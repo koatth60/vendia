@@ -290,6 +290,9 @@
     <button class="tab-btn" data-tab="conversations" onclick="switchTab('conversations')">
       <span class="tab-icon">💬</span> Conversaciones <span class="tab-count" id="tab-count-conversations">0</span>
     </button>
+    <button class="tab-btn" data-tab="ai-usage" onclick="switchTab('ai-usage')">
+      <span class="tab-icon">📊</span> Consumo IA
+    </button>
   </div>
 
   <main>
@@ -407,6 +410,17 @@
       <div class="card" style="padding:0; overflow:hidden;">
         <div id="conversations-list"></div>
       </div>
+    </div>
+
+    <div class="tab-panel" data-tab-panel="ai-usage">
+      <div class="panel-header">
+        <div>
+          <div class="panel-title">Consumo de IA</div>
+          <div class="panel-subtitle">Cuánto está gastando tu bot en DeepSeek, últimos 14 días.</div>
+        </div>
+        <button class="btn-ghost" onclick="loadAiUsage()">↻ Actualizar</button>
+      </div>
+      <div id="ai-usage-container"></div>
     </div>
   </main>
 
@@ -903,6 +917,51 @@ async function deletePaymentMethod(id) {
   }
 }
 
+async function loadAiUsage() {
+  const container = document.getElementById('ai-usage-container');
+  try {
+    const res = await apiFetch('/admin/api/ai-usage');
+    const s = await res.json();
+
+    const rows = [...s.byDay].reverse().map(d => `
+      <tr>
+        <td style="padding:10px 16px; border-top:1px solid var(--border);">${d.date}</td>
+        <td style="padding:10px 16px; border-top:1px solid var(--border); text-align:right;">US$ ${d.costUsd.toFixed(4)}</td>
+      </tr>
+    `).join('');
+
+    container.innerHTML = `
+      <div class="grid-3" style="margin-bottom:16px;">
+        <div class="card">
+          <div style="font-size:12px; color:var(--muted);">Costo total (14 días)</div>
+          <div style="font-size:24px; font-weight:700;">US$ ${s.totalCostUsd.toFixed(4)}</div>
+        </div>
+        <div class="card">
+          <div style="font-size:12px; color:var(--muted);">Llamadas a la IA</div>
+          <div style="font-size:24px; font-weight:700;">${s.totalCalls}</div>
+          <div style="font-size:12px; color:var(--muted);">${s.chatCalls} chat / ${s.visionCalls} fotos</div>
+        </div>
+        <div class="card">
+          <div style="font-size:12px; color:var(--muted);">Tokens (14 días)</div>
+          <div style="font-size:24px; font-weight:700;">${(s.totalInputTokens + s.totalOutputTokens).toLocaleString('es-CO')}</div>
+          <div style="font-size:12px; color:var(--muted);">${s.totalInputTokens.toLocaleString('es-CO')} entrada / ${s.totalOutputTokens.toLocaleString('es-CO')} salida</div>
+        </div>
+      </div>
+      <div class="section-title">Costo por día</div>
+      <div class="card" style="padding:0; overflow:hidden;">
+        ${s.byDay.length === 0
+          ? '<div class="empty-state"><div class="big">📊</div>Todavía no hay uso registrado.</div>'
+          : `<table style="width:100%; border-collapse:collapse;">
+              <thead><tr><th style="text-align:left; padding:10px 16px; font-size:12px; color:var(--muted);">Fecha</th><th style="text-align:right; padding:10px 16px; font-size:12px; color:var(--muted);">Costo (USD)</th></tr></thead>
+              <tbody>${rows}</tbody>
+            </table>`}
+      </div>
+    `;
+  } catch (err) {
+    container.innerHTML = `<div class="card empty-state" style="color:var(--danger);">No se pudo cargar el consumo: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
 let initialTab = 'business';
 try {
   const saved = localStorage.getItem('vendia-admin-tab');
@@ -914,6 +973,7 @@ loadBusiness();
 loadProducts();
 loadPaymentMethods();
 loadConversations();
+loadAiUsage();
 </script>
 </body>
 </html>

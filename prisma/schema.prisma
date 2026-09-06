@@ -27,6 +27,7 @@ model Business {
   products              Product[]
   customers             Customer[]
   paymentMethods        PaymentMethod[]
+  aiUsageLogs           AiUsageLog[]
   createdAt             DateTime        @default(now())
   updatedAt             DateTime        @updatedAt
 }
@@ -137,4 +138,25 @@ enum MessageRole {
   CUSTOMER
   ASSISTANT
   SYSTEM
+}
+
+enum AiUsageKind {
+  CHAT
+  VISION
+}
+
+model AiUsageLog {
+  id              String      @id @default(cuid())
+  business        Business    @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  businessId      String
+  conversationId  String?
+  kind            AiUsageKind
+  model           String
+  cacheHitTokens  Int         @default(0)
+  cacheMissTokens Int         @default(0)
+  outputTokens    Int         @default(0)
+  costUsd         Float
+  createdAt       DateTime    @default(now())
+
+  @@index([businessId, createdAt])
 }

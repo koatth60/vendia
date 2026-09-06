@@ -11,6 +11,7 @@ import {
 import { prisma } from "../db/client";
 import { requireAuth } from "../auth/requireAuth";
 import { listConversationsForBusiness, getConversationForBusiness } from "../conversation/service";
+import { getAiUsageSummary } from "../ai/usage";
 import { uploadMedia } from "../media/s3";
 import {
   listPaymentMethods,
@@ -127,6 +128,11 @@ adminRouter.put("/api/payment-methods/:id", async (req, res) => {
 adminRouter.delete("/api/payment-methods/:id", async (req, res) => {
   await deletePaymentMethod(businessIdOf(req), String(req.params.id));
   res.status(204).send();
+});
+
+adminRouter.get("/api/ai-usage", async (req, res) => {
+  const summary = await getAiUsageSummary(businessIdOf(req));
+  res.json(summary);
 });
 
 adminRouter.get("/api/conversations", async (req, res) => {

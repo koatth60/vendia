@@ -58,6 +58,9 @@ whatsappRouter.post("/webhook", async (req, res) => {
     const from: string = message.from;
     const whatsappMessageId: string | undefined = message.id;
 
+    const customer = await getOrCreateCustomer(business.id, from);
+    const conversation = await getOrCreateOpenConversation(customer.id);
+
     let text = "";
     let media: { s3Key: string; type: "IMAGE" } | undefined;
     let imageAnalysis: string | undefined;
@@ -70,15 +73,12 @@ whatsappRouter.post("/webhook", async (req, res) => {
         const { key, url } = await uploadMedia(buffer, mimeType, "images");
         media = { s3Key: key, type: "IMAGE" };
         text = message.image.caption ?? "";
-        imageAnalysis = await analyzeReceiptImage(url, text);
+        imageAnalysis = await analyzeReceiptImage(business.id, conversation.id, url, text);
       } catch (error) {
         console.error("No se pudo procesar la imagen entrante:", error);
         text = "[El cliente envio una imagen, pero hubo un problema tecnico y no se pudo procesar. Pedile que la reenvie.]";
       }
     }
-
-    const customer = await getOrCreateCustomer(business.id, from);
-    const conversation = await getOrCreateOpenConversation(customer.id);
 
     try {
       await recordMessage(conversation.id, "CUSTOMER", text, whatsappMessageId, media, imageAnalysis);

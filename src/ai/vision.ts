@@ -1,4 +1,5 @@
 import { deepseek, DEEPSEEK_VISION_MODEL } from "./client";
+import { logAiUsage } from "./usage";
 
 const VISION_PROMPT = `Estas mirando una imagen que un cliente mando por WhatsApp a un negocio, probablemente un
 comprobante de pago (transferencia bancaria, Nequi, Daviplata, etc).
@@ -9,7 +10,12 @@ explicitamente. Si la imagen NO parece un comprobante de pago, decí solo que no
 
 No agregues nada mas, solo la descripcion.`;
 
-export async function analyzeReceiptImage(imageUrl: string, caption: string): Promise<string> {
+export async function analyzeReceiptImage(
+  businessId: string,
+  conversationId: string,
+  imageUrl: string,
+  caption: string
+): Promise<string> {
   try {
     const response = await deepseek.chat.completions.create({
       model: DEEPSEEK_VISION_MODEL,
@@ -28,6 +34,14 @@ export async function analyzeReceiptImage(imageUrl: string, caption: string): Pr
       ],
       // @ts-expect-error DeepSeek-specific param, not in the OpenAI SDK types.
       thinking: { type: "disabled" },
+    });
+
+    await logAiUsage({
+      businessId,
+      conversationId,
+      kind: "VISION",
+      model: DEEPSEEK_VISION_MODEL,
+      usage: response.usage,
     });
 
     const text = response.choices[0]?.message?.content;

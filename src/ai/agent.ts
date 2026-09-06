@@ -2,6 +2,7 @@ import type OpenAI from "openai";
 import { deepseek, DEEPSEEK_MODEL } from "./client";
 import { catalogTools, runCatalogTool, type ToolContext } from "./tools";
 import { getRecentHistory } from "../conversation/service";
+import { logAiUsage } from "./usage";
 
 const BASE_SYSTEM_PROMPT = `Eres un asistente de ventas por WhatsApp para un negocio.
 
@@ -94,6 +95,14 @@ export async function generateReply(
       // @ts-expect-error DeepSeek-specific param, not in the OpenAI SDK types. Disabled: reasoning
       // tokens add latency/cost we don't need for a WhatsApp sales reply.
       thinking: { type: "disabled" },
+    });
+
+    await logAiUsage({
+      businessId: context.businessId,
+      conversationId,
+      kind: "CHAT",
+      model: DEEPSEEK_MODEL,
+      usage: response.usage,
     });
 
     const choice = response.choices[0];
