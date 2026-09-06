@@ -1,0 +1,91 @@
+# Vendia
+
+Asistente de ventas por WhatsApp con IA, en formato SaaS multi-negocio. Un negocio se registra, conecta
+su número de WhatsApp, carga su catálogo (productos, precios, stock, fotos/videos) y sus métodos de pago
+desde un panel web, y Claude responde a sus clientes por WhatsApp usando esos datos reales.
+
+## Qué hace
+
+- Responde preguntas de clientes sobre productos específicos (precio, stock, características) consultando
+  el catálogo real — nunca inventa datos.
+- Envía fotos y videos reales del producto por WhatsApp.
+- Ofrece los métodos de pago configurados por el negocio (transferencia, tarjeta, efectivo/contraentrega).
+- Guía la conversación hasta confirmar el pedido, y marca la venta como cerrada (o perdida) automáticamente.
+- Cada negocio puede agregar instrucciones propias de comportamiento para su bot.
+
+## Stack
+
+- **Backend**: Node.js + TypeScript + Express
+- **Base de datos**: PostgreSQL vía Prisma (driver adapter `@prisma/adapter-pg`)
+- **IA**: Anthropic Claude (Haiku 4.5) con tool use
+- **Autenticación**: sesiones (`express-session`) + contraseñas con `bcryptjs`
+- **Media**: AWS S3 (bucket privado + URLs firmadas temporales)
+- **WhatsApp**: Meta Cloud API
+- **Frontend**: HTML/CSS/JS simple, sin framework (panel de administración, login, registro, landing)
+
+## Estructura
+
+```
+src/
+  ai/            agente de Claude, herramientas del catálogo, respuestas rápidas
+  auth/          hash de contraseñas, middleware de sesión
+  catalog/       productos y métodos de pago (multi-negocio)
+  config/        variables de entorno
+  conversation/  clientes, conversaciones, mensajes
+  db/            cliente de Prisma
+  media/         subida y firma de URLs de S3
+  routes/        rutas HTTP (admin, auth, webhook de WhatsApp)
+  whatsapp/      cliente de la API de WhatsApp
+prisma/          schema y migraciones
+public/          landing, login, registro, panel de administración
+scripts/         utilidades (ej: generar claves de activación)
+```
+
+## Requisitos
+
+- Node.js 22+
+- PostgreSQL
+- Cuenta de Meta con WhatsApp Cloud API configurado
+- API key de Anthropic
+- Bucket de AWS S3 + credenciales de IAM
+
+## Setup local
+
+```bash
+npm install
+cp .env.example .env   # completar con tus valores reales
+npx prisma migrate deploy
+npx prisma generate
+npm run dev
+```
+
+## Variables de entorno
+
+Ver `.env.example`. Resumen:
+
+| Variable | Para qué |
+|---|---|
+| `DATABASE_URL` | conexión a PostgreSQL |
+| `SESSION_SECRET` | firma de las cookies de sesión |
+| `ANTHROPIC_API_KEY` | Claude |
+| `WHATSAPP_VERIFY_TOKEN` | verificación del webhook (compartido por toda la app en Meta) |
+| `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_S3_BUCKET` | almacenamiento de fotos/videos |
+
+El número de WhatsApp y el token de acceso **no van en variables de entorno** — cada negocio guarda los
+suyos en su propia fila de la tabla `Business` (`whatsappPhoneNumberId`, `whatsappAccessToken`), porque la
+app es multi-tenant: un mismo servidor atiende a todos los negocios.
+
+## Scripts
+
+- `npm run dev` — servidor en desarrollo (`tsx watch`)
+- `npm run build` / `npm start` — compilar y correr en producción
+- `npm run prisma:generate` / `npm run prisma:migrate` — Prisma
+- `npx tsx scripts/generate-key.ts <PLAN>` — genera una clave de activación (`BASICO`, `EMPRENDEDOR` o
+  `NEGOCIO`) para que un negocio nuevo pueda registrarse
+
+## Despliegue
+
+Corre en un droplet de DigitalOcean con Nginx como proxy reverso y SSL de Let's Encrypt, gestionado con
+PM2. El flujo de despliegue usado durante el desarrollo: empaquetar el proyecto (sin `node_modules`,
+`.env` ni `dist`) y enviarlo por SSH al servidor, correr las migraciones, y reiniciar con
+`pm2 restart vendia --update-env`.
