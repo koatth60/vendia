@@ -10,7 +10,6 @@ import {
   recordMessage,
 } from "../conversation/service";
 import { generateReply } from "../ai/agent";
-import { getQuickReply } from "../ai/quickReplies";
 import { analyzeReceiptImage } from "../ai/vision";
 
 export const whatsappRouter = Router();
@@ -90,13 +89,11 @@ whatsappRouter.post("/webhook", async (req, res) => {
       throw error;
     }
 
-    const reply =
-      (message.type === "text" ? getQuickReply(text) : null) ??
-      (await generateReply(
-        conversation.id,
-        { businessId: business.id, conversationId: conversation.id, credentials, recipientPhone: from },
-        business.customInstructions
-      ));
+    const reply = await generateReply(
+      conversation.id,
+      { businessId: business.id, conversationId: conversation.id, credentials, recipientPhone: from },
+      business.customInstructions
+    );
     await sendTextMessage(credentials, from, reply);
     await recordMessage(conversation.id, "ASSISTANT", reply);
   } catch (error) {
