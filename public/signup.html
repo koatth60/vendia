@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Vendia — Crear cuenta</title>
+<style>
+  :root {
+    --green: #1fa855; --green-dark: #16803f; --green-light: #e6f7ec;
+    --ink: #14181c; --muted: #6b7480; --border: #e4e7eb; --bg: #f4f6f8; --card: #ffffff;
+    --danger: #e5484d; --danger-light: #fdecec; --gold: #9c6a1f; --gold-soft: #f6ecd9;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: "Segoe UI", system-ui, sans-serif; background: var(--bg); margin: 0; color: var(--ink);
+    min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 30px 16px;
+  }
+  .card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 16px;
+    padding: 36px; width: 100%; max-width: 460px; box-shadow: 0 1px 2px rgba(20,24,28,0.04), 0 8px 24px rgba(20,24,28,0.06);
+  }
+  .brand { display: flex; align-items: center; gap: 10px; margin-bottom: 20px; justify-content: center; }
+  .brand-mark { width: 36px; height: 36px; border-radius: 10px; background: linear-gradient(135deg, var(--green), #0f7a3d); display: flex; align-items: center; justify-content: center; }
+  .brand-name { font-size: 19px; font-weight: 700; letter-spacing: -0.02em; }
+  h1 { font-size: 19px; text-align: center; margin: 0 0 22px; font-weight: 600; }
+  label { display: block; font-size: 13px; font-weight: 600; margin-top: 14px; margin-bottom: 6px; }
+  input { width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 9px; font-size: 16px; font-family: inherit; background: #fbfbfc; }
+  input:focus { outline: none; border-color: var(--green); background: #fff; }
+  .plans { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 6px; }
+  .plan { border: 1.5px solid var(--border); border-radius: 10px; padding: 10px 8px; text-align: center; cursor: pointer; }
+  .plan.selected { border-color: var(--green); background: var(--green-light); }
+  .plan-name { font-size: 12.5px; font-weight: 700; }
+  .plan-price { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+  .hint { font-size: 12px; color: var(--muted); margin-top: 6px; }
+  button { width: 100%; margin-top: 22px; cursor: pointer; border: none; border-radius: 9px; padding: 11px; font-size: 14px; font-weight: 700; background: var(--green); color: white; }
+  button:hover { opacity: .9; }
+  .error { background: var(--danger-light); color: var(--danger); padding: 10px 12px; border-radius: 8px; font-size: 13px; margin-top: 14px; display: none; }
+  .callout { background: var(--gold-soft); color: var(--gold); border-radius: 8px; padding: 10px 12px; font-size: 12.5px; margin-top: 16px; }
+  .foot { text-align: center; font-size: 13px; color: var(--muted); margin-top: 20px; }
+  .foot a { color: var(--green-dark); font-weight: 600; text-decoration: none; }
+
+  @media (max-width: 420px) {
+    .card { padding: 24px 18px; }
+    .plans { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="brand">
+      <div class="brand-mark">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+          <path d="M12 3C7.03 3 3 6.58 3 11c0 2.1 1 4 2.6 5.4L5 21l4.9-1.6c.7.13 1.4.2 2.1.2 4.97 0 9-3.58 9-8s-4.03-8.4-9-8.4Z" fill="white"/>
+          <circle cx="8.5" cy="11" r="1.1" fill="#16803f"/><circle cx="12" cy="11" r="1.1" fill="#16803f"/><circle cx="15.5" cy="11" r="1.1" fill="#16803f"/>
+        </svg>
+      </div>
+      <div class="brand-name">Vendia</div>
+    </div>
+    <h1>Creá tu cuenta</h1>
+    <form id="signup-form">
+      <label>Nombre del negocio</label>
+      <input type="text" id="businessName" required placeholder="Ej: Aurora Joyas" />
+
+      <label>Tu email</label>
+      <input type="email" id="email" required autocomplete="email" />
+
+      <label>Contraseña</label>
+      <input type="password" id="password" required minlength="8" autocomplete="new-password" />
+
+      <label>WhatsApp que quieres usar para el bot</label>
+      <input type="tel" id="contactPhone" required placeholder="Ej: +573001234567" />
+      <div class="hint">Nosotros lo conectamos por ti después de que actives tu cuenta.</div>
+
+      <label>Elige un plan</label>
+      <div class="plans" id="plans">
+        <div class="plan selected" data-plan="BASICO">
+          <div class="plan-name">Básico</div>
+          <div class="plan-price">$36.000/mes</div>
+        </div>
+        <div class="plan" data-plan="EMPRENDEDOR">
+          <div class="plan-name">Emprendedor</div>
+          <div class="plan-price">$60.000/mes</div>
+        </div>
+        <div class="plan" data-plan="NEGOCIO">
+          <div class="plan-name">Negocio</div>
+          <div class="plan-price">$116.000/mes</div>
+        </div>
+      </div>
+
+      <label>Clave de activación</label>
+      <input type="text" id="activationKey" required placeholder="Te la damos nosotros al confirmar el pago" style="text-transform: uppercase;" />
+
+      <div class="error" id="error"></div>
+      <button type="submit">Crear cuenta</button>
+    </form>
+    <div class="callout">¿Todavía no tienes una clave de activación? Escríbenos para coordinar el pago y te la damos al instante.</div>
+    <div class="foot">¿Ya tienes cuenta? <a href="/login.html">Inicia sesión</a></div>
+  </div>
+
+<script>
+let selectedPlan = 'BASICO';
+document.querySelectorAll('.plan').forEach((el) => {
+  el.addEventListener('click', () => {
+    document.querySelectorAll('.plan').forEach((p) => p.classList.remove('selected'));
+    el.classList.add('selected');
+    selectedPlan = el.dataset.plan;
+  });
+});
+
+document.getElementById('signup-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const errorEl = document.getElementById('error');
+  errorEl.style.display = 'none';
+
+  const body = {
+    businessName: document.getElementById('businessName').value.trim(),
+    email: document.getElementById('email').value.trim(),
+    password: document.getElementById('password').value,
+    contactPhone: document.getElementById('contactPhone').value.trim(),
+    planTier: selectedPlan,
+    activationKey: document.getElementById('activationKey').value.trim().toUpperCase(),
+  };
+
+  const res = await fetch('/auth/signup', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    errorEl.textContent = data.error || 'No pudimos crear la cuenta';
+    errorEl.style.display = 'block';
+    return;
+  }
+
+  window.location.href = '/admin/';
+});
+</script>
+</body>
+</html>

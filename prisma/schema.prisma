@@ -1,0 +1,137 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum PlanTier {
+  BASICO
+  EMPRENDEDOR
+  NEGOCIO
+}
+
+model Business {
+  id                    String          @id @default(cuid())
+  name                  String
+  description           String?
+  customInstructions    String?
+  email                 String          @unique
+  passwordHash          String
+  planTier              PlanTier        @default(BASICO)
+  active                Boolean         @default(false)
+  contactPhone          String?
+  whatsappPhoneNumberId String?         @unique
+  whatsappAccessToken   String?
+  products              Product[]
+  customers             Customer[]
+  paymentMethods        PaymentMethod[]
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+}
+
+enum PaymentMethodType {
+  TRANSFERENCIA
+  TARJETA
+  EFECTIVO
+}
+
+model PaymentMethod {
+  id         String            @id @default(cuid())
+  business   Business          @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  businessId String
+  type       PaymentMethodType
+  label      String
+  details    String
+  active     Boolean           @default(true)
+  createdAt  DateTime          @default(now())
+}
+
+model ActivationKey {
+  id               String    @id @default(cuid())
+  code             String    @unique
+  planTier         PlanTier
+  used             Boolean   @default(false)
+  usedByBusinessId String?   @unique
+  createdAt        DateTime  @default(now())
+  usedAt           DateTime?
+}
+
+model Product {
+  id          String        @id @default(cuid())
+  business    Business      @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  businessId  String
+  name        String
+  description String
+  price       Decimal       @db.Decimal(12, 2)
+  currency    String        @default("USD")
+  stock       Int           @default(0)
+  category    String?
+  active      Boolean       @default(true)
+  media       ProductMedia[]
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+}
+
+model ProductMedia {
+  id        String      @id @default(cuid())
+  product   Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
+  productId String
+  type      MediaType
+  url       String
+  s3Key     String
+  createdAt DateTime    @default(now())
+}
+
+enum MediaType {
+  IMAGE
+  VIDEO
+}
+
+model Customer {
+  id            String         @id @default(cuid())
+  business      Business       @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  businessId    String
+  phoneNumber   String
+  name          String?
+  conversations Conversation[]
+  createdAt     DateTime       @default(now())
+
+  @@unique([businessId, phoneNumber])
+}
+
+model Conversation {
+  id         String             @id @default(cuid())
+  customer   Customer           @relation(fields: [customerId], references: [id])
+  customerId String
+  status     ConversationStatus @default(NEW)
+  messages   Message[]
+  createdAt  DateTime           @default(now())
+  updatedAt  DateTime           @updatedAt
+}
+
+enum ConversationStatus {
+  NEW
+  INTERESTED
+  QUOTED
+  NEGOTIATING
+  SOLD
+  LOST
+}
+
+model Message {
+  id                String       @id @default(cuid())
+  conversation      Conversation @relation(fields: [conversationId], references: [id])
+  conversationId    String
+  role              MessageRole
+  content           String
+  whatsappMessageId String?      @unique
+  createdAt         DateTime     @default(now())
+}
+
+enum MessageRole {
+  CUSTOMER
+  ASSISTANT
+  SYSTEM
+}

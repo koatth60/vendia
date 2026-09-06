@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Vendia</title>
+<style>
+  :root {
+    --green: #1fa855; --green-dark: #16803f; --green-light: #e6f7ec;
+    --ink: #14181c; --muted: #6b7480; --border: #e4e7eb; --bg: #f4f6f8; --card: #ffffff;
+    --gold: #9c6a1f; --gold-soft: #f6ecd9;
+  }
+  * { box-sizing: border-box; }
+  body { font-family: "Segoe UI", system-ui, sans-serif; background: var(--bg); margin: 0; color: var(--ink); }
+  a { color: inherit; }
+  header {
+    display: flex; align-items: center; justify-content: space-between; padding: 18px 32px;
+    background: var(--card); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 10;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; }
+  .brand-mark { width: 34px; height: 34px; border-radius: 9px; background: linear-gradient(135deg, var(--green), #0f7a3d); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .brand-name { font-size: 17px; font-weight: 700; }
+  nav a { margin-left: 14px; text-decoration: none; font-size: 14px; font-weight: 600; color: var(--muted); }
+  nav a.cta { color: white; background: var(--green); padding: 8px 16px; border-radius: 8px; }
+
+  .hero { max-width: 720px; margin: 0 auto; text-align: center; padding: 72px 20px 32px; }
+  .hero .eyebrow { font-size: 12.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--green-dark); background: var(--green-light); display: inline-block; padding: 5px 12px; border-radius: 999px; margin-bottom: 18px; }
+  .hero h1 { font-size: 40px; margin: 0 0 14px; letter-spacing: -0.02em; line-height: 1.15; }
+  .hero p { font-size: 17px; color: var(--muted); max-width: 540px; margin: 0 auto 28px; line-height: 1.55; }
+  .hero .cta { display: inline-block; background: var(--green); color: white; text-decoration: none; font-weight: 700; padding: 13px 26px; border-radius: 10px; }
+  .hero .sub-cta { display: block; margin-top: 12px; font-size: 12.5px; color: var(--muted); }
+
+  section.block { max-width: 1000px; margin: 0 auto; padding: 56px 20px; }
+  .block-head { text-align: center; max-width: 560px; margin: 0 auto 36px; }
+  .block-head .eyebrow { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+  .block-head h2 { font-size: 26px; margin: 8px 0 0; letter-spacing: -0.01em; }
+
+  .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; }
+  .step { text-align: center; }
+  .step-num { width: 40px; height: 40px; border-radius: 50%; background: var(--green); color: white; font-weight: 800; font-size: 16px; display: flex; align-items: center; justify-content: center; margin: 0 auto 14px; }
+  .step h3 { font-size: 15.5px; margin: 0 0 6px; }
+  .step p { font-size: 13.5px; color: var(--muted); line-height: 1.5; margin: 0; }
+
+  .features { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
+  .feature { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 22px; }
+  .feature .icon { font-size: 22px; margin-bottom: 10px; }
+  .feature h3 { font-size: 14.5px; margin: 0 0 6px; }
+  .feature p { font-size: 13px; color: var(--muted); line-height: 1.5; margin: 0; }
+
+  .plans-section { background: var(--card); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+  .plans { max-width: 900px; margin: 0 auto; padding: 0 20px; display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
+  .plan { background: var(--bg); border: 1px solid var(--border); border-radius: 14px; padding: 24px; text-align: center; }
+  .plan.highlight { border-color: var(--green); background: var(--card); box-shadow: 0 4px 20px rgba(31,168,85,0.12); position: relative; }
+  .plan.highlight .badge { position: absolute; top: -11px; left: 50%; transform: translateX(-50%); background: var(--green); color: white; font-size: 10.5px; font-weight: 700; padding: 3px 10px; border-radius: 999px; }
+  .plan-name { font-weight: 700; font-size: 15px; }
+  .plan-price { font-size: 25px; font-weight: 800; color: var(--green-dark); margin: 10px 0 2px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .plan-price span { font-size: 12px; font-weight: 500; color: var(--muted); }
+  .plan-price-usd { font-size: 12px; color: var(--muted); margin-bottom: 10px; }
+  .plan-msgs { font-size: 13px; color: var(--muted); margin-bottom: 16px; }
+  .plan a { display: block; background: var(--green-light); color: var(--green-dark); text-decoration: none; font-weight: 700; padding: 9px; border-radius: 8px; font-size: 13.5px; }
+  .plan.highlight a { background: var(--green); color: white; }
+  .plans-note { text-align: center; font-size: 12.5px; color: var(--muted); margin: 20px auto 0; }
+
+  .faq { max-width: 680px; margin: 0 auto; }
+  .faq-item { border-bottom: 1px solid var(--border); padding: 18px 0; }
+  .faq-item h3 { font-size: 15px; margin: 0 0 6px; }
+  .faq-item p { font-size: 13.5px; color: var(--muted); line-height: 1.55; margin: 0; }
+
+  footer { border-top: 1px solid var(--border); background: var(--card); padding: 28px 20px; }
+  .footer-inner { max-width: 1000px; margin: 0 auto; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+  .footer-brand { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 14px; }
+  footer .copy { font-size: 12.5px; color: var(--muted); }
+
+  @media (max-width: 640px) {
+    .steps, .features { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 480px) {
+    header { padding: 14px 18px; }
+    .brand-name { font-size: 15px; }
+    nav a { margin-left: 8px; font-size: 13px; }
+    nav a.cta { padding: 7px 12px; }
+    .hero { padding: 44px 16px 30px; }
+    .hero h1 { font-size: 26px; }
+    .hero p { font-size: 15px; }
+    section.block { padding: 40px 16px; }
+    .block-head h2 { font-size: 21px; }
+  }
+</style>
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <div class="brand-mark">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+          <path d="M12 3C7.03 3 3 6.58 3 11c0 2.1 1 4 2.6 5.4L5 21l4.9-1.6c.7.13 1.4.2 2.1.2 4.97 0 9-3.58 9-8s-4.03-8.4-9-8.4Z" fill="white"/>
+          <circle cx="8.5" cy="11" r="1.1" fill="#16803f"/><circle cx="12" cy="11" r="1.1" fill="#16803f"/><circle cx="15.5" cy="11" r="1.1" fill="#16803f"/>
+        </svg>
+      </div>
+      <div class="brand-name">Vendia</div>
+    </div>
+    <nav>
+      <a href="/login.html">Iniciar sesión</a>
+      <a href="/signup.html" class="cta">Empezar</a>
+    </nav>
+  </header>
+
+  <section class="hero">
+    <span class="eyebrow">Hecho para negocios en Colombia</span>
+    <h1>Tu vendedor de WhatsApp que nunca duerme</h1>
+    <p>Vendia responde a tus clientes por WhatsApp con inteligencia artificial: precios, fotos y stock real de tu catálogo, las 24 horas, sin que tengas que estar pendiente del chat.</p>
+    <a class="cta" href="/signup.html">Crear mi cuenta</a>
+    <span class="sub-cta">Sin tarjeta de crédito para empezar a probar</span>
+  </section>
+
+  <section class="block">
+    <div class="block-head">
+      <div class="eyebrow">Cómo funciona</div>
+      <h2>Listo en tres pasos</h2>
+    </div>
+    <div class="steps">
+      <div class="step">
+        <div class="step-num">1</div>
+        <h3>Conectas tu WhatsApp</h3>
+        <p>Nosotros conectamos tu número de WhatsApp Business a la plataforma.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">2</div>
+        <h3>Cargas tu catálogo</h3>
+        <p>Productos, precios, stock, fotos y tus métodos de pago, desde un panel simple.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">3</div>
+        <h3>La IA atiende y vende</h3>
+        <p>Responde preguntas, manda fotos reales y guía al cliente hasta cerrar la compra.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="block">
+    <div class="block-head">
+      <div class="eyebrow">Por qué Vendia</div>
+      <h2>Todo lo que necesita tu WhatsApp de ventas</h2>
+    </div>
+    <div class="features">
+      <div class="feature">
+        <div class="icon">💬</div>
+        <h3>Respuestas 24/7</h3>
+        <p>Tu bot atiende de madrugada, fin de semana o feriado — nunca pierdes una consulta.</p>
+      </div>
+      <div class="feature">
+        <div class="icon">📸</div>
+        <h3>Fotos y videos reales</h3>
+        <p>Manda las imágenes de tu catálogo, no descripciones inventadas.</p>
+      </div>
+      <div class="feature">
+        <div class="icon">💳</div>
+        <h3>Tus formas de pago</h3>
+        <p>Nequi, transferencia, tarjeta o contraentrega — tú decides cuáles ofrecer.</p>
+      </div>
+      <div class="feature">
+        <div class="icon">📈</div>
+        <h3>Seguimiento automático</h3>
+        <p>Guía al cliente paso a paso hasta confirmar el pedido, sin que tengas que intervenir.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="plans-section">
+    <div class="block">
+      <div class="block-head">
+        <div class="eyebrow">Precios</div>
+        <h2>Un plan para cada tamaño de negocio</h2>
+      </div>
+      <div class="plans">
+        <div class="plan">
+          <div class="plan-name">Básico</div>
+          <div class="plan-price">$36.000<span>COP/mes</span></div>
+          <div class="plan-price-usd">≈ $9 USD</div>
+          <div class="plan-msgs">Hasta 300 mensajes con IA</div>
+          <a href="/signup.html">Elegir plan</a>
+        </div>
+        <div class="plan highlight">
+          <span class="badge">MÁS ELEGIDO</span>
+          <div class="plan-name">Emprendedor</div>
+          <div class="plan-price">$60.000<span>COP/mes</span></div>
+          <div class="plan-price-usd">≈ $15 USD</div>
+          <div class="plan-msgs">Hasta 1.000 mensajes con IA</div>
+          <a href="/signup.html">Elegir plan</a>
+        </div>
+        <div class="plan">
+          <div class="plan-name">Negocio</div>
+          <div class="plan-price">$116.000<span>COP/mes</span></div>
+          <div class="plan-price-usd">≈ $29 USD</div>
+          <div class="plan-msgs">Hasta 3.000 mensajes con IA</div>
+          <a href="/signup.html">Elegir plan</a>
+        </div>
+      </div>
+      <p class="plans-note">Precios de lanzamiento. Necesitas una clave de activación para registrarte — te la damos al confirmar el pago.</p>
+    </div>
+  </section>
+
+  <section class="block">
+    <div class="block-head">
+      <div class="eyebrow">Preguntas frecuentes</div>
+      <h2>Antes de empezar</h2>
+    </div>
+    <div class="faq">
+      <div class="faq-item">
+        <h3>¿Necesito saber programar?</h3>
+        <p>No. Cargas tu catálogo desde un panel simple, como llenar un formulario. Nosotros conectamos tu WhatsApp por ti.</p>
+      </div>
+      <div class="faq-item">
+        <h3>¿Puedo usar mi número de WhatsApp actual?</h3>
+        <p>Depende de tu caso — te lo confirmamos al registrarte. Muchos negocios prefieren empezar con una línea nueva dedicada al bot, para no arriesgar su WhatsApp actual.</p>
+      </div>
+      <div class="faq-item">
+        <h3>¿Qué pasa si supero los mensajes de mi plan?</h3>
+        <p>Te avisamos para que subas de plan. Tu bot no se corta de un día para el otro.</p>
+      </div>
+      <div class="faq-item">
+        <h3>¿Cómo pago?</h3>
+        <p>Por ahora coordinamos el pago directo contigo y te damos una clave de activación para registrarte en la plataforma.</p>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <div class="footer-inner">
+      <div class="footer-brand">
+        <div class="brand-mark" style="width:26px;height:26px;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+            <path d="M12 3C7.03 3 3 6.58 3 11c0 2.1 1 4 2.6 5.4L5 21l4.9-1.6c.7.13 1.4.2 2.1.2 4.97 0 9-3.58 9-8s-4.03-8.4-9-8.4Z" fill="white"/>
+          </svg>
+        </div>
+        Vendia
+      </div>
+      <div class="copy">© 2026 Vendia — Bogotá, Colombia</div>
+    </div>
+  </footer>
+</body>
+</html>

@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Vendia — Iniciar sesión</title>
+<style>
+  :root {
+    --green: #1fa855; --green-dark: #16803f; --green-light: #e6f7ec;
+    --ink: #14181c; --muted: #6b7480; --border: #e4e7eb; --bg: #f4f6f8; --card: #ffffff;
+    --danger: #e5484d; --danger-light: #fdecec;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: "Segoe UI", system-ui, sans-serif; background: var(--bg); margin: 0; color: var(--ink);
+    min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 16px;
+  }
+  .card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 16px;
+    padding: 36px; width: 100%; max-width: 380px; box-shadow: 0 1px 2px rgba(20,24,28,0.04), 0 8px 24px rgba(20,24,28,0.06);
+  }
+  .brand { display: flex; align-items: center; gap: 10px; margin-bottom: 24px; justify-content: center; }
+  .brand-mark { width: 36px; height: 36px; border-radius: 10px; background: linear-gradient(135deg, var(--green), #0f7a3d); display: flex; align-items: center; justify-content: center; }
+  .brand-name { font-size: 19px; font-weight: 700; letter-spacing: -0.02em; }
+  h1 { font-size: 19px; text-align: center; margin: 0 0 24px; font-weight: 600; }
+  label { display: block; font-size: 13px; font-weight: 600; margin-top: 14px; margin-bottom: 6px; }
+  input { width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 9px; font-size: 16px; font-family: inherit; background: #fbfbfc; }
+  input:focus { outline: none; border-color: var(--green); background: #fff; }
+  button { width: 100%; margin-top: 22px; cursor: pointer; border: none; border-radius: 9px; padding: 11px; font-size: 14px; font-weight: 700; background: var(--green); color: white; }
+  button:hover { opacity: .9; }
+  .error { background: var(--danger-light); color: var(--danger); padding: 10px 12px; border-radius: 8px; font-size: 13px; margin-top: 14px; display: none; }
+  .foot { text-align: center; font-size: 13px; color: var(--muted); margin-top: 20px; }
+  .foot a { color: var(--green-dark); font-weight: 600; text-decoration: none; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="brand">
+      <div class="brand-mark">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+          <path d="M12 3C7.03 3 3 6.58 3 11c0 2.1 1 4 2.6 5.4L5 21l4.9-1.6c.7.13 1.4.2 2.1.2 4.97 0 9-3.58 9-8s-4.03-8.4-9-8.4Z" fill="white"/>
+          <circle cx="8.5" cy="11" r="1.1" fill="#16803f"/><circle cx="12" cy="11" r="1.1" fill="#16803f"/><circle cx="15.5" cy="11" r="1.1" fill="#16803f"/>
+        </svg>
+      </div>
+      <div class="brand-name">Vendia</div>
+    </div>
+    <h1>Iniciar sesión</h1>
+    <form id="login-form">
+      <label>Email</label>
+      <input type="email" id="email" required autocomplete="email" />
+      <label>Contraseña</label>
+      <input type="password" id="password" required autocomplete="current-password" />
+      <div class="error" id="error"></div>
+      <button type="submit">Entrar</button>
+    </form>
+    <div class="foot">¿No tienes cuenta? <a href="/signup.html">Regístrate acá</a></div>
+  </div>
+
+<script>
+document.getElementById('login-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const errorEl = document.getElementById('error');
+  errorEl.style.display = 'none';
+
+  const email = document.getElementById('email').value.trim();
+  const password = document.getElementById('password').value;
+
+  const res = await fetch('/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password }),
+  });
+
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    errorEl.textContent = data.error || 'No pudimos iniciar sesión';
+    errorEl.style.display = 'block';
+    return;
+  }
+
+  window.location.href = '/admin/';
+});
+</script>
+</body>
+</html>

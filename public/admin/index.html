@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Vendia — Panel de administración</title>
+<style>
+  :root {
+    --green: #1fa855;
+    --green-dark: #16803f;
+    --green-light: #e6f7ec;
+    --ink: #14181c;
+    --muted: #6b7480;
+    --border: #e4e7eb;
+    --bg: #f4f6f8;
+    --card: #ffffff;
+    --danger: #e5484d;
+    --danger-light: #fdecec;
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+    background: var(--bg);
+    margin: 0;
+    color: var(--ink);
+  }
+  .topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 28px;
+    background: var(--card);
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; }
+  .brand-mark {
+    width: 36px; height: 36px; border-radius: 10px;
+    background: linear-gradient(135deg, var(--green), #0f7a3d);
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 2px 6px rgba(31,168,85,0.35);
+  }
+  .brand-name { font-size: 17px; font-weight: 700; letter-spacing: -0.02em; }
+  .brand-sub { font-size: 11px; color: var(--muted); margin-top: -2px; }
+  .pill {
+    font-size: 12px; font-weight: 600; color: var(--green-dark);
+    background: var(--green-light); padding: 5px 12px; border-radius: 999px;
+  }
+
+  main { max-width: 980px; margin: 0 auto; padding: 28px 20px 60px; }
+
+  .section-title { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 30px 0 12px; }
+  .section-title:first-child, #status + .section-title { margin-top: 0; }
+
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+    box-shadow: 0 1px 2px rgba(20,24,28,0.04);
+  }
+
+  label { display: block; font-size: 13px; font-weight: 600; margin-top: 12px; margin-bottom: 6px; color: var(--ink); }
+  input, textarea {
+    width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 9px;
+    font-size: 14px; font-family: inherit; background: #fbfbfc; transition: border-color .15s;
+  }
+  input:focus, textarea:focus { outline: none; border-color: var(--green); background: #fff; }
+  textarea { min-height: 70px; resize: vertical; }
+
+  button {
+    cursor: pointer; border: none; border-radius: 9px; padding: 10px 18px;
+    font-size: 13px; font-weight: 700; font-family: inherit; transition: opacity .15s, transform .1s;
+  }
+  button:active { transform: scale(0.97); }
+  .btn-primary { background: var(--green); color: white; }
+  .btn-primary:hover { opacity: .9; }
+  .btn-danger { background: var(--danger-light); color: var(--danger); }
+  .btn-danger:hover { opacity: .8; }
+  .btn-secondary { background: #eef0f2; color: var(--ink); }
+  .btn-secondary:hover { opacity: .85; }
+  .btn-ghost { background: transparent; color: var(--muted); padding: 6px 10px; }
+
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; }
+  .actions-row { margin-top: 14px; display: flex; gap: 8px; align-items: center; }
+
+  #status {
+    font-size: 13px; font-weight: 600; color: var(--green-dark); min-height: 20px;
+    display: flex; align-items: center; gap: 6px;
+  }
+
+  .product-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; margin-top: 14px; }
+  .empty-state { text-align: center; padding: 40px 20px; color: var(--muted); }
+  .empty-state .big { font-size: 34px; margin-bottom: 8px; }
+
+  .product-card { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; background: #fff; display: flex; flex-direction: column; }
+  .product-card.inactive { opacity: 0.55; }
+  .thumb-strip { display: flex; gap: 4px; padding: 10px 10px 0; overflow-x: auto; }
+  .thumb { width: 52px; height: 52px; border-radius: 8px; object-fit: cover; flex-shrink: 0; border: 1px solid var(--border); }
+  .thumb-wrap { position: relative; flex-shrink: 0; }
+  .thumb-remove {
+    position: absolute; top: -5px; right: -5px; width: 16px; height: 16px; border-radius: 50%;
+    background: var(--danger); color: white; font-size: 10px; line-height: 16px; text-align: center; padding: 0; border: none;
+  }
+  .thumb-add {
+    width: 52px; height: 52px; border-radius: 8px; border: 1.5px dashed var(--border); flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 20px; cursor: pointer; position: relative;
+  }
+  .thumb-add input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+
+  .product-body { padding: 14px; flex: 1; display: flex; flex-direction: column; gap: 6px; }
+  .product-name { font-size: 15px; font-weight: 700; }
+  .product-desc { font-size: 12.5px; color: var(--muted); line-height: 1.4; max-height: 3.6em; overflow: hidden; }
+  .product-meta { display: flex; align-items: center; justify-content: space-between; margin-top: 4px; }
+  .price-tag { font-size: 16px; font-weight: 800; color: var(--green-dark); }
+  .stock-badge { font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 999px; }
+  .stock-ok { background: var(--green-light); color: var(--green-dark); }
+  .stock-zero { background: var(--danger-light); color: var(--danger); }
+  .category-tag { font-size: 11px; color: var(--muted); background: #f1f2f4; padding: 2px 8px; border-radius: 6px; display: inline-block; width: fit-content; }
+  .product-footer { display: flex; gap: 6px; padding: 10px 14px; border-top: 1px solid var(--border); }
+  .product-footer button { flex: 1; padding: 7px; font-size: 12px; }
+
+  .edit-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 12px 14px; background: #fafbfc; border-top: 1px solid var(--border); }
+  .edit-grid label { margin-top: 6px; font-size: 11px; }
+  .edit-grid .full { grid-column: 1 / -1; }
+
+  @media (max-width: 640px) {
+    .topbar { padding: 12px 16px; flex-wrap: wrap; row-gap: 8px; }
+    .brand-name { font-size: 15px; }
+    .brand-sub { font-size: 10px; }
+    main { padding: 18px 14px 48px; }
+    .card { padding: 16px; }
+    .grid-2 { grid-template-columns: 1fr; }
+    .grid-3 { grid-template-columns: 1fr; }
+    .edit-grid { grid-template-columns: 1fr; }
+    .product-grid { grid-template-columns: 1fr; }
+    .product-footer { flex-wrap: wrap; }
+    .product-footer button { flex: 1 1 45%; }
+    button:not(.thumb-remove) { min-height: 40px; }
+    input, textarea, select { font-size: 16px; }
+  }
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <div class="brand">
+      <div class="brand-mark">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+          <path d="M12 3C7.03 3 3 6.58 3 11c0 2.1 1 4 2.6 5.4L5 21l4.9-1.6c.7.13 1.4.2 2.1.2 4.97 0 9-3.58 9-8s-4.03-8.4-9-8.4Z" fill="white"/>
+          <circle cx="8.5" cy="11" r="1.1" fill="#16803f"/>
+          <circle cx="12" cy="11" r="1.1" fill="#16803f"/>
+          <circle cx="15.5" cy="11" r="1.1" fill="#16803f"/>
+        </svg>
+      </div>
+      <div>
+        <div class="brand-name">Vendia</div>
+        <div class="brand-sub">Panel de administración</div>
+      </div>
+    </div>
+    <div style="display:flex; align-items:center; gap:10px;">
+      <div class="pill" id="product-count">0 productos</div>
+      <button class="btn-ghost" onclick="logout()" style="border:1px solid var(--border); border-radius:8px; background:transparent; color:var(--muted); font-size:12.5px; font-weight:600; padding:6px 12px; cursor:pointer;">Cerrar sesión</button>
+    </div>
+  </div>
+
+  <main>
+    <div id="status"></div>
+
+    <div class="section-title">Tu negocio</div>
+    <div class="card">
+      <label>Nombre del negocio</label>
+      <input id="business-name" placeholder="Ej: Zapatillas Express" />
+      <label>Descripción (ayuda a la IA a entender tu negocio)</label>
+      <textarea id="business-description" placeholder="Ej: Vendemos calzado deportivo importado, envíos a todo el país."></textarea>
+      <label>Instrucciones para tu bot (opcional)</label>
+      <textarea id="business-instructions" placeholder="Ej: Siempre ofrecé envío gratis en compras mayores a $100. Si preguntan por descuentos, decí que hay 10% de descuento pagando por transferencia. Nunca prometas fechas de entrega exactas."></textarea>
+      <div class="hint">Reglas o forma de hablar que quieres que tu bot siga siempre. No pueden hacer que invente precios, stock o formas de pago falsas.</div>
+      <div class="actions-row">
+        <button class="btn-primary" onclick="saveBusiness()">Guardar cambios</button>
+      </div>
+    </div>
+
+    <div class="section-title">Métodos de pago</div>
+    <div class="card">
+      <p style="font-size:13px; color:var(--muted); margin-top:0;">La IA le va a ofrecer al cliente exactamente estas opciones cuando pregunte cómo pagar. Puedes agregar varias (ej: Nequi, Bancolombia, tarjeta, efectivo).</p>
+      <div class="grid-2">
+        <div>
+          <label>Tipo</label>
+          <select id="pm-type" onchange="onPmTypeChange()" style="width:100%; padding:10px 12px; border:1px solid var(--border); border-radius:9px; font-size:14px; font-family:inherit; background:#fbfbfc;">
+            <option value="TRANSFERENCIA">Transferencia (Nequi, Bancolombia, Daviplata, etc.)</option>
+            <option value="TARJETA">Tarjeta (link de pago)</option>
+            <option value="EFECTIVO">Efectivo / Contraentrega</option>
+          </select>
+        </div>
+        <div>
+          <label>Nombre para mostrar</label>
+          <input id="pm-label" placeholder="Ej: Nequi" />
+        </div>
+      </div>
+      <label id="pm-details-label">Datos (número de cuenta, llave, celular, etc.)</label>
+      <textarea id="pm-details" placeholder="Ej: 300 123 4567 a nombre de Aurora Joyas"></textarea>
+      <div class="actions-row">
+        <button class="btn-primary" onclick="addPaymentMethod()">+ Agregar método de pago</button>
+      </div>
+      <div id="payment-methods-list" style="margin-top:14px; display:flex; flex-direction:column; gap:8px;"></div>
+    </div>
+
+    <div class="section-title">Agregar producto</div>
+    <div class="card">
+      <div class="grid-2">
+        <div>
+          <label>Nombre</label>
+          <input id="p-name" placeholder="Ej: Zapatillas Runner X" />
+        </div>
+        <div>
+          <label>Categoría (opcional)</label>
+          <input id="p-category" placeholder="Ej: Calzado" />
+        </div>
+      </div>
+      <label>Descripción</label>
+      <textarea id="p-description" placeholder="Detalles que la IA usará para responder preguntas de clientes"></textarea>
+      <div class="grid-3">
+        <div>
+          <label>Precio</label>
+          <input id="p-price" type="number" step="0.01" placeholder="0.00" />
+        </div>
+        <div>
+          <label>Moneda</label>
+          <select id="p-currency" style="width:100%; padding:10px 12px; border:1px solid var(--border); border-radius:9px; font-size:14px; font-family:inherit; background:#fbfbfc;">
+            <option value="COP">COP (pesos colombianos)</option>
+            <option value="USD">USD (dólares)</option>
+          </select>
+        </div>
+        <div>
+          <label>Stock disponible</label>
+          <input id="p-stock" type="number" value="0" />
+        </div>
+      </div>
+      <div class="actions-row">
+        <button class="btn-primary" onclick="addProduct()">+ Agregar producto</button>
+      </div>
+    </div>
+
+    <div class="section-title">Catálogo</div>
+    <div id="products-container"></div>
+  </main>
+
+<script>
+function setStatus(msg, isError) {
+  const el = document.getElementById('status');
+  el.textContent = msg;
+  el.style.color = isError ? '#e5484d' : '';
+  if (msg) setTimeout(() => { el.textContent = ''; }, 3000);
+}
+
+async function loadBusiness() {
+  const res = await fetch('/admin/api/business');
+  if (res.status === 401) {
+    window.location.href = '/login.html';
+    return;
+  }
+  const business = await res.json();
+  document.getElementById('business-name').value = business.name || '';
+  document.getElementById('business-description').value = business.description || '';
+  document.getElementById('business-instructions').value = business.customInstructions || '';
+}
+
+async function logout() {
+  await fetch('/auth/logout', { method: 'POST' });
+  window.location.href = '/login.html';
+}
+
+async function saveBusiness() {
+  const name = document.getElementById('business-name').value.trim();
+  const description = document.getElementById('business-description').value.trim();
+  const customInstructions = document.getElementById('business-instructions').value.trim();
+  if (!name) { setStatus('El nombre es obligatorio', true); return; }
+  await fetch('/admin/api/business', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, description, customInstructions }),
+  });
+  setStatus('Negocio guardado ✓');
+}
+
+let editingId = null;
+
+async function loadProducts() {
+  const res = await fetch('/admin/api/products');
+  const products = await res.json();
+  const container = document.getElementById('products-container');
+  document.getElementById('product-count').textContent =
+    products.length + (products.length === 1 ? ' producto' : ' productos');
+
+  if (products.length === 0) {
+    container.innerHTML = `<div class="card empty-state"><div class="big">🗂️</div>Todavía no cargaste productos.<br/>Agregá el primero arriba.</div>`;
+    return;
+  }
+
+  container.innerHTML = `<div class="product-grid">${products.map(renderCard).join('')}</div>`;
+}
+
+function renderCard(p) {
+  const media = p.media || [];
+  const thumbs = media.map(m => `
+    <span class="thumb-wrap">
+      ${m.type === 'VIDEO'
+        ? `<video class="thumb" src="${m.url}"></video>`
+        : `<img class="thumb" src="${m.url}" />`}
+      <button class="thumb-remove" onclick="deleteMedia('${m.id}')">×</button>
+    </span>
+  `).join('');
+
+  const editForm = editingId === p.id ? `
+    <div class="edit-grid">
+      <div class="full"><label>Nombre</label><input id="e-name-${p.id}" value="${escapeHtml(p.name)}" /></div>
+      <div class="full"><label>Descripción</label><textarea id="e-desc-${p.id}">${escapeHtml(p.description)}</textarea></div>
+      <div><label>Precio</label><input id="e-price-${p.id}" type="number" step="0.01" value="${p.price}" /></div>
+      <div><label>Moneda</label>
+        <select id="e-currency-${p.id}" style="width:100%; padding:9px 11px; border:1px solid var(--border); border-radius:8px; font-size:13px; font-family:inherit; background:#fff;">
+          <option value="COP" ${p.currency === 'COP' ? 'selected' : ''}>COP</option>
+          <option value="USD" ${p.currency === 'USD' ? 'selected' : ''}>USD</option>
+        </select>
+      </div>
+      <div><label>Stock</label><input id="e-stock-${p.id}" type="number" value="${p.stock}" /></div>
+      <div class="full"><label>Categoría</label><input id="e-cat-${p.id}" value="${escapeHtml(p.category || '')}" /></div>
+      <div class="full" style="display:flex; gap:6px; margin-top:8px;">
+        <button class="btn-primary" onclick="saveEdit('${p.id}')">Guardar</button>
+        <button class="btn-ghost" onclick="cancelEdit()">Cancelar</button>
+      </div>
+    </div>
+  ` : '';
+
+  return `
+    <div class="product-card ${p.active ? '' : 'inactive'}">
+      <div class="thumb-strip">
+        ${thumbs}
+        <label class="thumb-add">
+          +
+          <input type="file" accept="image/*,video/*" onchange="uploadMedia('${p.id}', this)" />
+        </label>
+      </div>
+      <div class="product-body">
+        <div class="product-name">${escapeHtml(p.name)}</div>
+        <div class="product-desc">${escapeHtml(p.description)}</div>
+        <div class="product-meta">
+          <span class="price-tag">${p.currency} ${Number(p.price).toFixed(2)}</span>
+          <span class="stock-badge ${p.stock > 0 ? 'stock-ok' : 'stock-zero'}">${p.stock > 0 ? p.stock + ' en stock' : 'sin stock'}</span>
+        </div>
+        ${p.category ? `<span class="category-tag">${escapeHtml(p.category)}</span>` : ''}
+      </div>
+      ${editForm}
+      <div class="product-footer">
+        <button class="btn-secondary" onclick="startEdit('${p.id}')">Editar</button>
+        <button class="btn-secondary" onclick="toggleActive('${p.id}', ${!p.active})">${p.active ? 'Desactivar' : 'Activar'}</button>
+        <button class="btn-danger" onclick="removeProduct('${p.id}')">Eliminar</button>
+      </div>
+    </div>
+  `;
+}
+
+function escapeHtml(str) {
+  return String(str ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function startEdit(id) { editingId = id; loadProducts(); }
+function cancelEdit() { editingId = null; loadProducts(); }
+
+async function saveEdit(id) {
+  const name = document.getElementById(`e-name-${id}`).value.trim();
+  const description = document.getElementById(`e-desc-${id}`).value.trim();
+  const price = document.getElementById(`e-price-${id}`).value;
+  const currency = document.getElementById(`e-currency-${id}`).value;
+  const stock = document.getElementById(`e-stock-${id}`).value;
+  const category = document.getElementById(`e-cat-${id}`).value.trim();
+
+  await fetch(`/admin/api/products/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, description, price, currency, stock, category }),
+  });
+  editingId = null;
+  setStatus('Producto actualizado ✓');
+  loadProducts();
+}
+
+async function addProduct() {
+  const name = document.getElementById('p-name').value.trim();
+  const description = document.getElementById('p-description').value.trim();
+  const price = document.getElementById('p-price').value;
+  const currency = document.getElementById('p-currency').value;
+  const stock = document.getElementById('p-stock').value;
+  const category = document.getElementById('p-category').value.trim();
+
+  if (!name || !description || !price) {
+    setStatus('Nombre, descripción y precio son obligatorios', true);
+    return;
+  }
+
+  await fetch('/admin/api/products', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, description, price, currency, stock, category }),
+  });
+
+  document.getElementById('p-name').value = '';
+  document.getElementById('p-description').value = '';
+  document.getElementById('p-price').value = '';
+  document.getElementById('p-stock').value = '0';
+  document.getElementById('p-category').value = '';
+
+  setStatus('Producto agregado ✓');
+  loadProducts();
+}
+
+async function toggleActive(id, active) {
+  await fetch(`/admin/api/products/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ active }),
+  });
+  loadProducts();
+}
+
+async function removeProduct(id) {
+  if (!confirm('¿Eliminar este producto?')) return;
+  await fetch(`/admin/api/products/${id}`, { method: 'DELETE' });
+  loadProducts();
+}
+
+async function uploadMedia(productId, input) {
+  const file = input.files[0];
+  if (!file) return;
+  const formData = new FormData();
+  formData.append('file', file);
+  setStatus('Subiendo archivo...');
+  const res = await fetch(`/admin/api/products/${productId}/media`, {
+    method: 'POST',
+    body: formData,
+  });
+  if (!res.ok) {
+    setStatus('Error subiendo archivo (revisá la configuración de S3)', true);
+    return;
+  }
+  setStatus('Archivo subido ✓');
+  loadProducts();
+}
+
+async function deleteMedia(mediaId) {
+  await fetch(`/admin/api/media/${mediaId}`, { method: 'DELETE' });
+  loadProducts();
+}
+
+function onPmTypeChange() {
+  const type = document.getElementById('pm-type').value;
+  const label = document.getElementById('pm-label');
+  const details = document.getElementById('pm-details');
+  const detailsLabel = document.getElementById('pm-details-label');
+  if (type === 'TARJETA') {
+    detailsLabel.textContent = 'Link de pago (puedes usar nuestro link de prueba para la demo)';
+    details.placeholder = window.location.origin + '/pago-demo.html';
+    label.placeholder = 'Ej: Pago con tarjeta';
+  } else if (type === 'EFECTIVO') {
+    detailsLabel.textContent = 'Instrucciones para el cliente';
+    details.placeholder = 'Ej: Pago en efectivo al recibir el pedido (contraentrega)';
+    label.placeholder = 'Ej: Contraentrega';
+  } else {
+    detailsLabel.textContent = 'Datos (número de cuenta, llave, celular, etc.)';
+    details.placeholder = 'Ej: 300 123 4567 a nombre de Aurora Joyas';
+    label.placeholder = 'Ej: Nequi';
+  }
+}
+
+function pmTypeLabel(type) {
+  return { TRANSFERENCIA: 'Transferencia', TARJETA: 'Tarjeta', EFECTIVO: 'Efectivo' }[type] || type;
+}
+
+async function loadPaymentMethods() {
+  const res = await fetch('/admin/api/payment-methods');
+  const methods = await res.json();
+  const container = document.getElementById('payment-methods-list');
+
+  if (!Array.isArray(methods) || methods.length === 0) {
+    container.innerHTML = '<div style="font-size:13px; color:var(--muted);">Todavía no agregaste ninguna forma de pago.</div>';
+    return;
+  }
+
+  container.innerHTML = methods.map((m) => `
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px 12px; border:1px solid var(--border); border-radius:9px; ${m.active ? '' : 'opacity:.5;'}">
+      <div>
+        <span class="category-tag" style="margin-right:8px;">${pmTypeLabel(m.type)}</span>
+        <strong style="font-size:13.5px;">${escapeHtml(m.label)}</strong>
+        <div style="font-size:12px; color:var(--muted); margin-top:2px; max-width:420px; overflow-wrap:anywhere;">${escapeHtml(m.details)}</div>
+      </div>
+      <div style="display:flex; gap:6px; flex-shrink:0;">
+        <button class="btn-secondary" onclick="togglePaymentMethod('${m.id}', ${!m.active})">${m.active ? 'Desactivar' : 'Activar'}</button>
+        <button class="btn-danger" onclick="deletePaymentMethod('${m.id}')">Eliminar</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+async function addPaymentMethod() {
+  const type = document.getElementById('pm-type').value;
+  const label = document.getElementById('pm-label').value.trim();
+  const details = document.getElementById('pm-details').value.trim();
+
+  if (!label || !details) {
+    setStatus('Completá el nombre y los datos del método de pago', true);
+    return;
+  }
+
+  await fetch('/admin/api/payment-methods', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ type, label, details }),
+  });
+
+  document.getElementById('pm-label').value = '';
+  document.getElementById('pm-details').value = '';
+  setStatus('Método de pago agregado ✓');
+  loadPaymentMethods();
+}
+
+async function togglePaymentMethod(id, active) {
+  await fetch(`/admin/api/payment-methods/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ active }),
+  });
+  loadPaymentMethods();
+}
+
+async function deletePaymentMethod(id) {
+  if (!confirm('¿Eliminar este método de pago?')) return;
+  await fetch(`/admin/api/payment-methods/${id}`, { method: 'DELETE' });
+  loadPaymentMethods();
+}
+
+loadBusiness();
+loadProducts();
+loadPaymentMethods();
+</script>
+</body>
+</html>

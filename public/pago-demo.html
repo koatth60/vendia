@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Vendia — Pago simulado</title>
+<style>
+  :root { --green: #1fa855; --green-dark: #16803f; --ink: #14181c; --muted: #6b7480; --border: #e4e7eb; --bg: #f4f6f8; --card: #fff; }
+  * { box-sizing: border-box; }
+  body { font-family: "Segoe UI", system-ui, sans-serif; background: var(--bg); margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center; color: var(--ink); padding: 16px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 32px; width: 100%; max-width: 360px; box-shadow: 0 8px 24px rgba(20,24,28,0.08); }
+  .badge { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); background: #f1f2f4; padding: 4px 10px; border-radius: 999px; display: inline-block; margin-bottom: 14px; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  p.sub { font-size: 13px; color: var(--muted); margin: 0 0 20px; }
+  label { display: block; font-size: 12.5px; font-weight: 600; margin-top: 12px; margin-bottom: 5px; }
+  input { width: 100%; padding: 9px 11px; border: 1px solid var(--border); border-radius: 8px; font-size: 16px; font-family: inherit; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  button { width: 100%; margin-top: 20px; background: var(--green); color: white; border: none; border-radius: 9px; padding: 11px; font-weight: 700; font-size: 14px; cursor: pointer; }
+  .success { text-align: center; }
+  .success .check { width: 56px; height: 56px; border-radius: 50%; background: #e6f7ec; display: flex; align-items: center; justify-content: center; margin: 0 auto 14px; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div id="form-view">
+      <div class="badge">Pago de prueba — demo</div>
+      <h1>Confirmar pago</h1>
+      <p class="sub">Esta es una pasarela simulada para pruebas. No se procesa ningún cobro real.</p>
+      <form id="pay-form">
+        <label>Número de tarjeta</label>
+        <input type="text" placeholder="4111 1111 1111 1111" maxlength="19" required />
+        <div class="row">
+          <div>
+            <label>Vencimiento</label>
+            <input type="text" placeholder="MM/AA" required />
+          </div>
+          <div>
+            <label>CVV</label>
+            <input type="text" placeholder="123" required />
+          </div>
+        </div>
+        <button type="submit">Pagar ahora</button>
+      </form>
+    </div>
+    <div id="success-view" class="success hidden">
+      <div class="check">✅</div>
+      <h1>¡Pago simulado con éxito!</h1>
+      <p class="sub">Puedes cerrar esta ventana y volver al chat de WhatsApp.</p>
+    </div>
+  </div>
+<script>
+document.getElementById('pay-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  document.getElementById('form-view').classList.add('hidden');
+  document.getElementById('success-view').classList.remove('hidden');
+});
+</script>
+</body>
+</html>
