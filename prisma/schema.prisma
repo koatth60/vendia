@@ -126,6 +126,8 @@ model Message {
   conversationId    String
   role              MessageRole
   content           String
+  mediaS3Key        String?
+  mediaType         MediaType?
   whatsappMessageId String?      @unique
   createdAt         DateTime     @default(now())
 }

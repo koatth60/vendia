@@ -2,7 +2,8 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { getProductById, listActiveProducts, searchProducts } from "../catalog/products";
 import { listActivePaymentMethods } from "../catalog/paymentMethods";
 import { updateConversationStatus } from "../conversation/service";
-import { sendImageMessage, sendVideoMessage, type WhatsappCredentials } from "../whatsapp/client";
+import { sendImageMessage, sendVideoMessage, sendTextMessage, type WhatsappCredentials } from "../whatsapp/client";
+import { prisma } from "../db/client";
 
 export const catalogTools: Anthropic.Tool[] = [
   {
@@ -74,11 +75,33 @@ export const catalogTools: Anthropic.Tool[] = [
       type: "object",
       properties: {
         outcome: { type: "string", enum: ["SOLD", "LOST"] },
+        summary: {
+          type: "string",
+          description:
+            "SOLO para outcome=SOLD: un resumen corto del pedido para el dueno del negocio, con producto(s) y cantidad, direccion de envio, forma de pago elegida, y el nombre/telefono de contacto que dio el cliente (si lo dio). No hace falta para outcome=LOST.",
+        },
       },
       required: ["outcome"],
     },
   },
 ];
+
+async function notifyBusinessOfSale(context: ToolContext, summary: string) {
+  try {
+    const business = await prisma.business.findUnique({ where: { id: context.businessId } });
+    if (!business?.contactPhone) return;
+
+    const text = [
+      "🟢 *Nueva venta cerrada por el bot*",
+      `Cliente (WhatsApp): ${context.recipientPhone}`,
+      summary || "El cliente confirmo la compra, sin mas detalles registrados.",
+    ].join("\n\n");
+
+    await sendTextMessage(context.credentials, business.contactPhone, text);
+  } catch (error) {
+    console.error("No se pudo notificar la venta al numero de contacto del negocio:", error);
+  }
+}
 
 function formatProduct(product: Awaited<ReturnType<typeof getProductById>>) {
   if (!product) return null;
@@ -152,6 +175,12 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
     case "close_conversation": {
       const outcome = input.outcome === "LOST" ? "LOST" : "SOLD";
       await updateConversationStatus(context.conversationId, outcome);
+
+      if (outcome === "SOLD") {
+        const summary = String(input.summary ?? "").trim();
+        await notifyBusinessOfSale(context, summary);
+      }
+
       return { closed: true, outcome };
     }
     default:

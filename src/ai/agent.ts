@@ -30,14 +30,23 @@ este turno. Por eso nunca digas "te mando los datos en un mensaje aparte" ni "en
 haberlo hecho ya: si el cliente elige una forma de pago, incluye el numero/llave o link real en ese mismo
 mensaje.
 
+COMPROBANTES: si el cliente manda una foto (por ejemplo un comprobante de pago o transferencia), SI la
+puedes ver directamente en la conversacion. Revisala vos mismo: fijate si parece un comprobante de pago
+(banco, monto, fecha) y si el monto coincide con lo que debia pagar. Si coincide, confirmaselo y segui
+con el cierre del pedido. Si no se ve como un comprobante, o el monto no coincide, o no se alcanza a leer
+bien, decile especificamente que no lograste confirmarlo y pedile que reenvie una foto mas clara o que
+confirme el monto por texto. Nunca digas que no puedes ver imagenes: si te llega una, ya la estas viendo.
+
 Si el cliente muestra intencion de compra, guialo hacia confirmar el pedido pidiendo los datos que falten
 (cantidad, direccion de envio, forma de pago) de a uno por vez. Si preguntan algo que no tiene que ver con
 el negocio, respondelo brevemente y redirigi la conversacion hacia el catalogo.
 
 CIERRE: justo despues de confirmarle al cliente su pedido final (ya con producto, cantidad, direccion y
-forma de pago decididos), usa la herramienta close_conversation con outcome=SOLD. Si el cliente dice
-explicitamente que no le interesa o no va a comprar, usa close_conversation con outcome=LOST. No la uses
-en ningun otro momento de la conversacion.`;
+forma de pago decididos), usa la herramienta close_conversation con outcome=SOLD, incluyendo el campo
+summary con el resumen del pedido (producto y cantidad, direccion, forma de pago, y nombre/telefono de
+contacto si el cliente lo dio) para que el dueno del negocio lo reciba. Si el cliente dice explicitamente
+que no le interesa o no va a comprar, usa close_conversation con outcome=LOST. No la uses en ningun otro
+momento de la conversacion.`;
 
 function buildSystemPrompt(customInstructions?: string | null): string {
   if (!customInstructions || !customInstructions.trim()) return BASE_SYSTEM_PROMPT;
@@ -59,12 +68,21 @@ export async function generateReply(
 ): Promise<string> {
   const history = await getRecentHistory(conversationId);
 
-  const messages: Anthropic.MessageParam[] = history.map((m) => ({
-    role: toAnthropicRole(m.role),
-    content: m.content,
-  }));
+  const messages: Anthropic.MessageParam[] = history.map((m) => {
+    if (m.mediaUrl && m.mediaType === "IMAGE") {
+      const content: Anthropic.ContentBlockParam[] = [
+        { type: "image", source: { type: "url", url: m.mediaUrl } },
+      ];
+      if (m.content.trim()) {
+        content.push({ type: "text", text: m.content });
+      }
+      return { role: toAnthropicRole(m.role), content };
+    }
+    return { role: toAnthropicRole(m.role), content: m.content };
+  });
 
   const systemPrompt = buildSystemPrompt(customInstructions);
+  let lastText = "";
 
   for (let iteration = 0; iteration < 5; iteration++) {
     const response = await anthropic.messages.create({
@@ -79,9 +97,13 @@ export async function generateReply(
       (block): block is Anthropic.ToolUseBlock => block.type === "tool_use"
     );
 
+    const textBlock = response.content.find((block) => block.type === "text");
+    if (textBlock?.type === "text" && textBlock.text.trim()) {
+      lastText = textBlock.text;
+    }
+
     if (toolUseBlocks.length === 0) {
-      const textBlock = response.content.find((block) => block.type === "text");
-      return textBlock?.type === "text" ? textBlock.text : "";
+      return lastText || "Disculpa, tuve un problema procesando tu consulta. Un asesor te va a contactar pronto.";
     }
 
     messages.push({ role: "assistant", content: response.content });
@@ -99,5 +121,5 @@ export async function generateReply(
     messages.push({ role: "user", content: toolResults });
   }
 
-  return "Disculpa, tuve un problema procesando tu consulta. Un asesor te va a contactar pronto.";
+  return lastText || "Disculpa, tuve un problema procesando tu consulta. Un asesor te va a contactar pronto.";
 }

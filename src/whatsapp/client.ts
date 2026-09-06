@@ -47,6 +47,29 @@ export async function sendImageMessage(
   });
 }
 
+export async function downloadMedia(
+  credentials: WhatsappCredentials,
+  mediaId: string
+): Promise<{ buffer: Buffer; mimeType: string }> {
+  const metaResponse = await fetch(`${GRAPH_BASE_URL}/${mediaId}`, {
+    headers: { Authorization: `Bearer ${credentials.accessToken}` },
+  });
+  if (!metaResponse.ok) {
+    throw new Error(`WhatsApp API error fetching media metadata (${metaResponse.status}): ${await metaResponse.text()}`);
+  }
+  const meta = (await metaResponse.json()) as { url: string; mime_type: string };
+
+  const fileResponse = await fetch(meta.url, {
+    headers: { Authorization: `Bearer ${credentials.accessToken}` },
+  });
+  if (!fileResponse.ok) {
+    throw new Error(`WhatsApp API error downloading media (${fileResponse.status}): ${await fileResponse.text()}`);
+  }
+
+  const buffer = Buffer.from(await fileResponse.arrayBuffer());
+  return { buffer, mimeType: meta.mime_type };
+}
+
 export async function sendVideoMessage(
   credentials: WhatsappCredentials,
   to: string,

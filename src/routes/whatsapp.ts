@@ -2,7 +2,8 @@ import { Router } from "express";
 import { Prisma } from "@prisma/client";
 import { env } from "../config/env";
 import { prisma } from "../db/client";
-import { sendTextMessage } from "../whatsapp/client";
+import { sendTextMessage, downloadMedia, type WhatsappCredentials } from "../whatsapp/client";
+import { uploadMedia } from "../media/s3";
 import {
   getOrCreateCustomer,
   getOrCreateOpenConversation,
@@ -36,7 +37,8 @@ whatsappRouter.post("/webhook", async (req, res) => {
     const message = value?.messages?.[0];
     const incomingPhoneNumberId: string | undefined = value?.metadata?.phone_number_id;
 
-    if (!message || message.type !== "text" || !incomingPhoneNumberId) return;
+    if (!message || !incomingPhoneNumberId) return;
+    if (message.type !== "text" && message.type !== "image") return;
 
     const business = await prisma.business.findUnique({
       where: { whatsappPhoneNumberId: incomingPhoneNumberId },
@@ -47,20 +49,36 @@ whatsappRouter.post("/webhook", async (req, res) => {
       return;
     }
 
-    const credentials = {
+    const credentials: WhatsappCredentials = {
       phoneNumberId: business.whatsappPhoneNumberId!,
       accessToken: business.whatsappAccessToken,
     };
 
     const from: string = message.from;
-    const text: string = message.text.body;
     const whatsappMessageId: string | undefined = message.id;
+
+    let text = "";
+    let media: { s3Key: string; type: "IMAGE" } | undefined;
+
+    if (message.type === "text") {
+      text = message.text.body;
+    } else {
+      try {
+        const { buffer, mimeType } = await downloadMedia(credentials, message.image.id);
+        const { key } = await uploadMedia(buffer, mimeType, "images");
+        media = { s3Key: key, type: "IMAGE" };
+        text = message.image.caption ?? "";
+      } catch (error) {
+        console.error("No se pudo procesar la imagen entrante:", error);
+        text = "[El cliente envio una imagen, pero hubo un problema tecnico y no se pudo procesar. Pedile que la reenvie.]";
+      }
+    }
 
     const customer = await getOrCreateCustomer(business.id, from);
     const conversation = await getOrCreateOpenConversation(customer.id);
 
     try {
-      await recordMessage(conversation.id, "CUSTOMER", text, whatsappMessageId);
+      await recordMessage(conversation.id, "CUSTOMER", text, whatsappMessageId, media);
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
         console.log("Mensaje duplicado de WhatsApp ignorado:", whatsappMessageId);
@@ -70,7 +88,7 @@ whatsappRouter.post("/webhook", async (req, res) => {
     }
 
     const reply =
-      getQuickReply(text) ??
+      (message.type === "text" ? getQuickReply(text) : null) ??
       (await generateReply(
         conversation.id,
         { businessId: business.id, conversationId: conversation.id, credentials, recipientPhone: from },

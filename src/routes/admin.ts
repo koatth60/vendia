@@ -10,6 +10,7 @@ import {
 } from "../catalog/products";
 import { prisma } from "../db/client";
 import { requireAuth } from "../auth/requireAuth";
+import { listConversationsForBusiness, getConversationForBusiness } from "../conversation/service";
 import { uploadMedia } from "../media/s3";
 import {
   listPaymentMethods,
@@ -126,4 +127,18 @@ adminRouter.put("/api/payment-methods/:id", async (req, res) => {
 adminRouter.delete("/api/payment-methods/:id", async (req, res) => {
   await deletePaymentMethod(businessIdOf(req), String(req.params.id));
   res.status(204).send();
+});
+
+adminRouter.get("/api/conversations", async (req, res) => {
+  const conversations = await listConversationsForBusiness(businessIdOf(req));
+  res.json(conversations);
+});
+
+adminRouter.get("/api/conversations/:id", async (req, res) => {
+  const conversation = await getConversationForBusiness(businessIdOf(req), String(req.params.id));
+  if (!conversation) {
+    res.status(404).json({ error: "Conversación no encontrada" });
+    return;
+  }
+  res.json(conversation);
 });
