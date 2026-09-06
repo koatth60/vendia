@@ -9,7 +9,7 @@ function required(name: string): string {
 export const env = {
   port: Number(process.env.PORT ?? 3000),
   databaseUrl: required("DATABASE_URL"),
-  anthropicApiKey: process.env.ANTHROPIC_API_KEY ?? "",
+  deepseekApiKey: process.env.DEEPSEEK_API_KEY ?? "",
   sessionSecret: process.env.SESSION_SECRET ?? "dev-secret-change-me",
   whatsapp: {
     verifyToken: process.env.WHATSAPP_VERIFY_TOKEN ?? "",

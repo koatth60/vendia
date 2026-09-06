@@ -11,6 +11,7 @@ import {
 } from "../conversation/service";
 import { generateReply } from "../ai/agent";
 import { getQuickReply } from "../ai/quickReplies";
+import { analyzeReceiptImage } from "../ai/vision";
 
 export const whatsappRouter = Router();
 
@@ -59,15 +60,17 @@ whatsappRouter.post("/webhook", async (req, res) => {
 
     let text = "";
     let media: { s3Key: string; type: "IMAGE" } | undefined;
+    let imageAnalysis: string | undefined;
 
     if (message.type === "text") {
       text = message.text.body;
     } else {
       try {
         const { buffer, mimeType } = await downloadMedia(credentials, message.image.id);
-        const { key } = await uploadMedia(buffer, mimeType, "images");
+        const { key, url } = await uploadMedia(buffer, mimeType, "images");
         media = { s3Key: key, type: "IMAGE" };
         text = message.image.caption ?? "";
+        imageAnalysis = await analyzeReceiptImage(url, text);
       } catch (error) {
         console.error("No se pudo procesar la imagen entrante:", error);
         text = "[El cliente envio una imagen, pero hubo un problema tecnico y no se pudo procesar. Pedile que la reenvie.]";
@@ -78,7 +81,7 @@ whatsappRouter.post("/webhook", async (req, res) => {
     const conversation = await getOrCreateOpenConversation(customer.id);
 
     try {
-      await recordMessage(conversation.id, "CUSTOMER", text, whatsappMessageId, media);
+      await recordMessage(conversation.id, "CUSTOMER", text, whatsappMessageId, media, imageAnalysis);
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
         console.log("Mensaje duplicado de WhatsApp ignorado:", whatsappMessageId);

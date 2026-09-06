@@ -17,7 +17,7 @@ desde un panel web, y Claude responde a sus clientes por WhatsApp usando esos da
 
 - **Backend**: Node.js + TypeScript + Express
 - **Base de datos**: PostgreSQL vía Prisma (driver adapter `@prisma/adapter-pg`)
-- **IA**: Anthropic Claude (Haiku 4.5) con tool use
+- **IA**: DeepSeek (`deepseek-v4-flash`) con tool use; `deepseek-v4-flash-vision-exp` para leer fotos de comprobantes
 - **Autenticación**: sesiones (`express-session`) + contraseñas con `bcryptjs`
 - **Media**: AWS S3 (bucket privado + URLs firmadas temporales)
 - **WhatsApp**: Meta Cloud API
@@ -27,7 +27,7 @@ desde un panel web, y Claude responde a sus clientes por WhatsApp usando esos da
 
 ```
 src/
-  ai/            agente de Claude, herramientas del catálogo, respuestas rápidas
+  ai/            agente de DeepSeek, herramientas del catálogo, respuestas rápidas
   auth/          hash de contraseñas, middleware de sesión
   catalog/       productos y métodos de pago (multi-negocio)
   config/        variables de entorno
@@ -46,7 +46,7 @@ scripts/         utilidades (ej: generar claves de activación)
 - Node.js 22+
 - PostgreSQL
 - Cuenta de Meta con WhatsApp Cloud API configurado
-- API key de Anthropic
+- API key de DeepSeek
 - Bucket de AWS S3 + credenciales de IAM
 
 ## Setup local
@@ -67,7 +67,7 @@ Ver `.env.example`. Resumen:
 |---|---|
 | `DATABASE_URL` | conexión a PostgreSQL |
 | `SESSION_SECRET` | firma de las cookies de sesión |
-| `ANTHROPIC_API_KEY` | Claude |
+| `DEEPSEEK_API_KEY` | DeepSeek |
 | `WHATSAPP_VERIFY_TOKEN` | verificación del webhook (compartido por toda la app en Meta) |
 | `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_S3_BUCKET` | almacenamiento de fotos/videos |
 

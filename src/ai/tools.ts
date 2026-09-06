@@ -1,87 +1,105 @@
-import type Anthropic from "@anthropic-ai/sdk";
+import type OpenAI from "openai";
 import { getProductById, listActiveProducts, searchProducts } from "../catalog/products";
 import { listActivePaymentMethods } from "../catalog/paymentMethods";
 import { updateConversationStatus } from "../conversation/service";
 import { sendImageMessage, sendVideoMessage, sendTextMessage, type WhatsappCredentials } from "../whatsapp/client";
 import { prisma } from "../db/client";
 
-export const catalogTools: Anthropic.Tool[] = [
+export const catalogTools: OpenAI.Chat.ChatCompletionTool[] = [
   {
-    name: "search_products",
-    description:
-      "Busca productos en el catalogo por nombre, descripcion o categoria. Usar cuando el cliente pregunta por un tipo de producto o palabra clave.",
-    input_schema: {
-      type: "object",
-      properties: {
-        query: { type: "string", description: "Palabra o frase para buscar" },
-      },
-      required: ["query"],
-    },
-  },
-  {
-    name: "get_product_details",
-    description:
-      "Obtiene el detalle completo de un producto especifico por su ID, incluyendo precio, stock y URLs de fotos/videos.",
-    input_schema: {
-      type: "object",
-      properties: {
-        productId: {
-          type: "string",
-          description:
-            "El campo 'id' exacto del producto (ej: cmtp5r1c00005jr2ky86q5l6d), tal como aparece en los resultados de search_products o list_all_products. NUNCA el numero de orden (1, 2, 3...) que se le muestra al cliente en una lista.",
+    type: "function",
+    function: {
+      name: "search_products",
+      description:
+        "Busca productos en el catalogo por nombre, descripcion o categoria. Usar cuando el cliente pregunta por un tipo de producto o palabra clave.",
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Palabra o frase para buscar" },
         },
+        required: ["query"],
       },
-      required: ["productId"],
     },
   },
   {
-    name: "list_all_products",
-    description: "Lista todos los productos activos del catalogo. Usar cuando el cliente pregunta que productos hay disponibles en general.",
-    input_schema: {
-      type: "object",
-      properties: {},
-    },
-  },
-  {
-    name: "send_product_media",
-    description:
-      "Envia por WhatsApp las fotos y/o videos reales de un producto especifico. Usar SIEMPRE que el cliente pida ver fotos, imagenes o video de un producto. Esto manda los archivos de verdad, no hace falta describir la imagen en texto aparte. Busca el producto por nombre en el momento, no hace falta pasar ningun ID.",
-    input_schema: {
-      type: "object",
-      properties: {
-        productName: {
-          type: "string",
-          description:
-            "El nombre (o parte del nombre) del producto tal como lo menciono el cliente en ESTE mensaje, por ejemplo 'smartwatch serie 11 mini' o 'boombox'. Usa siempre el producto del que se esta hablando ahora mismo en la conversacion, no uno mencionado antes.",
+    type: "function",
+    function: {
+      name: "get_product_details",
+      description:
+        "Obtiene el detalle completo de un producto especifico por su ID, incluyendo precio, stock y URLs de fotos/videos.",
+      parameters: {
+        type: "object",
+        properties: {
+          productId: {
+            type: "string",
+            description:
+              "El campo 'id' exacto del producto (ej: cmtp5r1c00005jr2ky86q5l6d), tal como aparece en los resultados de search_products o list_all_products. NUNCA el numero de orden (1, 2, 3...) que se le muestra al cliente en una lista.",
+          },
         },
+        required: ["productId"],
       },
-      required: ["productName"],
     },
   },
   {
-    name: "get_payment_methods",
-    description:
-      "Obtiene las formas de pago reales que acepta este negocio (transferencia, tarjeta, efectivo/contraentrega, etc). Usar cuando el cliente pregunte como pagar o este por confirmar una compra.",
-    input_schema: {
-      type: "object",
-      properties: {},
+    type: "function",
+    function: {
+      name: "list_all_products",
+      description: "Lista todos los productos activos del catalogo. Usar cuando el cliente pregunta que productos hay disponibles en general.",
+      parameters: {
+        type: "object",
+        properties: {},
+      },
     },
   },
   {
-    name: "close_conversation",
-    description:
-      "Marca esta conversacion como cerrada. Usa outcome=SOLD justo despues de confirmarle al cliente su pedido final (ya con producto, cantidad, direccion y forma de pago). Usa outcome=LOST si el cliente dice explicitamente que no le interesa o no va a comprar. No la uses para nada mas.",
-    input_schema: {
-      type: "object",
-      properties: {
-        outcome: { type: "string", enum: ["SOLD", "LOST"] },
-        summary: {
-          type: "string",
-          description:
-            "SOLO para outcome=SOLD: un resumen corto del pedido para el dueno del negocio, con producto(s) y cantidad, direccion de envio, forma de pago elegida, y el nombre/telefono de contacto que dio el cliente (si lo dio). No hace falta para outcome=LOST.",
+    type: "function",
+    function: {
+      name: "send_product_media",
+      description:
+        "Envia por WhatsApp las fotos y/o videos reales de un producto especifico. Usar SIEMPRE que el cliente pida ver fotos, imagenes o video de un producto. Esto manda los archivos de verdad, no hace falta describir la imagen en texto aparte. Busca el producto por nombre en el momento, no hace falta pasar ningun ID.",
+      parameters: {
+        type: "object",
+        properties: {
+          productName: {
+            type: "string",
+            description:
+              "El nombre (o parte del nombre) del producto tal como lo menciono el cliente en ESTE mensaje, por ejemplo 'smartwatch serie 11 mini' o 'boombox'. Usa siempre el producto del que se esta hablando ahora mismo en la conversacion, no uno mencionado antes.",
+          },
         },
+        required: ["productName"],
       },
-      required: ["outcome"],
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_payment_methods",
+      description:
+        "Obtiene las formas de pago reales que acepta este negocio (transferencia, tarjeta, efectivo/contraentrega, etc). Usar cuando el cliente pregunte como pagar o este por confirmar una compra.",
+      parameters: {
+        type: "object",
+        properties: {},
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "close_conversation",
+      description:
+        "Marca esta conversacion como cerrada. Usa outcome=SOLD justo despues de confirmarle al cliente su pedido final (ya con producto, cantidad, direccion y forma de pago). Usa outcome=LOST si el cliente dice explicitamente que no le interesa o no va a comprar. No la uses para nada mas.",
+      parameters: {
+        type: "object",
+        properties: {
+          outcome: { type: "string", enum: ["SOLD", "LOST"] },
+          summary: {
+            type: "string",
+            description:
+              "SOLO para outcome=SOLD: un resumen corto del pedido para el dueno del negocio, con producto(s) y cantidad, direccion de envio, forma de pago elegida, y el nombre/telefono de contacto que dio el cliente (si lo dio). No hace falta para outcome=LOST.",
+          },
+        },
+        required: ["outcome"],
+      },
     },
   },
 ];

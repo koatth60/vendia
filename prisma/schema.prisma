@@ -128,6 +128,7 @@ model Message {
   content           String
   mediaS3Key        String?
   mediaType         MediaType?
+  imageAnalysis     String?
   whatsappMessageId String?      @unique
   createdAt         DateTime     @default(now())
 }

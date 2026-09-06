@@ -1,8 +1,12 @@
-import Anthropic from "@anthropic-ai/sdk";
+import OpenAI from "openai";
 import { env } from "../config/env";
 
-export const anthropic = new Anthropic({
-  apiKey: env.anthropicApiKey,
+export const deepseek = new OpenAI({
+  apiKey: env.deepseekApiKey,
+  baseURL: "https://api.deepseek.com",
 });
 
-export const CLAUDE_MODEL = "claude-haiku-4-5-20251001";
+export const DEEPSEEK_MODEL = "deepseek-v4-flash";
+
+// Modelo experimental separado, unico que acepta imagenes (deepseek-v4-flash no tiene vision).
+export const DEEPSEEK_VISION_MODEL = "deepseek-v4-flash-vision-exp";

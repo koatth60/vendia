@@ -1,5 +1,5 @@
-import type Anthropic from "@anthropic-ai/sdk";
-import { anthropic, CLAUDE_MODEL } from "./client";
+import type OpenAI from "openai";
+import { deepseek, DEEPSEEK_MODEL } from "./client";
 import { catalogTools, runCatalogTool, type ToolContext } from "./tools";
 import { getRecentHistory } from "../conversation/service";
 
@@ -30,12 +30,13 @@ este turno. Por eso nunca digas "te mando los datos en un mensaje aparte" ni "en
 haberlo hecho ya: si el cliente elige una forma de pago, incluye el numero/llave o link real en ese mismo
 mensaje.
 
-COMPROBANTES: si el cliente manda una foto (por ejemplo un comprobante de pago o transferencia), SI la
-puedes ver directamente en la conversacion. Revisala vos mismo: fijate si parece un comprobante de pago
-(banco, monto, fecha) y si el monto coincide con lo que debia pagar. Si coincide, confirmaselo y segui
-con el cierre del pedido. Si no se ve como un comprobante, o el monto no coincide, o no se alcanza a leer
-bien, decile especificamente que no lograste confirmarlo y pedile que reenvie una foto mas clara o que
-confirme el monto por texto. Nunca digas que no puedes ver imagenes: si te llega una, ya la estas viendo.
+COMPROBANTES: si el cliente manda una foto (por ejemplo un comprobante de pago o transferencia), el
+mensaje va a incluir una nota "[Analisis de imagen adjunta]" con lo que se ve en la foto - usa esa
+descripcion como si tu mismo hubieras mirado la imagen. Si dice que parece un comprobante valido y el
+monto coincide con lo que debia pagar, confirmaselo y segui con el cierre del pedido. Si la nota dice que
+no se ve como un comprobante, que el monto no coincide, o que no se pudo leer bien, decile especificamente
+que no lograste confirmarlo y pedile que reenvie una foto mas clara o que confirme el monto por texto.
+Nunca digas que no puedes ver imagenes.
 
 Si el cliente muestra intencion de compra, guialo hacia confirmar el pedido pidiendo los datos que falten
 (cantidad, direccion de envio, forma de pago) de a uno por vez. Si preguntan algo que no tiene que ver con
@@ -57,8 +58,14 @@ precios, stock, metodos de pago o fotos reales):
 ${customInstructions.trim()}`;
 }
 
-function toAnthropicRole(role: "CUSTOMER" | "ASSISTANT" | "SYSTEM"): "user" | "assistant" {
+function toOpenAiRole(role: "CUSTOMER" | "ASSISTANT" | "SYSTEM"): "user" | "assistant" {
   return role === "ASSISTANT" ? "assistant" : "user";
+}
+
+function messageText(m: { content: string; imageAnalysis: string | null }): string {
+  if (!m.imageAnalysis) return m.content;
+  const caption = m.content.trim();
+  return `${caption ? `${caption}\n\n` : ""}[Analisis de imagen adjunta]: ${m.imageAnalysis}`;
 }
 
 export async function generateReply(
@@ -68,57 +75,56 @@ export async function generateReply(
 ): Promise<string> {
   const history = await getRecentHistory(conversationId);
 
-  const messages: Anthropic.MessageParam[] = history.map((m) => {
-    if (m.mediaUrl && m.mediaType === "IMAGE") {
-      const content: Anthropic.ContentBlockParam[] = [
-        { type: "image", source: { type: "url", url: m.mediaUrl } },
-      ];
-      if (m.content.trim()) {
-        content.push({ type: "text", text: m.content });
-      }
-      return { role: toAnthropicRole(m.role), content };
-    }
-    return { role: toAnthropicRole(m.role), content: m.content };
-  });
+  const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
+    { role: "system", content: buildSystemPrompt(customInstructions) },
+    ...history.map((m) => ({
+      role: toOpenAiRole(m.role),
+      content: messageText(m),
+    })),
+  ];
 
-  const systemPrompt = buildSystemPrompt(customInstructions);
   let lastText = "";
 
   for (let iteration = 0; iteration < 5; iteration++) {
-    const response = await anthropic.messages.create({
-      model: CLAUDE_MODEL,
+    const response = await deepseek.chat.completions.create({
+      model: DEEPSEEK_MODEL,
       max_tokens: 1024,
-      system: [{ type: "text", text: systemPrompt, cache_control: { type: "ephemeral", ttl: "1h" } }],
-      tools: catalogTools,
       messages,
+      tools: catalogTools,
+      // @ts-expect-error DeepSeek-specific param, not in the OpenAI SDK types. Disabled: reasoning
+      // tokens add latency/cost we don't need for a WhatsApp sales reply.
+      thinking: { type: "disabled" },
     });
 
-    const toolUseBlocks = response.content.filter(
-      (block): block is Anthropic.ToolUseBlock => block.type === "tool_use"
-    );
+    const choice = response.choices[0];
+    const message = choice.message;
 
-    const textBlock = response.content.find((block) => block.type === "text");
-    if (textBlock?.type === "text" && textBlock.text.trim()) {
-      lastText = textBlock.text;
+    if (message.content?.trim()) {
+      lastText = message.content;
     }
 
-    if (toolUseBlocks.length === 0) {
+    const toolCalls = message.tool_calls ?? [];
+    if (toolCalls.length === 0) {
       return lastText || "Disculpa, tuve un problema procesando tu consulta. Un asesor te va a contactar pronto.";
     }
 
-    messages.push({ role: "assistant", content: response.content });
+    messages.push(message);
 
-    const toolResults: Anthropic.ToolResultBlockParam[] = [];
-    for (const block of toolUseBlocks) {
-      const result = await runCatalogTool(context, block.name, block.input as Record<string, unknown>);
-      toolResults.push({
-        type: "tool_result",
-        tool_use_id: block.id,
+    for (const call of toolCalls) {
+      if (call.type !== "function") continue;
+      let input: Record<string, unknown> = {};
+      try {
+        input = JSON.parse(call.function.arguments || "{}");
+      } catch {
+        input = {};
+      }
+      const result = await runCatalogTool(context, call.function.name, input);
+      messages.push({
+        role: "tool",
+        tool_call_id: call.id,
         content: JSON.stringify(result),
       });
     }
-
-    messages.push({ role: "user", content: toolResults });
   }
 
   return lastText || "Disculpa, tuve un problema procesando tu consulta. Un asesor te va a contactar pronto.";

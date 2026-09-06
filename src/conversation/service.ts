@@ -30,7 +30,8 @@ export async function recordMessage(
   role: "CUSTOMER" | "ASSISTANT" | "SYSTEM",
   content: string,
   whatsappMessageId?: string,
-  media?: { s3Key: string; type: "IMAGE" | "VIDEO" }
+  media?: { s3Key: string; type: "IMAGE" | "VIDEO" },
+  imageAnalysis?: string
 ) {
   await prisma.message.create({
     data: {
@@ -40,6 +41,7 @@ export async function recordMessage(
       whatsappMessageId,
       mediaS3Key: media?.s3Key,
       mediaType: media?.type,
+      imageAnalysis,
     },
   });
   await prisma.conversation.update({
