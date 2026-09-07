@@ -90,6 +90,12 @@
       <label>Clave de activación</label>
       <input type="text" id="activationKey" required placeholder="Te la damos nosotros al confirmar el pago" style="text-transform: uppercase;" />
 
+      <label style="display:flex; align-items:flex-start; gap:8px; font-weight:400; font-size:13px; margin-top:18px;">
+        <input type="checkbox" id="acceptTerms" required style="width:auto; margin-top:2px;" />
+        <span>Acepto los <a href="/terminos.html" target="_blank">Términos y Condiciones</a> y la
+        <a href="/privacidad.html" target="_blank">Política de Privacidad</a> de Vendia.</span>
+      </label>
+
       <div class="error" id="error"></div>
       <button type="submit">Crear cuenta</button>
     </form>

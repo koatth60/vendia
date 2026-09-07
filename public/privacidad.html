@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Vendia — Política de Privacidad</title>
+<style>
+  :root { --green: #1fa855; --green-dark: #16803f; --ink: #14181c; --muted: #6b7480; --border: #e4e7eb; --bg: #f4f6f8; --card: #ffffff; }
+  * { box-sizing: border-box; }
+  body { font-family: "Segoe UI", system-ui, sans-serif; background: var(--bg); margin: 0; color: var(--ink); }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 40px 20px 80px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 32px 36px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .updated { font-size: 13px; color: var(--muted); margin-bottom: 28px; }
+  h2 { font-size: 15px; margin: 28px 0 8px; color: var(--green-dark); }
+  p, li { font-size: 14px; line-height: 1.6; color: #2a2f36; }
+  ul { padding-left: 20px; margin: 8px 0; }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 13.5px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; }
+  a { color: var(--green-dark); }
+  .back { display: inline-block; margin-bottom: 20px; font-size: 13px; color: var(--muted); text-decoration: none; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <a class="back" href="javascript:history.back()">← Volver</a>
+    <div class="card">
+      <h1>Política de Privacidad de Vendia</h1>
+      <div class="updated">Última actualización: septiembre de 2026</div>
+
+      <p>Esta política explica qué datos maneja Vendia, para qué los usa, y los derechos que tienen los
+      negocios que usan el Servicio ("Cliente") y las personas que les escriben por WhatsApp ("cliente
+      final"). Aplicamos esta política conforme a la Ley 1581 de 2012 de Colombia (protección de datos
+      personales / Habeas Data).</p>
+
+      <h2>1. Qué datos manejamos</h2>
+      <table>
+        <thead><tr><th>Dato</th><th>De quién</th><th>Para qué</th></tr></thead>
+        <tbody>
+          <tr><td>Nombre, email, contraseña (encriptada)</td><td>Cliente (negocio)</td><td>Crear y proteger la cuenta del panel</td></tr>
+          <tr><td>Número de WhatsApp del negocio</td><td>Cliente</td><td>Conectar el asistente a ese número</td></tr>
+          <tr><td>Catálogo, precios, FAQ, instrucciones del bot</td><td>Cliente</td><td>Que el asistente responda correctamente a sus clientes</td></tr>
+          <tr><td>Número de teléfono, nombre (si lo da)</td><td>Cliente final</td><td>Identificarlo en las conversaciones y pedidos</td></tr>
+          <tr><td>Historial de mensajes de WhatsApp</td><td>Cliente final</td><td>Que el asistente responda con contexto; que el negocio pueda revisar la conversación</td></tr>
+          <tr><td>Fotos enviadas (ej. comprobantes de pago)</td><td>Cliente final</td><td>Verificar pagos (por IA o revisión manual del negocio)</td></tr>
+          <tr><td>Pedidos cerrados (productos, cantidad, dirección, forma de pago)</td><td>Cliente final</td><td>Historial de ventas del negocio</td></tr>
+        </tbody>
+      </table>
+
+      <h2>2. Cómo procesamos los mensajes</h2>
+      <p>Los mensajes de texto se envían a un proveedor externo de inteligencia artificial (DeepSeek) para
+      generar la respuesta del asistente. Las fotos de comprobantes de pago se analizan con un modelo de
+      IA con capacidad de visión para verificar si parecen válidas. Estos proveedores procesan la
+      información únicamente para generar la respuesta en el momento; no los usamos para entrenar modelos
+      con los datos de tus clientes.</p>
+
+      <h2>3. Dónde se almacenan los datos</h2>
+      <ul>
+        <li>Conversaciones, pedidos y catálogo: base de datos PostgreSQL en nuestra infraestructura.</li>
+        <li>Fotos e imágenes: almacenamiento Amazon S3, con acceso restringido mediante enlaces temporales (presigned URLs), nunca públicos de forma permanente.</li>
+      </ul>
+
+      <h2>4. Con quién compartimos datos</h2>
+      <p>No vendemos datos de negocios ni de sus clientes finales a terceros. Compartimos datos únicamente
+      con: Meta/WhatsApp (para enviar y recibir los mensajes), nuestro proveedor de IA (DeepSeek, para
+      generar respuestas), y Amazon Web Services (para almacenar imágenes). Cada uno procesa los datos
+      bajo sus propios términos de servicio como proveedor técnico, no como dueño de los datos.</p>
+
+      <h2>5. Cuánto tiempo conservamos los datos</h2>
+      <p>Conservamos las conversaciones y pedidos mientras la cuenta del negocio esté activa, para que el
+      asistente tenga contexto y el negocio pueda consultar su historial. Si un negocio cancela su cuenta,
+      puede solicitar la eliminación de sus datos y los de sus clientes finales.</p>
+
+      <h2>6. Derechos de los clientes finales (Habeas Data)</h2>
+      <p>Cualquier persona que le haya escrito al asistente de un negocio que usa Vendia puede solicitar
+      conocer, actualizar, rectificar o eliminar su información, contactando directamente a ese negocio (el
+      responsable del tratamiento de sus datos) o escribiéndonos a nosotros como encargados técnicos del
+      tratamiento.</p>
+
+      <h2>7. Empleados del negocio</h2>
+      <p>El dueño de una cuenta puede crear accesos de empleado para su equipo. Los empleados pueden ver y
+      responder conversaciones, pedidos y analíticas, pero no pueden ver ni cambiar la configuración del
+      negocio, el catálogo, las formas de pago ni la FAQ.</p>
+
+      <h2>8. Seguridad</h2>
+      <p>Las contraseñas se almacenan encriptadas (nunca en texto plano). El acceso a la base de datos y al
+      almacenamiento de imágenes está restringido a la infraestructura del Servicio.</p>
+
+      <h2>9. Contacto</h2>
+      <p>Para ejercer tus derechos de Habeas Data o resolver dudas sobre esta política, escríbenos al
+      número de contacto que te dimos al activar tu cuenta.</p>
+    </div>
+  </div>
+</body>
+</html>
