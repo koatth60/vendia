@@ -100,6 +100,7 @@
     font-size: 14px; font-family: inherit; background: #fbfcfd; color: var(--ink); transition: border-color .15s, background .15s;
   }
   input:focus, textarea:focus, select:focus { outline: none; border-color: var(--brand); background: #fff; }
+  input:disabled, textarea:disabled, select:disabled { background: var(--border-soft); color: var(--muted); cursor: not-allowed; }
   textarea { min-height: 72px; resize: vertical; }
   .hint { font-size: 11.5px; color: var(--muted-soft); margin-top: 6px; line-height: 1.4; }
 
@@ -274,7 +275,10 @@
         <div class="brand-sub">Panel de administración</div>
       </div>
     </div>
-    <button class="logout-btn" onclick="logout()">Cerrar sesión</button>
+    <div style="display:flex; align-items:center; gap:12px;">
+      <div id="session-badge" style="font-size:12.5px; color:var(--muted); text-align:right; line-height:1.3;"></div>
+      <button class="logout-btn" onclick="logout()">Cerrar sesión</button>
+    </div>
   </div>
 
   <div class="tabbar">
@@ -396,7 +400,7 @@
           </div>
         </div>
         <div class="actions-row">
-          <button class="btn-primary owner-only" onclick="addProduct()">+ Agregar producto</button>
+          <button class="btn-primary" onclick="addProduct()">+ Agregar producto</button>
         </div>
       </div>
 
@@ -508,7 +512,7 @@
       <div class="panel-header">
         <div>
           <div class="panel-title">Equipo</div>
-          <div class="panel-subtitle">Cuentas de empleados: pueden atender conversaciones y ver pedidos, pero no tocan catálogo, pagos, FAQ ni la configuración del negocio.</div>
+          <div class="panel-subtitle">Cuentas de empleados: pueden atender conversaciones, gestionar el catálogo y ver pedidos, pero no tocan pagos, FAQ ni la configuración del negocio.</div>
         </div>
       </div>
       <div class="card">
@@ -1346,7 +1350,27 @@ async function loadAiUsage() {
       </tr>
     `).join('');
 
+    const pu = s.planUsage;
+    const planLabel = { BASICO: 'Básico', EMPRENDEDOR: 'Emprendedor', NEGOCIO: 'Negocio' }[pu.planTier] || pu.planTier;
+    const barColor = pu.usagePercent >= 100 ? 'var(--danger)' : pu.usagePercent >= 70 ? '#d97706' : 'var(--brand)';
+    const monthLabel = new Date(pu.periodStart).toLocaleDateString('es-CO', { month: 'long', year: 'numeric' });
+
     container.innerHTML = `
+      <div class="card" style="margin-bottom:16px;">
+        <div style="display:flex; justify-content:space-between; align-items:baseline;">
+          <div style="font-size:12px; color:var(--muted);">Consumo del plan ${escapeHtml(planLabel)} · ${monthLabel}</div>
+          <div style="font-size:12px; color:var(--muted);">${pu.messagesUsed.toLocaleString('es-CO')} / ${pu.messageCap.toLocaleString('es-CO')} mensajes</div>
+        </div>
+        <div style="background:var(--border-soft); border-radius:999px; height:10px; margin-top:8px; overflow:hidden;">
+          <div style="width:${Math.min(pu.usagePercent, 100)}%; background:${barColor}; height:100%; border-radius:999px;"></div>
+        </div>
+        <div style="font-size:20px; font-weight:700; margin-top:8px; color:${barColor};">${pu.usagePercent}%</div>
+        ${pu.usagePercent >= 100
+          ? '<div style="font-size:12px; color:var(--danger); margin-top:4px;">Superaste el límite estimado de tu plan este mes.</div>'
+          : pu.usagePercent >= 70
+            ? '<div style="font-size:12px; color:#d97706; margin-top:4px;">Te estás acercando al límite de tu plan.</div>'
+            : ''}
+      </div>
       <div class="grid-3" style="margin-bottom:16px;">
         <div class="card">
           <div style="font-size:12px; color:var(--muted);">Costo total (14 días)</div>
@@ -1463,14 +1487,33 @@ async function deleteTeamMember(id) {
 
 let isOwner = true;
 
+const OWNER_ONLY_INPUT_IDS = [
+  'business-name', 'business-description', 'business-instructions', 'business-contact-name',
+  'business-contact-phone', 'business-followup-template', 'business-followup-language', 'business-followup-hours',
+  'pm-type', 'pm-label', 'pm-details',
+  'faq-question', 'faq-answer',
+  'team-name', 'team-email', 'team-password',
+];
+
 async function loadRole() {
   try {
     const res = await fetch('/auth/me');
-    if (!res.ok) return;
-    const me = await res.json();
-    isOwner = me.role !== 'EMPLOYEE';
-  } catch {}
+    if (res.ok) {
+      const me = await res.json();
+      isOwner = me.role !== 'EMPLOYEE';
+      const badge = document.getElementById('session-badge');
+      if (badge) badge.innerHTML = `${escapeHtml(me.email)}<br/><strong>${isOwner ? '👑 Dueño' : '🙋 Empleado'}</strong>`;
+    } else {
+      isOwner = false;
+    }
+  } catch {
+    isOwner = false;
+  }
   document.querySelectorAll('.owner-only').forEach((el) => { el.hidden = !isOwner; });
+  OWNER_ONLY_INPUT_IDS.forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.disabled = !isOwner;
+  });
 }
 
 async function boot() {

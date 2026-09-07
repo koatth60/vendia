@@ -44,6 +44,7 @@ authRouter.post("/signup", async (req, res) => {
 
   req.session.businessId = business.id;
   req.session.role = "OWNER";
+  req.session.email = business.email;
   res.status(201).json({ id: business.id, name: business.name, email: business.email, planTier: business.planTier });
 });
 
@@ -67,6 +68,7 @@ authRouter.post("/login", async (req, res) => {
     }
     req.session.businessId = business.id;
     req.session.role = "OWNER";
+    req.session.email = business.email;
     res.json({ id: business.id, name: business.name, email: business.email, planTier: business.planTier });
     return;
   }
@@ -83,6 +85,7 @@ authRouter.post("/login", async (req, res) => {
   }
   req.session.businessId = member.business.id;
   req.session.role = "EMPLOYEE";
+  req.session.email = member.email;
   res.json({ id: member.business.id, name: member.business.name, email: member.email, planTier: member.business.planTier });
 });
 
@@ -105,7 +108,7 @@ authRouter.get("/me", async (req, res) => {
   res.json({
     id: business.id,
     name: business.name,
-    email: business.email,
+    email: req.session.email ?? business.email,
     planTier: business.planTier,
     whatsappConnected: Boolean(business.whatsappPhoneNumberId),
     role: req.session.role ?? "OWNER",

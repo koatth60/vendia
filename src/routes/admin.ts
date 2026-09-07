@@ -20,7 +20,7 @@ import {
   setCustomerTags,
 } from "../conversation/service";
 import { sendTextMessage, type WhatsappCredentials } from "../whatsapp/client";
-import { getAiUsageSummary } from "../ai/usage";
+import { getAiUsageSummary, getPlanUsage } from "../ai/usage";
 import { getAnalyticsSummary } from "../analytics/service";
 import { listFaqEntries, createFaqEntry, updateFaqEntry, deleteFaqEntry } from "../catalog/faq";
 import { listOrdersForBusiness } from "../orders/service";
@@ -84,7 +84,7 @@ adminRouter.get("/api/products", async (req, res) => {
   res.json(products);
 });
 
-adminRouter.post("/api/products", requireOwner, async (req, res) => {
+adminRouter.post("/api/products", async (req, res) => {
   const { name, description, price, currency, stock, category } = req.body;
   const product = await createProduct(businessIdOf(req), {
     name,
@@ -97,7 +97,7 @@ adminRouter.post("/api/products", requireOwner, async (req, res) => {
   res.status(201).json(product);
 });
 
-adminRouter.put("/api/products/:id", requireOwner, async (req, res) => {
+adminRouter.put("/api/products/:id", async (req, res) => {
   const { name, description, price, currency, stock, category, active } = req.body;
   const product = await updateProduct(businessIdOf(req), String(req.params.id), {
     name,
@@ -111,12 +111,12 @@ adminRouter.put("/api/products/:id", requireOwner, async (req, res) => {
   res.json(product);
 });
 
-adminRouter.delete("/api/products/:id", requireOwner, async (req, res) => {
+adminRouter.delete("/api/products/:id", async (req, res) => {
   await deleteProduct(businessIdOf(req), String(req.params.id));
   res.status(204).send();
 });
 
-adminRouter.post("/api/products/:id/media", requireOwner, upload.single("file"), async (req, res) => {
+adminRouter.post("/api/products/:id/media", upload.single("file"), async (req, res) => {
   if (!req.file) {
     res.status(400).json({ error: "No file uploaded" });
     return;
@@ -129,7 +129,7 @@ adminRouter.post("/api/products/:id/media", requireOwner, upload.single("file"),
   res.status(201).json(media);
 });
 
-adminRouter.delete("/api/media/:id", requireOwner, async (req, res) => {
+adminRouter.delete("/api/media/:id", async (req, res) => {
   await deleteProductMedia(businessIdOf(req), String(req.params.id));
   res.status(204).send();
 });
@@ -240,8 +240,9 @@ adminRouter.delete("/api/team/:id", requireOwner, async (req, res) => {
 });
 
 adminRouter.get("/api/ai-usage", async (req, res) => {
-  const summary = await getAiUsageSummary(businessIdOf(req));
-  res.json(summary);
+  const businessId = businessIdOf(req);
+  const [summary, planUsage] = await Promise.all([getAiUsageSummary(businessId), getPlanUsage(businessId)]);
+  res.json({ ...summary, planUsage });
 });
 
 adminRouter.put("/api/customers/:id/tags", async (req, res) => {

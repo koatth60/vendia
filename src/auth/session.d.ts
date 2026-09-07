@@ -4,5 +4,6 @@ declare module "express-session" {
   interface SessionData {
     businessId?: string;
     role?: "OWNER" | "EMPLOYEE";
+    email?: string;
   }
 }

@@ -1,5 +1,37 @@
 import { prisma } from "../db/client";
 
+// Message caps per plan tier — used only to show the owner a usage percentage, not enforced yet
+// (see roadmap: enforcement deferred while signup is gated behind manual ActivationKeys).
+const PLAN_MESSAGE_CAPS: Record<string, number> = {
+  BASICO: 300,
+  EMPRENDEDOR: 1000,
+  NEGOCIO: 3000,
+};
+
+export async function getPlanUsage(businessId: string) {
+  const business = await prisma.business.findUnique({ where: { id: businessId }, select: { planTier: true } });
+  const planTier = business?.planTier ?? "BASICO";
+  const messageCap = PLAN_MESSAGE_CAPS[planTier] ?? PLAN_MESSAGE_CAPS.BASICO;
+
+  const now = new Date();
+  const periodStart = new Date(now.getFullYear(), now.getMonth(), 1);
+
+  const messagesUsed = await prisma.message.count({
+    where: {
+      conversation: { customer: { businessId } },
+      createdAt: { gte: periodStart },
+    },
+  });
+
+  return {
+    planTier,
+    messageCap,
+    messagesUsed,
+    usagePercent: Math.round((messagesUsed / messageCap) * 1000) / 10,
+    periodStart,
+  };
+}
+
 // Precios oficiales DeepSeek por 1M tokens (USD), vigentes desde el repricing del 2026-08-16.
 // Fuente: https://api-docs.deepseek.com/quick_start/pricing
 // Peak: 01:00-04:00 y 06:00-10:00 UTC, lunes a viernes (precio x2 sobre off-peak).
