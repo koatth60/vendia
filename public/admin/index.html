@@ -302,6 +302,9 @@
     <button class="tab-btn" data-tab="ai-usage" onclick="switchTab('ai-usage')">
       <span class="tab-icon">📊</span> Consumo IA
     </button>
+    <button class="tab-btn owner-only" data-tab="team" onclick="switchTab('team')" hidden>
+      <span class="tab-icon">👥</span> Equipo
+    </button>
   </div>
 
   <main>
@@ -328,7 +331,7 @@
         <input id="business-contact-phone" placeholder="Ej: +573001234567" />
         <div class="hint">Un número distinto al del bot. Cuando un cliente mande el comprobante de pago, el bot te va a escribir a este número pidiendo que confirmes si el pago llegó antes de cerrarle la venta al cliente.</div>
         <div class="actions-row">
-          <button class="btn-primary" onclick="saveBusiness()">Guardar cambios</button>
+          <button class="btn-primary owner-only" onclick="saveBusiness()">Guardar cambios</button>
         </div>
       </div>
 
@@ -348,7 +351,7 @@
         <label>Horas después de la venta para enviarlo</label>
         <input id="business-followup-hours" type="number" min="1" placeholder="24" />
         <div class="actions-row">
-          <button class="btn-primary" onclick="saveBusiness()">Guardar cambios</button>
+          <button class="btn-primary owner-only" onclick="saveBusiness()">Guardar cambios</button>
         </div>
       </div>
     </div>
@@ -393,7 +396,7 @@
           </div>
         </div>
         <div class="actions-row">
-          <button class="btn-primary" onclick="addProduct()">+ Agregar producto</button>
+          <button class="btn-primary owner-only" onclick="addProduct()">+ Agregar producto</button>
         </div>
       </div>
 
@@ -427,7 +430,7 @@
         <label id="pm-details-label">Datos (número de cuenta, llave, celular, etc.)</label>
         <textarea id="pm-details" placeholder="Ej: 300 123 4567 a nombre de Aurora Joyas"></textarea>
         <div class="actions-row">
-          <button class="btn-primary" onclick="addPaymentMethod()">+ Agregar método de pago</button>
+          <button class="btn-primary owner-only" onclick="addPaymentMethod()">+ Agregar método de pago</button>
         </div>
         <div id="payment-methods-list" style="margin-top:16px; display:flex; flex-direction:column; gap:8px;"></div>
       </div>
@@ -447,7 +450,7 @@
         <label>Respuesta</label>
         <textarea id="faq-answer" placeholder="Ej: Sí, hacemos envíos a todo el país con Servientrega, 2-4 días hábiles."></textarea>
         <div class="actions-row">
-          <button class="btn-primary" onclick="addFaqEntry()">+ Agregar pregunta</button>
+          <button class="btn-primary owner-only" onclick="addFaqEntry()">+ Agregar pregunta</button>
         </div>
         <div id="faq-list" style="margin-top:16px; display:flex; flex-direction:column; gap:8px;"></div>
       </div>
@@ -499,6 +502,33 @@
         <button class="btn-ghost" onclick="loadAiUsage()">↻ Actualizar</button>
       </div>
       <div id="ai-usage-container"></div>
+    </div>
+
+    <div class="tab-panel" data-tab-panel="team">
+      <div class="panel-header">
+        <div>
+          <div class="panel-title">Equipo</div>
+          <div class="panel-subtitle">Cuentas de empleados: pueden atender conversaciones y ver pedidos, pero no tocan catálogo, pagos, FAQ ni la configuración del negocio.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="grid-2">
+          <div>
+            <label>Nombre</label>
+            <input id="team-name" placeholder="Ej: María" />
+          </div>
+          <div>
+            <label>Email</label>
+            <input id="team-email" type="email" placeholder="Ej: maria@negocio.com" />
+          </div>
+        </div>
+        <label>Contraseña</label>
+        <input id="team-password" type="password" placeholder="Mínimo 8 caracteres" />
+        <div class="actions-row">
+          <button class="btn-primary" onclick="addTeamMember()">+ Agregar empleado</button>
+        </div>
+        <div id="team-list" style="margin-top:16px; display:flex; flex-direction:column; gap:8px;"></div>
+      </div>
     </div>
   </main>
 
@@ -1348,21 +1378,123 @@ async function loadAiUsage() {
   }
 }
 
-let initialTab = 'business';
-try {
-  const saved = localStorage.getItem('vendia-admin-tab');
-  if (saved && document.querySelector(`.tab-btn[data-tab="${saved}"]`)) initialTab = saved;
-} catch {}
-switchTab(initialTab);
+async function loadTeamMembers() {
+  const container = document.getElementById('team-list');
+  try {
+    const res = await apiFetch('/admin/api/team');
+    const members = await res.json();
 
-loadBusiness();
-loadProducts();
-loadPaymentMethods();
-loadConversations();
-loadFaqEntries();
-loadOrders();
-loadAnalytics();
-loadAiUsage();
+    if (!Array.isArray(members) || members.length === 0) {
+      container.innerHTML = '<div style="font-size:13px; color:var(--muted);">Todavía no agregaste ningún empleado.</div>';
+      return;
+    }
+
+    container.innerHTML = members.map((m) => `
+      <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px 12px; border:1px solid var(--border); border-radius:var(--radius-md); ${m.active ? '' : 'opacity:.5;'}">
+        <div>
+          <strong style="font-size:13.5px;">${escapeHtml(m.name)}</strong>
+          <div style="font-size:12px; color:var(--muted); margin-top:2px;">${escapeHtml(m.email)}</div>
+        </div>
+        <div style="display:flex; gap:6px; flex-shrink:0;">
+          <button class="btn-secondary" onclick="toggleTeamMember('${m.id}', ${!m.active})">${m.active ? 'Desactivar' : 'Activar'}</button>
+          <button class="btn-danger" onclick="deleteTeamMember('${m.id}')">Eliminar</button>
+        </div>
+      </div>
+    `).join('');
+  } catch (err) {
+    container.innerHTML = `<div style="font-size:13px; color:var(--danger);">No se pudieron cargar: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+async function addTeamMember() {
+  const name = document.getElementById('team-name').value.trim();
+  const email = document.getElementById('team-email').value.trim();
+  const password = document.getElementById('team-password').value;
+
+  if (!name || !email || !password) {
+    setStatus('Completá nombre, email y contraseña', true);
+    return;
+  }
+  if (password.length < 8) {
+    setStatus('La contraseña debe tener al menos 8 caracteres', true);
+    return;
+  }
+
+  try {
+    await apiFetch('/admin/api/team', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, email, password }),
+    });
+  } catch (err) {
+    setStatus(`No se pudo agregar: ${err.message}`, true);
+    return;
+  }
+
+  document.getElementById('team-name').value = '';
+  document.getElementById('team-email').value = '';
+  document.getElementById('team-password').value = '';
+  setStatus('Empleado agregado ✓');
+  loadTeamMembers();
+}
+
+async function toggleTeamMember(id, active) {
+  try {
+    await apiFetch(`/admin/api/team/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ active }),
+    });
+    loadTeamMembers();
+  } catch (err) {
+    setStatus(`No se pudo actualizar: ${err.message}`, true);
+  }
+}
+
+async function deleteTeamMember(id) {
+  if (!confirm('¿Eliminar este empleado?')) return;
+  try {
+    await apiFetch(`/admin/api/team/${id}`, { method: 'DELETE' });
+    loadTeamMembers();
+  } catch (err) {
+    setStatus(`No se pudo eliminar: ${err.message}`, true);
+  }
+}
+
+let isOwner = true;
+
+async function loadRole() {
+  try {
+    const res = await fetch('/auth/me');
+    if (!res.ok) return;
+    const me = await res.json();
+    isOwner = me.role !== 'EMPLOYEE';
+  } catch {}
+  document.querySelectorAll('.owner-only').forEach((el) => { el.hidden = !isOwner; });
+}
+
+async function boot() {
+  await loadRole();
+
+  let initialTab = 'business';
+  try {
+    const saved = localStorage.getItem('vendia-admin-tab');
+    if (saved && document.querySelector(`.tab-btn[data-tab="${saved}"]`) && !(saved === 'team' && !isOwner)) initialTab = saved;
+  } catch {}
+  switchTab(initialTab);
+
+  loadBusiness();
+  loadProducts();
+  loadPaymentMethods();
+  loadConversations();
+  loadFaqEntries();
+  loadOrders();
+  loadAnalytics();
+  loadAiUsage();
+  if (isOwner) loadTeamMembers();
+}
+
+boot();
 </script>
 </body>
 </html>

@@ -43,6 +43,7 @@ authRouter.post("/signup", async (req, res) => {
   });
 
   req.session.businessId = business.id;
+  req.session.role = "OWNER";
   res.status(201).json({ id: business.id, name: business.name, email: business.email, planTier: business.planTier });
 });
 
@@ -54,19 +55,35 @@ authRouter.post("/login", async (req, res) => {
   }
 
   const business = await prisma.business.findUnique({ where: { email } });
-  if (!business || !business.active) {
-    res.status(401).json({ error: "Credenciales inválidas" });
+  if (business) {
+    if (!business.active) {
+      res.status(401).json({ error: "Credenciales inválidas" });
+      return;
+    }
+    const valid = await verifyPassword(password, business.passwordHash);
+    if (!valid) {
+      res.status(401).json({ error: "Credenciales inválidas" });
+      return;
+    }
+    req.session.businessId = business.id;
+    req.session.role = "OWNER";
+    res.json({ id: business.id, name: business.name, email: business.email, planTier: business.planTier });
     return;
   }
 
-  const valid = await verifyPassword(password, business.passwordHash);
-  if (!valid) {
+  const member = await prisma.teamMember.findUnique({ where: { email }, include: { business: true } });
+  if (!member || !member.active || !member.business.active) {
     res.status(401).json({ error: "Credenciales inválidas" });
     return;
   }
-
-  req.session.businessId = business.id;
-  res.json({ id: business.id, name: business.name, email: business.email, planTier: business.planTier });
+  const validMember = await verifyPassword(password, member.passwordHash);
+  if (!validMember) {
+    res.status(401).json({ error: "Credenciales inválidas" });
+    return;
+  }
+  req.session.businessId = member.business.id;
+  req.session.role = "EMPLOYEE";
+  res.json({ id: member.business.id, name: member.business.name, email: member.email, planTier: member.business.planTier });
 });
 
 authRouter.post("/logout", (req, res) => {
@@ -91,5 +108,6 @@ authRouter.get("/me", async (req, res) => {
     email: business.email,
     planTier: business.planTier,
     whatsappConnected: Boolean(business.whatsappPhoneNumberId),
+    role: req.session.role ?? "OWNER",
   });
 });
