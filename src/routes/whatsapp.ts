@@ -14,6 +14,7 @@ import {
 } from "../conversation/service";
 import { generateReply } from "../ai/agent";
 import { analyzeReceiptImage } from "../ai/vision";
+import { createOrder, type ResolvedOrderItem } from "../orders/service";
 
 export const whatsappRouter = Router();
 
@@ -27,7 +28,12 @@ interface OwnerReplyMessage {
   interactive?: { type: string; button_reply?: { id: string; title: string } };
 }
 
-async function handleOwnerReply(credentials: WhatsappCredentials, ownerPhone: string, message: OwnerReplyMessage) {
+async function handleOwnerReply(
+  businessId: string,
+  credentials: WhatsappCredentials,
+  ownerPhone: string,
+  message: OwnerReplyMessage
+) {
   if (message.type !== "text" && message.type !== "interactive") {
     console.log("Mensaje del dueno ignorado (tipo no soportado para confirmaciones):", message.type);
     return;
@@ -68,6 +74,20 @@ async function handleOwnerReply(credentials: WhatsappCredentials, ownerPhone: st
   const customerPhone = conversation.customer.phoneNumber;
 
   if (isConfirm) {
+    const draft = conversation.pendingOrderItems as {
+      items?: ResolvedOrderItem[];
+      shippingAddress?: string | null;
+      paymentMethodLabel?: string | null;
+    } | null;
+    await createOrder({
+      businessId,
+      customerId: conversation.customer.id,
+      conversationId: conversation.id,
+      summary: conversation.pendingOrderSummary ?? "",
+      items: draft?.items ?? [],
+      shippingAddress: draft?.shippingAddress ?? null,
+      paymentMethodLabel: draft?.paymentMethodLabel ?? null,
+    });
     await updateConversationStatus(conversation.id, "SOLD");
     await clearPendingConfirmation(conversation.id);
     const customerText = "¡Listo! Tu pago quedo confirmado y tu pedido esta cerrado. Gracias por tu compra 🎉";
@@ -129,7 +149,7 @@ whatsappRouter.post("/webhook", async (req, res) => {
 
     const onlyDigits = (phone: string) => phone.replace(/\D/g, "");
     if (business.contactPhone && onlyDigits(from) === onlyDigits(business.contactPhone)) {
-      await handleOwnerReply(credentials, from, message);
+      await handleOwnerReply(business.id, credentials, from, message);
       return;
     }
 

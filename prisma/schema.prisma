@@ -33,6 +33,7 @@ model Business {
   paymentMethods        PaymentMethod[]
   aiUsageLogs           AiUsageLog[]
   faqEntries            FaqEntry[]
+  orders                Order[]
   createdAt             DateTime        @default(now())
   updatedAt             DateTime        @updatedAt
 }
@@ -52,6 +53,36 @@ model PaymentMethod {
   details    String
   active     Boolean           @default(true)
   createdAt  DateTime          @default(now())
+}
+
+model Order {
+  id                 String       @id @default(cuid())
+  business           Business     @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  businessId         String
+  customer           Customer     @relation(fields: [customerId], references: [id])
+  customerId         String
+  conversation       Conversation @relation(fields: [conversationId], references: [id])
+  conversationId     String       @unique
+  summary            String
+  shippingAddress    String?
+  paymentMethodLabel String?
+  totalAmount        Decimal      @db.Decimal(12, 2)
+  currency           String
+  items              OrderItem[]
+  createdAt          DateTime     @default(now())
+
+  @@index([businessId, createdAt])
+}
+
+model OrderItem {
+  id          String  @id @default(cuid())
+  order       Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderId     String
+  productId   String?
+  productName String
+  quantity    Int
+  unitPrice   Decimal @db.Decimal(12, 2)
+  currency    String
 }
 
 model FaqEntry {
@@ -114,6 +145,7 @@ model Customer {
   name          String?
   tags          String[]       @default([])
   conversations Conversation[]
+  orders        Order[]
   createdAt     DateTime       @default(now())
 
   @@unique([businessId, phoneNumber])
@@ -129,6 +161,8 @@ model Conversation {
   followUpSentAt              DateTime?
   pendingConfirmationMessageId String?           @unique
   pendingOrderSummary         String?
+  pendingOrderItems           Json?
+  order                       Order?
   messages                    Message[]
   createdAt                   DateTime           @default(now())
   updatedAt                   DateTime           @updatedAt

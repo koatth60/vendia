@@ -293,6 +293,9 @@
     <button class="tab-btn" data-tab="conversations" onclick="switchTab('conversations')">
       <span class="tab-icon">💬</span> Conversaciones <span class="tab-count" id="tab-count-conversations">0</span>
     </button>
+    <button class="tab-btn" data-tab="orders" onclick="switchTab('orders')">
+      <span class="tab-icon">📦</span> Pedidos
+    </button>
     <button class="tab-btn" data-tab="analytics" onclick="switchTab('analytics')">
       <span class="tab-icon">📈</span> Analytics
     </button>
@@ -460,6 +463,19 @@
       </div>
       <div class="card" style="padding:0; overflow:hidden;">
         <div id="conversations-list"></div>
+      </div>
+    </div>
+
+    <div class="tab-panel" data-tab-panel="orders">
+      <div class="panel-header">
+        <div>
+          <div class="panel-title">Pedidos</div>
+          <div class="panel-subtitle">Ventas cerradas con productos, cantidades y total, generadas automáticamente por el bot.</div>
+        </div>
+        <button class="btn-ghost" onclick="loadOrders()">↻ Actualizar</button>
+      </div>
+      <div class="card" style="padding:0; overflow:hidden;">
+        <div id="orders-list"></div>
       </div>
     </div>
 
@@ -1174,6 +1190,41 @@ async function deleteFaqEntry(id) {
   }
 }
 
+async function loadOrders() {
+  const container = document.getElementById('orders-list');
+  try {
+    const res = await apiFetch('/admin/api/orders');
+    const orders = await res.json();
+
+    if (!Array.isArray(orders) || orders.length === 0) {
+      container.innerHTML = '<div class="empty-state"><div class="big">📦</div>Todavía no hay pedidos cerrados.<br/>Van a aparecer acá apenas el bot confirme una venta.</div>';
+      return;
+    }
+
+    container.innerHTML = orders.map((o) => {
+      const displayName = o.customer.name || o.customer.phoneNumber;
+      const itemsList = o.items.length > 0
+        ? o.items.map((i) => `${i.quantity}x ${escapeHtml(i.productName)}`).join(', ')
+        : '<span style="color:var(--muted);">sin productos identificados en el catálogo</span>';
+      const date = new Date(o.createdAt).toLocaleString('es-CO', { dateStyle: 'medium', timeStyle: 'short' });
+      return `
+        <div style="padding:12px 16px; border-top:1px solid var(--border);">
+          <div style="display:flex; justify-content:space-between; gap:10px;">
+            <strong style="font-size:13.5px;">${escapeHtml(displayName)}</strong>
+            <span style="font-size:13px; color:var(--muted);">${date}</span>
+          </div>
+          <div style="font-size:13px; margin-top:4px;">${itemsList}</div>
+          ${o.shippingAddress ? `<div style="font-size:12px; color:var(--muted); margin-top:2px;">📍 ${escapeHtml(o.shippingAddress)}</div>` : ''}
+          ${o.paymentMethodLabel ? `<div style="font-size:12px; color:var(--muted); margin-top:2px;">💳 ${escapeHtml(o.paymentMethodLabel)}</div>` : ''}
+          <div style="font-size:14px; font-weight:700; margin-top:6px;">${o.currency} ${Number(o.totalAmount).toLocaleString('es-CO')}</div>
+        </div>
+      `;
+    }).join('');
+  } catch (err) {
+    container.innerHTML = `<div class="empty-state" style="color:var(--danger);">No se pudieron cargar los pedidos: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
 async function loadAnalytics() {
   const container = document.getElementById('analytics-container');
   try {
@@ -1309,6 +1360,7 @@ loadProducts();
 loadPaymentMethods();
 loadConversations();
 loadFaqEntries();
+loadOrders();
 loadAnalytics();
 loadAiUsage();
 </script>

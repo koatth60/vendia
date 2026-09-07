@@ -21,6 +21,7 @@ import { sendTextMessage, type WhatsappCredentials } from "../whatsapp/client";
 import { getAiUsageSummary } from "../ai/usage";
 import { getAnalyticsSummary } from "../analytics/service";
 import { listFaqEntries, createFaqEntry, updateFaqEntry, deleteFaqEntry } from "../catalog/faq";
+import { listOrdersForBusiness } from "../orders/service";
 import { uploadMedia } from "../media/s3";
 import {
   listPaymentMethods,
@@ -196,6 +197,11 @@ adminRouter.put("/api/customers/:id/tags", async (req, res) => {
     return;
   }
   res.json({ id: customer.id, tags: customer.tags });
+});
+
+adminRouter.get("/api/orders", async (req, res) => {
+  const orders = await listOrdersForBusiness(businessIdOf(req));
+  res.json(orders);
 });
 
 adminRouter.get("/api/analytics", async (req, res) => {

@@ -8,6 +8,7 @@ import {
   setHumanControl,
   saveCustomerName,
 } from "../conversation/service";
+import { resolveOrderItems, createOrder, type ResolvedOrderItem } from "../orders/service";
 import {
   sendImageMessage,
   sendVideoMessage,
@@ -169,6 +170,27 @@ export const catalogTools: OpenAI.Chat.ChatCompletionTool[] = [
             description:
               "SOLO para outcome=SOLD: un resumen corto del pedido para el dueno del negocio, con producto(s) y cantidad, direccion de envio, forma de pago elegida, y el nombre/telefono de contacto que dio el cliente (si lo dio). No hace falta para outcome=LOST.",
           },
+          items: {
+            type: "array",
+            description:
+              "SOLO para outcome=SOLD: la lista estructurada de productos del pedido, para guardarlos como una orden real (no solo texto). Un item por cada producto distinto, con el nombre tal como aparece en el catalogo y la cantidad.",
+            items: {
+              type: "object",
+              properties: {
+                productName: { type: "string", description: "Nombre del producto, tal como aparece en el catalogo" },
+                quantity: { type: "number", description: "Cantidad comprada de ese producto" },
+              },
+              required: ["productName", "quantity"],
+            },
+          },
+          shippingAddress: {
+            type: "string",
+            description: "SOLO para outcome=SOLD: la direccion de envio que dio el cliente, si aplica.",
+          },
+          paymentMethodLabel: {
+            type: "string",
+            description: "SOLO para outcome=SOLD: el nombre de la forma de pago elegida (ej: 'Nequi', 'Contraentrega'), tal como la devolvio get_payment_methods.",
+          },
         },
         required: ["outcome"],
       },
@@ -176,7 +198,13 @@ export const catalogTools: OpenAI.Chat.ChatCompletionTool[] = [
   },
 ];
 
-async function requestSaleConfirmation(context: ToolContext, summary: string): Promise<boolean> {
+interface PendingOrderDraft {
+  items: ResolvedOrderItem[];
+  shippingAddress: string | null;
+  paymentMethodLabel: string | null;
+}
+
+async function requestSaleConfirmation(context: ToolContext, summary: string, draft: PendingOrderDraft): Promise<boolean> {
   const business = await prisma.business.findUnique({ where: { id: context.businessId } });
   if (!business?.contactPhone) return false;
 
@@ -195,7 +223,11 @@ async function requestSaleConfirmation(context: ToolContext, summary: string): P
 
   await prisma.conversation.update({
     where: { id: context.conversationId },
-    data: { pendingConfirmationMessageId: wamid, pendingOrderSummary: summary || null },
+    data: {
+      pendingConfirmationMessageId: wamid,
+      pendingOrderSummary: summary || null,
+      pendingOrderItems: draft as unknown as object,
+    },
   });
   return true;
 }
@@ -320,7 +352,14 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
 
       if (outcome === "SOLD") {
         const summary = String(input.summary ?? "").trim();
-        const pending = await requestSaleConfirmation(context, summary);
+        const shippingAddress = input.shippingAddress ? String(input.shippingAddress).trim() : null;
+        const paymentMethodLabel = input.paymentMethodLabel ? String(input.paymentMethodLabel).trim() : null;
+        const items = await resolveOrderItems(
+          businessId,
+          Array.isArray(input.items) ? (input.items as { productName: string; quantity: number }[]) : []
+        );
+
+        const pending = await requestSaleConfirmation(context, summary, { items, shippingAddress, paymentMethodLabel });
         if (pending) {
           return {
             closed: false,
@@ -328,6 +367,16 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
             note: "El dueno del negocio tiene que confirmar el pago primero. No le digas al cliente que su compra quedo confirmada todavia - decile que estas verificando el pago con el equipo.",
           };
         }
+
+        await createOrder({
+          businessId,
+          customerId: context.customerId,
+          conversationId: context.conversationId,
+          summary,
+          items,
+          shippingAddress,
+          paymentMethodLabel,
+        });
       }
 
       await updateConversationStatus(context.conversationId, outcome);

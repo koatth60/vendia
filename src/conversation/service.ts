@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { prisma } from "../db/client";
 import { getPresignedMediaUrl } from "../media/s3";
 
@@ -107,7 +108,7 @@ export async function findConversationByPendingConfirmation(pendingConfirmationM
 export async function clearPendingConfirmation(conversationId: string) {
   await prisma.conversation.update({
     where: { id: conversationId },
-    data: { pendingConfirmationMessageId: null, pendingOrderSummary: null },
+    data: { pendingConfirmationMessageId: null, pendingOrderSummary: null, pendingOrderItems: Prisma.JsonNull },
   });
 }
 
