@@ -25,6 +25,9 @@ model Business {
   contactName           String?
   whatsappPhoneNumberId String?         @unique
   whatsappAccessToken   String?
+  followUpTemplateName     String?
+  followUpTemplateLanguage String        @default("es")
+  followUpDelayHours       Int           @default(24)
   products              Product[]
   customers             Customer[]
   paymentMethods        PaymentMethod[]
@@ -123,6 +126,7 @@ model Conversation {
   status                      ConversationStatus @default(NEW)
   intent                      ConversationIntent?
   humanControl                Boolean            @default(false)
+  followUpSentAt              DateTime?
   pendingConfirmationMessageId String?           @unique
   pendingOrderSummary         String?
   messages                    Message[]

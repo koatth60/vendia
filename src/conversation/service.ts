@@ -111,6 +111,25 @@ export async function clearPendingConfirmation(conversationId: string) {
   });
 }
 
+export async function findConversationsDueForFollowUp(businessId: string, olderThan: Date) {
+  return prisma.conversation.findMany({
+    where: {
+      customer: { businessId },
+      status: "SOLD",
+      followUpSentAt: null,
+      updatedAt: { lte: olderThan },
+    },
+    include: { customer: true },
+  });
+}
+
+export async function markFollowUpSent(conversationId: string) {
+  return prisma.conversation.update({
+    where: { id: conversationId },
+    data: { followUpSentAt: new Date() },
+  });
+}
+
 export async function wasWhatsappMessageProcessed(whatsappMessageId: string): Promise<boolean> {
   const existing = await prisma.message.findUnique({ where: { whatsappMessageId } });
   return existing !== null;

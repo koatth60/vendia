@@ -328,6 +328,26 @@
           <button class="btn-primary" onclick="saveBusiness()">Guardar cambios</button>
         </div>
       </div>
+
+      <div class="section-title">Seguimiento post-venta</div>
+      <div class="card">
+        <p style="font-size:13px; color:var(--muted); margin-top:0;">Le manda automáticamente una plantilla de WhatsApp a los clientes X horas después de cerrar la venta (ej: "¿cómo te fue con tu compra?"). Requiere que la plantilla ya esté <strong>aprobada por Meta</strong> (categoría Utility, se aprueba en minutos/días, no necesita Tech Provider). Dejá el nombre vacío para desactivarlo.</p>
+        <div class="grid-2">
+          <div>
+            <label>Nombre exacto de la plantilla aprobada</label>
+            <input id="business-followup-template" placeholder="Ej: seguimiento_post_venta" />
+          </div>
+          <div>
+            <label>Código de idioma de la plantilla</label>
+            <input id="business-followup-language" placeholder="Ej: es o es_CO" />
+          </div>
+        </div>
+        <label>Horas después de la venta para enviarlo</label>
+        <input id="business-followup-hours" type="number" min="1" placeholder="24" />
+        <div class="actions-row">
+          <button class="btn-primary" onclick="saveBusiness()">Guardar cambios</button>
+        </div>
+      </div>
     </div>
 
     <div class="tab-panel" data-tab-panel="catalog">
@@ -526,6 +546,9 @@ async function loadBusiness() {
     document.getElementById('business-instructions').value = business.customInstructions || '';
     document.getElementById('business-contact-name').value = business.contactName || '';
     document.getElementById('business-contact-phone').value = business.contactPhone || '';
+    document.getElementById('business-followup-template').value = business.followUpTemplateName || '';
+    document.getElementById('business-followup-language').value = business.followUpTemplateLanguage || 'es';
+    document.getElementById('business-followup-hours').value = business.followUpDelayHours || 24;
   } catch (err) {
     setStatus(`No se pudo cargar el negocio: ${err.message}`, true);
   }
@@ -542,12 +565,18 @@ async function saveBusiness() {
   const customInstructions = document.getElementById('business-instructions').value.trim();
   const contactName = document.getElementById('business-contact-name').value.trim();
   const contactPhone = document.getElementById('business-contact-phone').value.trim();
+  const followUpTemplateName = document.getElementById('business-followup-template').value.trim();
+  const followUpTemplateLanguage = document.getElementById('business-followup-language').value.trim() || 'es';
+  const followUpDelayHours = Number(document.getElementById('business-followup-hours').value) || 24;
   if (!name) { setStatus('El nombre es obligatorio', true); return; }
   try {
     await apiFetch('/admin/api/business', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, description, customInstructions, contactName, contactPhone }),
+      body: JSON.stringify({
+        name, description, customInstructions, contactName, contactPhone,
+        followUpTemplateName, followUpTemplateLanguage, followUpDelayHours,
+      }),
     });
     setStatus('Negocio guardado ✓');
   } catch (err) {

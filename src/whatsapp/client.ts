@@ -55,6 +55,28 @@ export async function sendInteractiveButtonsMessage(
   return result.messages?.[0]?.id ?? "";
 }
 
+export async function sendTemplateMessage(
+  credentials: WhatsappCredentials,
+  to: string,
+  templateName: string,
+  languageCode: string,
+  bodyParams?: string[]
+): Promise<string> {
+  const result = (await callGraphApi(credentials, {
+    messaging_product: "whatsapp",
+    to,
+    type: "template",
+    template: {
+      name: templateName,
+      language: { code: languageCode },
+      ...(bodyParams && bodyParams.length > 0
+        ? { components: [{ type: "body", parameters: bodyParams.map((text) => ({ type: "text", text })) }] }
+        : {}),
+    },
+  })) as { messages?: { id: string }[] };
+  return result.messages?.[0]?.id ?? "";
+}
+
 export async function sendImageMessage(
   credentials: WhatsappCredentials,
   to: string,

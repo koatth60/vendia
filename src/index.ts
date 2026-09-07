@@ -5,6 +5,7 @@ import { env } from "./config/env";
 import { whatsappRouter } from "./routes/whatsapp";
 import { adminRouter } from "./routes/admin";
 import { authRouter } from "./routes/auth";
+import { runFollowUpJob } from "./jobs/followUp";
 
 const app = express();
 app.set("trust proxy", 1);
@@ -36,3 +37,8 @@ app.use(express.static(path.join(__dirname, "..", "public")));
 app.listen(env.port, () => {
   console.log(`Server listening on port ${env.port}`);
 });
+
+const FOLLOW_UP_INTERVAL_MS = 60 * 60 * 1000;
+setInterval(() => {
+  runFollowUpJob().catch((error) => console.error("Error corriendo el job de seguimiento post-venta:", error));
+}, FOLLOW_UP_INTERVAL_MS);
