@@ -10,8 +10,16 @@ import {
 } from "../catalog/products";
 import { prisma } from "../db/client";
 import { requireAuth } from "../auth/requireAuth";
-import { listConversationsForBusiness, getConversationForBusiness } from "../conversation/service";
+import {
+  listConversationsForBusiness,
+  getConversationForBusiness,
+  setHumanControl,
+  recordMessage,
+  setCustomerTags,
+} from "../conversation/service";
+import { sendTextMessage, type WhatsappCredentials } from "../whatsapp/client";
 import { getAiUsageSummary } from "../ai/usage";
+import { getAnalyticsSummary } from "../analytics/service";
 import { uploadMedia } from "../media/s3";
 import {
   listPaymentMethods,
@@ -135,6 +143,21 @@ adminRouter.get("/api/ai-usage", async (req, res) => {
   res.json(summary);
 });
 
+adminRouter.put("/api/customers/:id/tags", async (req, res) => {
+  const tags = Array.isArray(req.body?.tags) ? req.body.tags.map((t: unknown) => String(t).trim()).filter(Boolean) : [];
+  const customer = await setCustomerTags(businessIdOf(req), String(req.params.id), tags);
+  if (!customer) {
+    res.status(404).json({ error: "Cliente no encontrado" });
+    return;
+  }
+  res.json({ id: customer.id, tags: customer.tags });
+});
+
+adminRouter.get("/api/analytics", async (req, res) => {
+  const summary = await getAnalyticsSummary(businessIdOf(req));
+  res.json(summary);
+});
+
 adminRouter.get("/api/conversations", async (req, res) => {
   const conversations = await listConversationsForBusiness(businessIdOf(req));
   res.json(conversations);
@@ -147,4 +170,46 @@ adminRouter.get("/api/conversations/:id", async (req, res) => {
     return;
   }
   res.json(conversation);
+});
+
+adminRouter.put("/api/conversations/:id/handoff", async (req, res) => {
+  const active = Boolean(req.body?.active);
+  const conversation = await setHumanControl(businessIdOf(req), String(req.params.id), active);
+  if (!conversation) {
+    res.status(404).json({ error: "Conversación no encontrada" });
+    return;
+  }
+  res.json({ id: conversation.id, humanControl: conversation.humanControl });
+});
+
+adminRouter.post("/api/conversations/:id/messages", async (req, res) => {
+  const text = String(req.body?.text ?? "").trim();
+  if (!text) {
+    res.status(400).json({ error: "Falta el texto del mensaje" });
+    return;
+  }
+
+  const businessId = businessIdOf(req);
+  const conversation = await getConversationForBusiness(businessId, String(req.params.id));
+  if (!conversation) {
+    res.status(404).json({ error: "Conversación no encontrada" });
+    return;
+  }
+
+  const business = await prisma.business.findUnique({ where: { id: businessId } });
+  if (!business?.whatsappPhoneNumberId || !business.whatsappAccessToken) {
+    res.status(400).json({ error: "Este negocio no tiene WhatsApp conectado" });
+    return;
+  }
+
+  const credentials: WhatsappCredentials = {
+    phoneNumberId: business.whatsappPhoneNumberId,
+    accessToken: business.whatsappAccessToken,
+  };
+
+  await sendTextMessage(credentials, conversation.customer.phoneNumber, text);
+  await recordMessage(String(req.params.id), "ASSISTANT", text);
+  await setHumanControl(businessId, String(req.params.id), true);
+
+  res.status(201).json({ ok: true });
 });

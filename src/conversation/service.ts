@@ -60,6 +60,43 @@ export async function updateConversationStatus(
   });
 }
 
+export async function saveCustomerName(customerId: string, name: string) {
+  return prisma.customer.update({
+    where: { id: customerId },
+    data: { name },
+  });
+}
+
+export async function setCustomerTags(businessId: string, customerId: string, tags: string[]) {
+  const customer = await prisma.customer.findFirst({ where: { id: customerId, businessId } });
+  if (!customer) return null;
+  return prisma.customer.update({
+    where: { id: customerId },
+    data: { tags },
+  });
+}
+
+export async function setConversationIntent(
+  conversationId: string,
+  intent: "PQR" | "DEVOLUCION" | "NO_RECIBIDO"
+) {
+  return prisma.conversation.update({
+    where: { id: conversationId },
+    data: { intent },
+  });
+}
+
+export async function setHumanControl(businessId: string, conversationId: string, active: boolean) {
+  const conversation = await prisma.conversation.findFirst({
+    where: { id: conversationId, customer: { businessId } },
+  });
+  if (!conversation) return null;
+  return prisma.conversation.update({
+    where: { id: conversationId },
+    data: { humanControl: active },
+  });
+}
+
 export async function findConversationByPendingConfirmation(pendingConfirmationMessageId: string) {
   return prisma.conversation.findUnique({
     where: { pendingConfirmationMessageId },
@@ -108,8 +145,10 @@ export async function listConversationsForBusiness(businessId: string) {
   return conversations.map((c) => ({
     id: c.id,
     status: c.status,
+    intent: c.intent,
+    humanControl: c.humanControl,
     updatedAt: c.updatedAt,
-    customer: { phoneNumber: c.customer.phoneNumber, name: c.customer.name },
+    customer: { id: c.customer.id, phoneNumber: c.customer.phoneNumber, name: c.customer.name, tags: c.customer.tags },
     lastMessage: c.messages[0]
       ? {
           role: c.messages[0].role,
@@ -133,8 +172,15 @@ export async function getConversationForBusiness(businessId: string, conversatio
   return {
     id: conversation.id,
     status: conversation.status,
+    intent: conversation.intent,
+    humanControl: conversation.humanControl,
     updatedAt: conversation.updatedAt,
-    customer: { phoneNumber: conversation.customer.phoneNumber, name: conversation.customer.name },
+    customer: {
+      id: conversation.customer.id,
+      phoneNumber: conversation.customer.phoneNumber,
+      name: conversation.customer.name,
+      tags: conversation.customer.tags,
+    },
     messages: await Promise.all(
       conversation.messages.map(async (m) => ({
         id: m.id,

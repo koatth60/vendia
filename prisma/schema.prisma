@@ -71,6 +71,7 @@ model Product {
   stock       Int           @default(0)
   category    String?
   active      Boolean       @default(true)
+  inquiryCount Int          @default(0)
   media       ProductMedia[]
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
@@ -97,6 +98,7 @@ model Customer {
   businessId    String
   phoneNumber   String
   name          String?
+  tags          String[]       @default([])
   conversations Conversation[]
   createdAt     DateTime       @default(now())
 
@@ -108,6 +110,8 @@ model Conversation {
   customer                    Customer           @relation(fields: [customerId], references: [id])
   customerId                  String
   status                      ConversationStatus @default(NEW)
+  intent                      ConversationIntent?
+  humanControl                Boolean            @default(false)
   pendingConfirmationMessageId String?           @unique
   pendingOrderSummary         String?
   messages                    Message[]
@@ -122,6 +126,12 @@ enum ConversationStatus {
   NEGOTIATING
   SOLD
   LOST
+}
+
+enum ConversationIntent {
+  PQR
+  DEVOLUCION
+  NO_RECIBIDO
 }
 
 model Message {

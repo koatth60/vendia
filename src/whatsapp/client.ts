@@ -34,6 +34,27 @@ export async function sendTextMessage(credentials: WhatsappCredentials, to: stri
   return result.messages?.[0]?.id ?? "";
 }
 
+export async function sendInteractiveButtonsMessage(
+  credentials: WhatsappCredentials,
+  to: string,
+  bodyText: string,
+  buttons: { id: string; title: string }[]
+): Promise<string> {
+  const result = (await callGraphApi(credentials, {
+    messaging_product: "whatsapp",
+    to,
+    type: "interactive",
+    interactive: {
+      type: "button",
+      body: { text: bodyText },
+      action: {
+        buttons: buttons.map((b) => ({ type: "reply", reply: { id: b.id, title: b.title } })),
+      },
+    },
+  })) as { messages?: { id: string }[] };
+  return result.messages?.[0]?.id ?? "";
+}
+
 export async function sendImageMessage(
   credentials: WhatsappCredentials,
   to: string,

@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { Prisma, type Business } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import { env } from "../config/env";
 import { prisma } from "../db/client";
 import { sendTextMessage, downloadMedia, type WhatsappCredentials } from "../whatsapp/client";
@@ -17,15 +17,22 @@ import { analyzeReceiptImage } from "../ai/vision";
 
 export const whatsappRouter = Router();
 
-const CONFIRM_WORDS = ["si", "sí", "confirmado", "confirmo", "listo", "ok", "dale", "correcto"];
-const DENY_WORDS = ["no"];
+const CONFIRM_WORDS = ["si", "sí", "confirmado", "confirmo", "listo", "ok", "dale", "correcto", "confirm_yes"];
+const DENY_WORDS = ["no", "confirm_no"];
 
-async function handleOwnerReply(
-  business: Business,
-  credentials: WhatsappCredentials,
-  ownerPhone: string,
-  message: { context?: { id?: string }; text?: { body: string } }
-) {
+interface OwnerReplyMessage {
+  type: string;
+  context?: { id?: string };
+  text?: { body: string };
+  interactive?: { type: string; button_reply?: { id: string; title: string } };
+}
+
+async function handleOwnerReply(credentials: WhatsappCredentials, ownerPhone: string, message: OwnerReplyMessage) {
+  if (message.type !== "text" && message.type !== "interactive") {
+    console.log("Mensaje del dueno ignorado (tipo no soportado para confirmaciones):", message.type);
+    return;
+  }
+
   const quotedId = message.context?.id;
   if (!quotedId) {
     await sendTextMessage(
@@ -46,9 +53,12 @@ async function handleOwnerReply(
     return;
   }
 
-  const normalized = (message.text?.body ?? "").trim().toLowerCase();
-  const isConfirm = CONFIRM_WORDS.includes(normalized);
-  const isDeny = DENY_WORDS.includes(normalized);
+  const answer =
+    message.type === "interactive"
+      ? (message.interactive?.button_reply?.id ?? "")
+      : (message.text?.body ?? "").trim().toLowerCase();
+  const isConfirm = CONFIRM_WORDS.includes(answer);
+  const isDeny = DENY_WORDS.includes(answer);
 
   if (!isConfirm && !isDeny) {
     await sendTextMessage(credentials, ownerPhone, 'Respondeme "si" o "no" citando ese mismo mensaje, por favor.');
@@ -98,7 +108,7 @@ whatsappRouter.post("/webhook", async (req, res) => {
     const incomingPhoneNumberId: string | undefined = value?.metadata?.phone_number_id;
 
     if (!message || !incomingPhoneNumberId) return;
-    if (message.type !== "text" && message.type !== "image") return;
+    if (message.type !== "text" && message.type !== "image" && message.type !== "interactive") return;
 
     const business = await prisma.business.findUnique({
       where: { whatsappPhoneNumberId: incomingPhoneNumberId },
@@ -118,14 +128,12 @@ whatsappRouter.post("/webhook", async (req, res) => {
     const whatsappMessageId: string | undefined = message.id;
 
     const onlyDigits = (phone: string) => phone.replace(/\D/g, "");
-    if (
-      message.type === "text" &&
-      business.contactPhone &&
-      onlyDigits(from) === onlyDigits(business.contactPhone)
-    ) {
-      await handleOwnerReply(business, credentials, from, message);
+    if (business.contactPhone && onlyDigits(from) === onlyDigits(business.contactPhone)) {
+      await handleOwnerReply(credentials, from, message);
       return;
     }
+
+    if (message.type === "interactive") return;
 
     const customer = await getOrCreateCustomer(business.id, from);
     const conversation = await getOrCreateOpenConversation(customer.id);
@@ -159,9 +167,20 @@ whatsappRouter.post("/webhook", async (req, res) => {
       throw error;
     }
 
+    if (conversation.humanControl) {
+      console.log("Conversacion en control humano, el bot no responde:", conversation.id);
+      return;
+    }
+
     const reply = await generateReply(
       conversation.id,
-      { businessId: business.id, conversationId: conversation.id, credentials, recipientPhone: from },
+      {
+        businessId: business.id,
+        conversationId: conversation.id,
+        customerId: customer.id,
+        credentials,
+        recipientPhone: from,
+      },
       business.customInstructions
     );
     await sendTextMessage(credentials, from, reply);

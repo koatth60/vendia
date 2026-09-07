@@ -1,8 +1,19 @@
 import type OpenAI from "openai";
 import { getProductById, listActiveProducts, searchProducts } from "../catalog/products";
 import { listActivePaymentMethods } from "../catalog/paymentMethods";
-import { updateConversationStatus } from "../conversation/service";
-import { sendImageMessage, sendVideoMessage, sendTextMessage, type WhatsappCredentials } from "../whatsapp/client";
+import {
+  updateConversationStatus,
+  setConversationIntent,
+  setHumanControl,
+  saveCustomerName,
+} from "../conversation/service";
+import {
+  sendImageMessage,
+  sendVideoMessage,
+  sendTextMessage,
+  sendInteractiveButtonsMessage,
+  type WhatsappCredentials,
+} from "../whatsapp/client";
 import { prisma } from "../db/client";
 
 export const catalogTools: OpenAI.Chat.ChatCompletionTool[] = [
@@ -85,6 +96,51 @@ export const catalogTools: OpenAI.Chat.ChatCompletionTool[] = [
   {
     type: "function",
     function: {
+      name: "save_customer_name",
+      description:
+        "Guarda el nombre del cliente cuando lo menciona en la conversacion (por ejemplo al presentarse o al darlo para el envio). Usar UNA VEZ apenas lo sepas, no hace falta volver a preguntarlo despues.",
+      parameters: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "El nombre del cliente tal como lo dijo" },
+        },
+        required: ["name"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "update_conversation_status",
+      description:
+        "Actualiza el avance de esta conversacion en el embudo de ventas: INTERESTED (el cliente mostro interes concreto en un producto), QUOTED (ya le diste precio/cotizacion), NEGOTIATING (esta decidiendo, comparando o negociando detalles antes de confirmar). No la uses para SOLD ni LOST, para eso usa close_conversation.",
+      parameters: {
+        type: "object",
+        properties: {
+          status: { type: "string", enum: ["INTERESTED", "QUOTED", "NEGOTIATING"] },
+        },
+        required: ["status"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "flag_conversation_intent",
+      description:
+        "Usa esta herramienta UNA SOLA VEZ cuando detectes que el cliente no esta haciendo una consulta de venta normal, sino que trae: una PQR (peticion, queja o reclamo sobre el servicio/producto), una solicitud de DEVOLUCION, o un reclamo de que su pedido NO_RECIBIDO (no le llego). NO la uses para preguntas normales de catalogo, precio o para cerrar una venta. Esto escala la conversacion a un humano del negocio automaticamente.",
+      parameters: {
+        type: "object",
+        properties: {
+          intent: { type: "string", enum: ["PQR", "DEVOLUCION", "NO_RECIBIDO"] },
+        },
+        required: ["intent"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "close_conversation",
       description:
         "Usa outcome=SOLD cuando el cliente ya confirmo su pedido final (producto, cantidad, direccion y forma de pago) y mando comprobante de pago valido. Si el negocio tiene un numero de contacto configurado, esto NO cierra la venta de inmediato: le manda el resumen al dueno para que confirme el pago, y el resultado te va a decir si quedo pendiente - en ese caso NO le digas al cliente que su compra esta confirmada, decile que estas verificando el pago con el equipo. Usa outcome=LOST si el cliente dice explicitamente que no le interesa o no va a comprar. No la uses para nada mas.",
@@ -112,10 +168,13 @@ async function requestSaleConfirmation(context: ToolContext, summary: string): P
   const text = [
     `${greeting}, el cliente ${context.recipientPhone} pago/confirmo este pedido:`,
     summary || "El cliente confirmo la compra, sin mas detalles registrados.",
-    'Responde CITANDO este mensaje (reply) con "si" o "no" para confirmar si el pago fue recibido.',
+    "¿Te llego el pago?",
   ].join("\n\n");
 
-  const wamid = await sendTextMessage(context.credentials, business.contactPhone, text);
+  const wamid = await sendInteractiveButtonsMessage(context.credentials, business.contactPhone, text, [
+    { id: "confirm_yes", title: "✅ Si llego" },
+    { id: "confirm_no", title: "❌ No llego" },
+  ]);
   if (!wamid) return false;
 
   await prisma.conversation.update({
@@ -142,6 +201,7 @@ function formatProduct(product: Awaited<ReturnType<typeof getProductById>>) {
 export interface ToolContext {
   businessId: string;
   conversationId: string;
+  customerId: string;
   credentials: WhatsappCredentials;
   recipientPhone: string;
 }
@@ -155,6 +215,9 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
     }
     case "get_product_details": {
       const product = await getProductById(businessId, String(input.productId ?? ""));
+      if (product) {
+        await prisma.product.update({ where: { id: product.id }, data: { inquiryCount: { increment: 1 } } });
+      }
       return formatProduct(product);
     }
     case "list_all_products": {
@@ -170,6 +233,7 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
       }
 
       const product = matches[0];
+      await prisma.product.update({ where: { id: product.id }, data: { inquiryCount: { increment: 1 } } });
       if (product.media.length === 0) {
         return { sent: false, product: product.name, reason: "Este producto no tiene fotos ni videos cargados" };
       }
@@ -192,6 +256,40 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
       }
       return {
         methods: methods.map((m) => ({ type: m.type, label: m.label, details: m.details })),
+      };
+    }
+    case "save_customer_name": {
+      const name = String(input.name ?? "").trim();
+      if (!name) return { error: "Falta el nombre" };
+      await saveCustomerName(context.customerId, name);
+      return { saved: true, name };
+    }
+    case "update_conversation_status": {
+      const status = ["INTERESTED", "QUOTED", "NEGOTIATING"].includes(String(input.status)) ? (input.status as "INTERESTED" | "QUOTED" | "NEGOTIATING") : null;
+      if (!status) return { error: "Estado invalido" };
+      await updateConversationStatus(context.conversationId, status);
+      return { updated: true, status };
+    }
+    case "flag_conversation_intent": {
+      const intent = input.intent === "DEVOLUCION" || input.intent === "NO_RECIBIDO" ? input.intent : "PQR";
+      await setConversationIntent(context.conversationId, intent);
+      await setHumanControl(businessId, context.conversationId, true);
+
+      const business = await prisma.business.findUnique({ where: { id: businessId } });
+      if (business?.contactPhone) {
+        const label = { PQR: "PQR", DEVOLUCION: "una devolucion", NO_RECIBIDO: "un pedido no recibido" }[intent];
+        const greeting = business.contactName ? `Hola ${business.contactName}` : "Hola";
+        await sendTextMessage(
+          context.credentials,
+          business.contactPhone,
+          `${greeting}, el cliente ${context.recipientPhone} reporto ${label}. Tome control de la conversacion en el panel para atenderlo directamente, el bot dejo de responderle.`
+        );
+      }
+
+      return {
+        flagged: true,
+        intent,
+        note: "La conversacion quedo escalada a un humano. No sigas intentando resolverlo vos mismo: decile al cliente que un asesor lo va a atender directamente.",
       };
     }
     case "close_conversation": {
