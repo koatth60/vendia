@@ -313,6 +313,11 @@
         <label>Instrucciones para tu bot (opcional)</label>
         <textarea id="business-instructions" placeholder="Ej: Siempre ofrecé envío gratis en compras mayores a $100. Si preguntan por descuentos, decí que hay 10% de descuento pagando por transferencia. Nunca prometas fechas de entrega exactas."></textarea>
         <div class="hint">Reglas o forma de hablar que quieres que tu bot siga siempre. No pueden hacer que invente precios, stock o formas de pago falsas.</div>
+        <label>Tu nombre</label>
+        <input id="business-contact-name" placeholder="Ej: Carlos" />
+        <label>Tu número de WhatsApp (para confirmar pagos)</label>
+        <input id="business-contact-phone" placeholder="Ej: +573001234567" />
+        <div class="hint">Un número distinto al del bot. Cuando un cliente mande el comprobante de pago, el bot te va a escribir a este número pidiendo que confirmes si el pago llegó antes de cerrarle la venta al cliente.</div>
         <div class="actions-row">
           <button class="btn-primary" onclick="saveBusiness()">Guardar cambios</button>
         </div>
@@ -476,6 +481,8 @@ async function loadBusiness() {
     document.getElementById('business-name').value = business.name || '';
     document.getElementById('business-description').value = business.description || '';
     document.getElementById('business-instructions').value = business.customInstructions || '';
+    document.getElementById('business-contact-name').value = business.contactName || '';
+    document.getElementById('business-contact-phone').value = business.contactPhone || '';
   } catch (err) {
     setStatus(`No se pudo cargar el negocio: ${err.message}`, true);
   }
@@ -490,12 +497,14 @@ async function saveBusiness() {
   const name = document.getElementById('business-name').value.trim();
   const description = document.getElementById('business-description').value.trim();
   const customInstructions = document.getElementById('business-instructions').value.trim();
+  const contactName = document.getElementById('business-contact-name').value.trim();
+  const contactPhone = document.getElementById('business-contact-phone').value.trim();
   if (!name) { setStatus('El nombre es obligatorio', true); return; }
   try {
     await apiFetch('/admin/api/business', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, description, customInstructions }),
+      body: JSON.stringify({ name, description, customInstructions, contactName, contactPhone }),
     });
     setStatus('Negocio guardado ✓');
   } catch (err) {

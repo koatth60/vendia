@@ -60,6 +60,20 @@ export async function updateConversationStatus(
   });
 }
 
+export async function findConversationByPendingConfirmation(pendingConfirmationMessageId: string) {
+  return prisma.conversation.findUnique({
+    where: { pendingConfirmationMessageId },
+    include: { customer: true },
+  });
+}
+
+export async function clearPendingConfirmation(conversationId: string) {
+  await prisma.conversation.update({
+    where: { id: conversationId },
+    data: { pendingConfirmationMessageId: null, pendingOrderSummary: null },
+  });
+}
+
 export async function wasWhatsappMessageProcessed(whatsappMessageId: string): Promise<boolean> {
   const existing = await prisma.message.findUnique({ where: { whatsappMessageId } });
   return existing !== null;

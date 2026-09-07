@@ -87,7 +87,7 @@ export const catalogTools: OpenAI.Chat.ChatCompletionTool[] = [
     function: {
       name: "close_conversation",
       description:
-        "Marca esta conversacion como cerrada. Usa outcome=SOLD justo despues de confirmarle al cliente su pedido final (ya con producto, cantidad, direccion y forma de pago). Usa outcome=LOST si el cliente dice explicitamente que no le interesa o no va a comprar. No la uses para nada mas.",
+        "Usa outcome=SOLD cuando el cliente ya confirmo su pedido final (producto, cantidad, direccion y forma de pago) y mando comprobante de pago valido. Si el negocio tiene un numero de contacto configurado, esto NO cierra la venta de inmediato: le manda el resumen al dueno para que confirme el pago, y el resultado te va a decir si quedo pendiente - en ese caso NO le digas al cliente que su compra esta confirmada, decile que estas verificando el pago con el equipo. Usa outcome=LOST si el cliente dice explicitamente que no le interesa o no va a comprar. No la uses para nada mas.",
       parameters: {
         type: "object",
         properties: {
@@ -104,21 +104,25 @@ export const catalogTools: OpenAI.Chat.ChatCompletionTool[] = [
   },
 ];
 
-async function notifyBusinessOfSale(context: ToolContext, summary: string) {
-  try {
-    const business = await prisma.business.findUnique({ where: { id: context.businessId } });
-    if (!business?.contactPhone) return;
+async function requestSaleConfirmation(context: ToolContext, summary: string): Promise<boolean> {
+  const business = await prisma.business.findUnique({ where: { id: context.businessId } });
+  if (!business?.contactPhone) return false;
 
-    const text = [
-      "🟢 *Nueva venta cerrada por el bot*",
-      `Cliente (WhatsApp): ${context.recipientPhone}`,
-      summary || "El cliente confirmo la compra, sin mas detalles registrados.",
-    ].join("\n\n");
+  const greeting = business.contactName ? `Hola ${business.contactName}` : "Hola";
+  const text = [
+    `${greeting}, el cliente ${context.recipientPhone} pago/confirmo este pedido:`,
+    summary || "El cliente confirmo la compra, sin mas detalles registrados.",
+    'Responde CITANDO este mensaje (reply) con "si" o "no" para confirmar si el pago fue recibido.',
+  ].join("\n\n");
 
-    await sendTextMessage(context.credentials, business.contactPhone, text);
-  } catch (error) {
-    console.error("No se pudo notificar la venta al numero de contacto del negocio:", error);
-  }
+  const wamid = await sendTextMessage(context.credentials, business.contactPhone, text);
+  if (!wamid) return false;
+
+  await prisma.conversation.update({
+    where: { id: context.conversationId },
+    data: { pendingConfirmationMessageId: wamid, pendingOrderSummary: summary || null },
+  });
+  return true;
 }
 
 function formatProduct(product: Awaited<ReturnType<typeof getProductById>>) {
@@ -192,13 +196,20 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
     }
     case "close_conversation": {
       const outcome = input.outcome === "LOST" ? "LOST" : "SOLD";
-      await updateConversationStatus(context.conversationId, outcome);
 
       if (outcome === "SOLD") {
         const summary = String(input.summary ?? "").trim();
-        await notifyBusinessOfSale(context, summary);
+        const pending = await requestSaleConfirmation(context, summary);
+        if (pending) {
+          return {
+            closed: false,
+            pending: true,
+            note: "El dueno del negocio tiene que confirmar el pago primero. No le digas al cliente que su compra quedo confirmada todavia - decile que estas verificando el pago con el equipo.",
+          };
+        }
       }
 
+      await updateConversationStatus(context.conversationId, outcome);
       return { closed: true, outcome };
     }
     default:

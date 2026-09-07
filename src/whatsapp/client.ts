@@ -24,13 +24,14 @@ async function callGraphApi(credentials: WhatsappCredentials, body: unknown) {
   return response.json();
 }
 
-export async function sendTextMessage(credentials: WhatsappCredentials, to: string, text: string) {
-  return callGraphApi(credentials, {
+export async function sendTextMessage(credentials: WhatsappCredentials, to: string, text: string): Promise<string> {
+  const result = (await callGraphApi(credentials, {
     messaging_product: "whatsapp",
     to,
     type: "text",
     text: { body: text },
-  });
+  })) as { messages?: { id: string }[] };
+  return result.messages?.[0]?.id ?? "";
 }
 
 export async function sendImageMessage(

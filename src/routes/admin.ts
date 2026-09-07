@@ -40,10 +40,10 @@ adminRouter.get("/api/business", async (req, res) => {
 });
 
 adminRouter.put("/api/business", async (req, res) => {
-  const { name, description, customInstructions } = req.body;
+  const { name, description, customInstructions, contactPhone, contactName } = req.body;
   const business = await prisma.business.update({
     where: { id: businessIdOf(req) },
-    data: { name, description, customInstructions },
+    data: { name, description, customInstructions, contactPhone, contactName },
   });
   const { passwordHash: _hash, whatsappAccessToken: _token, ...safe } = business;
   res.json(safe);

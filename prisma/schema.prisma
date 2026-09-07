@@ -22,6 +22,7 @@ model Business {
   planTier              PlanTier        @default(BASICO)
   active                Boolean         @default(false)
   contactPhone          String?
+  contactName           String?
   whatsappPhoneNumberId String?         @unique
   whatsappAccessToken   String?
   products              Product[]
@@ -103,13 +104,15 @@ model Customer {
 }
 
 model Conversation {
-  id         String             @id @default(cuid())
-  customer   Customer           @relation(fields: [customerId], references: [id])
-  customerId String
-  status     ConversationStatus @default(NEW)
-  messages   Message[]
-  createdAt  DateTime           @default(now())
-  updatedAt  DateTime           @updatedAt
+  id                          String             @id @default(cuid())
+  customer                    Customer           @relation(fields: [customerId], references: [id])
+  customerId                  String
+  status                      ConversationStatus @default(NEW)
+  pendingConfirmationMessageId String?           @unique
+  pendingOrderSummary         String?
+  messages                    Message[]
+  createdAt                   DateTime           @default(now())
+  updatedAt                   DateTime           @updatedAt
 }
 
 enum ConversationStatus {

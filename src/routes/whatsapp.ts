@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { Prisma } from "@prisma/client";
+import { Prisma, type Business } from "@prisma/client";
 import { env } from "../config/env";
 import { prisma } from "../db/client";
 import { sendTextMessage, downloadMedia, type WhatsappCredentials } from "../whatsapp/client";
@@ -8,11 +8,71 @@ import {
   getOrCreateCustomer,
   getOrCreateOpenConversation,
   recordMessage,
+  findConversationByPendingConfirmation,
+  clearPendingConfirmation,
+  updateConversationStatus,
 } from "../conversation/service";
 import { generateReply } from "../ai/agent";
 import { analyzeReceiptImage } from "../ai/vision";
 
 export const whatsappRouter = Router();
+
+const CONFIRM_WORDS = ["si", "sí", "confirmado", "confirmo", "listo", "ok", "dale", "correcto"];
+const DENY_WORDS = ["no"];
+
+async function handleOwnerReply(
+  business: Business,
+  credentials: WhatsappCredentials,
+  ownerPhone: string,
+  message: { context?: { id?: string }; text?: { body: string } }
+) {
+  const quotedId = message.context?.id;
+  if (!quotedId) {
+    await sendTextMessage(
+      credentials,
+      ownerPhone,
+      'No identifique a que pedido te refieres. Por favor responde citando (mantén presionado y "Responder") el mensaje del pedido especifico.'
+    );
+    return;
+  }
+
+  const conversation = await findConversationByPendingConfirmation(quotedId);
+  if (!conversation) {
+    await sendTextMessage(
+      credentials,
+      ownerPhone,
+      "Ese pedido ya no esta esperando confirmacion (puede que ya se haya resuelto o haya expirado)."
+    );
+    return;
+  }
+
+  const normalized = (message.text?.body ?? "").trim().toLowerCase();
+  const isConfirm = CONFIRM_WORDS.includes(normalized);
+  const isDeny = DENY_WORDS.includes(normalized);
+
+  if (!isConfirm && !isDeny) {
+    await sendTextMessage(credentials, ownerPhone, 'Respondeme "si" o "no" citando ese mismo mensaje, por favor.');
+    return;
+  }
+
+  const customerPhone = conversation.customer.phoneNumber;
+
+  if (isConfirm) {
+    await updateConversationStatus(conversation.id, "SOLD");
+    await clearPendingConfirmation(conversation.id);
+    const customerText = "¡Listo! Tu pago quedo confirmado y tu pedido esta cerrado. Gracias por tu compra 🎉";
+    await sendTextMessage(credentials, customerPhone, customerText);
+    await recordMessage(conversation.id, "ASSISTANT", customerText);
+    await sendTextMessage(credentials, ownerPhone, "Listo, le avise al cliente ✅");
+  } else {
+    await clearPendingConfirmation(conversation.id);
+    const customerText =
+      "No logramos confirmar tu pago todavia. ¿Puedes reenviar una foto mas clara del comprobante o confirmar el monto por texto?";
+    await sendTextMessage(credentials, customerPhone, customerText);
+    await recordMessage(conversation.id, "ASSISTANT", customerText);
+    await sendTextMessage(credentials, ownerPhone, "Listo, le pedi al cliente que reenvie el comprobante.");
+  }
+}
 
 whatsappRouter.get("/webhook", (req, res) => {
   const mode = req.query["hub.mode"];
@@ -56,6 +116,16 @@ whatsappRouter.post("/webhook", async (req, res) => {
 
     const from: string = message.from;
     const whatsappMessageId: string | undefined = message.id;
+
+    const onlyDigits = (phone: string) => phone.replace(/\D/g, "");
+    if (
+      message.type === "text" &&
+      business.contactPhone &&
+      onlyDigits(from) === onlyDigits(business.contactPhone)
+    ) {
+      await handleOwnerReply(business, credentials, from, message);
+      return;
+    }
 
     const customer = await getOrCreateCustomer(business.id, from);
     const conversation = await getOrCreateOpenConversation(customer.id);

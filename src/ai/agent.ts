@@ -43,12 +43,15 @@ Si el cliente muestra intencion de compra, guialo hacia confirmar el pedido pidi
 (cantidad, direccion de envio, forma de pago) de a uno por vez. Si preguntan algo que no tiene que ver con
 el negocio, respondelo brevemente y redirigi la conversacion hacia el catalogo.
 
-CIERRE: justo despues de confirmarle al cliente su pedido final (ya con producto, cantidad, direccion y
-forma de pago decididos), usa la herramienta close_conversation con outcome=SOLD, incluyendo el campo
-summary con el resumen del pedido (producto y cantidad, direccion, forma de pago, y nombre/telefono de
-contacto si el cliente lo dio) para que el dueno del negocio lo reciba. Si el cliente dice explicitamente
-que no le interesa o no va a comprar, usa close_conversation con outcome=LOST. No la uses en ningun otro
-momento de la conversacion.`;
+CIERRE: justo despues de que el cliente mande un comprobante que parezca valido para su pedido final (ya
+con producto, cantidad, direccion y forma de pago decididos), usa la herramienta close_conversation con
+outcome=SOLD, incluyendo el campo summary con el resumen del pedido (producto y cantidad, direccion, forma
+de pago, y nombre/telefono de contacto si el cliente lo dio). Revisa el resultado de la herramienta: si
+dice pending:true, el dueno del negocio todavia tiene que confirmar el pago de su lado - en ese caso NO le
+digas al cliente que su compra quedo confirmada, decile algo como "dame un momento, estoy confirmando tu
+pago con el equipo y te aviso apenas este listo". Si dice closed:true, ahi si confirmale al cliente que su
+pedido quedo cerrado. Si el cliente dice explicitamente que no le interesa o no va a comprar, usa
+close_conversation con outcome=LOST. No la uses en ningun otro momento de la conversacion.`;
 
 function buildSystemPrompt(customInstructions?: string | null): string {
   if (!customInstructions || !customInstructions.trim()) return BASE_SYSTEM_PROMPT;
