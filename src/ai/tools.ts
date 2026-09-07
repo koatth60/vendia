@@ -1,6 +1,7 @@
 import type OpenAI from "openai";
 import { getProductById, listActiveProducts, searchProducts } from "../catalog/products";
 import { listActivePaymentMethods } from "../catalog/paymentMethods";
+import { searchFaq } from "../catalog/faq";
 import {
   updateConversationStatus,
   setConversationIntent,
@@ -78,6 +79,21 @@ export const catalogTools: OpenAI.Chat.ChatCompletionTool[] = [
           },
         },
         required: ["productName"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "search_faq",
+      description:
+        "Busca en las preguntas frecuentes configuradas por el negocio (politicas de envio, garantia, horarios, cambios, etc). Usar cuando el cliente pregunte algo que no es sobre un producto especifico ni sobre formas de pago, antes de responder de memoria o decir que no sabes.",
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "La pregunta o palabra clave del cliente" },
+        },
+        required: ["query"],
       },
     },
   },
@@ -248,6 +264,13 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
         sentCount++;
       }
       return { sent: true, product: product.name, count: sentCount };
+    }
+    case "search_faq": {
+      const results = await searchFaq(businessId, String(input.query ?? ""));
+      if (results.length === 0) {
+        return { results: [], note: "No hay ninguna pregunta frecuente configurada que coincida. No inventes la respuesta." };
+      }
+      return { results: results.map((r) => ({ question: r.question, answer: r.answer })) };
     }
     case "get_payment_methods": {
       const methods = await listActivePaymentMethods(businessId);

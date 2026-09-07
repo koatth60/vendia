@@ -20,6 +20,7 @@ import {
 import { sendTextMessage, type WhatsappCredentials } from "../whatsapp/client";
 import { getAiUsageSummary } from "../ai/usage";
 import { getAnalyticsSummary } from "../analytics/service";
+import { listFaqEntries, createFaqEntry, updateFaqEntry, deleteFaqEntry } from "../catalog/faq";
 import { uploadMedia } from "../media/s3";
 import {
   listPaymentMethods,
@@ -135,6 +136,32 @@ adminRouter.put("/api/payment-methods/:id", async (req, res) => {
 
 adminRouter.delete("/api/payment-methods/:id", async (req, res) => {
   await deletePaymentMethod(businessIdOf(req), String(req.params.id));
+  res.status(204).send();
+});
+
+adminRouter.get("/api/faq", async (req, res) => {
+  const entries = await listFaqEntries(businessIdOf(req));
+  res.json(entries);
+});
+
+adminRouter.post("/api/faq", async (req, res) => {
+  const { question, answer } = req.body;
+  if (!question || !answer) {
+    res.status(400).json({ error: "Faltan la pregunta o la respuesta" });
+    return;
+  }
+  const entry = await createFaqEntry(businessIdOf(req), { question, answer });
+  res.status(201).json(entry);
+});
+
+adminRouter.put("/api/faq/:id", async (req, res) => {
+  const { question, answer, active } = req.body;
+  const entry = await updateFaqEntry(businessIdOf(req), String(req.params.id), { question, answer, active });
+  res.json(entry);
+});
+
+adminRouter.delete("/api/faq/:id", async (req, res) => {
+  await deleteFaqEntry(businessIdOf(req), String(req.params.id));
   res.status(204).send();
 });
 

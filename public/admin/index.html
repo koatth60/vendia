@@ -287,6 +287,9 @@
     <button class="tab-btn" data-tab="payments" onclick="switchTab('payments')">
       <span class="tab-icon">💳</span> Pagos
     </button>
+    <button class="tab-btn" data-tab="faq" onclick="switchTab('faq')">
+      <span class="tab-icon">❓</span> FAQ
+    </button>
     <button class="tab-btn" data-tab="conversations" onclick="switchTab('conversations')">
       <span class="tab-icon">💬</span> Conversaciones <span class="tab-count" id="tab-count-conversations">0</span>
     </button>
@@ -404,6 +407,26 @@
           <button class="btn-primary" onclick="addPaymentMethod()">+ Agregar método de pago</button>
         </div>
         <div id="payment-methods-list" style="margin-top:16px; display:flex; flex-direction:column; gap:8px;"></div>
+      </div>
+    </div>
+
+    <div class="tab-panel" data-tab-panel="faq">
+      <div class="panel-header">
+        <div>
+          <div class="panel-title">Preguntas frecuentes</div>
+          <div class="panel-subtitle">Politicas de envio, garantia, cambios, horarios: lo que el bot debe saber responder sin inventar.</div>
+        </div>
+      </div>
+      <div class="card">
+        <p style="font-size:13px; color:var(--muted); margin-top:0;">El bot va a buscar acá cuando el cliente pregunte algo que no sea sobre un producto puntual ni sobre formas de pago.</p>
+        <label>Pregunta</label>
+        <input id="faq-question" placeholder="Ej: ¿Hacen envíos a toda Colombia?" />
+        <label>Respuesta</label>
+        <textarea id="faq-answer" placeholder="Ej: Sí, hacemos envíos a todo el país con Servientrega, 2-4 días hábiles."></textarea>
+        <div class="actions-row">
+          <button class="btn-primary" onclick="addFaqEntry()">+ Agregar pregunta</button>
+        </div>
+        <div id="faq-list" style="margin-top:16px; display:flex; flex-direction:column; gap:8px;"></div>
       </div>
     </div>
 
@@ -1045,6 +1068,83 @@ async function deletePaymentMethod(id) {
   }
 }
 
+async function loadFaqEntries() {
+  const container = document.getElementById('faq-list');
+  try {
+    const res = await apiFetch('/admin/api/faq');
+    const entries = await res.json();
+
+    if (!Array.isArray(entries) || entries.length === 0) {
+      container.innerHTML = '<div style="font-size:13px; color:var(--muted);">Todavía no agregaste ninguna pregunta frecuente.</div>';
+      return;
+    }
+
+    container.innerHTML = entries.map((f) => `
+      <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:10px; padding:10px 12px; border:1px solid var(--border); border-radius:var(--radius-md); ${f.active ? '' : 'opacity:.5;'}">
+        <div>
+          <strong style="font-size:13.5px;">${escapeHtml(f.question)}</strong>
+          <div style="font-size:12px; color:var(--muted); margin-top:2px; max-width:480px; overflow-wrap:anywhere;">${escapeHtml(f.answer)}</div>
+        </div>
+        <div style="display:flex; gap:6px; flex-shrink:0;">
+          <button class="btn-secondary" onclick="toggleFaqEntry('${f.id}', ${!f.active})">${f.active ? 'Desactivar' : 'Activar'}</button>
+          <button class="btn-danger" onclick="deleteFaqEntry('${f.id}')">Eliminar</button>
+        </div>
+      </div>
+    `).join('');
+  } catch (err) {
+    container.innerHTML = `<div style="font-size:13px; color:var(--danger);">No se pudieron cargar: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+async function addFaqEntry() {
+  const question = document.getElementById('faq-question').value.trim();
+  const answer = document.getElementById('faq-answer').value.trim();
+
+  if (!question || !answer) {
+    setStatus('Completá la pregunta y la respuesta', true);
+    return;
+  }
+
+  try {
+    await apiFetch('/admin/api/faq', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question, answer }),
+    });
+  } catch (err) {
+    setStatus(`No se pudo agregar: ${err.message}`, true);
+    return;
+  }
+
+  document.getElementById('faq-question').value = '';
+  document.getElementById('faq-answer').value = '';
+  setStatus('Pregunta frecuente agregada ✓');
+  loadFaqEntries();
+}
+
+async function toggleFaqEntry(id, active) {
+  try {
+    await apiFetch(`/admin/api/faq/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ active }),
+    });
+    loadFaqEntries();
+  } catch (err) {
+    setStatus(`No se pudo actualizar: ${err.message}`, true);
+  }
+}
+
+async function deleteFaqEntry(id) {
+  if (!confirm('¿Eliminar esta pregunta frecuente?')) return;
+  try {
+    await apiFetch(`/admin/api/faq/${id}`, { method: 'DELETE' });
+    loadFaqEntries();
+  } catch (err) {
+    setStatus(`No se pudo eliminar: ${err.message}`, true);
+  }
+}
+
 async function loadAnalytics() {
   const container = document.getElementById('analytics-container');
   try {
@@ -1179,6 +1279,7 @@ loadBusiness();
 loadProducts();
 loadPaymentMethods();
 loadConversations();
+loadFaqEntries();
 loadAnalytics();
 loadAiUsage();
 </script>

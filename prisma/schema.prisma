@@ -29,6 +29,7 @@ model Business {
   customers             Customer[]
   paymentMethods        PaymentMethod[]
   aiUsageLogs           AiUsageLog[]
+  faqEntries            FaqEntry[]
   createdAt             DateTime        @default(now())
   updatedAt             DateTime        @updatedAt
 }
@@ -48,6 +49,16 @@ model PaymentMethod {
   details    String
   active     Boolean           @default(true)
   createdAt  DateTime          @default(now())
+}
+
+model FaqEntry {
+  id         String   @id @default(cuid())
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  businessId String
+  question   String
+  answer     String
+  active     Boolean  @default(true)
+  createdAt  DateTime @default(now())
 }
 
 model ActivationKey {
