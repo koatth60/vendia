@@ -1,11 +1,20 @@
 import { Router } from "express";
+import rateLimit from "express-rate-limit";
 import { prisma } from "../db/client";
-import { hashPassword, verifyPassword } from "../auth/service";
+import { hashPassword, verifyPassword, requestPasswordReset, resetPasswordWithCode } from "../auth/service";
 import { env } from "../config/env";
 
 export const authRouter = Router();
 
-authRouter.post("/signup", async (req, res) => {
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Demasiados intentos. Probá de nuevo en unos minutos." },
+});
+
+authRouter.post("/signup", authLimiter, async (req, res) => {
   const { businessName, email, password, contactPhone, activationKey } = req.body;
 
   if (!businessName || !email || !password || !activationKey) {
@@ -64,7 +73,7 @@ authRouter.post("/request-key", async (req, res) => {
   res.status(201).json({ ok: true });
 });
 
-authRouter.post("/login", async (req, res) => {
+authRouter.post("/login", authLimiter, async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) {
     res.status(400).json({ error: "Faltan email o contraseña" });
@@ -109,6 +118,39 @@ authRouter.post("/login", async (req, res) => {
   req.session.role = "EMPLOYEE";
   req.session.email = member.email;
   res.json({ id: member.business.id, name: member.business.name, email: member.email, planTier: member.business.planTier });
+});
+
+authRouter.post("/forgot-password", authLimiter, async (req, res) => {
+  const { email } = req.body;
+  if (!email) {
+    res.status(400).json({ error: "Falta el email" });
+    return;
+  }
+
+  await requestPasswordReset(String(email));
+
+  // Misma respuesta exista o no la cuenta, para no revelar que emails estan registrados
+  res.json({ ok: true });
+});
+
+authRouter.post("/reset-password", authLimiter, async (req, res) => {
+  const { email, code, newPassword } = req.body;
+  if (!email || !code || !newPassword) {
+    res.status(400).json({ error: "Faltan campos obligatorios" });
+    return;
+  }
+  if (String(newPassword).length < 8) {
+    res.status(400).json({ error: "La contraseña debe tener al menos 8 caracteres" });
+    return;
+  }
+
+  const ok = await resetPasswordWithCode(String(email), String(code), String(newPassword));
+  if (!ok) {
+    res.status(400).json({ error: "Código inválido o expirado" });
+    return;
+  }
+
+  res.json({ ok: true });
 });
 
 authRouter.post("/logout", (req, res) => {

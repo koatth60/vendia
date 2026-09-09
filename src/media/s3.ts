@@ -24,7 +24,7 @@ function getS3Client(): S3Client {
 export async function uploadMedia(
   buffer: Buffer,
   contentType: string,
-  folder: "images" | "videos"
+  folder: "images" | "videos" | "audio" | "receipts" | "backups"
 ): Promise<{ key: string; url: string }> {
   const extension = contentType.split("/")[1] ?? "bin";
   const key = `${folder}/${randomUUID()}.${extension}`;
@@ -40,6 +40,19 @@ export async function uploadMedia(
 
   const url = await getPresignedMediaUrl(key);
   return { key, url };
+}
+
+// Backups are named by timestamp (not a random key) so they sort and are identifiable in the S3
+// console; unlike other media they're never read back through a presigned URL.
+export async function uploadBackup(buffer: Buffer, filename: string): Promise<void> {
+  await getS3Client().send(
+    new PutObjectCommand({
+      Bucket: env.aws.bucket,
+      Key: `backups/${filename}`,
+      Body: buffer,
+      ContentType: "application/octet-stream",
+    })
+  );
 }
 
 export async function getPresignedMediaUrl(key: string): Promise<string> {

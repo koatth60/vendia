@@ -1,0 +1,292 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Work+Sans:wght@400;500;600;700&display=swap">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+    :root{
+      --green:#1fa855; --green-dark:#16803f; --green-light:#e6f7ec;
+      --ink:#12211a; --ink-soft:#3d5147; --muted:#5c6e65; --border:#dde6e0; --bg:#fbfdfb; --card:#ffffff;
+      --gold:#9c6a1f; --gold-soft:#f6ecd9;
+      --dark:#0c1f16; --dark-card:#132a1f; --dark-border:#20402f; --dark-muted:#9db3a7;
+      --display: "Space Grotesk", system-ui, sans-serif;
+      --body: "Work Sans", system-ui, sans-serif;
+    }
+    *{box-sizing:border-box;}
+    body{margin:0;font-family:var(--body);background:var(--bg);color:var(--ink);}
+    a{color:var(--green-dark);text-decoration:none;}
+    a:hover{color:var(--green);}
+    h1,h2,h3{font-family:var(--display);letter-spacing:-0.02em;margin:0;}
+    ::selection{background:var(--green-light);color:var(--green-dark);}
+  </style>
+</helmet>
+
+<div style="width:100%;overflow-x:hidden;background:var(--bg);">
+
+  <!-- ============ HEADER ============ -->
+  <header style="display:flex;align-items:center;justify-content:space-between;padding:20px 48px;position:sticky;top:0;z-index:20;background:rgba(251,253,251,0.82);backdrop-filter:blur(10px);border-bottom:1px solid var(--border);">
+    <div style="display:flex;align-items:center;gap:11px;">
+      <div style="width:34px;height:34px;border-radius:10px;background:linear-gradient(155deg,var(--green) 0%,var(--green-dark) 100%);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+        <svg width="19" height="19" viewBox="0 0 24 24" fill="none">
+          <path d="M12 3.2C6.9 3.2 2.8 6.9 2.8 11.4c0 2.3 1.1 4.4 2.9 5.9L5 21.2l5-1.7c.7.13 1.4.2 2 .2 5.1 0 9.2-3.7 9.2-8.3S17.1 3.2 12 3.2Z" stroke="white" stroke-width="1.4" fill="none"/>
+          <circle cx="8.6" cy="11.4" r="1.15" fill="white"/><circle cx="12" cy="11.4" r="1.15" fill="white"/><circle cx="15.4" cy="11.4" r="1.15" fill="white"/>
+        </svg>
+      </div>
+      <div style="font-family:var(--display);font-weight:700;font-size:19px;letter-spacing:-0.01em;color:var(--ink);">vendia</div>
+    </div>
+    <nav style="display:flex;align-items:center;gap:30px;">
+      <a href="#como-funciona" style="font-size:14px;font-weight:500;color:var(--ink-soft);">Cómo funciona</a>
+      <a href="#precios" style="font-size:14px;font-weight:500;color:var(--ink-soft);">Precios</a>
+      <a href="#faq" style="font-size:14px;font-weight:500;color:var(--ink-soft);">Preguntas</a>
+      <a href="#" style="font-size:14px;font-weight:500;color:var(--ink-soft);">Iniciar sesión</a>
+      <a href="#" style="font-size:14px;font-weight:700;color:white;background:var(--ink);padding:10px 20px;border-radius:999px;">Empezar</a>
+    </nav>
+  </header>
+
+  <!-- ============ HERO ============ -->
+  <section style="position:relative;padding:96px 48px 60px;max-width:1440px;margin:0 auto;overflow:hidden;">
+    <div style="position:absolute;top:-220px;left:-160px;width:640px;height:640px;border-radius:50%;background:radial-gradient(circle,rgba(31,168,85,0.22) 0%,rgba(31,168,85,0) 70%);filter:blur(10px);pointer-events:none;"></div>
+    <div style="position:absolute;top:-100px;right:-220px;width:560px;height:560px;border-radius:50%;background:radial-gradient(circle,rgba(156,106,31,0.16) 0%,rgba(156,106,31,0) 70%);filter:blur(10px);pointer-events:none;"></div>
+
+    <div style="position:relative;display:grid;grid-template-columns:1fr 1fr;gap:64px;align-items:center;">
+      <div>
+        <div style="display:inline-flex;align-items:center;gap:8px;font-size:12.5px;font-weight:600;text-transform:uppercase;letter-spacing:0.07em;color:var(--green-dark);background:var(--green-light);padding:7px 14px;border-radius:999px;margin-bottom:24px;">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 21c-.6 0-1-.4-1-1v-3.3C6.6 16 3 12.6 3 8.5 3 4.9 6.6 2 12 2s9 2.9 9 6.5c0 4.1-3.6 7.5-8 7.5v3c0 .6-.4 1-1 1Z"/></svg>
+          Hecho para negocios en Colombia
+        </div>
+        <h1 style="font-size:56px;line-height:1.04;margin-bottom:22px;">
+          Tu vendedor de<br>WhatsApp que<br><span style="color:var(--green-dark);">nunca duerme</span>
+        </h1>
+        <p style="font-size:18px;line-height:1.6;color:var(--ink-soft);max-width:460px;margin-bottom:32px;">
+          Vendia responde a tus clientes por WhatsApp con inteligencia artificial: precios, fotos y stock real de tu catálogo, las 24 horas, sin que tengas que estar pendiente del chat.
+        </p>
+        <div style="display:flex;align-items:center;gap:18px;">
+          <a href="#" style="display:inline-flex;align-items:center;gap:8px;background:var(--ink);color:white;font-weight:700;font-size:15px;padding:15px 26px;border-radius:999px;">
+            Crear mi cuenta
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+          </a>
+          <span style="font-size:13px;color:var(--muted);">Sin tarjeta de crédito para empezar a probar</span>
+        </div>
+      </div>
+
+      <div style="position:relative;height:520px;">
+        <div style="position:absolute;top:12px;left:24px;width:340px;background:var(--card);border:1px solid var(--border);border-radius:20px;box-shadow:0 24px 60px -20px rgba(18,33,26,0.25);overflow:hidden;">
+          <div style="background:var(--dark);padding:14px 18px;display:flex;align-items:center;gap:10px;">
+            <div style="width:30px;height:30px;border-radius:50%;background:var(--green);display:flex;align-items:center;justify-content:center;font-family:var(--display);font-weight:700;color:white;font-size:12px;">MI</div>
+            <div>
+              <div style="color:white;font-size:13px;font-weight:600;">Mag.imp</div>
+              <div style="color:var(--dark-muted);font-size:10.5px;">en línea</div>
+            </div>
+          </div>
+          <div style="padding:16px;display:flex;flex-direction:column;gap:10px;background:#eef4ef;">
+            <div style="align-self:flex-start;background:white;border-radius:14px 14px 14px 3px;padding:9px 13px;font-size:12.5px;max-width:80%;box-shadow:0 1px 2px rgba(0,0,0,0.05);">¿Tienen el Smartwatch Serie 11 Mini en negro?</div>
+            <div style="align-self:flex-end;background:var(--green-light);border-radius:14px 14px 3px 14px;padding:9px 13px;font-size:12.5px;max-width:85%;box-shadow:0 1px 2px rgba(0,0,0,0.05);">
+              ¡Sí! Tenemos en negro mate 🖤 $145 USD, correa metálica incluida. Te mando foto 👇
+            </div>
+            <div style="align-self:flex-end;width:64%;border-radius:12px;overflow:hidden;background:linear-gradient(140deg,#2b2f33,#111315);height:74px;display:flex;align-items:center;justify-content:center;">
+              <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#9db3a7" stroke-width="1.6"><rect x="7" y="3" width="10" height="18" rx="4"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+            </div>
+            <div style="align-self:flex-end;background:var(--green-light);border-radius:14px 14px 3px 14px;padding:9px 13px;font-size:12.5px;max-width:70%;box-shadow:0 1px 2px rgba(0,0,0,0.05);">
+              ¿Cómo quieres pagar? Nequi, transferencia o contraentrega
+            </div>
+          </div>
+        </div>
+
+        <div style="position:absolute;bottom:26px;right:8px;background:var(--dark);color:white;border-radius:16px;padding:16px 18px;width:220px;box-shadow:0 20px 50px -16px rgba(12,31,22,0.5);">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+            <div style="width:20px;height:20px;border-radius:50%;background:var(--green);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+            </div>
+            <span style="font-size:12.5px;font-weight:600;">Pedido confirmado</span>
+          </div>
+          <div style="font-size:20px;font-weight:700;font-family:var(--display);margin-bottom:2px;">$155.000</div>
+          <div style="font-size:11px;color:var(--dark-muted);">Smartwatch Serie 11 Mini · Nequi</div>
+        </div>
+
+        <div style="position:absolute;top:60px;right:-6px;background:var(--card);border:1px solid var(--border);border-radius:14px;padding:11px 16px;box-shadow:0 14px 30px -14px rgba(18,33,26,0.3);display:flex;align-items:center;gap:9px;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--green-dark)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.2 1.9"/></svg>
+          <span style="font-size:12px;font-weight:600;color:var(--ink);">Responde en segundos</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ COMO FUNCIONA ============ -->
+  <section id="como-funciona" style="max-width:1100px;margin:0 auto;padding:88px 48px;">
+    <div style="text-align:center;max-width:520px;margin:0 auto 52px;">
+      <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted);margin-bottom:10px;">Cómo funciona</div>
+      <h2 style="font-size:32px;">Listo en tres pasos</h2>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:28px;">
+
+      <div style="background:var(--card);border:1px solid var(--border);border-radius:20px;padding:30px 26px;">
+        <div style="font-family:var(--display);font-size:13px;font-weight:700;color:var(--green-dark);margin-bottom:18px;">01</div>
+        <h3 style="font-size:17px;margin-bottom:8px;">Conectas tu WhatsApp</h3>
+        <p style="font-size:13.5px;color:var(--muted);line-height:1.6;margin:0;">Nosotros conectamos tu número de WhatsApp Business a la plataforma.</p>
+      </div>
+
+      <div style="background:var(--card);border:1px solid var(--border);border-radius:20px;padding:30px 26px;">
+        <div style="font-family:var(--display);font-size:13px;font-weight:700;color:var(--green-dark);margin-bottom:18px;">02</div>
+        <h3 style="font-size:17px;margin-bottom:8px;">Cargas tu catálogo</h3>
+        <p style="font-size:13.5px;color:var(--muted);line-height:1.6;margin:0;">Productos, precios, stock, fotos y tus métodos de pago, desde un panel simple.</p>
+      </div>
+
+      <div style="background:var(--ink);border-radius:20px;padding:30px 26px;">
+        <div style="font-family:var(--display);font-size:13px;font-weight:700;color:var(--green);margin-bottom:18px;">03</div>
+        <h3 style="font-size:17px;margin-bottom:8px;color:white;">La IA atiende y vende</h3>
+        <p style="font-size:13.5px;color:var(--dark-muted);line-height:1.6;margin:0;">Responde preguntas, manda fotos reales y guía al cliente hasta cerrar la compra.</p>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ============ FEATURES ============ -->
+  <section style="max-width:1100px;margin:0 auto;padding:0 48px 96px;">
+    <div style="text-align:center;max-width:560px;margin:0 auto 52px;">
+      <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted);margin-bottom:10px;">Por qué Vendia</div>
+      <h2 style="font-size:32px;">Todo lo que necesita tu WhatsApp de ventas</h2>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:20px;">
+
+      <div style="display:flex;gap:18px;padding:26px;border:1px solid var(--border);border-radius:18px;background:var(--card);">
+        <div style="width:44px;height:44px;border-radius:12px;background:var(--green-light);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+          <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="var(--green-dark)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21c-.6 0-1-.4-1-1v-3.3C6.6 16 3 12.6 3 8.5 3 4.9 6.6 2 12 2s9 2.9 9 6.5c0 4.1-3.6 7.5-8 7.5v3c0 .6-.4 1-1 1Z"/></svg>
+        </div>
+        <div>
+          <h3 style="font-size:15.5px;margin-bottom:6px;">Respuestas 24/7</h3>
+          <p style="font-size:13.5px;color:var(--muted);line-height:1.6;margin:0;">Tu bot atiende de madrugada, fin de semana o feriado — nunca pierdes una consulta.</p>
+        </div>
+      </div>
+
+      <div style="display:flex;gap:18px;padding:26px;border:1px solid var(--border);border-radius:18px;background:var(--card);">
+        <div style="width:44px;height:44px;border-radius:12px;background:var(--green-light);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+          <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="var(--green-dark)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="14" rx="2.5"/><path d="M8 6l1.6-2.4A1.5 1.5 0 0 1 10.85 3h2.3a1.5 1.5 0 0 1 1.25.6L16 6"/><circle cx="12" cy="13" r="3.4"/></svg>
+        </div>
+        <div>
+          <h3 style="font-size:15.5px;margin-bottom:6px;">Fotos y videos reales</h3>
+          <p style="font-size:13.5px;color:var(--muted);line-height:1.6;margin:0;">Manda las imágenes de tu catálogo, no descripciones inventadas.</p>
+        </div>
+      </div>
+
+      <div style="display:flex;gap:18px;padding:26px;border:1px solid var(--border);border-radius:18px;background:var(--card);">
+        <div style="width:44px;height:44px;border-radius:12px;background:var(--green-light);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+          <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="var(--green-dark)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="5" width="19" height="14" rx="2.5"/><line x1="2.5" y1="9.5" x2="21.5" y2="9.5"/><line x1="6" y1="14.5" x2="10" y2="14.5"/></svg>
+        </div>
+        <div>
+          <h3 style="font-size:15.5px;margin-bottom:6px;">Tus formas de pago</h3>
+          <p style="font-size:13.5px;color:var(--muted);line-height:1.6;margin:0;">Nequi, transferencia, tarjeta o contraentrega — tú decides cuáles ofrecer.</p>
+        </div>
+      </div>
+
+      <div style="display:flex;gap:18px;padding:26px;border:1px solid var(--border);border-radius:18px;background:var(--card);">
+        <div style="width:44px;height:44px;border-radius:12px;background:var(--green-light);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+          <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="var(--green-dark)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/></svg>
+        </div>
+        <div>
+          <h3 style="font-size:15.5px;margin-bottom:6px;">Seguimiento automático</h3>
+          <p style="font-size:13.5px;color:var(--muted);line-height:1.6;margin:0;">Guía al cliente paso a paso hasta confirmar el pedido, sin que tengas que intervenir.</p>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ============ DARK CTA BAND ============ -->
+  <section style="background:var(--dark);padding:88px 48px;position:relative;overflow:hidden;">
+    <div style="position:absolute;top:-180px;right:-140px;width:520px;height:520px;border-radius:50%;background:radial-gradient(circle,rgba(31,168,85,0.28) 0%,rgba(31,168,85,0) 70%);pointer-events:none;"></div>
+    <div style="position:relative;max-width:680px;margin:0 auto;text-align:center;">
+      <h2 style="font-size:34px;color:white;margin-bottom:16px;line-height:1.2;">Cada mensaje sin responder es una venta que se enfría</h2>
+      <p style="font-size:16px;color:var(--dark-muted);line-height:1.6;margin-bottom:32px;">Deja que Vendia atienda mientras duermes, mientras trabajas, mientras vives — tu catálogo real, disponible siempre.</p>
+      <a href="#" style="display:inline-flex;align-items:center;gap:8px;background:var(--green);color:white;font-weight:700;font-size:15px;padding:15px 28px;border-radius:999px;">
+        Crear mi cuenta
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+      </a>
+    </div>
+  </section>
+
+  <!-- ============ PRICING ============ -->
+  <section id="precios" style="max-width:1100px;margin:0 auto;padding:96px 48px;">
+    <div style="text-align:center;max-width:560px;margin:0 auto 52px;">
+      <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted);margin-bottom:10px;">Precios</div>
+      <h2 style="font-size:32px;">Un plan para cada tamaño de negocio</h2>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:24px;">
+
+      <div style="border:1px solid var(--border);border-radius:20px;padding:32px 28px;background:var(--card);">
+        <div style="font-family:var(--display);font-weight:600;font-size:15px;margin-bottom:16px;">Básico</div>
+        <div style="font-family:var(--display);font-size:30px;font-weight:700;margin-bottom:2px;">$36.000<span style="font-size:13px;font-weight:500;color:var(--muted);"> COP/mes</span></div>
+        <div style="font-size:12.5px;color:var(--muted);margin-bottom:20px;">≈ $9 USD · hasta 300 mensajes con IA</div>
+        <a href="#" style="display:block;text-align:center;background:var(--green-light);color:var(--green-dark);font-weight:700;padding:12px;border-radius:12px;font-size:14px;">Elegir plan</a>
+      </div>
+
+      <div style="border-radius:20px;padding:32px 28px;background:var(--ink);position:relative;">
+        <div style="position:absolute;top:-12px;left:50%;transform:translateX(-50%);background:var(--green);color:white;font-size:11px;font-weight:700;padding:5px 14px;border-radius:999px;white-space:nowrap;">MÁS ELEGIDO</div>
+        <div style="font-family:var(--display);font-weight:600;font-size:15px;margin-bottom:16px;color:white;">Emprendedor</div>
+        <div style="font-family:var(--display);font-size:30px;font-weight:700;margin-bottom:2px;color:white;">$60.000<span style="font-size:13px;font-weight:500;color:var(--dark-muted);"> COP/mes</span></div>
+        <div style="font-size:12.5px;color:var(--dark-muted);margin-bottom:20px;">≈ $15 USD · hasta 1.000 mensajes con IA</div>
+        <a href="#" style="display:block;text-align:center;background:var(--green);color:white;font-weight:700;padding:12px;border-radius:12px;font-size:14px;">Elegir plan</a>
+      </div>
+
+      <div style="border:1px solid var(--border);border-radius:20px;padding:32px 28px;background:var(--card);">
+        <div style="font-family:var(--display);font-weight:600;font-size:15px;margin-bottom:16px;">Negocio</div>
+        <div style="font-family:var(--display);font-size:30px;font-weight:700;margin-bottom:2px;">$116.000<span style="font-size:13px;font-weight:500;color:var(--muted);"> COP/mes</span></div>
+        <div style="font-size:12.5px;color:var(--muted);margin-bottom:20px;">≈ $29 USD · hasta 3.000 mensajes con IA</div>
+        <a href="#" style="display:block;text-align:center;background:var(--green-light);color:var(--green-dark);font-weight:700;padding:12px;border-radius:12px;font-size:14px;">Elegir plan</a>
+      </div>
+
+    </div>
+    <p style="text-align:center;font-size:12.5px;color:var(--muted);margin-top:28px;">Precios de lanzamiento. Necesitas una clave de activación para registrarte — te la damos al confirmar el pago.</p>
+  </section>
+
+  <!-- ============ FAQ ============ -->
+  <section id="faq" style="max-width:720px;margin:0 auto;padding:0 48px 96px;">
+    <div style="text-align:center;margin:0 auto 44px;">
+      <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted);margin-bottom:10px;">Preguntas frecuentes</div>
+      <h2 style="font-size:32px;">Antes de empezar</h2>
+    </div>
+
+    <div style="border-top:1px solid var(--border);">
+      <div style="padding:22px 0;border-bottom:1px solid var(--border);">
+        <h3 style="font-size:15.5px;margin-bottom:7px;">¿Necesito saber programar?</h3>
+        <p style="font-size:13.5px;color:var(--muted);line-height:1.6;margin:0;">No. Cargas tu catálogo desde un panel simple, como llenar un formulario. Nosotros conectamos tu WhatsApp por ti.</p>
+      </div>
+      <div style="padding:22px 0;border-bottom:1px solid var(--border);">
+        <h3 style="font-size:15.5px;margin-bottom:7px;">¿Puedo usar mi número de WhatsApp actual?</h3>
+        <p style="font-size:13.5px;color:var(--muted);line-height:1.6;margin:0;">Depende de tu caso — te lo confirmamos al registrarte. Muchos negocios prefieren empezar con una línea nueva dedicada al bot, para no arriesgar su WhatsApp actual.</p>
+      </div>
+      <div style="padding:22px 0;border-bottom:1px solid var(--border);">
+        <h3 style="font-size:15.5px;margin-bottom:7px;">¿Qué pasa si supero los mensajes de mi plan?</h3>
+        <p style="font-size:13.5px;color:var(--muted);line-height:1.6;margin:0;">Te avisamos para que subas de plan. Tu bot no se corta de un día para el otro.</p>
+      </div>
+      <div style="padding:22px 0;border-bottom:1px solid var(--border);">
+        <h3 style="font-size:15.5px;margin-bottom:7px;">¿Cómo pago?</h3>
+        <p style="font-size:13.5px;color:var(--muted);line-height:1.6;margin:0;">Por ahora coordinamos el pago directo contigo y te damos una clave de activación para registrarte en la plataforma.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ FOOTER ============ -->
+  <footer style="border-top:1px solid var(--border);padding:32px 48px;">
+    <div style="max-width:1100px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:14px;">
+      <div style="display:flex;align-items:center;gap:9px;font-family:var(--display);font-weight:700;font-size:15px;">
+        <div style="width:24px;height:24px;border-radius:7px;background:linear-gradient(155deg,var(--green),var(--green-dark));display:flex;align-items:center;justify-content:center;">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M12 3.2C6.9 3.2 2.8 6.9 2.8 11.4c0 2.3 1.1 4.4 2.9 5.9L5 21.2l5-1.7c.7.13 1.4.2 2 .2 5.1 0 9.2-3.7 9.2-8.3S17.1 3.2 12 3.2Z" stroke="white" stroke-width="1.6" fill="none"/></svg>
+        </div>
+        vendia
+      </div>
+      <div style="font-size:12.5px;color:var(--muted);">© 2026 Vendia — Bogotá, Colombia</div>
+    </div>
+  </footer>
+
+</div>
+</x-dc>
+<script data-dc-script>
+class Component extends DCLogic {}
+</script>
+</body>
+</html>

@@ -1,7 +1,7 @@
 import type OpenAI from "openai";
 import { getProductById, listActiveProducts, searchProducts } from "../catalog/products";
 import { listActivePaymentMethods } from "../catalog/paymentMethods";
-import { searchFaq } from "../catalog/faq";
+import { listActiveFaqEntries } from "../catalog/faq";
 import {
   updateConversationStatus,
   setConversationIntent,
@@ -95,15 +95,12 @@ export const catalogTools: OpenAI.Chat.ChatCompletionTool[] = [
   {
     type: "function",
     function: {
-      name: "search_faq",
+      name: "get_faq",
       description:
-        "Busca en las preguntas frecuentes configuradas por el negocio (politicas de envio, garantia, horarios, cambios, etc). Usar cuando el cliente pregunte algo que no es sobre un producto especifico ni sobre formas de pago, antes de responder de memoria o decir que no sabes.",
+        "Trae TODAS las preguntas frecuentes configuradas por el negocio (politicas de envio, garantia, horarios, cambios, etc). Usar cuando el cliente pregunte algo que no es sobre un producto especifico ni sobre formas de pago, antes de responder de memoria o decir que no sabes. Revisa vos mismo la lista completa por significado, no solo por si aparecen las mismas palabras - el cliente puede preguntar lo mismo con otras palabras.",
       parameters: {
         type: "object",
-        properties: {
-          query: { type: "string", description: "La pregunta o palabra clave del cliente" },
-        },
-        required: ["query"],
+        properties: {},
       },
     },
   },
@@ -161,6 +158,24 @@ export const catalogTools: OpenAI.Chat.ChatCompletionTool[] = [
           intent: { type: "string", enum: ["PQR", "DEVOLUCION", "NO_RECIBIDO"] },
         },
         required: ["intent"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "ask_owner",
+      description:
+        "Usa esta herramienta cuando el cliente pregunta algo que no podes responder con las demas herramientas (catalogo, search_faq, formas de pago) y de verdad no sabes la respuesta. Le manda la pregunta EXACTA del cliente al dueno del negocio por WhatsApp para que la responda el mismo. Cuando el dueno responda, esa respuesta se le reenvia al cliente tal cual, sin que vos intervengas. Mientras tanto el bot deja de responderle a este cliente. NO inventes ni adivines la respuesta - preferi escalar. No la uses para PQR, devoluciones o pedidos no recibidos, para eso usa flag_conversation_intent.",
+      parameters: {
+        type: "object",
+        properties: {
+          question: {
+            type: "string",
+            description: "La pregunta del cliente tal como la escribio, sin resumir ni traducir.",
+          },
+        },
+        required: ["question"],
       },
     },
   },
@@ -307,12 +322,15 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
       }
       return { sent: true, product: product.name, count: sentCount };
     }
-    case "search_faq": {
-      const results = await searchFaq(businessId, String(input.query ?? ""));
+    case "get_faq": {
+      const results = await listActiveFaqEntries(businessId);
       if (results.length === 0) {
-        return { results: [], note: "No hay ninguna pregunta frecuente configurada que coincida. No inventes la respuesta." };
+        return { results: [], note: "Este negocio no tiene preguntas frecuentes configuradas. No inventes ni niegues nada, usa ask_owner." };
       }
-      return { results: results.map((r) => ({ question: r.question, answer: r.answer })) };
+      return {
+        results: results.map((r) => ({ question: r.question, answer: r.answer })),
+        note: "Revisa si alguna de estas responde por significado lo que pregunto el cliente, aunque este redactado distinto. Si ninguna lo confirma explicitamente, no inventes ni niegues nada - usa ask_owner.",
+      };
     }
     case "get_payment_methods": {
       const methods = await listActivePaymentMethods(businessId);
@@ -356,6 +374,45 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
         flagged: true,
         intent,
         note: "La conversacion quedo escalada a un humano. No sigas intentando resolverlo vos mismo: decile al cliente que un asesor lo va a atender directamente.",
+      };
+    }
+    case "ask_owner": {
+      const question = String(input.question ?? "").trim();
+      if (!question) return { error: "Falta la pregunta" };
+
+      const business = await prisma.business.findUnique({ where: { id: businessId } });
+      if (!business?.contactPhone) {
+        return {
+          asked: false,
+          note: "Este negocio no tiene un numero de contacto configurado para escalar preguntas. Decile al cliente que no tenes esa informacion por ahora.",
+        };
+      }
+
+      const greeting = business.contactName ? `Hola ${business.contactName}` : "Hola";
+      const customerLabel = await describeCustomer(context.customerId, context.recipientPhone);
+      const text = [
+        `${greeting}, el cliente ${customerLabel} pregunto algo que el bot no supo responder:`,
+        `"${question}"`,
+        'Respondeme citando (mantén presionado y "Responder") este mismo mensaje con la respuesta y se la reenvio tal cual al cliente.',
+      ].join("\n\n");
+
+      const wamid = await sendTextMessage(context.credentials, business.contactPhone, text);
+      if (!wamid) {
+        return {
+          asked: false,
+          note: "No se pudo enviar la pregunta al dueno. Decile al cliente que un asesor le va a escribir pronto.",
+        };
+      }
+
+      await setHumanControl(businessId, context.conversationId, true);
+      await prisma.conversation.update({
+        where: { id: context.conversationId },
+        data: { pendingOwnerQuestionMessageId: wamid },
+      });
+
+      return {
+        asked: true,
+        note: "La pregunta quedo escalada al dueno del negocio. No sigas intentando responderla vos mismo ni inventes nada: decile al cliente que estas confirmando esa info con el equipo y le respondes en breve.",
       };
     }
     case "close_conversation": {

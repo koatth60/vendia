@@ -1,35 +1,14 @@
 import { prisma } from "../db/client";
-import { tokenize, normalizeForMatch } from "../search/text";
 
 export async function listFaqEntries(businessId: string) {
   return prisma.faqEntry.findMany({ where: { businessId }, orderBy: { createdAt: "asc" } });
 }
 
-function relevanceScore(tokens: string[], entry: { question: string; answer: string }): number {
-  const question = normalizeForMatch(entry.question);
-  const answer = normalizeForMatch(entry.answer);
-
-  let score = 0;
-  for (const token of tokens) {
-    if (question.includes(token)) score += 3;
-    if (answer.includes(token)) score += 1;
-  }
-  return score;
-}
-
-export async function searchFaq(businessId: string, query: string) {
-  const tokens = tokenize(query);
-  if (tokens.length === 0) return [];
-
-  // FAQ lists are small per business, so score in memory against accent-normalized text
-  // instead of a SQL `contains` filter (which would miss e.g. "envios" vs stored "envíos").
-  const entries = await prisma.faqEntry.findMany({ where: { businessId, active: true } });
-
-  return entries
-    .map((entry) => ({ entry, score: relevanceScore(tokens, entry) }))
-    .filter(({ score }) => score > 0)
-    .sort((a, b) => b.score - a.score)
-    .map(({ entry }) => entry);
+// FAQ lists are small per business, so the agent tool hands the model the whole active list
+// instead of pre-filtering by keyword match - that pre-filter used to miss paraphrased customer
+// questions (a keyword scorer can't tell "envio gratis" is a variant of "cuanto cuesta el envio").
+export async function listActiveFaqEntries(businessId: string) {
+  return prisma.faqEntry.findMany({ where: { businessId, active: true }, orderBy: { createdAt: "asc" } });
 }
 
 export async function createFaqEntry(businessId: string, data: { question: string; answer: string }) {

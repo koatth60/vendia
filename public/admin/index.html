@@ -1215,7 +1215,9 @@ async function openConversation(id) {
       (conversation.intent ? ` <span class="status-badge" style="background:#fee2e2; color:#991b1b;">${INTENT_LABELS[conversation.intent] || conversation.intent}</span>` : '');
 
     thread.innerHTML = conversation.messages.map((m) => {
-      const img = m.mediaUrl ? `<img src="${m.mediaUrl}" style="max-width:220px; border-radius:6px; display:block; margin-bottom:4px;" />` : '';
+      const img = m.mediaUrl && m.mediaType === 'AUDIO'
+        ? `<audio src="${m.mediaUrl}" controls style="display:block; margin-bottom:4px; max-width:240px;"></audio>`
+        : m.mediaUrl ? `<img src="${m.mediaUrl}" style="max-width:220px; border-radius:6px; display:block; margin-bottom:4px;" />` : '';
       const time = new Date(m.createdAt).toLocaleString('es-CO', { hour: '2-digit', minute: '2-digit' });
       return `<div class="bubble bubble-${m.role}">${img}<span class="bubble-text">${escapeHtml(m.content)}</span><span class="bubble-time">${time}</span></div>`;
     }).join('') || '<div style="text-align:center; color:var(--muted); font-size:13px; padding:20px;">Sin mensajes todavía.</div>';

@@ -31,7 +31,7 @@ export async function recordMessage(
   role: "CUSTOMER" | "ASSISTANT" | "SYSTEM",
   content: string,
   whatsappMessageId?: string,
-  media?: { s3Key: string; type: "IMAGE" | "VIDEO" },
+  media?: { s3Key: string; type: "IMAGE" | "VIDEO" | "AUDIO" },
   imageAnalysis?: string
 ) {
   await prisma.message.create({
@@ -109,6 +109,20 @@ export async function clearPendingConfirmation(conversationId: string) {
   await prisma.conversation.update({
     where: { id: conversationId },
     data: { pendingConfirmationMessageId: null, pendingOrderSummary: null, pendingOrderItems: Prisma.JsonNull },
+  });
+}
+
+export async function findConversationByPendingOwnerQuestion(pendingOwnerQuestionMessageId: string) {
+  return prisma.conversation.findUnique({
+    where: { pendingOwnerQuestionMessageId },
+    include: { customer: true },
+  });
+}
+
+export async function clearPendingOwnerQuestion(conversationId: string) {
+  await prisma.conversation.update({
+    where: { id: conversationId },
+    data: { pendingOwnerQuestionMessageId: null },
   });
 }
 

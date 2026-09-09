@@ -30,6 +30,8 @@ model Business {
   active                   Boolean         @default(false)
   contactPhone             String?
   contactName              String?
+  passwordResetCode        String?
+  passwordResetExpiresAt   DateTime?
   whatsappPhoneNumberId    String?         @unique
   whatsappPhoneNumber      String?
   whatsappAccessToken      String?
@@ -170,6 +172,7 @@ model ProductMedia {
 enum MediaType {
   IMAGE
   VIDEO
+  AUDIO
 }
 
 model Customer {
@@ -197,6 +200,7 @@ model Conversation {
   pendingConfirmationMessageId String?             @unique
   pendingOrderSummary          String?
   pendingOrderItems            Json?
+  pendingOwnerQuestionMessageId String?            @unique
   order                        Order?
   messages                     Message[]
   createdAt                    DateTime            @default(now())

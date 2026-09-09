@@ -10,10 +10,14 @@ import {
   recordMessage,
   findConversationByPendingConfirmation,
   clearPendingConfirmation,
+  findConversationByPendingOwnerQuestion,
+  clearPendingOwnerQuestion,
+  setHumanControl,
   updateConversationStatus,
 } from "../conversation/service";
 import { generateReply } from "../ai/agent";
 import { analyzeReceiptImage } from "../ai/vision";
+import { transcribeAudio } from "../ai/transcription";
 import { createOrder, type ResolvedOrderItem } from "../orders/service";
 
 export const whatsappRouter = Router();
@@ -44,8 +48,23 @@ async function handleOwnerReply(
     await sendTextMessage(
       credentials,
       ownerPhone,
-      'No identifique a que pedido te refieres. Por favor responde citando (mantén presionado y "Responder") el mensaje del pedido especifico.'
+      'No identifique a que mensaje te refieres. Por favor responde citando (mantén presionado y "Responder") el mensaje especifico.'
     );
+    return;
+  }
+
+  const pendingQuestion = await findConversationByPendingOwnerQuestion(quotedId);
+  if (pendingQuestion) {
+    const answerText = message.type === "text" ? (message.text?.body ?? "").trim() : "";
+    if (!answerText) {
+      await sendTextMessage(credentials, ownerPhone, "Respondeme con un mensaje de texto, citando esa misma pregunta, por favor.");
+      return;
+    }
+    await sendTextMessage(credentials, pendingQuestion.customer.phoneNumber, answerText);
+    await recordMessage(pendingQuestion.id, "ASSISTANT", answerText);
+    await clearPendingOwnerQuestion(pendingQuestion.id);
+    await setHumanControl(businessId, pendingQuestion.id, false);
+    await sendTextMessage(credentials, ownerPhone, "Listo, le reenvie tu respuesta al cliente ✅");
     return;
   }
 
@@ -54,7 +73,7 @@ async function handleOwnerReply(
     await sendTextMessage(
       credentials,
       ownerPhone,
-      "Ese pedido ya no esta esperando confirmacion (puede que ya se haya resuelto o haya expirado)."
+      "Ese mensaje ya no esta esperando respuesta (puede que ya se haya resuelto o haya expirado)."
     );
     return;
   }
@@ -128,7 +147,7 @@ whatsappRouter.post("/webhook", async (req, res) => {
     const incomingPhoneNumberId: string | undefined = value?.metadata?.phone_number_id;
 
     if (!message || !incomingPhoneNumberId) return;
-    if (message.type !== "text" && message.type !== "image" && message.type !== "interactive") return;
+    if (message.type !== "text" && message.type !== "image" && message.type !== "audio" && message.type !== "interactive") return;
 
     const business = await prisma.business.findUnique({
       where: { whatsappPhoneNumberId: incomingPhoneNumberId },
@@ -164,21 +183,32 @@ whatsappRouter.post("/webhook", async (req, res) => {
     const conversation = await getOrCreateOpenConversation(customer.id);
 
     let text = "";
-    let media: { s3Key: string; type: "IMAGE" } | undefined;
+    let media: { s3Key: string; type: "IMAGE" | "AUDIO" } | undefined;
     let imageAnalysis: string | undefined;
 
     if (message.type === "text") {
       text = message.text.body;
-    } else {
+    } else if (message.type === "image") {
       try {
         const { buffer, mimeType } = await downloadMedia(credentials, message.image.id);
-        const { key, url } = await uploadMedia(buffer, mimeType, "images");
+        const { key, url } = await uploadMedia(buffer, mimeType, "receipts");
         media = { s3Key: key, type: "IMAGE" };
         text = message.image.caption ?? "";
         imageAnalysis = await analyzeReceiptImage(business.id, conversation.id, url, text);
       } catch (error) {
         console.error("No se pudo procesar la imagen entrante:", error);
         text = "[El cliente envio una imagen, pero hubo un problema tecnico y no se pudo procesar. Pedile que la reenvie.]";
+      }
+    } else {
+      try {
+        const { buffer, mimeType } = await downloadMedia(credentials, message.audio.id);
+        const { key } = await uploadMedia(buffer, mimeType, "audio");
+        media = { s3Key: key, type: "AUDIO" };
+        const transcript = await transcribeAudio(buffer, mimeType);
+        text = transcript || "[El cliente envio una nota de voz, pero no se pudo transcribir. Pedile que la repita por texto.]";
+      } catch (error) {
+        console.error("No se pudo procesar el audio entrante:", error);
+        text = "[El cliente envio una nota de voz, pero hubo un problema tecnico y no se pudo procesar. Pedile que la reenvie o escriba el mensaje.]";
       }
     }
 
