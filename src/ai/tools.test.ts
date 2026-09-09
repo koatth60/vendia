@@ -203,3 +203,28 @@ test("search_products and get_product_details find a seeded product", async () =
   const detail = (await runCatalogTool(context, "get_product_details", { productId: product.id })) as { name: string };
   assert.equal(detail.name, "Smartwatch Serie 11 Mini");
 });
+
+test("search_products falls back to the full catalog (with a note) when no keyword matches", async () => {
+  // Regression for the same class of bug fixed in get_faq: a query worded differently from the
+  // catalog text shouldn't produce a false "no lo tenemos" - the model should get the full list to
+  // judge by meaning instead.
+  await prisma.product.create({
+    data: {
+      businessId,
+      name: "Hello Plum",
+      description: "Smartwatch de diseño minimalista",
+      price: 125000,
+      currency: "COP",
+      stock: 2,
+    },
+  });
+
+  const context = await freshContext();
+  const result = (await runCatalogTool(context, "search_products", { query: "algo para hacer ejercicio" })) as {
+    results: { name: string }[];
+    note: string;
+  };
+  assert.ok(Array.isArray(result.results));
+  assert.ok(result.results.length > 0);
+  assert.match(result.note, /catalogo completo/i);
+});

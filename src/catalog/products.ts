@@ -55,27 +55,26 @@ function relevanceScore(tokens: string[], product: { name: string; description: 
   return score;
 }
 
+// Scores in memory against accent-normalized text instead of a SQL `contains` filter (which would
+// miss e.g. "smartwatch deportivo" vs stored "deportivo" written with an accented word elsewhere, or
+// "envios" vs "envíos" - same class of bug fixed in catalog/faq.ts). Catalogs are small enough per
+// business for this to be cheap.
 export async function searchProducts(businessId: string, query: string) {
   const tokens = tokenize(query);
-
-  if (tokens.length === 0) {
-    return listActiveProducts(businessId);
-  }
-
-  const orConditions = tokens.flatMap((token) => [
-    { name: { contains: token, mode: "insensitive" as const } },
-    { description: { contains: token, mode: "insensitive" as const } },
-    { category: { contains: token, mode: "insensitive" as const } },
-  ]);
+  if (tokens.length === 0) return listActiveProducts(businessId);
 
   const products = await prisma.product.findMany({
-    where: { businessId, active: true, OR: orConditions },
+    where: { businessId, active: true },
     include: { media: true },
   });
 
-  products.sort((a, b) => relevanceScore(tokens, b) - relevanceScore(tokens, a));
+  const matches = products
+    .map((product) => ({ product, score: relevanceScore(tokens, product) }))
+    .filter(({ score }) => score > 0)
+    .sort((a, b) => b.score - a.score)
+    .map(({ product }) => product);
 
-  return withFreshMediaUrls(products);
+  return withFreshMediaUrls(matches);
 }
 
 export async function createProduct(

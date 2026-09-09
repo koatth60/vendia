@@ -284,7 +284,19 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
   switch (name) {
     case "search_products": {
       const results = await searchProducts(businessId, String(input.query ?? ""));
-      return results.map(formatProduct);
+      if (results.length > 0) return results.map(formatProduct);
+
+      // No hubo coincidencia por palabra clave - el catalogo suele ser chico por negocio, asi que en
+      // vez de decir "no existe" le mostramos todo lo activo para que lo revise por significado (el
+      // cliente puede estar describiendo el producto con otras palabras que las del catalogo).
+      const all = await listActiveProducts(businessId);
+      return {
+        results: all.map(formatProduct),
+        note:
+          all.length > 0
+            ? "No hubo coincidencia exacta por palabra clave. Revisa este catalogo completo por significado antes de decir que no tenes el producto."
+            : "Este negocio todavia no tiene productos activos en el catalogo.",
+      };
     }
     case "get_product_details": {
       const product = await getProductById(businessId, String(input.productId ?? ""));
