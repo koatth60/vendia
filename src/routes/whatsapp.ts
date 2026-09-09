@@ -19,7 +19,7 @@ import { generateReply } from "../ai/agent";
 import { analyzeReceiptImage } from "../ai/vision";
 import { transcribeAudio } from "../ai/transcription";
 import { checkPlanCap } from "../ai/usage";
-import { createOrder, type ResolvedOrderItem } from "../orders/service";
+import { createOrder, askForCsat, recordCsatReply, type ResolvedOrderItem } from "../orders/service";
 
 export const whatsappRouter = Router();
 
@@ -99,7 +99,7 @@ async function handleOwnerReply(
       shippingAddress?: string | null;
       paymentMethodLabel?: string | null;
     } | null;
-    await createOrder({
+    const order = await createOrder({
       businessId,
       customerId: conversation.customer.id,
       conversationId: conversation.id,
@@ -113,6 +113,7 @@ async function handleOwnerReply(
     const customerText = "¡Listo! Tu pago quedo confirmado y tu pedido esta cerrado. Gracias por tu compra 🎉";
     await sendTextMessage(credentials, customerPhone, customerText);
     await recordMessage(conversation.id, "ASSISTANT", customerText);
+    await askForCsat(credentials, order.id, customerPhone);
     await sendTextMessage(credentials, ownerPhone, "Listo, le avise al cliente ✅");
   } else {
     await clearPendingConfirmation(conversation.id);
@@ -178,7 +179,16 @@ whatsappRouter.post("/webhook", async (req, res) => {
       return;
     }
 
-    if (message.type === "interactive") return;
+    if (message.type === "interactive") {
+      const buttonId: string | undefined = message.interactive?.button_reply?.id;
+      if (buttonId?.startsWith("csat_")) {
+        const result = await recordCsatReply(business.id, from, buttonId);
+        if (result.recorded) {
+          await sendTextMessage(credentials, from, "¡Gracias por tu opinión! 🙏");
+        }
+      }
+      return;
+    }
 
     const customer = await getOrCreateCustomer(business.id, from);
     const conversation = await getOrCreateOpenConversation(customer.id);

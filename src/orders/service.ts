@@ -1,5 +1,6 @@
 import { prisma } from "../db/client";
 import { searchProducts } from "../catalog/products";
+import { sendInteractiveButtonsMessage, type WhatsappCredentials } from "../whatsapp/client";
 
 export interface ResolvedOrderItem {
   productId: string;
@@ -71,6 +72,55 @@ export async function createOrder(params: {
     },
     include: { items: true },
   });
+}
+
+const CSAT_BUTTON_RATINGS: Record<string, number> = { csat_1: 1, csat_2: 2, csat_3: 3 };
+
+// Asked right after a sale closes, while the 24h customer-service session is still open - waiting for
+// "after delivery" would need an approved WhatsApp template (see followUpTemplateName), which isn't set
+// up yet. Rates the sales experience, not the product/delivery itself.
+export async function askForCsat(
+  credentials: WhatsappCredentials,
+  orderId: string,
+  customerPhone: string
+): Promise<void> {
+  try {
+    const wamid = await sendInteractiveButtonsMessage(
+      credentials,
+      customerPhone,
+      "¿Cómo calificarías la atención que recibiste? 😊",
+      [
+        { id: "csat_3", title: "😃 Buena" },
+        { id: "csat_2", title: "😐 Regular" },
+        { id: "csat_1", title: "😞 Mala" },
+      ]
+    );
+    if (!wamid) return;
+    await prisma.order.update({ where: { id: orderId }, data: { csatAskedAt: new Date() } });
+  } catch (error) {
+    console.error("No se pudo enviar la encuesta de satisfaccion:", error);
+  }
+}
+
+export async function recordCsatReply(
+  businessId: string,
+  customerPhone: string,
+  buttonId: string
+): Promise<{ recorded: boolean }> {
+  const rating = CSAT_BUTTON_RATINGS[buttonId];
+  if (!rating) return { recorded: false };
+
+  const customer = await prisma.customer.findFirst({ where: { businessId, phoneNumber: customerPhone } });
+  if (!customer) return { recorded: false };
+
+  const order = await prisma.order.findFirst({
+    where: { customerId: customer.id, csatAskedAt: { not: null }, csatRating: null },
+    orderBy: { createdAt: "desc" },
+  });
+  if (!order) return { recorded: false };
+
+  await prisma.order.update({ where: { id: order.id }, data: { csatRating: rating } });
+  return { recorded: true };
 }
 
 function formatOrder<T extends { totalAmount: unknown; items: { unitPrice: unknown }[] }>(order: T) {

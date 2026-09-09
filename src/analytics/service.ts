@@ -42,5 +42,12 @@ export async function getAnalyticsSummary(businessId: string, days = 30) {
     select: { id: true, name: true, inquiryCount: true },
   });
 
-  return { totalConversations, byStatus, conversionRate, messagesByDay, topProducts };
+  const csatOrders = await prisma.order.findMany({
+    where: { businessId, csatRating: { not: null }, createdAt: { gte: since } },
+    select: { csatRating: true },
+  });
+  const csatCount = csatOrders.length;
+  const avgCsat = csatCount > 0 ? csatOrders.reduce((sum, o) => sum + (o.csatRating ?? 0), 0) / csatCount : null;
+
+  return { totalConversations, byStatus, conversionRate, messagesByDay, topProducts, avgCsat, csatCount };
 }

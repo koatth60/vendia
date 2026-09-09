@@ -80,6 +80,8 @@ model Order {
   paymentMethodLabel String?
   totalAmount        Decimal      @db.Decimal(12, 2)
   currency           String
+  csatRating         Int?
+  csatAskedAt        DateTime?
   items              OrderItem[]
   createdAt          DateTime     @default(now())
 

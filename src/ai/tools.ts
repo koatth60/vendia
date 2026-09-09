@@ -8,7 +8,7 @@ import {
   setHumanControl,
   saveCustomerName,
 } from "../conversation/service";
-import { resolveOrderItems, createOrder, type ResolvedOrderItem } from "../orders/service";
+import { resolveOrderItems, createOrder, askForCsat, type ResolvedOrderItem } from "../orders/service";
 import {
   sendImageMessage,
   sendVideoMessage,
@@ -436,7 +436,7 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
           };
         }
 
-        await createOrder({
+        const order = await createOrder({
           businessId,
           customerId: context.customerId,
           conversationId: context.conversationId,
@@ -445,6 +445,7 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
           shippingAddress,
           paymentMethodLabel,
         });
+        await askForCsat(context.credentials, order.id, context.recipientPhone);
       }
 
       await updateConversationStatus(context.conversationId, outcome);
