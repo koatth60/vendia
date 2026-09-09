@@ -409,6 +409,10 @@
           <input type="checkbox" id="bot-auto-photo" checked />
           <span>Mandar la foto del producto automáticamente la primera vez que se cotiza (recomendado)</span>
         </label>
+        <label class="checkbox-label">
+          <input type="checkbox" id="bot-require-proof" checked />
+          <span>Exigir foto del comprobante de pago antes de cerrar un pedido (recomendado)</span>
+        </label>
         <label>Estilo de español</label>
         <select id="bot-dialect">
           <option value="neutro">Neutro latinoamericano</option>
@@ -728,6 +732,7 @@ async function loadBusiness() {
     document.getElementById('bot-greeting').value = business.botGreeting || '';
     document.getElementById('bot-never-say').value = business.botNeverSay || '';
     document.getElementById('bot-auto-photo').checked = business.autoSendPhotoOnQuote !== false;
+    document.getElementById('bot-require-proof').checked = business.requirePaymentProof !== false;
     document.getElementById('bot-category').value = business.businessCategory || '';
     renderInstructionChips();
     document.getElementById('business-contact-name').value = business.contactName || '';
@@ -835,6 +840,7 @@ async function saveBusiness() {
   const botGreeting = document.getElementById('bot-greeting').value.trim();
   const botNeverSay = document.getElementById('bot-never-say').value.trim();
   const autoSendPhotoOnQuote = document.getElementById('bot-auto-photo').checked;
+  const requirePaymentProof = document.getElementById('bot-require-proof').checked;
   const businessCategory = document.getElementById('bot-category').value;
   const contactName = document.getElementById('business-contact-name').value.trim();
   const contactPhone = document.getElementById('business-contact-phone').value.trim();
@@ -848,7 +854,7 @@ async function saveBusiness() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         name, description, customInstructions, assistantName, botTone, botDialect, botGreeting, botNeverSay,
-        autoSendPhotoOnQuote, businessCategory, contactName, contactPhone,
+        autoSendPhotoOnQuote, requirePaymentProof, businessCategory, contactName, contactPhone,
         followUpTemplateName, followUpTemplateLanguage, followUpDelayHours,
       }),
     });
@@ -1091,7 +1097,7 @@ const STATUS_LABELS = {
   NEGOTIATING: 'Negociando', SOLD: 'Vendido', LOST: 'Perdido',
 };
 
-const INTENT_LABELS = { PQR: '⚠️ PQR', DEVOLUCION: '↩️ Devolución', NO_RECIBIDO: '📦 No recibido' };
+const INTENT_LABELS = { PQR: '⚠️ PQR', DEVOLUCION: '↩️ Devolución', NO_RECIBIDO: '📦 No recibido', SOLICITA_AGENTE: '🙋 Pide agente' };
 const CSAT_EMOJI = { 1: '😞', 2: '😐', 3: '😃' };
 
 const AVATAR_COLORS = ['#1fa855', '#16803f', '#2f8f6f', '#9c6a1f', '#7a6a9c', '#4f7a9c', '#8f7a2f', '#5c6e65'];
@@ -1737,7 +1743,7 @@ let isOwner = true;
 
 const OWNER_ONLY_INPUT_IDS = [
   'business-name', 'business-description', 'business-instructions',
-  'bot-category', 'bot-assistant-name', 'bot-tone', 'bot-dialect', 'bot-greeting', 'bot-never-say', 'bot-auto-photo',
+  'bot-category', 'bot-assistant-name', 'bot-tone', 'bot-dialect', 'bot-greeting', 'bot-never-say', 'bot-auto-photo', 'bot-require-proof',
   'business-contact-name',
   'business-contact-phone', 'business-followup-template', 'business-followup-language', 'business-followup-hours',
   'pm-type', 'pm-label', 'pm-details',

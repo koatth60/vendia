@@ -79,7 +79,7 @@ export async function setCustomerTags(businessId: string, customerId: string, ta
 
 export async function setConversationIntent(
   conversationId: string,
-  intent: "PQR" | "DEVOLUCION" | "NO_RECIBIDO"
+  intent: "PQR" | "DEVOLUCION" | "NO_RECIBIDO" | "SOLICITA_AGENTE"
 ) {
   return prisma.conversation.update({
     where: { id: conversationId },

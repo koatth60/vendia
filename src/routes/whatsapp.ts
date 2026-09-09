@@ -273,6 +273,7 @@ whatsappRouter.post("/webhook", async (req, res) => {
         neverSay: business.botNeverSay,
         customInstructions: business.customInstructions,
         autoSendPhotoOnQuote: business.autoSendPhotoOnQuote,
+        requirePaymentProof: business.requirePaymentProof,
         category: business.businessCategory,
       }
     );

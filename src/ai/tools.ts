@@ -151,11 +151,11 @@ export const catalogTools: OpenAI.Chat.ChatCompletionTool[] = [
     function: {
       name: "flag_conversation_intent",
       description:
-        "Usa esta herramienta UNA SOLA VEZ cuando detectes que el cliente no esta haciendo una consulta de venta normal, sino que trae: una PQR (peticion, queja o reclamo sobre el servicio/producto), una solicitud de DEVOLUCION, o un reclamo de que su pedido NO_RECIBIDO (no le llego). NO la uses para preguntas normales de catalogo, precio o para cerrar una venta. Esto escala la conversacion a un humano del negocio automaticamente.",
+        "Usa esta herramienta UNA SOLA VEZ cuando detectes que el cliente no esta haciendo una consulta de venta normal, sino que trae: una PQR (peticion, queja o reclamo sobre el servicio/producto), una solicitud de DEVOLUCION, un reclamo de que su pedido NO_RECIBIDO (no le llego), o SOLICITA_AGENTE cuando el cliente pide explicitamente hablar con una persona real, un asesor, un agente o un humano (no con vos). NO la uses para preguntas normales de catalogo, precio o para cerrar una venta. Esto escala la conversacion a un humano del negocio automaticamente.",
       parameters: {
         type: "object",
         properties: {
-          intent: { type: "string", enum: ["PQR", "DEVOLUCION", "NO_RECIBIDO"] },
+          intent: { type: "string", enum: ["PQR", "DEVOLUCION", "NO_RECIBIDO", "SOLICITA_AGENTE"] },
         },
         required: ["intent"],
       },
@@ -366,13 +366,21 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
       return { updated: true, status };
     }
     case "flag_conversation_intent": {
-      const intent = input.intent === "DEVOLUCION" || input.intent === "NO_RECIBIDO" ? input.intent : "PQR";
+      const validIntents = ["PQR", "DEVOLUCION", "NO_RECIBIDO", "SOLICITA_AGENTE"] as const;
+      const intent = validIntents.includes(input.intent as (typeof validIntents)[number])
+        ? (input.intent as (typeof validIntents)[number])
+        : "PQR";
       await setConversationIntent(context.conversationId, intent);
       await setHumanControl(businessId, context.conversationId, true);
 
       const business = await prisma.business.findUnique({ where: { id: businessId } });
       if (business?.contactPhone) {
-        const label = { PQR: "PQR", DEVOLUCION: "una devolucion", NO_RECIBIDO: "un pedido no recibido" }[intent];
+        const label = {
+          PQR: "PQR",
+          DEVOLUCION: "una devolucion",
+          NO_RECIBIDO: "un pedido no recibido",
+          SOLICITA_AGENTE: "que pidio hablar con un asesor",
+        }[intent];
         const greeting = business.contactName ? `Hola ${business.contactName}` : "Hola";
         const customerLabel = await describeCustomer(context.customerId, context.recipientPhone);
         await sendTextMessage(

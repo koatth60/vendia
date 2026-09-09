@@ -23,6 +23,7 @@ model Business {
   botGreeting              String?
   botNeverSay              String?
   autoSendPhotoOnQuote     Boolean         @default(true)
+  requirePaymentProof      Boolean         @default(true)
   businessCategory         String?
   email                    String          @unique
   passwordHash             String
@@ -223,6 +224,7 @@ enum ConversationIntent {
   PQR
   DEVOLUCION
   NO_RECIBIDO
+  SOLICITA_AGENTE
 }
 
 model Message {

@@ -138,6 +138,23 @@ test("flag_conversation_intent escalates to a human and notifies the owner", asy
   }
 });
 
+test("flag_conversation_intent escalates when the customer asks for a human agent", async () => {
+  stubWhatsappFetch();
+  try {
+    const context = await freshContext();
+    const result = await runCatalogTool(context, "flag_conversation_intent", { intent: "SOLICITA_AGENTE" });
+    assert.equal((result as { flagged: boolean }).flagged, true);
+
+    const conversation = await prisma.conversation.findUniqueOrThrow({ where: { id: context.conversationId } });
+    assert.equal(conversation.humanControl, true);
+    assert.equal(conversation.intent, "SOLICITA_AGENTE");
+    assert.equal(sentMessages.length, 1);
+    assert.match(sentMessages[0].body, /asesor/i);
+  } finally {
+    restoreFetch();
+  }
+});
+
 test("close_conversation with outcome LOST updates status without creating an order", async () => {
   const context = await freshContext();
   const result = await runCatalogTool(context, "close_conversation", { outcome: "LOST" });
