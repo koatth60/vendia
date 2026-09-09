@@ -1,7 +1,7 @@
 import { prisma } from "../db/client";
 
-// Message caps per plan tier — used only to show the owner a usage percentage, not enforced yet
-// (see roadmap: enforcement deferred while signup is gated behind manual ActivationKeys).
+// Message caps per plan tier — enforced by checkPlanCap below (gates the bot's auto-reply once
+// exceeded), and also shown to the owner as a usage percentage in the admin panel.
 const PLAN_MESSAGE_CAPS: Record<string, number> = {
   BASICO: 300,
   EMPRENDEDOR: 1000,
@@ -85,6 +85,25 @@ export async function logAiUsage(params: {
   } catch (error) {
     console.error("No se pudo registrar el uso de IA:", error);
   }
+}
+
+// Gates the bot's auto-reply, not the DB write of the incoming message itself - the customer message
+// is always recorded, only the AI call (and the cost/message-volume it represents) is what gets capped.
+export async function checkPlanCap(
+  businessId: string
+): Promise<{ capped: boolean; justCrossed: boolean; messageCap: number; planTier: string }> {
+  const usage = await getPlanUsage(businessId);
+  if (usage.messagesUsed <= usage.messageCap) {
+    return { capped: false, justCrossed: false, messageCap: usage.messageCap, planTier: usage.planTier };
+  }
+
+  const business = await prisma.business.findUnique({ where: { id: businessId }, select: { capNotifiedAt: true } });
+  const justCrossed = !business?.capNotifiedAt || business.capNotifiedAt < usage.periodStart;
+  if (justCrossed) {
+    await prisma.business.update({ where: { id: businessId }, data: { capNotifiedAt: new Date() } });
+  }
+
+  return { capped: true, justCrossed, messageCap: usage.messageCap, planTier: usage.planTier };
 }
 
 export async function getAiUsageSummary(businessId: string, days = 14) {

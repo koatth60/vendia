@@ -18,6 +18,7 @@ import {
 import { generateReply } from "../ai/agent";
 import { analyzeReceiptImage } from "../ai/vision";
 import { transcribeAudio } from "../ai/transcription";
+import { checkPlanCap } from "../ai/usage";
 import { createOrder, type ResolvedOrderItem } from "../orders/service";
 
 export const whatsappRouter = Router();
@@ -224,6 +225,24 @@ whatsappRouter.post("/webhook", async (req, res) => {
 
     if (conversation.humanControl) {
       console.log("Conversacion en control humano, el bot no responde:", conversation.id);
+      return;
+    }
+
+    const capStatus = await checkPlanCap(business.id);
+    if (capStatus.capped) {
+      const capText =
+        "Por ahora alcanzamos el límite de mensajes de este mes para este negocio. Un asesor te va a contactar en breve para ayudarte manualmente. ¡Gracias por tu paciencia! 🙏";
+      await sendTextMessage(credentials, from, capText);
+      await recordMessage(conversation.id, "ASSISTANT", capText);
+
+      if (capStatus.justCrossed && business.contactPhone) {
+        const greeting = business.contactName ? `Hola ${business.contactName}` : "Hola";
+        await sendTextMessage(
+          credentials,
+          business.contactPhone,
+          `${greeting}, tu negocio alcanzó el límite de ${capStatus.messageCap} mensajes de tu plan ${capStatus.planTier} este mes. El bot dejó de responder automáticamente hasta el próximo mes - escribime si querés subir de plan.`
+        );
+      }
       return;
     }
 

@@ -32,6 +32,7 @@ model Business {
   contactName              String?
   passwordResetCode        String?
   passwordResetExpiresAt   DateTime?
+  capNotifiedAt            DateTime?
   whatsappPhoneNumberId    String?         @unique
   whatsappPhoneNumber      String?
   whatsappAccessToken      String?
