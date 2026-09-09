@@ -262,7 +262,7 @@
 
   .chat-thread {
     display: flex; flex-direction: column; gap: 3px; padding: 18px 28px 18px 22px; max-height: 480px;
-    overflow-y: auto; background: #e9edf0;
+    overflow-y: auto; overflow-x: hidden; background: #e9edf0;
     scrollbar-width: thin; scrollbar-color: var(--muted-soft) transparent;
   }
   .chat-thread::-webkit-scrollbar { width: 6px; }
@@ -274,6 +274,10 @@
     font-size: 14px; line-height: 1.35; word-break: break-word;
     box-shadow: 0 1px 1px rgba(15,23,42,.1); margin: 5px 12px 1px;
   }
+  /* <audio controls> has a native minimum width (~240-300px) that doesn't shrink - a normal 62%-wide
+     bubble clips it on narrow phone screens, so audio bubbles get more room. */
+  .bubble-has-audio { max-width: min(88%, 300px); }
+  .bubble-has-audio audio { display: block; width: 100%; }
   .bubble-CUSTOMER { align-self: flex-start; background: #ffffff; color: #111b21; border-bottom-left-radius: 0; }
   .bubble-ASSISTANT { align-self: flex-end; background: #d9fdd3; color: #111b21; border-bottom-right-radius: 0; }
   .bubble-SYSTEM { align-self: center; background: rgba(255,255,255,.85); color: var(--muted); font-size: 11.5px; box-shadow: none; margin: 8px auto; white-space: pre-wrap; }
@@ -306,6 +310,12 @@
     .product-footer button { flex: 1 1 45%; }
     button:not(.thumb-remove) { min-height: 40px; }
     input, textarea, select { font-size: 16px; }
+    .modal-overlay { padding: 8px; }
+    .modal-card { max-height: 94vh; border-radius: 14px; }
+    .modal-header { padding: 12px 14px; }
+    .chat-thread { padding: 14px 12px; }
+    .bubble { max-width: 80%; }
+    .bubble-has-audio { max-width: 90%; }
   }
 </style>
 </head>
@@ -1222,11 +1232,12 @@ async function openConversation(id) {
       (conversation.intent ? ` <span class="status-badge" style="background:#fee2e2; color:#991b1b;">${INTENT_LABELS[conversation.intent] || conversation.intent}</span>` : '');
 
     thread.innerHTML = conversation.messages.map((m) => {
-      const img = m.mediaUrl && m.mediaType === 'AUDIO'
-        ? `<audio src="${m.mediaUrl}" controls style="display:block; margin-bottom:4px; max-width:240px;"></audio>`
+      const isAudio = m.mediaUrl && m.mediaType === 'AUDIO';
+      const img = isAudio
+        ? `<audio src="${m.mediaUrl}" controls style="margin-bottom:4px;"></audio>`
         : m.mediaUrl ? `<img src="${m.mediaUrl}" style="max-width:220px; border-radius:6px; display:block; margin-bottom:4px;" />` : '';
       const time = new Date(m.createdAt).toLocaleString('es-CO', { hour: '2-digit', minute: '2-digit' });
-      return `<div class="bubble bubble-${m.role}">${img}<span class="bubble-text">${escapeHtml(m.content)}</span><span class="bubble-time">${time}</span></div>`;
+      return `<div class="bubble bubble-${m.role}${isAudio ? ' bubble-has-audio' : ''}">${img}<span class="bubble-text">${escapeHtml(m.content)}</span><span class="bubble-time">${time}</span></div>`;
     }).join('') || '<div style="text-align:center; color:var(--muted); font-size:13px; padding:20px;">Sin mensajes todavía.</div>';
 
     thread.scrollTop = thread.scrollHeight;
