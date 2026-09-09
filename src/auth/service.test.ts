@@ -33,8 +33,9 @@ function stubWhatsappFetch() {
   originalFetch = globalThis.fetch;
   sentCode = null;
   globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
-    const body = JSON.parse(String(init?.body ?? "{}"));
-    const match = /\b(\d{6})\b/.exec(body.text?.body ?? "");
+    // sendOwnerAlert tries a template first (params live in template.components[].parameters), so
+    // search the whole payload rather than assuming a plain-text message shape.
+    const match = /\b(\d{6})\b/.exec(String(init?.body ?? ""));
     if (match) sentCode = match[1];
     return {
       ok: true,

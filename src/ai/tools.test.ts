@@ -47,7 +47,14 @@ function stubWhatsappFetch() {
   globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
     const body = JSON.parse(String(init?.body ?? "{}"));
     const to = body.to ?? body.recipient;
-    if (body.type === "text") sentMessages.push({ to, body: body.text?.body ?? "" });
+    if (body.type === "text") {
+      sentMessages.push({ to, body: body.text?.body ?? "" });
+    } else if (body.type === "template") {
+      // sendOwnerAlert tries the vendia_owner_alert template first - the dynamic text lives in the
+      // template's body component parameters, not a plain text.body field.
+      const paramText = body.template?.components?.[0]?.parameters?.[0]?.text ?? "";
+      sentMessages.push({ to, body: paramText });
+    }
     return {
       ok: true,
       json: async () => ({ messages: [{ id: `wamid.test-${randomUUID()}` }] }),

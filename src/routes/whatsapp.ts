@@ -2,7 +2,7 @@ import { Router } from "express";
 import { Prisma } from "@prisma/client";
 import { env } from "../config/env";
 import { prisma } from "../db/client";
-import { sendTextMessage, downloadMedia, type WhatsappCredentials } from "../whatsapp/client";
+import { sendTextMessage, sendOwnerAlert, downloadMedia, type WhatsappCredentials } from "../whatsapp/client";
 import { uploadMedia } from "../media/s3";
 import {
   getOrCreateCustomer,
@@ -247,7 +247,7 @@ whatsappRouter.post("/webhook", async (req, res) => {
 
       if (capStatus.justCrossed && business.contactPhone) {
         const greeting = business.contactName ? `Hola ${business.contactName}` : "Hola";
-        await sendTextMessage(
+        await sendOwnerAlert(
           credentials,
           business.contactPhone,
           `${greeting}, tu negocio alcanzó el límite de ${capStatus.messageCap} mensajes de tu plan ${capStatus.planTier} este mes. El bot dejó de responder automáticamente hasta el próximo mes - escribime si querés subir de plan.`

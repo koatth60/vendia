@@ -13,6 +13,7 @@ import {
   sendImageMessage,
   sendVideoMessage,
   sendTextMessage,
+  sendOwnerAlert,
   sendInteractiveButtonsMessage,
   isBsuid,
   type WhatsappCredentials,
@@ -383,10 +384,10 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
         }[intent];
         const greeting = business.contactName ? `Hola ${business.contactName}` : "Hola";
         const customerLabel = await describeCustomer(context.customerId, context.recipientPhone);
-        await sendTextMessage(
+        await sendOwnerAlert(
           context.credentials,
           business.contactPhone,
-          `${greeting}, el cliente ${customerLabel} reporto ${label}. El bot dejo de responderle - entra a https://vendiahub.online/login.html, anda a "Conversaciones" y toma el control para atenderlo vos directamente.`
+          `${greeting}, el cliente ${customerLabel} reporto ${label}. El bot dejo de responderle, toma el control vos directamente.`
         );
       }
 
@@ -416,7 +417,7 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
         'Respondeme citando (mantén presionado y "Responder") este mismo mensaje con la respuesta y se la reenvio tal cual al cliente.',
       ].join("\n\n");
 
-      const wamid = await sendTextMessage(context.credentials, business.contactPhone, text);
+      const wamid = await sendOwnerAlert(context.credentials, business.contactPhone, text);
       if (!wamid) {
         return {
           asked: false,

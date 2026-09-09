@@ -99,6 +99,20 @@ export async function sendImageMessage(
   });
 }
 
+// Owner-facing alerts (escalations, payment confirmations, password resets) need to reach the owner
+// even outside the 24h customer-service session window, which plain text can't do - only an
+// approved template can. Tries the template first and falls back to plain text if it's not approved
+// yet (or doesn't exist for this business's WABA), so behavior degrades gracefully instead of failing
+// silently.
+export async function sendOwnerAlert(credentials: WhatsappCredentials, to: string, bodyText: string): Promise<string> {
+  try {
+    return await sendTemplateMessage(credentials, to, "vendia_owner_alert", "es", [bodyText]);
+  } catch (error) {
+    console.error("No se pudo enviar alerta al dueno via plantilla, probando texto libre:", error);
+    return sendTextMessage(credentials, to, bodyText);
+  }
+}
+
 export async function downloadMedia(
   credentials: WhatsappCredentials,
   mediaId: string
