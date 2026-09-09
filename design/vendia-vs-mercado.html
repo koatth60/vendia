@@ -304,8 +304,8 @@
   <div class="meta">Actualizado 9 sep 2026 · MAG.IMP como piloto real</div>
 
   <div class="stats">
-    <div class="stat done"><div class="n">22</div><div class="l">construido</div></div>
-    <div class="stat gap"><div class="n">9</div><div class="l">brechas reales</div></div>
+    <div class="stat done"><div class="n">23</div><div class="l">construido</div></div>
+    <div class="stat gap"><div class="n">8</div><div class="l">brechas reales</div></div>
     <div class="stat blocked"><div class="n">4</div><div class="l">bloqueado por Tech Provider</div></div>
   </div>
 
@@ -336,7 +336,8 @@
       <div class="built-row"><span>Monitoreo de uptime con alertas<small>GitHub Actions cada 5 min, avisa por WhatsApp</small></span></div>
       <div class="built-row"><span>Topes de plan aplicados de verdad<small>bot deja de responder al pasar el límite, avisa al dueño una vez</small></span></div>
       <div class="built-row"><span>CSAT post-venta<small>encuesta de 3 botones al cerrar el pedido, promedio en analítica</small></span></div>
-      <div class="built-row"><span>Suite de tests en CI<small>24 tests, corre en GitHub Actions en cada push a master</small></span></div>
+      <div class="built-row"><span>Suite de tests en CI<small>27 tests, corre en GitHub Actions en cada push a master</small></span></div>
+      <div class="built-row"><span>Búsqueda semántica en catálogo de productos<small>acentos corregidos + fallback a catálogo completo si no matchea</small></span></div>
     </div>
   </section>
 
@@ -403,13 +404,6 @@
     <div class="group-label">Calidad de IA — encontrado hoy</div>
 
     <div class="item">
-      <span class="chip warn">importante</span>
-      <div class="item-body">
-        <div class="item-title">Catálogo de productos sigue siendo por palabra clave</div>
-        <div class="item-desc">El mismo problema que tenía FAQ hasta hoy — se corrigió ahí (<code>get_faq</code> trae todo, el modelo lee por significado) pero no en <code>search_products</code>.</div>
-      </div>
-    </div>
-    <div class="item">
       <span class="chip polish">pulido</span>
       <div class="item-body">
         <div class="item-title">Sin soporte multi-idioma</div>
@@ -469,13 +463,6 @@
         <div class="reco-body">
           <b>Achicar permisos de S3</b>
           <p>Único crítico que queda abierto — pasar de <code>AmazonS3FullAccess</code> a una policy scoped al bucket de Vendia. Barato, cierra el riesgo de seguridad más serio pendiente.</p>
-        </div>
-      </div>
-      <div class="reco-item">
-        <div class="reco-num"></div>
-        <div class="reco-body">
-          <b>Búsqueda semántica en catálogo de productos</b>
-          <p>Mismo fix que ya funcionó en FAQ — bajo esfuerzo, cierra el hueco de calidad de IA más visible que queda.</p>
         </div>
       </div>
       <div class="reco-item">
