@@ -304,8 +304,8 @@
   <div class="meta">Actualizado 9 sep 2026 · MAG.IMP como piloto real</div>
 
   <div class="stats">
-    <div class="stat done"><div class="n">15</div><div class="l">construido</div></div>
-    <div class="stat gap"><div class="n">16</div><div class="l">brechas reales</div></div>
+    <div class="stat done"><div class="n">19</div><div class="l">construido</div></div>
+    <div class="stat gap"><div class="n">12</div><div class="l">brechas reales</div></div>
     <div class="stat blocked"><div class="n">4</div><div class="l">bloqueado por Tech Provider</div></div>
   </div>
 
@@ -330,6 +330,10 @@
       <div class="built-row"><span>Panel interno Vendia Admin<small>gestionar clientes sin SSH</small></span></div>
       <div class="built-row"><span>Tests automáticos del bot<small><code>npm test</code>, corre contra DeepSeek real</small></span></div>
       <div class="built-row"><span>Borrado automático en S3<small>comprobantes y audios de clientes, 90 días</small></span></div>
+      <div class="built-row"><span>Recuperar contraseña<small>código por WhatsApp, sin proveedor de email nuevo</small></span></div>
+      <div class="built-row"><span>Rate limiting en login/signup/reset<small>10 intentos / 15 min</small></span></div>
+      <div class="built-row"><span>Backups automáticos de la base de datos<small><code>pg_dump</code> diario a S3, 30 días de retención</small></span></div>
+      <div class="built-row"><span>Monitoreo de uptime con alertas<small>GitHub Actions cada 5 min, avisa por WhatsApp</small></span></div>
     </div>
   </section>
 
@@ -351,34 +355,8 @@
     <div class="item">
       <span class="chip crit">crítico</span>
       <div class="item-body">
-        <div class="item-title">No hay recuperar contraseña</div>
-        <div class="item-desc">Un dueño que se traba en su cuenta no tiene salida self-serve.</div>
-      </div>
-    </div>
-    <div class="item">
-      <span class="chip crit">crítico</span>
-      <div class="item-body">
-        <div class="item-title">Sin rate limiting en login/signup</div>
-        <div class="item-desc">Expuesto a fuerza bruta — cero fricción para intentos repetidos.</div>
-      </div>
-    </div>
-    <div class="item">
-      <span class="chip crit">crítico</span>
-      <div class="item-body">
         <div class="item-title">Permisos S3 sobre-amplios</div>
         <div class="item-desc">El IAM user de la app tiene <code>AmazonS3FullAccess</code> en vez de acceso limitado al bucket de Vendia.</div>
-      </div>
-    </div>
-    <div class="item">
-      <span class="chip warn">importante</span>
-      <div class="item-body">
-        <div class="item-title">Sin backups automáticos de la base de datos</div>
-      </div>
-    </div>
-    <div class="item">
-      <span class="chip warn">importante</span>
-      <div class="item-body">
-        <div class="item-title">Sin monitoreo de uptime con alertas</div>
       </div>
     </div>
 
@@ -408,10 +386,10 @@
       </div>
     </div>
     <div class="item">
-      <span class="chip warn">importante</span>
+      <span class="chip polish">en pausa</span>
       <div class="item-body">
         <div class="item-title">Cobro sigue siendo manual (ActivationKey)</div>
-        <div class="item-desc">Sin pasarela integrada — candidatos para Colombia: Wompi, ePayco, PayU. Bloquea señ-up self-serve.</div>
+        <div class="item-desc">Wompi persona natural alcanzaría (confirmado). Pausado a propósito — todavía en fase de aprendizaje con un solo cliente piloto antes de cobrar de verdad.</div>
       </div>
     </div>
 
@@ -506,32 +484,26 @@
       <div class="reco-item">
         <div class="reco-num"></div>
         <div class="reco-body">
-          <b>Rate limiting + recuperar contraseña</b>
-          <p>Barato de construir, cierra un riesgo real de seguridad antes de sumar más clientes que MAG.IMP.</p>
-        </div>
-      </div>
-      <div class="reco-item">
-        <div class="reco-num"></div>
-        <div class="reco-body">
-          <b>Pasarela de pago automatizada (Wompi o ePayco)</b>
-          <p>Desbloquea señ-up self-serve y billing real — hoy todo pasa por ActivationKey manual.</p>
-        </div>
-      </div>
-      <div class="reco-item">
-        <div class="reco-num"></div>
-        <div class="reco-body">
-          <b>Checkout in-chat más fluido para métodos LatAm</b>
-          <p>Diferenciación genuina — ningún competidor resuelve bien Nequi/contraentrega, Zoko solo sirve a Shopify.</p>
+          <b>Achicar permisos de S3</b>
+          <p>Único crítico que queda abierto — pasar de <code>AmazonS3FullAccess</code> a una policy scoped al bucket de Vendia. Barato, cierra el riesgo de seguridad más serio pendiente.</p>
         </div>
       </div>
       <div class="reco-item">
         <div class="reco-num"></div>
         <div class="reco-body">
           <b>Búsqueda semántica en catálogo de productos</b>
-          <p>Mismo fix que ya funcionó en FAQ hoy — bajo esfuerzo, cierra el hueco de calidad de IA más visible que queda.</p>
+          <p>Mismo fix que ya funcionó en FAQ — bajo esfuerzo, cierra el hueco de calidad de IA más visible que queda.</p>
+        </div>
+      </div>
+      <div class="reco-item">
+        <div class="reco-num"></div>
+        <div class="reco-body">
+          <b>Checkout in-chat más fluido para métodos LatAm</b>
+          <p>Diferenciación genuina — ningún competidor resuelve bien Nequi/contraentrega, Zoko solo sirve a Shopify. Vale más una vez retomen el tema de pagos.</p>
         </div>
       </div>
     </div>
+    <p class="item-desc" style="margin-top:14px;">Pasarela de pago automatizada queda fuera de esta lista a propósito — pausada mientras siguen en fase de aprendizaje con MAG.IMP antes de cobrar de verdad (ver brecha "en pausa" arriba).</p>
   </section>
 
   <footer>Documento vivo — pedime que lo actualice cada vez que cerremos o encontremos algo nuevo.</footer>
