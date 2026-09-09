@@ -741,7 +741,7 @@ async function loadBusiness() {
 }
 
 const QUICK_INSTRUCTION_CHIPS = [
-  { label: 'Confirmar antes de cerrar', text: 'Antes de cerrar el pedido, confirma con el cliente todos los datos (producto, cantidad, dirección, forma de pago).' },
+  { label: 'Confirmar datos con el cliente', text: 'Antes de cerrar el pedido, confirma con el cliente todos los datos (producto, cantidad, dirección, forma de pago).' },
   { label: 'No prometer fechas exactas', text: 'Nunca prometas fechas exactas de entrega, solo tiempos aproximados.' },
   { label: 'Despedirse cordialmente', text: 'Al terminar una conversación o cerrar una venta, despídete de forma cordial agradeciendo al cliente.' },
   { label: 'Emojis moderados', text: 'Usa emojis con moderación, sin exagerar.' },
@@ -783,7 +783,7 @@ function renderInstructionChips() {
   currentChips = QUICK_INSTRUCTION_CHIPS.concat(CATEGORY_INSTRUCTION_CHIPS[category] || []);
   container.innerHTML = currentChips.map((chip, i) => {
     const already = current.includes(chip.text);
-    return `<button type="button" class="chip${already ? ' chip-added' : ''}" onclick="addChipInstruction(${i})">${already ? '✓ ' : '+ '}${escapeHtml(chip.label)}</button>`;
+    return `<button type="button" class="chip${already ? ' chip-added' : ''}" title="${escapeHtml(chip.text)}" onclick="addChipInstruction(${i})">${already ? '✓ ' : '+ '}${escapeHtml(chip.label)}</button>`;
   }).join('');
 }
 
