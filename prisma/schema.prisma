@@ -205,6 +205,8 @@ model Conversation {
   pendingOrderSummary          String?
   pendingOrderItems            Json?
   pendingOwnerQuestionMessageId String?            @unique
+  contextSummary                String?
+  contextSummarizedUpTo         Int?
   order                        Order?
   messages                     Message[]
   createdAt                    DateTime            @default(now())

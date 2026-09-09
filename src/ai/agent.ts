@@ -3,6 +3,7 @@ import { deepseek, DEEPSEEK_MODEL } from "./client";
 import { catalogTools, runCatalogTool, type ToolContext } from "./tools";
 import { getRecentHistory } from "../conversation/service";
 import { logAiUsage } from "./usage";
+import { prisma } from "../db/client";
 
 const BASE_SYSTEM_PROMPT = `Eres un asistente de ventas por WhatsApp para un negocio.
 
@@ -12,6 +13,11 @@ para un pedido, pregunta de a UN dato a la vez y espera la respuesta antes de pe
 tires una lista numerada de 3 preguntas juntas.
 
 {{IDIOMA}}
+
+IDIOMA DEL CLIENTE: la directiva de arriba es el español por default de este negocio, pero si el cliente
+te escribe en otro idioma (ingles, portugues, etc.), respondele en ESE idioma, no en español - mantene el
+mismo tono calido y breve. Si mezcla idiomas o volves a un mensaje en español, volves vos tambien al
+español configurado. Nunca le digas al cliente que no entendes su idioma.
 
 ORTOGRAFIA: escribe siempre con tildes y ortografia correcta en español (catálogo, información, teléfono,
 cómo, qué, envío, garantía, política, etc). Nunca omitas una tilde por escribir rápido.
@@ -229,15 +235,103 @@ function messageText(m: { content: string; imageAnalysis: string | null }): stri
   return `${caption ? `${caption}\n\n` : ""}[Analisis de imagen adjunta]: ${m.imageAnalysis}`;
 }
 
+// getRecentHistory only sends the last RECENT_WINDOW messages to the model - a long conversation would
+// otherwise lose everything said before that. Instead of re-summarizing the whole older-messages history
+// from scratch each time (which grows unbounded), this only feeds the newly-aged-out slice through the
+// model to fold into the existing summary, so each refresh stays cheap regardless of how long the
+// conversation eventually gets.
+const CONTEXT_SUMMARY_WINDOW = 20;
+const CONTEXT_SUMMARY_REFRESH_EVERY = 10;
+
+export async function getOrRefreshContextSummary(conversationId: string, businessId: string): Promise<string | null> {
+  const total = await prisma.message.count({ where: { conversationId } });
+  if (total <= CONTEXT_SUMMARY_WINDOW) return null;
+
+  const conversation = await prisma.conversation.findUnique({
+    where: { id: conversationId },
+    select: { contextSummary: true, contextSummarizedUpTo: true },
+  });
+
+  const olderCount = total - CONTEXT_SUMMARY_WINDOW;
+  const lastUpTo = conversation?.contextSummarizedUpTo ?? 0;
+
+  if (conversation?.contextSummary && olderCount - lastUpTo < CONTEXT_SUMMARY_REFRESH_EVERY) {
+    return conversation.contextSummary;
+  }
+
+  const newlyAgedMessages = await prisma.message.findMany({
+    where: { conversationId },
+    orderBy: { createdAt: "asc" },
+    skip: lastUpTo,
+    take: olderCount - lastUpTo,
+  });
+  if (newlyAgedMessages.length === 0) return conversation?.contextSummary ?? null;
+
+  const roleLabel = { CUSTOMER: "Cliente", ASSISTANT: "Bot", SYSTEM: "Sistema" } as const;
+  const transcript = newlyAgedMessages.map((m) => `${roleLabel[m.role]}: ${m.content}`).join("\n");
+
+  try {
+    const response = await deepseek.chat.completions.create({
+      model: DEEPSEEK_MODEL,
+      max_tokens: 220,
+      messages: [
+        {
+          role: "system",
+          content:
+            "Actualiza el resumen de esta conversacion de ventas por WhatsApp combinando el resumen " +
+            "anterior con los mensajes nuevos. 3-4 frases cortas en español: que producto(s) le " +
+            "interesaron al cliente, que datos ya dio (nombre, direccion, forma de pago), en que quedo " +
+            "la conversacion. Sin relleno, sin saludos.",
+        },
+        {
+          role: "user",
+          content: `Resumen anterior: ${conversation?.contextSummary || "(ninguno todavia)"}\n\nMensajes nuevos:\n${transcript}`,
+        },
+      ],
+      // @ts-expect-error DeepSeek-specific param, not in the OpenAI SDK types.
+      thinking: { type: "disabled" },
+    });
+
+    await logAiUsage({
+      businessId,
+      conversationId,
+      kind: "CHAT",
+      model: DEEPSEEK_MODEL,
+      usage: response.usage,
+    });
+
+    const summary = response.choices[0]?.message?.content?.trim();
+    if (!summary) return conversation?.contextSummary ?? null;
+
+    await prisma.conversation.update({
+      where: { id: conversationId },
+      data: { contextSummary: summary, contextSummarizedUpTo: olderCount },
+    });
+    return summary;
+  } catch (error) {
+    console.error("No se pudo actualizar el resumen de contexto de la conversacion:", error);
+    return conversation?.contextSummary ?? null;
+  }
+}
+
 export async function generateReply(
   conversationId: string,
   context: ToolContext,
   personality?: BotPersonality | null
 ): Promise<string> {
   const history = await getRecentHistory(conversationId);
+  const contextSummary = await getOrRefreshContextSummary(conversationId, context.businessId);
 
   const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
     { role: "system", content: buildSystemPrompt(personality) },
+    ...(contextSummary
+      ? [
+          {
+            role: "system" as const,
+            content: `RESUMEN DE LO HABLADO ANTES (mensajes mas viejos que ya no ves completos): ${contextSummary}`,
+          },
+        ]
+      : []),
     ...history.map((m) => ({
       role: toOpenAiRole(m.role),
       content: messageText(m),
