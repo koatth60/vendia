@@ -386,7 +386,7 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
         await sendTextMessage(
           context.credentials,
           business.contactPhone,
-          `${greeting}, el cliente ${customerLabel} reporto ${label}. Tome control de la conversacion en el panel para atenderlo directamente, el bot dejo de responderle.`
+          `${greeting}, el cliente ${customerLabel} reporto ${label}. El bot dejo de responderle - entra a https://vendiahub.online/login.html, anda a "Conversaciones" y toma el control para atenderlo vos directamente.`
         );
       }
 
