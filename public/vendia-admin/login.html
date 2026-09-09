@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="icon" href="/favicon.ico" sizes="any" />
+<link rel="icon" type="image/png" href="/favicon-32.png" />
+<link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+<title>Vendia Admin | Iniciar sesión</title>
+<style>
+  :root {
+    --green: #1fa855; --green-dark: #16803f;
+    --ink: #14181c; --muted: #6b7480; --border: #e4e7eb; --bg: #f4f6f8; --card: #ffffff;
+    --danger: #e5484d; --danger-light: #fdecec;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: "Segoe UI", system-ui, sans-serif; background: var(--bg); margin: 0; color: var(--ink);
+    min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 16px;
+  }
+  .card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 16px;
+    padding: 36px; width: 100%; max-width: 380px; box-shadow: 0 1px 2px rgba(20,24,28,0.04), 0 8px 24px rgba(20,24,28,0.06);
+  }
+  h1 { font-size: 19px; text-align: center; margin: 0 0 4px; font-weight: 600; }
+  .sub { text-align: center; font-size: 13px; color: var(--muted); margin: 0 0 24px; }
+  label { display: block; font-size: 13px; font-weight: 600; margin-top: 14px; margin-bottom: 6px; }
+  input { width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 9px; font-size: 16px; font-family: inherit; background: #fbfbfc; }
+  input:focus { outline: none; border-color: var(--green); background: #fff; }
+  button { width: 100%; margin-top: 22px; cursor: pointer; border: none; border-radius: 9px; padding: 11px; font-size: 14px; font-weight: 700; background: var(--green); color: white; }
+  button:hover { opacity: .9; }
+  .error { background: var(--danger-light); color: var(--danger); padding: 10px 12px; border-radius: 8px; font-size: 13px; margin-top: 14px; display: none; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>Vendia Admin</h1>
+    <p class="sub">Panel interno — solo equipo Vendia</p>
+    <form id="login-form">
+      <label>Email</label>
+      <input type="email" id="email" required autocomplete="email" />
+      <label>Contraseña</label>
+      <input type="password" id="password" required autocomplete="current-password" />
+      <div class="error" id="error"></div>
+      <button type="submit">Entrar</button>
+    </form>
+  </div>
+
+<script>
+document.getElementById('login-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const errorEl = document.getElementById('error');
+  errorEl.style.display = 'none';
+
+  const email = document.getElementById('email').value.trim();
+  const password = document.getElementById('password').value;
+
+  const res = await fetch('/vendia-admin/api/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password }),
+  });
+
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    errorEl.textContent = data.error || 'No pudimos iniciar sesión';
+    errorEl.style.display = 'block';
+    return;
+  }
+
+  window.location.href = '/vendia-admin/';
+});
+</script>
+</body>
+</html>

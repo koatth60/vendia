@@ -144,8 +144,13 @@ whatsappRouter.post("/webhook", async (req, res) => {
       accessToken: business.whatsappAccessToken,
     };
 
-    const from: string = message.from;
+    const from: string | undefined = message.from ?? message.from_user_id;
     const whatsappMessageId: string | undefined = message.id;
+
+    if (!from) {
+      console.log("Mensaje sin remitente (from) valido, ignorado:", JSON.stringify(message));
+      return;
+    }
 
     const onlyDigits = (phone: string) => phone.replace(/\D/g, "");
     if (business.contactPhone && onlyDigits(from) === onlyDigits(business.contactPhone)) {
@@ -201,7 +206,16 @@ whatsappRouter.post("/webhook", async (req, res) => {
         credentials,
         recipientPhone: from,
       },
-      business.customInstructions
+      {
+        assistantName: business.assistantName,
+        tone: business.botTone,
+        dialect: business.botDialect,
+        greeting: business.botGreeting,
+        neverSay: business.botNeverSay,
+        customInstructions: business.customInstructions,
+        autoSendPhotoOnQuote: business.autoSendPhotoOnQuote,
+        category: business.businessCategory,
+      }
     );
     await sendTextMessage(credentials, from, reply);
     await recordMessage(conversation.id, "ASSISTANT", reply);

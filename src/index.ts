@@ -5,6 +5,7 @@ import { env } from "./config/env";
 import { whatsappRouter } from "./routes/whatsapp";
 import { adminRouter } from "./routes/admin";
 import { authRouter } from "./routes/auth";
+import { platformAdminRouter } from "./routes/platformAdmin";
 import { runFollowUpJob } from "./jobs/followUp";
 
 const app = express();
@@ -32,6 +33,8 @@ app.use(whatsappRouter);
 app.use("/auth", authRouter);
 app.use("/admin", adminRouter);
 app.use("/admin", express.static(path.join(__dirname, "..", "public", "admin")));
+app.use("/vendia-admin/api", platformAdminRouter);
+app.use("/vendia-admin", express.static(path.join(__dirname, "..", "public", "vendia-admin")));
 app.use(express.static(path.join(__dirname, "..", "public")));
 
 app.listen(env.port, () => {

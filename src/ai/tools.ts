@@ -14,9 +14,18 @@ import {
   sendVideoMessage,
   sendTextMessage,
   sendInteractiveButtonsMessage,
+  isBsuid,
   type WhatsappCredentials,
 } from "../whatsapp/client";
 import { prisma } from "../db/client";
+
+async function describeCustomer(customerId: string, recipientPhone: string): Promise<string> {
+  if (!isBsuid(recipientPhone)) return recipientPhone;
+  const customer = await prisma.customer.findUnique({ where: { id: customerId } });
+  return customer?.name
+    ? `${customer.name} (sin numero visible, privacidad de WhatsApp activada)`
+    : "un cliente (sin numero visible, privacidad de WhatsApp activada)";
+}
 
 export const catalogTools: OpenAI.Chat.ChatCompletionTool[] = [
   {
@@ -209,8 +218,9 @@ async function requestSaleConfirmation(context: ToolContext, summary: string, dr
   if (!business?.contactPhone) return false;
 
   const greeting = business.contactName ? `Hola ${business.contactName}` : "Hola";
+  const customerLabel = await describeCustomer(context.customerId, context.recipientPhone);
   const text = [
-    `${greeting}, el cliente ${context.recipientPhone} pago/confirmo este pedido:`,
+    `${greeting}, el cliente ${customerLabel} pago/confirmo este pedido:`,
     summary || "El cliente confirmo la compra, sin mas detalles registrados.",
     "¿Te llego el pago?",
   ].join("\n\n");
@@ -334,10 +344,11 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
       if (business?.contactPhone) {
         const label = { PQR: "PQR", DEVOLUCION: "una devolucion", NO_RECIBIDO: "un pedido no recibido" }[intent];
         const greeting = business.contactName ? `Hola ${business.contactName}` : "Hola";
+        const customerLabel = await describeCustomer(context.customerId, context.recipientPhone);
         await sendTextMessage(
           context.credentials,
           business.contactPhone,
-          `${greeting}, el cliente ${context.recipientPhone} reporto ${label}. Tome control de la conversacion en el panel para atenderlo directamente, el bot dejo de responderle.`
+          `${greeting}, el cliente ${customerLabel} reporto ${label}. Tome control de la conversacion en el panel para atenderlo directamente, el bot dejo de responderle.`
         );
       }
 

@@ -11,9 +11,10 @@ Usa emojis con naturalidad (no en cada linea, pero si donde ayuden a que suene h
 para un pedido, pregunta de a UN dato a la vez y espera la respuesta antes de pedir el siguiente - nunca
 tires una lista numerada de 3 preguntas juntas.
 
-IDIOMA: usa español neutro latinoamericano. Trata al cliente de "tú", nunca de "vos". No uses vocabulario
-ni conjugaciones argentinas (nunca "sos", "querés", "tenés", "decime", "contame", "che", "vos"). Usa formas
-neutras: "eres", "quieres", "tienes", "dime", "cuéntame".
+{{IDIOMA}}
+
+ORTOGRAFIA: escribe siempre con tildes y ortografia correcta en español (catálogo, información, teléfono,
+cómo, qué, envío, garantía, política, etc). Nunca omitas una tilde por escribir rápido.
 
 CATALOGO: responde preguntas sobre productos (precio, stock, caracteristicas) usando siempre las
 herramientas para consultar el catalogo real. Nunca inventes precios, stock ni caracteristicas.
@@ -23,11 +24,7 @@ cambios, horarios, etc) que no sea un producto especifico ni una forma de pago, 
 responder. Si no encuentra nada, decile honestamente que no tienes esa informacion y que un asesor se la
 va a confirmar - nunca inventes politicas del negocio.
 
-FOTOS Y VIDEOS: si el cliente pide ver fotos, imagenes o video de un producto, usa send_product_media
-pasando el nombre del producto DEL QUE SE ESTA HABLANDO AHORA MISMO (no uno mencionado antes en la
-conversacion). No describas la foto en texto ni pongas la URL en el mensaje, la herramienta ya envia el
-archivo real. Revisa el campo "product" que devuelve la herramienta: si no coincide con lo pedido, decilo
-honestamente. Si la herramienta devuelve error o sent:false, nunca digas que ya la mandaste.
+{{FOTOS}}
 
 PAGOS: cuando el cliente quiera confirmar una compra o pregunte como pagar, usa get_payment_methods para
 saber las formas de pago reales de este negocio y ofrecele esas opciones. Nunca inventes metodos de pago.
@@ -73,13 +70,104 @@ pago con el equipo y te aviso apenas este listo". Si dice closed:true, ahi si co
 pedido quedo cerrado. Si el cliente dice explicitamente que no le interesa o no va a comprar, usa
 close_conversation con outcome=LOST. No la uses en ningun otro momento de la conversacion.`;
 
-function buildSystemPrompt(customInstructions?: string | null): string {
-  if (!customInstructions || !customInstructions.trim()) return BASE_SYSTEM_PROMPT;
-  return `${BASE_SYSTEM_PROMPT}
+const TONE_DIRECTIVES: Record<string, string> = {
+  cercano: "Tono cercano y casual, como chateando con un amigo, emojis con naturalidad.",
+  formal: "Tono formal y profesional. Sin diminutivos, sin emojis, trato respetuoso y directo.",
+  juvenil: "Tono juvenil, dinámico y entusiasta, con emojis frecuentes y lenguaje relajado.",
+  profesional: "Tono profesional pero amable, corporativo sin ser frío, pocos emojis.",
+};
 
-INSTRUCCIONES ESPECIFICAS DE ESTE NEGOCIO (seguilas siempre que no contradigan las reglas de arriba sobre
+const LANGUAGE_DIRECTIVES: Record<string, string> = {
+  neutro: `IDIOMA: usa español neutro latinoamericano. Trata al cliente de "tú", nunca de "vos". No uses
+vocabulario ni conjugaciones argentinas (nunca "sos", "querés", "tenés", "decime", "contame", "che", "vos").
+Usa formas neutras: "eres", "quieres", "tienes", "dime", "cuéntame".`,
+  mexico: `IDIOMA: usa español de México. Trata al cliente de "tú". Modismos mexicanos naturales con
+moderación (ej: "¿qué tal?", "con gusto", "órale" solo si encaja), nunca fuerces jerga que no venga al caso.`,
+  argentina: `IDIOMA: usa español rioplatense (Argentina). Trata al cliente de "vos" (sos, querés, tenés,
+decime, contame), tono cercano y directo.`,
+  colombia: `IDIOMA: usa español colombiano. Trata al cliente de "tú", expresiones naturales como "listo",
+"con gusto", "de una", sin exagerar el acento regional.`,
+  chile: `IDIOMA: usa español chileno. Trata al cliente de "tú", modismos chilenos con moderación (ej:
+"bacán", "al tiro"), sin forzarlos si no vienen al caso.`,
+};
+
+const PHOTO_DIRECTIVE_AUTO = `FOTOS Y VIDEOS: la primera vez que cotices o des detalle de un producto especifico en la
+conversacion, usa send_product_media para mandar su foto automaticamente, sin que el cliente tenga que
+pedirla - pasando el nombre del producto DEL QUE SE ESTA HABLANDO AHORA MISMO. No la reenvies si ya la
+mandaste para ese mismo producto en esta conversacion, salvo que el cliente la pida de nuevo o pida ver
+otro angulo/video. Si el cliente pide ver fotos, imagenes o video explicitamente, usa la herramienta igual.
+No describas la foto en texto ni pongas la URL en el mensaje, la herramienta ya envia el archivo real.
+Revisa el campo "product" que devuelve la herramienta: si no coincide con lo pedido, decilo honestamente.
+Si la herramienta devuelve error o sent:false, nunca digas que ya la mandaste.`;
+
+const PHOTO_DIRECTIVE_REACTIVE = `FOTOS Y VIDEOS: si el cliente pide ver fotos, imagenes o video de un producto, usa send_product_media
+pasando el nombre del producto DEL QUE SE ESTA HABLANDO AHORA MISMO (no uno mencionado antes en la
+conversacion). No describas la foto en texto ni pongas la URL en el mensaje, la herramienta ya envia el
+archivo real. Revisa el campo "product" que devuelve la herramienta: si no coincide con lo pedido, decilo
+honestamente. Si la herramienta devuelve error o sent:false, nunca digas que ya la mandaste.`;
+
+const CATEGORY_LABELS: Record<string, string> = {
+  ropa: "moda y ropa",
+  electronica: "electrónica y tecnología",
+  comida: "restaurante y comida",
+  servicios: "servicios (belleza, salud u otros servicios agendables)",
+  joyeria: "joyería y accesorios",
+};
+
+export interface BotPersonality {
+  assistantName?: string | null;
+  tone?: string | null;
+  dialect?: string | null;
+  greeting?: string | null;
+  neverSay?: string | null;
+  customInstructions?: string | null;
+  autoSendPhotoOnQuote?: boolean;
+  category?: string | null;
+}
+
+function buildSystemPrompt(personality?: BotPersonality | null): string {
+  const languageDirective =
+    (personality?.dialect && LANGUAGE_DIRECTIVES[personality.dialect]) || LANGUAGE_DIRECTIVES.neutro;
+  const photoDirective = personality?.autoSendPhotoOnQuote === false ? PHOTO_DIRECTIVE_REACTIVE : PHOTO_DIRECTIVE_AUTO;
+  const parts: string[] = [
+    BASE_SYSTEM_PROMPT.replace("{{IDIOMA}}", languageDirective).replace("{{FOTOS}}", photoDirective),
+  ];
+
+  const categoryLabel = personality?.category ? CATEGORY_LABELS[personality.category] : undefined;
+  if (categoryLabel) {
+    parts.push(`RUBRO DEL NEGOCIO: este negocio es de ${categoryLabel}. Ten esto en cuenta para el tipo de preguntas que hacés y cómo describís los productos.`);
+  }
+
+  if (personality?.assistantName?.trim()) {
+    parts.push(
+      `TU NOMBRE: te llamas "${personality.assistantName.trim()}". Preséntate con ese nombre cuando corresponda.`
+    );
+  }
+
+  const toneDirective = personality?.tone ? TONE_DIRECTIVES[personality.tone] : undefined;
+  if (toneDirective) {
+    parts.push(`TONO DE ESTE NEGOCIO: ${toneDirective}`);
+  }
+
+  if (personality?.greeting?.trim()) {
+    parts.push(
+      `SALUDO: al iniciar una conversación nueva, saluda basándote en esto (adaptándolo naturalmente, no lo repitas literal siempre): "${personality.greeting.trim()}"`
+    );
+  }
+
+  if (personality?.neverSay?.trim()) {
+    parts.push(`NUNCA digas ni hagas esto: ${personality.neverSay.trim()}`);
+  }
+
+  if (personality?.customInstructions?.trim()) {
+    parts.push(
+      `INSTRUCCIONES ESPECIFICAS DE ESTE NEGOCIO (seguilas siempre que no contradigan las reglas de arriba sobre
 precios, stock, metodos de pago o fotos reales):
-${customInstructions.trim()}`;
+${personality.customInstructions.trim()}`
+    );
+  }
+
+  return parts.join("\n\n");
 }
 
 function toOpenAiRole(role: "CUSTOMER" | "ASSISTANT" | "SYSTEM"): "user" | "assistant" {
@@ -95,12 +183,12 @@ function messageText(m: { content: string; imageAnalysis: string | null }): stri
 export async function generateReply(
   conversationId: string,
   context: ToolContext,
-  customInstructions?: string | null
+  personality?: BotPersonality | null
 ): Promise<string> {
   const history = await getRecentHistory(conversationId);
 
   const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
-    { role: "system", content: buildSystemPrompt(customInstructions) },
+    { role: "system", content: buildSystemPrompt(personality) },
     ...history.map((m) => ({
       role: toOpenAiRole(m.role),
       content: messageText(m),

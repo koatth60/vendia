@@ -5,6 +5,14 @@ export interface WhatsappCredentials {
   accessToken: string;
 }
 
+export function isBsuid(id: string): boolean {
+  return /^[A-Za-z]{2}\.\d+$/.test(id);
+}
+
+function recipientField(to: string): { to: string } | { recipient: string } {
+  return isBsuid(to) ? { recipient: to } : { to };
+}
+
 async function callGraphApi(credentials: WhatsappCredentials, body: unknown) {
   const url = `${GRAPH_BASE_URL}/${credentials.phoneNumberId}/messages`;
   const response = await fetch(url, {
@@ -27,7 +35,7 @@ async function callGraphApi(credentials: WhatsappCredentials, body: unknown) {
 export async function sendTextMessage(credentials: WhatsappCredentials, to: string, text: string): Promise<string> {
   const result = (await callGraphApi(credentials, {
     messaging_product: "whatsapp",
-    to,
+    ...recipientField(to),
     type: "text",
     text: { body: text },
   })) as { messages?: { id: string }[] };
@@ -42,7 +50,7 @@ export async function sendInteractiveButtonsMessage(
 ): Promise<string> {
   const result = (await callGraphApi(credentials, {
     messaging_product: "whatsapp",
-    to,
+    ...recipientField(to),
     type: "interactive",
     interactive: {
       type: "button",
@@ -64,7 +72,7 @@ export async function sendTemplateMessage(
 ): Promise<string> {
   const result = (await callGraphApi(credentials, {
     messaging_product: "whatsapp",
-    to,
+    ...recipientField(to),
     type: "template",
     template: {
       name: templateName,
@@ -85,7 +93,7 @@ export async function sendImageMessage(
 ) {
   return callGraphApi(credentials, {
     messaging_product: "whatsapp",
-    to,
+    ...recipientField(to),
     type: "image",
     image: { link: imageUrl, caption },
   });
@@ -122,7 +130,7 @@ export async function sendVideoMessage(
 ) {
   return callGraphApi(credentials, {
     messaging_product: "whatsapp",
-    to,
+    ...recipientField(to),
     type: "video",
     video: { link: videoUrl, caption },
   });

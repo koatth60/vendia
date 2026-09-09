@@ -20,7 +20,8 @@ import {
   setCustomerTags,
 } from "../conversation/service";
 import { sendTextMessage, type WhatsappCredentials } from "../whatsapp/client";
-import { getAiUsageSummary, getPlanUsage } from "../ai/usage";
+import { getAiUsageSummary, getPlanUsage, logAiUsage } from "../ai/usage";
+import { deepseek, DEEPSEEK_MODEL } from "../ai/client";
 import { getAnalyticsSummary } from "../analytics/service";
 import { listFaqEntries, createFaqEntry, updateFaqEntry, deleteFaqEntry } from "../catalog/faq";
 import { listOrdersForBusiness } from "../orders/service";
@@ -56,6 +57,13 @@ adminRouter.put("/api/business", requireOwner, async (req, res) => {
     name,
     description,
     customInstructions,
+    assistantName,
+    botTone,
+    botDialect,
+    botGreeting,
+    botNeverSay,
+    autoSendPhotoOnQuote,
+    businessCategory,
     contactPhone,
     contactName,
     followUpTemplateName,
@@ -68,6 +76,13 @@ adminRouter.put("/api/business", requireOwner, async (req, res) => {
       name,
       description,
       customInstructions,
+      assistantName: assistantName || null,
+      botTone: botTone || null,
+      botDialect: botDialect || null,
+      botGreeting: botGreeting || null,
+      botNeverSay: botNeverSay || null,
+      autoSendPhotoOnQuote: Boolean(autoSendPhotoOnQuote),
+      businessCategory: businessCategory || null,
       contactPhone,
       contactName,
       followUpTemplateName: followUpTemplateName || null,
@@ -77,6 +92,61 @@ adminRouter.put("/api/business", requireOwner, async (req, res) => {
   });
   const { passwordHash: _hash, whatsappAccessToken: _token, ...safe } = business;
   res.json(safe);
+});
+
+adminRouter.delete("/api/reset-test-data", requireOwner, async (req, res) => {
+  const businessId = businessIdOf(req);
+
+  await prisma.$transaction([
+    prisma.message.deleteMany({ where: { conversation: { customer: { businessId } } } }),
+    prisma.orderItem.deleteMany({ where: { order: { businessId } } }),
+    prisma.order.deleteMany({ where: { businessId } }),
+    prisma.conversation.deleteMany({ where: { customer: { businessId } } }),
+    prisma.customer.deleteMany({ where: { businessId } }),
+    prisma.product.updateMany({ where: { businessId }, data: { inquiryCount: 0 } }),
+  ]);
+
+  res.json({ ok: true });
+});
+
+adminRouter.post("/api/improve-instructions", requireOwner, async (req, res) => {
+  const text = String(req.body?.text ?? "").trim();
+  if (!text) {
+    res.status(400).json({ error: "No hay texto para mejorar" });
+    return;
+  }
+
+  const response = await deepseek.chat.completions.create({
+    model: DEEPSEEK_MODEL,
+    max_tokens: 600,
+    messages: [
+      {
+        role: "system",
+        content: `Reescribe instrucciones de un dueño de negocio para su asistente de ventas de WhatsApp.
+Corrige ortografía y gramática, organiza en viñetas claras y cortas, en español neutro. NO inventes reglas
+nuevas ni cambies el significado de lo que pidió - solo aclara la redacción. No agregues explicaciones,
+devuelve unicamente las instrucciones reescritas.`,
+      },
+      { role: "user", content: text },
+    ],
+    // @ts-expect-error DeepSeek-specific param, not in the OpenAI SDK types. Disabled: reasoning
+    // tokens leave message.content empty for a short rewrite task like this one.
+    thinking: { type: "disabled" },
+  });
+
+  await logAiUsage({
+    businessId: businessIdOf(req),
+    kind: "CHAT",
+    model: DEEPSEEK_MODEL,
+    usage: response.usage,
+  });
+
+  const improved = response.choices[0]?.message?.content?.trim();
+  if (!improved) {
+    res.status(502).json({ error: "No se pudo mejorar el texto, intenta de nuevo" });
+    return;
+  }
+  res.json({ improved });
 });
 
 adminRouter.get("/api/products", async (req, res) => {

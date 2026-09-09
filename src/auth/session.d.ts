@@ -5,5 +5,6 @@ declare module "express-session" {
     businessId?: string;
     role?: "OWNER" | "EMPLOYEE";
     email?: string;
+    platformAdmin?: boolean;
   }
 }

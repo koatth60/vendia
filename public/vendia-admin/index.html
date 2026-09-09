@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="icon" href="/favicon.ico" sizes="any" />
+<link rel="icon" type="image/png" href="/favicon-32.png" />
+<link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+<title>Vendia Admin</title>
+<style>
+  :root {
+    --green: #1fa855; --green-dark: #16803f; --green-light: #e6f7ec;
+    --ink: #14181c; --muted: #6b7480; --border: #e4e7eb; --bg: #f4f6f8; --card: #ffffff;
+    --danger: #e5484d; --danger-light: #fdecec;
+  }
+  * { box-sizing: border-box; }
+  body { font-family: "Segoe UI", system-ui, sans-serif; background: var(--bg); margin: 0; color: var(--ink); }
+  header { background: var(--card); border-bottom: 1px solid var(--border); padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; }
+  header h1 { font-size: 17px; margin: 0; font-weight: 700; }
+  header button { border: 1px solid var(--border); background: var(--card); border-radius: 8px; padding: 7px 14px; font-size: 13px; cursor: pointer; }
+  main { max-width: 960px; margin: 0 auto; padding: 24px; }
+  table { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+  th, td { text-align: left; padding: 12px 14px; font-size: 14px; border-bottom: 1px solid var(--border); }
+  th { background: #fafbfc; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  tr:last-child td { border-bottom: none; }
+  .badge { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+  .badge-yes { background: var(--green-light); color: var(--green-dark); }
+  .badge-no { background: var(--danger-light); color: var(--danger); }
+  .badge-active { background: var(--green-light); color: var(--green-dark); }
+  .badge-inactive { background: #f1f2f4; color: var(--muted); }
+  .edit-btn { border: 1px solid var(--border); background: var(--card); border-radius: 7px; padding: 5px 12px; font-size: 12px; cursor: pointer; }
+  .edit-btn:hover { border-color: var(--green); }
+  .overlay { position: fixed; inset: 0; background: rgba(20,24,28,0.4); display: none; align-items: center; justify-content: center; padding: 16px; }
+  .modal { background: var(--card); border-radius: 14px; padding: 28px; width: 100%; max-width: 420px; }
+  .modal h2 { margin: 0 0 4px; font-size: 17px; }
+  .modal .sub { font-size: 13px; color: var(--muted); margin: 0 0 18px; }
+  label { display: block; font-size: 13px; font-weight: 600; margin-top: 12px; margin-bottom: 6px; }
+  input { width: 100%; padding: 9px 11px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; font-family: inherit; background: #fbfbfc; }
+  input:focus { outline: none; border-color: var(--green); background: #fff; }
+  .modal-actions { display: flex; gap: 10px; margin-top: 20px; }
+  .modal-actions button { flex: 1; border: none; border-radius: 8px; padding: 10px; font-size: 14px; font-weight: 600; cursor: pointer; }
+  .btn-primary { background: var(--green); color: white; }
+  .btn-secondary { background: #f1f2f4; color: var(--ink); }
+  .error { background: var(--danger-light); color: var(--danger); padding: 9px 11px; border-radius: 8px; font-size: 13px; margin-top: 12px; display: none; }
+  .empty { text-align: center; padding: 40px; color: var(--muted); font-size: 14px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 18px 20px; }
+  main h1 { font-size: 17px; margin: 0 0 14px; font-weight: 700; }
+  .card button { border: none; border-radius: 8px; padding: 10px 16px; font-size: 13px; font-weight: 600; cursor: pointer; background: var(--green); color: white; }
+  .card button:hover { background: var(--green-dark); }
+  code { background: #f1f2f4; padding: 2px 7px; border-radius: 5px; font-size: 13px; }
+</style>
+</head>
+<body>
+  <header>
+    <h1>Vendia Admin — Negocios</h1>
+    <button id="logout-btn">Cerrar sesión</button>
+  </header>
+  <main>
+    <div id="requests-alert" style="display:none; margin-bottom:24px; background:var(--danger-light); border:1px solid var(--danger); border-radius:12px; padding:14px 18px;">
+      <strong id="requests-alert-count" style="color:var(--danger);"></strong>
+      <span style="color:var(--ink);"> — alguien está esperando una clave de activación, mira abajo.</span>
+    </div>
+
+    <h1>Solicitudes de clave</h1>
+    <table id="requests-table" style="display:none; margin-bottom:20px;">
+      <thead>
+        <tr>
+          <th>Negocio</th>
+          <th>Email</th>
+          <th>WhatsApp</th>
+          <th>Plan</th>
+          <th>Pedida</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="requests-body"></tbody>
+    </table>
+    <div class="empty" id="requests-empty" style="display:none; margin-bottom:20px;">No hay solicitudes pendientes.</div>
+
+    <h1>Negocios</h1>
+    <table id="businesses-table" style="display:none;">
+      <thead>
+        <tr>
+          <th>Negocio</th>
+          <th>Plan</th>
+          <th>Cuenta</th>
+          <th>WhatsApp</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="businesses-body"></tbody>
+    </table>
+    <div class="empty" id="empty-state" style="display:none;">No hay negocios registrados todavía.</div>
+
+    <h1 style="margin-top:40px;">Claves de activación</h1>
+    <div class="card" style="margin-bottom:20px;">
+      <div style="display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap;">
+        <div>
+          <label style="display:block; font-size:12px; font-weight:600; margin-bottom:6px;">Plan</label>
+          <select id="new-key-plan" style="padding:9px 11px; border:1px solid var(--border); border-radius:8px; font-size:14px;">
+            <option value="BASICO">Básico</option>
+            <option value="EMPRENDEDOR">Emprendedor</option>
+            <option value="NEGOCIO">Negocio</option>
+          </select>
+        </div>
+        <button id="generate-key-btn">+ Generar clave nueva</button>
+      </div>
+      <div id="new-key-result" style="display:none; margin-top:14px; padding:12px 14px; background:var(--green-light); border-radius:8px; font-size:14px;">
+        Clave generada: <strong id="new-key-code"></strong>
+        <button id="copy-key-btn" style="margin-left:10px; font-size:12px; padding:4px 10px;">Copiar</button>
+      </div>
+    </div>
+
+    <table id="keys-table" style="display:none;">
+      <thead>
+        <tr>
+          <th>Código</th>
+          <th>Plan</th>
+          <th>Estado</th>
+          <th>Usada por</th>
+          <th>Creada</th>
+        </tr>
+      </thead>
+      <tbody id="keys-body"></tbody>
+    </table>
+  </main>
+
+  <div class="overlay" id="overlay">
+    <div class="modal">
+      <h2 id="modal-title">Conectar WhatsApp</h2>
+      <p class="sub" id="modal-sub"></p>
+      <form id="whatsapp-form">
+        <label>Número de WhatsApp</label>
+        <input type="text" id="phoneNumber" required autocomplete="off" placeholder="+57 322 8848545" />
+        <label>Phone Number ID</label>
+        <input type="text" id="phoneNumberId" required autocomplete="off" />
+        <label>Access Token</label>
+        <input type="text" id="accessToken" required autocomplete="off" placeholder="EAA..." />
+        <p style="font-size:12px;color:var(--muted);margin:6px 0 0;">Puede ser el mismo token permanente de otros negocios, si el System User ya tiene esta cuenta de WhatsApp agregada como asset en Meta.</p>
+        <div class="error" id="modal-error"></div>
+        <div class="modal-actions">
+          <button type="button" class="btn-secondary" id="cancel-btn">Cancelar</button>
+          <button type="submit" class="btn-primary">Guardar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+<script>
+let currentBusinessId = null;
+
+async function checkAuth() {
+  const res = await fetch('/vendia-admin/api/me');
+  if (!res.ok) {
+    window.location.href = '/login.html';
+    return false;
+  }
+  return true;
+}
+
+function renderBusinesses(businesses) {
+  const table = document.getElementById('businesses-table');
+  const empty = document.getElementById('empty-state');
+  const body = document.getElementById('businesses-body');
+
+  if (businesses.length === 0) {
+    table.style.display = 'none';
+    empty.style.display = 'block';
+    return;
+  }
+
+  table.style.display = 'table';
+  empty.style.display = 'none';
+  body.innerHTML = businesses.map((b) => `
+    <tr>
+      <td><strong>${escapeHtml(b.name)}</strong><br><span style="color:var(--muted);font-size:12px;">${escapeHtml(b.email)}</span></td>
+      <td>${escapeHtml(b.planTier)}</td>
+      <td><span class="badge ${b.active ? 'badge-active' : 'badge-inactive'}">${b.active ? 'Activa' : 'Inactiva'}</span></td>
+      <td>
+        <span class="badge ${b.whatsappPhoneNumberId ? 'badge-yes' : 'badge-no'}">${b.whatsappPhoneNumberId ? 'Conectado' : 'Sin conectar'}</span>
+        ${b.whatsappPhoneNumber ? `<br><span style="color:var(--muted);font-size:12px;">${escapeHtml(b.whatsappPhoneNumber)}</span>` : ''}
+      </td>
+      <td><button class="edit-btn" data-id="${b.id}" data-name="${escapeHtml(b.name)}" data-phone-id="${escapeHtml(b.whatsappPhoneNumberId ?? '')}" data-phone="${escapeHtml(b.whatsappPhoneNumber ?? '')}">${b.whatsappPhoneNumberId ? 'Editar' : 'Conectar'}</button></td>
+    </tr>
+  `).join('');
+
+  document.querySelectorAll('.edit-btn').forEach((btn) => {
+    btn.addEventListener('click', () => openModal(btn.dataset.id, btn.dataset.name, btn.dataset.phoneId, btn.dataset.phone));
+  });
+}
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str ?? '';
+  return div.innerHTML;
+}
+
+function openModal(businessId, businessName, currentPhoneNumberId, currentPhoneNumber) {
+  currentBusinessId = businessId;
+  document.getElementById('modal-sub').textContent = businessName;
+  document.getElementById('phoneNumber').value = currentPhoneNumber ?? '';
+  document.getElementById('phoneNumberId').value = currentPhoneNumberId ?? '';
+  document.getElementById('accessToken').value = '';
+  document.getElementById('modal-error').style.display = 'none';
+  document.getElementById('overlay').style.display = 'flex';
+}
+
+function closeModal() {
+  document.getElementById('overlay').style.display = 'none';
+  currentBusinessId = null;
+}
+
+async function loadBusinesses() {
+  const res = await fetch('/vendia-admin/api/businesses');
+  if (!res.ok) return;
+  const businesses = await res.json();
+  renderBusinesses(businesses);
+}
+
+document.getElementById('cancel-btn').addEventListener('click', closeModal);
+
+document.getElementById('whatsapp-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const errorEl = document.getElementById('modal-error');
+  errorEl.style.display = 'none';
+
+  const phoneNumber = document.getElementById('phoneNumber').value.trim();
+  const phoneNumberId = document.getElementById('phoneNumberId').value.trim();
+  const accessToken = document.getElementById('accessToken').value.trim();
+
+  const res = await fetch(`/vendia-admin/api/businesses/${currentBusinessId}/whatsapp`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ phoneNumber, phoneNumberId, accessToken }),
+  });
+
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    errorEl.textContent = data.error || 'No se pudo guardar';
+    errorEl.style.display = 'block';
+    return;
+  }
+
+  closeModal();
+  loadBusinesses();
+});
+
+document.getElementById('logout-btn').addEventListener('click', async () => {
+  await fetch('/vendia-admin/api/logout', { method: 'POST' });
+  window.location.href = '/login.html';
+});
+
+async function loadRequests() {
+  const res = await fetch('/vendia-admin/api/key-requests');
+  if (!res.ok) return;
+  const requests = await res.json();
+  const pending = requests.filter((r) => !r.handled);
+
+  const alertEl = document.getElementById('requests-alert');
+  if (pending.length > 0) {
+    alertEl.style.display = 'block';
+    document.getElementById('requests-alert-count').textContent =
+      pending.length === 1 ? '1 solicitud nueva' : `${pending.length} solicitudes nuevas`;
+  } else {
+    alertEl.style.display = 'none';
+  }
+
+  const table = document.getElementById('requests-table');
+  const empty = document.getElementById('requests-empty');
+  if (requests.length === 0) {
+    table.style.display = 'none';
+    empty.style.display = 'block';
+    return;
+  }
+  table.style.display = 'table';
+  empty.style.display = 'none';
+  document.getElementById('requests-body').innerHTML = requests.map((r) => `
+    <tr style="${r.handled ? 'opacity:.55;' : ''}">
+      <td>${escapeHtml(r.businessName)}</td>
+      <td>${escapeHtml(r.email)}</td>
+      <td>${escapeHtml(r.phone)}</td>
+      <td>${escapeHtml(r.planTier)}</td>
+      <td>${new Date(r.createdAt).toLocaleString('es-CO')}</td>
+      <td><button class="edit-btn" onclick="toggleRequestHandled('${r.id}', ${!r.handled})">${r.handled ? 'Reabrir' : 'Marcar contactado'}</button></td>
+    </tr>
+  `).join('');
+}
+
+async function toggleRequestHandled(id, handled) {
+  await fetch(`/vendia-admin/api/key-requests/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ handled }),
+  });
+  loadRequests();
+}
+
+async function loadKeys() {
+  const res = await fetch('/vendia-admin/api/activation-keys');
+  if (!res.ok) return;
+  const keys = await res.json();
+  const table = document.getElementById('keys-table');
+  const body = document.getElementById('keys-body');
+  if (keys.length === 0) {
+    table.style.display = 'none';
+    return;
+  }
+  table.style.display = 'table';
+  body.innerHTML = keys.map((k) => `
+    <tr>
+      <td><code>${escapeHtml(k.code)}</code></td>
+      <td>${escapeHtml(k.planTier)}</td>
+      <td><span class="badge ${k.used ? 'badge-inactive' : 'badge-yes'}">${k.used ? 'Usada' : 'Disponible'}</span></td>
+      <td>${k.usedByBusinessName ? escapeHtml(k.usedByBusinessName) : '—'}</td>
+      <td>${new Date(k.createdAt).toLocaleDateString('es-CO')}</td>
+    </tr>
+  `).join('');
+}
+
+document.getElementById('generate-key-btn').addEventListener('click', async () => {
+  const planTier = document.getElementById('new-key-plan').value;
+  const res = await fetch('/vendia-admin/api/activation-keys', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ planTier }),
+  });
+  if (!res.ok) return;
+  const data = await res.json();
+  document.getElementById('new-key-code').textContent = data.code;
+  document.getElementById('new-key-result').style.display = 'block';
+  loadKeys();
+});
+
+document.getElementById('copy-key-btn').addEventListener('click', () => {
+  const code = document.getElementById('new-key-code').textContent;
+  navigator.clipboard.writeText(code).catch(() => {});
+});
+
+(async () => {
+  const ok = await checkAuth();
+  if (ok) { loadBusinesses(); loadKeys(); loadRequests(); }
+})();
+</script>
+</body>
+</html>

@@ -14,6 +14,10 @@ export const env = {
   whatsapp: {
     verifyToken: process.env.WHATSAPP_VERIFY_TOKEN ?? "",
   },
+  platformAdmin: {
+    email: process.env.PLATFORM_ADMIN_EMAIL ?? "",
+    password: process.env.PLATFORM_ADMIN_PASSWORD ?? "",
+  },
   aws: {
     region: process.env.AWS_REGION ?? "",
     accessKeyId: process.env.AWS_ACCESS_KEY_ID ?? "",

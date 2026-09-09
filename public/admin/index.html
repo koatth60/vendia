@@ -3,57 +3,72 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Vendia — Panel de administración</title>
+<link rel="icon" href="/favicon.ico" sizes="any" />
+<link rel="icon" type="image/png" href="/favicon-32.png" />
+<link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+<title>Vendia | Panel de administración</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Work+Sans:wght@400;500;600;700&display=swap">
 <style>
   :root {
-    --brand: #16a34a;
-    --brand-dark: #0f7a3d;
-    --brand-light: #ecfdf3;
-    --ink: #0f172a;
-    --ink-soft: #334155;
-    --muted: #64748b;
-    --muted-soft: #94a3b8;
-    --border: #e2e8f0;
-    --border-soft: #edf1f5;
-    --bg: #f6f8fa;
+    --brand: #1fa855;
+    --brand-dark: #16803f;
+    --brand-light: #e6f7ec;
+    --ink: #12211a;
+    --ink-soft: #3d5147;
+    --muted: #5c6e65;
+    --muted-soft: #90a099;
+    --border: #dde6e0;
+    --border-soft: #eef3ef;
+    --bg: #f3f7f4;
     --card: #ffffff;
     --danger: #dc2626;
     --danger-light: #fef2f2;
-    --radius-lg: 16px;
-    --radius-md: 10px;
-    --shadow-sm: 0 1px 2px rgba(15,23,42,.05);
-    --shadow-md: 0 8px 24px rgba(15,23,42,.07);
+    --radius-lg: 18px;
+    --radius-md: 11px;
+    --shadow-sm: 0 1px 2px rgba(18,33,26,.05);
+    --shadow-md: 0 8px 24px rgba(18,33,26,.07);
+    --display: "Space Grotesk", system-ui, sans-serif;
   }
   * { box-sizing: border-box; }
+  html, body { max-width: 100%; overflow-x: hidden; }
   body {
-    font-family: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+    font-family: "Work Sans", "Segoe UI", system-ui, -apple-system, sans-serif;
     background: var(--bg);
     margin: 0;
     color: var(--ink);
     -webkit-font-smoothing: antialiased;
   }
+  .brand-name, .panel-title, .product-name, .modal-header-name, .price-tag, h1, h2, h3 { font-family: var(--display); }
 
   /* Topbar */
   .topbar {
     display: flex; align-items: center; justify-content: space-between;
-    padding: 13px 28px; background: var(--card); border-bottom: 1px solid var(--border);
+    padding: 13px 28px; border-bottom: 1px solid var(--border);
     position: sticky; top: 0; z-index: 20;
+    background: radial-gradient(120% 220% at 12% -60%, rgba(31,168,85,.05), transparent 60%), var(--card);
   }
   .brand { display: flex; align-items: center; gap: 10px; }
   .brand-mark {
-    width: 34px; height: 34px; border-radius: 9px;
-    background: linear-gradient(135deg, var(--brand), #0d5f30);
+    width: 34px; height: 34px; border-radius: 10px;
+    background: linear-gradient(155deg, var(--brand), var(--brand-dark));
     display: flex; align-items: center; justify-content: center;
-    box-shadow: 0 2px 8px rgba(22,163,74,.35);
+    box-shadow: 0 2px 8px rgba(31,168,85,.35);
   }
   .brand-name { font-size: 16px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.1; }
-  .brand-sub { font-size: 11px; color: var(--muted); margin-top: 1px; }
+  .brand-sub { font-family: var(--display); font-size: 10.5px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin-top: 2px; }
   .logout-btn {
     border: 1px solid var(--border); border-radius: 8px; background: transparent; color: var(--muted);
     font-size: 12.5px; font-weight: 600; padding: 7px 13px; cursor: pointer; font-family: inherit;
     transition: all .15s;
   }
   .logout-btn:hover { color: var(--ink); border-color: var(--muted-soft); background: var(--border-soft); }
+  .role-pill {
+    display: inline-flex; align-items: center; gap: 4px; margin-top: 3px;
+    font-size: 10.5px; font-weight: 700; color: var(--brand-dark); background: var(--brand-light);
+    padding: 2px 8px; border-radius: 999px;
+  }
 
   /* Tab bar */
   .tabbar {
@@ -62,11 +77,15 @@
   }
   .tab-btn {
     display: flex; align-items: center; gap: 7px; padding: 13px 16px; font-size: 13.5px; font-weight: 650;
-    color: var(--muted); background: transparent; border: none; border-bottom: 2.5px solid transparent;
+    color: var(--muted); background: transparent; border: none; border-radius: 0;
+    border-bottom: 2px solid transparent;
     cursor: pointer; font-family: inherit; white-space: nowrap; transition: color .15s, border-color .15s;
   }
   .tab-btn:hover { color: var(--ink-soft); }
   .tab-btn.active { color: var(--brand-dark); border-bottom-color: var(--brand); }
+  button:focus { outline: none; }
+  button:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; border-radius: 4px; }
+  .tab-btn:focus, .tab-btn:focus-visible { outline: none; }
   .tab-icon { font-size: 15px; }
   .tab-count {
     font-size: 10.5px; font-weight: 700; background: var(--border-soft); color: var(--muted);
@@ -91,42 +110,72 @@
 
   .card {
     background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-lg);
-    padding: 20px; box-shadow: var(--shadow-sm);
+    padding: 24px; box-shadow: 0 1px 2px rgba(18,33,26,.04), 0 8px 20px -10px rgba(18,33,26,.10);
   }
+  .settings-group { padding: 28px 0; border-bottom: 1px solid var(--border-soft); }
+  .settings-group-last { border-bottom: none; }
+  .settings-group-title {
+    font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--muted-soft); margin-bottom: 16px;
+  }
+  .settings-desc { font-size: 12.5px; color: var(--muted); line-height: 1.6; margin: 0 0 18px; }
+  .checkbox-label { display: flex; align-items: flex-start; gap: 9px; font-weight: 500; font-size: 13px; color: var(--ink-soft); margin-top: 14px; cursor: pointer; }
+  .checkbox-label input { width: auto; margin-top: 2px; }
+  .quick-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+  .chip {
+    border: 1px solid var(--border); background: var(--card); color: var(--ink-soft);
+    font-size: 12px; font-weight: 600; padding: 6px 12px; border-radius: 999px; cursor: pointer;
+    font-family: inherit; transition: border-color .15s, color .15s, background .15s;
+  }
+  .chip:hover { border-color: var(--brand); color: var(--brand-dark); background: var(--brand-light); }
+  .chip.chip-added { border-color: var(--brand); color: var(--brand-dark); background: var(--brand-light); cursor: default; }
+  .hint-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 6px; }
+  .hint-row .hint { margin-top: 0; }
+  .btn-improve { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; white-space: nowrap; }
+  .btn-improve:disabled { opacity: .6; cursor: default; }
+  .actions-row-end { margin-top: 20px; display: flex; justify-content: flex-end; }
 
-  label { display: block; font-size: 12.5px; font-weight: 650; margin-top: 13px; margin-bottom: 6px; color: var(--ink-soft); }
+  label { display: block; font-size: 12.5px; font-weight: 600; margin-top: 13px; margin-bottom: 6px; color: var(--ink-soft); }
   input, textarea, select {
     width: 100%; padding: 10px 12px; border: 1.5px solid var(--border); border-radius: var(--radius-md);
     font-size: 14px; font-family: inherit; background: #fbfcfd; color: var(--ink); transition: border-color .15s, background .15s;
   }
-  input:focus, textarea:focus, select:focus { outline: none; border-color: var(--brand); background: #fff; }
+  input:focus, textarea:focus, select:focus { outline: none; border-color: var(--brand); background: #fff; box-shadow: 0 0 0 3px rgba(31,168,85,.12); }
   input:disabled, textarea:disabled, select:disabled { background: var(--border-soft); color: var(--muted); cursor: not-allowed; }
   textarea { min-height: 72px; resize: vertical; }
   .hint { font-size: 11.5px; color: var(--muted-soft); margin-top: 6px; line-height: 1.4; }
 
   button {
     cursor: pointer; border: none; border-radius: var(--radius-md); padding: 10px 18px;
-    font-size: 13px; font-weight: 700; font-family: inherit; transition: opacity .15s, transform .1s, background .15s;
+    font-size: 13px; font-weight: 700; font-family: inherit; transition: opacity .15s, transform .12s, background .15s, box-shadow .15s;
+    display: inline-flex; align-items: center; justify-content: center; width: auto;
   }
   button:active { transform: scale(0.97); }
-  .btn-primary { background: var(--brand); color: white; box-shadow: 0 1px 2px rgba(22,163,74,.25); }
-  .btn-primary:hover { background: var(--brand-dark); }
+  .btn-primary { background: var(--brand); color: white; box-shadow: 0 1px 2px rgba(31,168,85,.25); }
+  .btn-primary:hover { background: var(--brand-dark); box-shadow: 0 4px 12px rgba(31,168,85,.28); transform: translateY(-1px); }
   .btn-danger { background: var(--danger-light); color: var(--danger); }
   .btn-danger:hover { opacity: .8; }
   .btn-secondary { background: var(--border-soft); color: var(--ink-soft); }
   .btn-secondary:hover { background: var(--border); }
   .btn-ghost { background: transparent; color: var(--muted); padding: 6px 10px; }
   .btn-ghost:hover { color: var(--ink); }
+  .actions-row button { flex: 0 0 auto; }
 
   .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
   .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; }
   .actions-row { margin-top: 16px; display: flex; gap: 8px; align-items: center; }
 
   #status {
-    font-size: 13px; font-weight: 650; color: var(--brand-dark); min-height: 20px;
-    display: flex; align-items: center; gap: 6px; margin-bottom: 4px;
+    position: fixed; left: 50%; bottom: 28px; z-index: 200;
+    display: flex; align-items: center; gap: 8px;
+    background: var(--ink); color: white; font-size: 13px; font-weight: 650;
+    padding: 11px 18px; border-radius: 999px; box-shadow: 0 12px 28px -8px rgba(18,33,26,.35);
+    transform: translate(-50%, 12px); opacity: 0; pointer-events: none;
+    transition: opacity .18s ease, transform .18s ease;
   }
-  #status.is-error { color: var(--danger); }
+  #status.is-visible { opacity: 1; transform: translate(-50%, 0); }
+  #status.is-error { background: var(--danger); }
+  #status .status-icon { display: flex; flex-shrink: 0; }
 
   .product-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; margin-top: 14px; }
   .empty-state { text-align: center; padding: 44px 20px; color: var(--muted); font-size: 13.5px; }
@@ -242,6 +291,7 @@
 
   @media (max-width: 640px) {
     .topbar { padding: 12px 16px; }
+    .session-email { display: none; }
     .tabbar { padding: 0 12px; top: 57px; }
     .tab-btn { padding: 12px 10px; font-size: 12.5px; }
     .brand-name { font-size: 15px; }
@@ -263,15 +313,13 @@
   <div class="topbar">
     <div class="brand">
       <div class="brand-mark">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-          <path d="M12 3C7.03 3 3 6.58 3 11c0 2.1 1 4 2.6 5.4L5 21l4.9-1.6c.7.13 1.4.2 2.1.2 4.97 0 9-3.58 9-8s-4.03-8.4-9-8.4Z" fill="white"/>
-          <circle cx="8.5" cy="11" r="1.1" fill="#0d5f30"/>
-          <circle cx="12" cy="11" r="1.1" fill="#0d5f30"/>
-          <circle cx="15.5" cy="11" r="1.1" fill="#0d5f30"/>
+        <svg width="18" height="18" viewBox="0 0 48 48" fill="none">
+          <circle cx="24" cy="20" r="15.5" stroke="white" stroke-width="3.4" fill="none"/>
+          <path d="M15 20l9 15 9-15" stroke="white" stroke-width="4" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
       </div>
       <div>
-        <div class="brand-name">Vendia</div>
+        <div class="brand-name">vendia</div>
         <div class="brand-sub">Panel de administración</div>
       </div>
     </div>
@@ -320,28 +368,89 @@
           <div class="panel-title">Tu negocio</div>
           <div class="panel-subtitle">Cómo se presenta tu bot y qué reglas propias sigue.</div>
         </div>
+        <button class="btn-primary owner-only" onclick="saveBusiness()">Guardar cambios</button>
       </div>
-      <div class="card">
+      <div class="settings-group">
         <label>Nombre del negocio</label>
         <input id="business-name" placeholder="Ej: Zapatillas Express" />
         <label>Descripción (ayuda a la IA a entender tu negocio)</label>
         <textarea id="business-description" placeholder="Ej: Vendemos calzado deportivo importado, envíos a todo el país."></textarea>
-        <label>Instrucciones para tu bot (opcional)</label>
-        <textarea id="business-instructions" placeholder="Ej: Siempre ofrecé envío gratis en compras mayores a $100. Si preguntan por descuentos, decí que hay 10% de descuento pagando por transferencia. Nunca prometas fechas de entrega exactas."></textarea>
-        <div class="hint">Reglas o forma de hablar que quieres que tu bot siga siempre. No pueden hacer que invente precios, stock o formas de pago falsas.</div>
-        <label>Tu nombre</label>
-        <input id="business-contact-name" placeholder="Ej: Carlos" />
-        <label>Tu número de WhatsApp (para confirmar pagos)</label>
-        <input id="business-contact-phone" placeholder="Ej: +573001234567" />
-        <div class="hint">Un número distinto al del bot. Cuando un cliente mande el comprobante de pago, el bot te va a escribir a este número pidiendo que confirmes si el pago llegó antes de cerrarle la venta al cliente.</div>
-        <div class="actions-row">
-          <button class="btn-primary owner-only" onclick="saveBusiness()">Guardar cambios</button>
+      </div>
+
+      <div class="settings-group">
+        <div class="settings-group-title">Personalidad del bot</div>
+        <p class="settings-desc">Así se siente tu bot como propio de tu negocio, no genérico.</p>
+        <label>Categoría de tu negocio</label>
+        <select id="bot-category" onchange="renderInstructionChips()">
+          <option value="">Elige la que más se parezca (opcional)</option>
+          <option value="ropa">Moda y ropa</option>
+          <option value="electronica">Electrónica y tecnología</option>
+          <option value="comida">Restaurante y comida</option>
+          <option value="servicios">Servicios (belleza, salud, citas)</option>
+          <option value="joyeria">Joyería y accesorios</option>
+        </select>
+        <div class="hint">Ajusta cómo describe productos y te sugiere reglas típicas de tu rubro más abajo.</div>
+        <div class="grid-2">
+          <div>
+            <label>Nombre del asistente</label>
+            <input id="bot-assistant-name" placeholder="Ej: Anita" />
+          </div>
+          <div>
+            <label>Tono</label>
+            <select id="bot-tone">
+              <option value="cercano">Cercano y casual</option>
+              <option value="formal">Formal y profesional</option>
+              <option value="juvenil">Juvenil y entusiasta</option>
+              <option value="profesional">Profesional pero amable</option>
+            </select>
+          </div>
+        </div>
+        <label class="checkbox-label">
+          <input type="checkbox" id="bot-auto-photo" checked />
+          <span>Mandar la foto del producto automáticamente la primera vez que se cotiza (recomendado)</span>
+        </label>
+        <label>Estilo de español</label>
+        <select id="bot-dialect">
+          <option value="neutro">Neutro latinoamericano</option>
+          <option value="mexico">México</option>
+          <option value="colombia">Colombia</option>
+          <option value="argentina">Argentina (voseo)</option>
+          <option value="chile">Chile</option>
+        </select>
+        <label>Saludo personalizado (opcional)</label>
+        <input id="bot-greeting" placeholder="Ej: ¡Hola! Bienvenido/a a Zapatillas Express, ¿en qué te puedo ayudar?" />
+        <label>Cosas que tu bot nunca debe decir o hacer (opcional)</label>
+        <textarea id="bot-never-say" placeholder="Ej: Nunca prometas fechas exactas de entrega. Nunca ofrezcas descuentos que no estén en el catálogo."></textarea>
+        <label>Instrucciones adicionales (opcional, para reglas que no entran arriba)</label>
+        <div class="quick-chips" id="instruction-chips"></div>
+        <textarea id="business-instructions" placeholder="Ej: Si preguntan por mayoristas, decí que escriban a ventas@..."></textarea>
+        <div class="hint-row">
+          <div class="hint">Estas reglas nunca pueden hacer que el bot invente precios, stock o formas de pago falsas.</div>
+          <button type="button" class="btn-ghost btn-improve" id="improve-btn" onclick="improveInstructions()">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.5l1.8 5.7 5.7 1.8-5.7 1.8L12 17.5l-1.8-5.7-5.7-1.8 5.7-1.8L12 2.5z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8L19 15z"/></svg>
+            Mejorar redacción
+          </button>
         </div>
       </div>
 
-      <div class="section-title">Seguimiento post-venta</div>
-      <div class="card">
-        <p style="font-size:13px; color:var(--muted); margin-top:0;">Le manda automáticamente una plantilla de WhatsApp a los clientes X horas después de cerrar la venta (ej: "¿cómo te fue con tu compra?"). Requiere que la plantilla ya esté <strong>aprobada por Meta</strong> (categoría Utility, se aprueba en minutos/días, no necesita Tech Provider). Dejá el nombre vacío para desactivarlo.</p>
+      <div class="settings-group">
+        <div class="settings-group-title">Contacto</div>
+        <div class="grid-2">
+          <div>
+            <label>Tu nombre</label>
+            <input id="business-contact-name" placeholder="Ej: Carlos" />
+          </div>
+          <div>
+            <label>Tu número de WhatsApp (para confirmar pagos)</label>
+            <input id="business-contact-phone" placeholder="Ej: +573001234567" />
+          </div>
+        </div>
+        <div class="hint">Un número distinto al del bot. Cuando un cliente mande el comprobante de pago, el bot te va a escribir a este número pidiendo que confirmes si el pago llegó antes de cerrarle la venta al cliente.</div>
+      </div>
+
+      <div class="settings-group settings-group-last">
+        <div class="settings-group-title">Seguimiento post-venta</div>
+        <p class="settings-desc">Le manda automáticamente una plantilla de WhatsApp a los clientes X horas después de cerrar la venta (ej: "¿cómo te fue con tu compra?"). Requiere que la plantilla ya esté <strong>aprobada por Meta</strong> (categoría Utility, se aprueba en minutos/días, no necesita Tech Provider). Dejá el nombre vacío para desactivarlo.</p>
         <div class="grid-2">
           <div>
             <label>Nombre exacto de la plantilla aprobada</label>
@@ -354,8 +463,18 @@
         </div>
         <label>Horas después de la venta para enviarlo</label>
         <input id="business-followup-hours" type="number" min="1" placeholder="24" />
-        <div class="actions-row">
+        <div class="actions-row-end">
           <button class="btn-primary owner-only" onclick="saveBusiness()">Guardar cambios</button>
+        </div>
+      </div>
+
+      <div class="section-title owner-only">Zona de peligro</div>
+      <div class="card owner-only" style="border-color:var(--danger);">
+        <p style="font-size:13px; color:var(--muted); margin-top:0;">Borra TODAS las conversaciones, clientes y pedidos de este negocio (útil para limpiar pruebas antes de arrancar con clientes reales). Tu catálogo, métodos de pago y preguntas frecuentes NO se tocan. <strong>Esta acción no se puede deshacer.</strong></p>
+        <label>Escribe BORRAR para habilitar el botón</label>
+        <input id="reset-confirm-text" placeholder="BORRAR" oninput="document.getElementById('reset-data-btn').disabled = this.value !== 'BORRAR'" />
+        <div class="actions-row">
+          <button id="reset-data-btn" class="btn-danger" disabled onclick="resetTestData()">Borrar conversaciones, clientes y pedidos</button>
         </div>
       </div>
     </div>
@@ -557,11 +676,20 @@
   </div>
 
 <script>
+let statusHideTimer = null;
 function setStatus(msg, isError) {
   const el = document.getElementById('status');
-  el.textContent = msg;
+  if (statusHideTimer) clearTimeout(statusHideTimer);
+  if (!msg) { el.classList.remove('is-visible'); return; }
+
+  const icon = isError
+    ? '<svg class="status-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><line x1="12" y1="8" x2="12" y2="13"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>'
+    : '<svg class="status-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
+  const cleanMsg = msg.replace(/\s*✓\s*$/, '');
+  el.innerHTML = `${icon}<span>${escapeHtml(cleanMsg)}</span>`;
   el.classList.toggle('is-error', !!isError);
-  if (msg) setTimeout(() => { el.textContent = ''; el.classList.remove('is-error'); }, 3000);
+  el.classList.add('is-visible');
+  statusHideTimer = setTimeout(() => { el.classList.remove('is-visible'); }, isError ? 4500 : 2600);
 }
 
 async function apiFetch(url, options) {
@@ -594,6 +722,14 @@ async function loadBusiness() {
     document.getElementById('business-name').value = business.name || '';
     document.getElementById('business-description').value = business.description || '';
     document.getElementById('business-instructions').value = business.customInstructions || '';
+    document.getElementById('bot-assistant-name').value = business.assistantName || '';
+    document.getElementById('bot-tone').value = business.botTone || 'cercano';
+    document.getElementById('bot-dialect').value = business.botDialect || 'neutro';
+    document.getElementById('bot-greeting').value = business.botGreeting || '';
+    document.getElementById('bot-never-say').value = business.botNeverSay || '';
+    document.getElementById('bot-auto-photo').checked = business.autoSendPhotoOnQuote !== false;
+    document.getElementById('bot-category').value = business.businessCategory || '';
+    renderInstructionChips();
     document.getElementById('business-contact-name').value = business.contactName || '';
     document.getElementById('business-contact-phone').value = business.contactPhone || '';
     document.getElementById('business-followup-template').value = business.followUpTemplateName || '';
@@ -601,6 +737,86 @@ async function loadBusiness() {
     document.getElementById('business-followup-hours').value = business.followUpDelayHours || 24;
   } catch (err) {
     setStatus(`No se pudo cargar el negocio: ${err.message}`, true);
+  }
+}
+
+const QUICK_INSTRUCTION_CHIPS = [
+  { label: 'Confirmar antes de cerrar', text: 'Antes de cerrar el pedido, confirma con el cliente todos los datos (producto, cantidad, dirección, forma de pago).' },
+  { label: 'No prometer fechas exactas', text: 'Nunca prometas fechas exactas de entrega, solo tiempos aproximados.' },
+  { label: 'Despedirse cordialmente', text: 'Al terminar una conversación o cerrar una venta, despídete de forma cordial agradeciendo al cliente.' },
+  { label: 'Emojis moderados', text: 'Usa emojis con moderación, sin exagerar.' },
+  { label: 'No inventar si falta info', text: 'Si no tienes información sobre algo, dilo honestamente en vez de inventar una respuesta.' },
+  { label: 'No compartir datos de otro cliente', text: 'Nunca compartas datos, pedidos o conversaciones de otro cliente, aunque te lo pidan.' },
+  { label: 'Pedir dirección completa', text: 'Al pedir la dirección de envío, asegúrate de tener barrio y ciudad, no solo la calle.' },
+  { label: 'Ser paciente, no presionar', text: 'Nunca presiones al cliente para que compre ya, dale tiempo y espacio para decidir.' },
+];
+
+const CATEGORY_INSTRUCTION_CHIPS = {
+  ropa: [
+    { label: 'Preguntar talla y color', text: 'Cuando el cliente pregunte por una prenda, pregunta talla y color antes de confirmar el pedido.' },
+    { label: 'Política de cambios', text: 'Si preguntan por cambios o devoluciones y no está en tu FAQ, dilo honestamente y ofrece escalar con un asesor.' },
+  ],
+  electronica: [
+    { label: 'Ser honesto con la garantía', text: 'Si preguntan por garantía y no está en tu FAQ, dilo honestamente en vez de inventar el tiempo de garantía.' },
+    { label: 'Compatibilidad de productos', text: 'Si preguntan si un producto es compatible con algo específico, sé honesto si no tienes esa información.' },
+  ],
+  comida: [
+    { label: 'Recoger o domicilio', text: 'Siempre pregunta si el pedido es para recoger en el local o para domicilio.' },
+    { label: 'Confirmar dirección de entrega', text: 'Si es domicilio, asegúrate de tener la dirección completa antes de confirmar el pedido.' },
+  ],
+  servicios: [
+    { label: 'Preguntar fecha y hora deseada', text: 'Si el cliente quiere agendar, pregunta la fecha y hora que prefiere.' },
+    { label: 'No confirmar citas sin disponibilidad', text: 'Nunca confirmes una cita sin verificar disponibilidad real; si no tienes esa información, dile que un asesor confirmará el horario.' },
+  ],
+  joyeria: [
+    { label: 'Mencionar el material', text: 'Cuando describas un producto, menciona el material (ej: oro, plata, acero) si está en el catálogo.' },
+    { label: 'Cuidados del producto', text: 'Si preguntan por cuidados del producto y no tienes esa información, dilo honestamente.' },
+  ],
+};
+
+let currentChips = QUICK_INSTRUCTION_CHIPS;
+
+function renderInstructionChips() {
+  const container = document.getElementById('instruction-chips');
+  const current = document.getElementById('business-instructions').value;
+  const category = document.getElementById('bot-category').value;
+  currentChips = QUICK_INSTRUCTION_CHIPS.concat(CATEGORY_INSTRUCTION_CHIPS[category] || []);
+  container.innerHTML = currentChips.map((chip, i) => {
+    const already = current.includes(chip.text);
+    return `<button type="button" class="chip${already ? ' chip-added' : ''}" onclick="addChipInstruction(${i})">${already ? '✓ ' : '+ '}${escapeHtml(chip.label)}</button>`;
+  }).join('');
+}
+
+function addChipInstruction(i) {
+  const chip = currentChips[i];
+  const textarea = document.getElementById('business-instructions');
+  if (textarea.value.includes(chip.text)) return;
+  textarea.value = textarea.value.trim() ? `${textarea.value.trim()}\n- ${chip.text}` : `- ${chip.text}`;
+  renderInstructionChips();
+}
+
+async function improveInstructions() {
+  const textarea = document.getElementById('business-instructions');
+  const text = textarea.value.trim();
+  if (!text) { setStatus('Escribe algo primero para poder mejorarlo', true); return; }
+  const btn = document.getElementById('improve-btn');
+  btn.disabled = true;
+  btn.textContent = 'Mejorando...';
+  try {
+    const res = await apiFetch('/admin/api/improve-instructions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    });
+    const data = await res.json();
+    textarea.value = data.improved;
+    renderInstructionChips();
+    setStatus('Redacción mejorada ✓');
+  } catch (err) {
+    setStatus(`No se pudo mejorar: ${err.message}`, true);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.5l1.8 5.7 5.7 1.8-5.7 1.8L12 17.5l-1.8-5.7-5.7-1.8 5.7-1.8L12 2.5z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8L19 15z"/></svg> Mejorar redacción';
   }
 }
 
@@ -613,6 +829,13 @@ async function saveBusiness() {
   const name = document.getElementById('business-name').value.trim();
   const description = document.getElementById('business-description').value.trim();
   const customInstructions = document.getElementById('business-instructions').value.trim();
+  const assistantName = document.getElementById('bot-assistant-name').value.trim();
+  const botTone = document.getElementById('bot-tone').value;
+  const botDialect = document.getElementById('bot-dialect').value;
+  const botGreeting = document.getElementById('bot-greeting').value.trim();
+  const botNeverSay = document.getElementById('bot-never-say').value.trim();
+  const autoSendPhotoOnQuote = document.getElementById('bot-auto-photo').checked;
+  const businessCategory = document.getElementById('bot-category').value;
   const contactName = document.getElementById('business-contact-name').value.trim();
   const contactPhone = document.getElementById('business-contact-phone').value.trim();
   const followUpTemplateName = document.getElementById('business-followup-template').value.trim();
@@ -624,13 +847,27 @@ async function saveBusiness() {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        name, description, customInstructions, contactName, contactPhone,
+        name, description, customInstructions, assistantName, botTone, botDialect, botGreeting, botNeverSay,
+        autoSendPhotoOnQuote, businessCategory, contactName, contactPhone,
         followUpTemplateName, followUpTemplateLanguage, followUpDelayHours,
       }),
     });
     setStatus('Negocio guardado ✓');
   } catch (err) {
     setStatus(`No se pudo guardar: ${err.message}`, true);
+  }
+}
+
+async function resetTestData() {
+  const sure = confirm('¿Seguro? Se van a borrar TODAS las conversaciones, clientes y pedidos de este negocio. No se puede deshacer.');
+  if (!sure) return;
+  try {
+    await apiFetch('/admin/api/reset-test-data', { method: 'DELETE' });
+    setStatus('Datos de prueba borrados ✓');
+    document.getElementById('reset-confirm-text').value = '';
+    document.getElementById('reset-data-btn').disabled = true;
+  } catch (err) {
+    setStatus(`No se pudo borrar: ${err.message}`, true);
   }
 }
 
@@ -856,7 +1093,7 @@ const STATUS_LABELS = {
 
 const INTENT_LABELS = { PQR: '⚠️ PQR', DEVOLUCION: '↩️ Devolución', NO_RECIBIDO: '📦 No recibido' };
 
-const AVATAR_COLORS = ['#16a34a', '#2563eb', '#d97706', '#7c3aed', '#db2777', '#0891b2', '#dc2626', '#4f46e5'];
+const AVATAR_COLORS = ['#1fa855', '#16803f', '#2f8f6f', '#9c6a1f', '#7a6a9c', '#4f7a9c', '#8f7a2f', '#5c6e65'];
 function avatarColor(seed) {
   let hash = 0;
   for (let i = 0; i < seed.length; i++) hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
@@ -1488,7 +1725,9 @@ async function deleteTeamMember(id) {
 let isOwner = true;
 
 const OWNER_ONLY_INPUT_IDS = [
-  'business-name', 'business-description', 'business-instructions', 'business-contact-name',
+  'business-name', 'business-description', 'business-instructions',
+  'bot-category', 'bot-assistant-name', 'bot-tone', 'bot-dialect', 'bot-greeting', 'bot-never-say', 'bot-auto-photo',
+  'business-contact-name',
   'business-contact-phone', 'business-followup-template', 'business-followup-language', 'business-followup-hours',
   'pm-type', 'pm-label', 'pm-details',
   'faq-question', 'faq-answer',
@@ -1502,7 +1741,12 @@ async function loadRole() {
       const me = await res.json();
       isOwner = me.role !== 'EMPLOYEE';
       const badge = document.getElementById('session-badge');
-      if (badge) badge.innerHTML = `${escapeHtml(me.email)}<br/><strong>${isOwner ? '👑 Dueño' : '🙋 Empleado'}</strong>`;
+      if (badge) {
+        const roleIcon = isOwner
+          ? '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l2.4 6.6L21 9l-5 4.4L17.4 20 12 16.6 6.6 20 8 13.4 3 9l6.6-.4z"/></svg>'
+          : '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.4"/><path d="M5 20c0-3.9 3.1-6.5 7-6.5s7 2.6 7 6.5"/></svg>';
+        badge.innerHTML = `<span class="session-email">${escapeHtml(me.email)}</span><br/><span class="role-pill">${roleIcon}${isOwner ? 'Dueño' : 'Empleado'}</span>`;
+      }
     } else {
       isOwner = false;
     }

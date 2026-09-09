@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { prisma } from "../db/client";
 import { hashPassword, verifyPassword } from "../auth/service";
+import { env } from "../config/env";
 
 export const authRouter = Router();
 
@@ -48,10 +49,31 @@ authRouter.post("/signup", async (req, res) => {
   res.status(201).json({ id: business.id, name: business.name, email: business.email, planTier: business.planTier });
 });
 
+authRouter.post("/request-key", async (req, res) => {
+  const { businessName, email, phone, planTier } = req.body;
+  if (!businessName || !email || !phone) {
+    res.status(400).json({ error: "Faltan campos obligatorios" });
+    return;
+  }
+  const tier = ["BASICO", "EMPRENDEDOR", "NEGOCIO"].includes(planTier) ? planTier : "BASICO";
+
+  await prisma.keyRequest.create({
+    data: { businessName, email, phone, planTier: tier },
+  });
+
+  res.status(201).json({ ok: true });
+});
+
 authRouter.post("/login", async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) {
     res.status(400).json({ error: "Faltan email o contraseña" });
+    return;
+  }
+
+  if (env.platformAdmin.email && env.platformAdmin.password && email === env.platformAdmin.email && password === env.platformAdmin.password) {
+    req.session.platformAdmin = true;
+    res.json({ isPlatformAdmin: true });
     return;
   }
 
