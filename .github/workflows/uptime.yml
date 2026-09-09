@@ -1,0 +1,30 @@
+name: Uptime check
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check /health (retry once before failing)
+        run: |
+          for i in 1 2; do
+            if curl -fsS --max-time 10 https://vendiahub.online/health > /dev/null; then
+              exit 0
+            fi
+            echo "Intento $i fallo, reintentando en 20s..."
+            sleep 20
+          done
+          echo "vendiahub.online no respondio dos veces seguidas."
+          exit 1
+
+      - name: Alert via WhatsApp
+        if: failure()
+        run: |
+          curl -sS -X POST "https://graph.facebook.com/v21.0/${{ secrets.ALERT_WA_PHONE_NUMBER_ID }}/messages" \
+            -H "Authorization: Bearer ${{ secrets.ALERT_WA_ACCESS_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d "{\"messaging_product\":\"whatsapp\",\"to\":\"${{ secrets.ALERT_WA_TO }}\",\"type\":\"text\",\"text\":{\"body\":\"⚠️ vendiahub.online no responde (2 intentos con 20s de espera). Revisar el droplet.\"}}"
