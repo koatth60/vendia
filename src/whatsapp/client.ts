@@ -10,6 +10,12 @@ export function isBsuid(id: string): boolean {
   return /^[A-Za-z]{2}\.\d+$/.test(id);
 }
 
+// DeepSeek writes bold as **text** (Markdown), but WhatsApp only renders *text* (single asterisk) as
+// bold - double asterisks show up literally to the customer. Converts before anything goes out.
+export function formatForWhatsapp(text: string): string {
+  return text.replace(/\*\*(.+?)\*\*/g, "*$1*");
+}
+
 function recipientField(to: string): { to: string } | { recipient: string } {
   return isBsuid(to) ? { recipient: to } : { to };
 }

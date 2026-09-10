@@ -2,7 +2,7 @@ import { Router } from "express";
 import { Prisma } from "@prisma/client";
 import { env } from "../config/env";
 import { prisma } from "../db/client";
-import { sendTextMessage, sendOwnerAlert, downloadMedia, type WhatsappCredentials } from "../whatsapp/client";
+import { sendTextMessage, sendOwnerAlert, downloadMedia, formatForWhatsapp, type WhatsappCredentials } from "../whatsapp/client";
 import { uploadMedia } from "../media/s3";
 import {
   getOrCreateCustomer,
@@ -62,8 +62,9 @@ async function handleOwnerReply(
       await sendTextMessage(credentials, ownerPhone, "Respondeme con un mensaje de texto, citando esa misma pregunta, por favor.");
       return;
     }
-    await sendTextMessage(credentials, pendingQuestion.customer.phoneNumber, answerText);
-    await recordMessage(pendingQuestion.id, "ASSISTANT", answerText);
+    const formattedAnswer = formatForWhatsapp(answerText);
+    await sendTextMessage(credentials, pendingQuestion.customer.phoneNumber, formattedAnswer);
+    await recordMessage(pendingQuestion.id, "ASSISTANT", formattedAnswer);
     await clearPendingOwnerQuestion(pendingQuestion.id);
     await setHumanControl(businessId, pendingQuestion.id, false);
     await sendTextMessage(credentials, ownerPhone, "Listo, le reenvie tu respuesta al cliente ✅");
@@ -307,8 +308,9 @@ whatsappRouter.post("/webhook", async (req, res) => {
       },
       rawText
     );
-    await sendTextMessage(credentials, from, reply);
-    await recordMessage(conversation.id, "ASSISTANT", reply);
+    const formattedReply = formatForWhatsapp(reply);
+    await sendTextMessage(credentials, from, formattedReply);
+    await recordMessage(conversation.id, "ASSISTANT", formattedReply);
   } catch (error) {
     console.error("Error handling WhatsApp webhook:", error);
   }

@@ -89,7 +89,8 @@
   }
   .tab-btn.active .tab-count { background: var(--brand-light); color: var(--brand-dark); }
 
-  main { max-width: 900px; margin: 0 auto; padding: 24px 20px 64px; }
+  main { max-width: 900px; margin: 0 auto; padding: 24px 20px 64px; transition: max-width .15s ease; }
+  main.wide { max-width: 1560px; }
 
   .tab-panel { display: none; animation: fadeIn .18s ease; }
   .tab-panel.active { display: block; }
@@ -229,9 +230,15 @@
   .status-SOLD { background: var(--brand-light); color: var(--brand-dark); }
   .status-LOST { background: var(--danger-light); color: var(--danger); }
 
-  .chat-split { display: flex; height: 640px; }
-  .chat-split-list { width: 320px; flex-shrink: 0; overflow-y: auto; border-right: 1px solid var(--border); }
-  .chat-split-thread { flex: 1; min-width: 0; display: flex; flex-direction: column; background: #e9edf0; }
+  .chat-split { display: flex; height: calc(100vh - 260px); min-height: 480px; }
+  .chat-split-list { width: 340px; flex-shrink: 0; overflow-y: auto; border-right: 1px solid var(--border); }
+  .chat-split-thread {
+    flex: 1; min-width: 0; display: flex; flex-direction: column;
+    background-color: #e5ddd5;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='110' height='110'><g fill='none' stroke='%23d3c8b8' stroke-width='1.3' opacity='0.65'><circle cx='18' cy='22' r='6'/><path d='M50 8 q9 11 0 22 q-9 -11 0 -22z'/><path d='M84 26 l7 7 m-7 0 l7 -7'/><circle cx='22' cy='78' r='3.5'/><path d='M64 68 q11 0 11 11 q-11 0 -11 -11z'/><path d='M92 86 l0 11 m-5.5 -5.5 l11 0'/><circle cx='95' cy='50' r='2.5'/></g></svg>");
+    background-size: 110px 110px;
+  }
+  .chat-split-thread .chat-thread { background: transparent; flex: 1; max-height: none; }
   .chat-panel-empty { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 13.5px; }
   .chat-panel-header {
     display: flex; align-items: center; gap: 12px; padding: 14px 18px;
@@ -779,6 +786,7 @@ async function apiFetch(url, options) {
 function switchTab(name) {
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.dataset.tabPanel === name));
+  document.querySelector('main').classList.toggle('wide', name === 'conversations');
   try { localStorage.setItem('vendia-admin-tab', name); } catch {}
 }
 
@@ -1044,6 +1052,14 @@ function reformatPriceField(priceId, currencyId) {
 
 function escapeHtml(str) {
   return String(str ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// WhatsApp bold is *text* (single asterisk); older messages sent before the formatting fix may still
+// have **text** (Markdown-style). Render both as <strong> so history looks right either way.
+function formatMessageText(str) {
+  return escapeHtml(str)
+    .replace(/\*\*([^\n*]+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*([^\n*]+?)\*/g, '<strong>$1</strong>');
 }
 
 function startEdit(id) { editingId = id; loadProducts(); }
@@ -1355,7 +1371,7 @@ function renderThreadMessages(thread, messages) {
       ? `<audio src="${m.mediaUrl}" controls style="margin-bottom:4px;"></audio>`
       : m.mediaUrl ? `<img src="${m.mediaUrl}" style="max-width:220px; border-radius:6px; display:block; margin-bottom:4px;" />` : '';
     const time = new Date(m.createdAt).toLocaleString('es-CO', { hour: '2-digit', minute: '2-digit' });
-    return `<div class="bubble bubble-${m.role}${isAudio ? ' bubble-has-audio' : ''}">${img}<span class="bubble-text">${escapeHtml(m.content)}</span><span class="bubble-time">${time}</span></div>`;
+    return `<div class="bubble bubble-${m.role}${isAudio ? ' bubble-has-audio' : ''}">${img}<span class="bubble-text">${formatMessageText(m.content)}</span><span class="bubble-time">${time}</span></div>`;
   }).join('') || '<div style="text-align:center; color:var(--muted); font-size:13px; padding:20px;">Sin mensajes todavía.</div>';
   if (nearBottom) thread.scrollTop = thread.scrollHeight;
 }
@@ -1452,7 +1468,7 @@ async function openConversation(id) {
         ? `<audio src="${m.mediaUrl}" controls style="margin-bottom:4px;"></audio>`
         : m.mediaUrl ? `<img src="${m.mediaUrl}" style="max-width:220px; border-radius:6px; display:block; margin-bottom:4px;" />` : '';
       const time = new Date(m.createdAt).toLocaleString('es-CO', { hour: '2-digit', minute: '2-digit' });
-      return `<div class="bubble bubble-${m.role}${isAudio ? ' bubble-has-audio' : ''}">${img}<span class="bubble-text">${escapeHtml(m.content)}</span><span class="bubble-time">${time}</span></div>`;
+      return `<div class="bubble bubble-${m.role}${isAudio ? ' bubble-has-audio' : ''}">${img}<span class="bubble-text">${formatMessageText(m.content)}</span><span class="bubble-time">${time}</span></div>`;
     }).join('') || '<div style="text-align:center; color:var(--muted); font-size:13px; padding:20px;">Sin mensajes todavía.</div>';
 
     thread.scrollTop = thread.scrollHeight;

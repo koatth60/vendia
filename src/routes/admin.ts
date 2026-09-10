@@ -24,6 +24,7 @@ import {
   sendImageMessage,
   sendVideoMessage,
   setBusinessProfilePhoto,
+  formatForWhatsapp,
   type WhatsappCredentials,
 } from "../whatsapp/client";
 import { getAiUsageSummary, getPlanUsage, logAiUsage } from "../ai/usage";
@@ -422,21 +423,22 @@ adminRouter.post("/api/conversations/:id/messages", upload.single("file"), async
     accessToken: business.whatsappAccessToken,
   };
 
+  const formattedText = formatForWhatsapp(text);
   if (file) {
     const type = file.mimetype.startsWith("video") ? "VIDEO" : "IMAGE";
     const folder = type === "VIDEO" ? "videos" : "images";
     const { key, url } = await uploadMedia(file.buffer, file.mimetype, folder);
     const wamid =
       type === "IMAGE"
-        ? await sendImageMessage(credentials, conversation.customer.phoneNumber, url, text || undefined)
-        : await sendVideoMessage(credentials, conversation.customer.phoneNumber, url, text || undefined);
-    await recordMessage(String(req.params.id), "ASSISTANT", text || (type === "IMAGE" ? "[Foto]" : "[Video]"), wamid || undefined, {
+        ? await sendImageMessage(credentials, conversation.customer.phoneNumber, url, formattedText || undefined)
+        : await sendVideoMessage(credentials, conversation.customer.phoneNumber, url, formattedText || undefined);
+    await recordMessage(String(req.params.id), "ASSISTANT", formattedText || (type === "IMAGE" ? "[Foto]" : "[Video]"), wamid || undefined, {
       s3Key: key,
       type,
     });
   } else {
-    const wamid = await sendTextMessage(credentials, conversation.customer.phoneNumber, text);
-    await recordMessage(String(req.params.id), "ASSISTANT", text, wamid || undefined);
+    const wamid = await sendTextMessage(credentials, conversation.customer.phoneNumber, formattedText);
+    await recordMessage(String(req.params.id), "ASSISTANT", formattedText, wamid || undefined);
   }
   await setHumanControl(businessId, String(req.params.id), true);
 
