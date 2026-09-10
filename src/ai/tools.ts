@@ -423,7 +423,7 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
     case "save_customer_name": {
       const name = String(input.name ?? "").trim();
       if (!name) return { error: "Falta el nombre" };
-      await saveCustomerName(context.customerId, name);
+      await saveCustomerName(context.businessId, context.customerId, name);
       return { saved: true, name };
     }
     case "update_conversation_status": {

@@ -18,6 +18,7 @@ import {
   setHumanControl,
   recordMessage,
   setCustomerTags,
+  saveCustomerName,
 } from "../conversation/service";
 import {
   sendTextMessage,
@@ -361,6 +362,16 @@ adminRouter.put("/api/customers/:id/tags", async (req, res) => {
     return;
   }
   res.json({ id: customer.id, tags: customer.tags });
+});
+
+adminRouter.put("/api/customers/:id/name", async (req, res) => {
+  const name = String(req.body?.name ?? "").trim();
+  const customer = await saveCustomerName(businessIdOf(req), String(req.params.id), name || null);
+  if (!customer) {
+    res.status(404).json({ error: "Cliente no encontrado" });
+    return;
+  }
+  res.json({ id: customer.id, name: customer.name });
 });
 
 adminRouter.get("/api/orders", async (req, res) => {

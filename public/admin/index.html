@@ -643,7 +643,12 @@
                 <button class="btn-ghost chat-back-btn" onclick="closeConversation()">‹</button>
                 <div class="conv-avatar" id="modal-avatar"></div>
                 <div class="modal-header-info">
-                  <div class="modal-header-name" id="modal-title"></div>
+                  <div class="modal-header-name" style="display:flex; align-items:center; gap:6px;">
+                    <span id="modal-title"></span>
+                    <button class="btn-ghost" type="button" id="edit-name-btn" title="Editar nombre" onclick="startEditCustomerName()" style="padding:1px 5px; font-size:11px; line-height:1.4;">✎</button>
+                    <input id="modal-title-input" type="text" placeholder="Nombre del cliente" style="display:none; font-size:14px; font-weight:700; border:1px solid var(--border); border-radius:6px; padding:2px 6px; width:160px;" onkeydown="if(event.key==='Enter') saveCustomerNameEdit(); if(event.key==='Escape') cancelEditCustomerName();" />
+                    <button class="btn-ghost" type="button" id="save-name-btn" onclick="saveCustomerNameEdit()" style="display:none; padding:1px 6px; font-size:11px;">✓</button>
+                  </div>
                   <div class="modal-header-meta" id="modal-subtitle"></div>
                 </div>
                 <button class="btn-ghost" id="modal-handoff-btn" onclick="toggleHandoff()" style="white-space:nowrap;"></button>
@@ -1376,6 +1381,8 @@ async function loadConversations() {
 let currentConversationId = null;
 let currentCustomerId = null;
 let currentCustomerTags = [];
+let currentCustomerName = '';
+let currentCustomerPhone = '';
 let conversationPollTimer = null;
 let renderedMessageIds = new Set();
 
@@ -1424,6 +1431,42 @@ function stopConversationPolling() {
   if (conversationPollTimer) {
     clearInterval(conversationPollTimer);
     conversationPollTimer = null;
+  }
+}
+
+function startEditCustomerName() {
+  document.getElementById('modal-title').style.display = 'none';
+  document.getElementById('edit-name-btn').style.display = 'none';
+  const input = document.getElementById('modal-title-input');
+  input.value = currentCustomerName;
+  input.style.display = 'inline-block';
+  document.getElementById('save-name-btn').style.display = 'inline-block';
+  input.focus();
+  input.select();
+}
+
+function cancelEditCustomerName() {
+  document.getElementById('modal-title').style.display = '';
+  document.getElementById('edit-name-btn').style.display = '';
+  document.getElementById('modal-title-input').style.display = 'none';
+  document.getElementById('save-name-btn').style.display = 'none';
+}
+
+async function saveCustomerNameEdit() {
+  if (!currentCustomerId) return;
+  const name = document.getElementById('modal-title-input').value.trim();
+  try {
+    await apiFetch(`/admin/api/customers/${currentCustomerId}/name`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    });
+    currentCustomerName = name;
+    document.getElementById('modal-title').textContent = name || currentCustomerPhone;
+    cancelEditCustomerName();
+    loadConversations();
+  } catch (err) {
+    setStatus(`No se pudo guardar el nombre: ${err.message}`, true);
   }
 }
 
@@ -1476,6 +1519,9 @@ async function openConversation(id) {
     renderHandoffState(conversation.humanControl);
     currentCustomerId = conversation.customer.id;
     currentCustomerTags = [...(conversation.customer.tags || [])];
+    currentCustomerName = conversation.customer.name || '';
+    currentCustomerPhone = conversation.customer.phoneNumber;
+    cancelEditCustomerName();
     renderTags();
 
     const displayName = conversation.customer.name || conversation.customer.phoneNumber;

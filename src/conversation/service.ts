@@ -76,7 +76,9 @@ export async function updateConversationStatus(
   });
 }
 
-export async function saveCustomerName(customerId: string, name: string) {
+export async function saveCustomerName(businessId: string, customerId: string, name: string | null) {
+  const customer = await prisma.customer.findFirst({ where: { id: customerId, businessId } });
+  if (!customer) return null;
   return prisma.customer.update({
     where: { id: customerId },
     data: { name },
