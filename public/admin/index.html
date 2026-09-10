@@ -231,7 +231,7 @@
   .status-SOLD { background: var(--brand-light); color: var(--brand-dark); }
   .status-LOST { background: var(--danger-light); color: var(--danger); }
 
-  .chat-split { display: flex; height: calc(100vh - 200px); min-height: 480px; }
+  .chat-split { display: flex; height: 480px; min-height: 480px; }
   .chat-split-list { width: 340px; flex-shrink: 0; overflow-y: auto; border-right: 1px solid var(--border); }
   .chat-split-thread {
     flex: 1; min-width: 0; display: flex; flex-direction: column;
@@ -784,11 +784,24 @@ async function apiFetch(url, options) {
   return res;
 }
 
+function fitChatSplit() {
+  const split = document.getElementById('chat-split');
+  if (!split) return;
+  const top = split.getBoundingClientRect().top;
+  const bottomMargin = 16;
+  const available = window.innerHeight - top - bottomMargin;
+  split.style.height = `${Math.max(480, available)}px`;
+}
+window.addEventListener('resize', () => {
+  if (document.querySelector('.tab-btn[data-tab="conversations"]').classList.contains('active')) fitChatSplit();
+});
+
 function switchTab(name) {
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.dataset.tabPanel === name));
   document.querySelector('main').classList.toggle('wide', name === 'conversations');
   document.body.classList.toggle('no-scroll', name === 'conversations');
+  if (name === 'conversations') requestAnimationFrame(fitChatSplit);
   try { localStorage.setItem('vendia-admin-tab', name); } catch {}
 }
 
