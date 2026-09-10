@@ -14,7 +14,7 @@ before(async () => {
       name: `Test Business ${randomUUID()}`,
       email: `test-${randomUUID()}@example.com`,
       passwordHash: "x",
-      planTier: "BASICO", // cap = 300, see PLAN_MESSAGE_CAPS in ./usage.ts
+      planTier: "BASICO", // cap = 2000, see PLAN_MESSAGE_CAPS in ./usage.ts
     },
   });
   businessId = business.id;
@@ -37,12 +37,12 @@ after(async () => {
 
 test("checkPlanCap is not capped right at the plan limit", async () => {
   await prisma.message.createMany({
-    data: Array.from({ length: 300 }, () => ({ conversationId, role: "CUSTOMER" as const, content: "hola" })),
+    data: Array.from({ length: 2000 }, () => ({ conversationId, role: "CUSTOMER" as const, content: "hola" })),
   });
 
   const status = await checkPlanCap(businessId);
   assert.equal(status.capped, false);
-  assert.equal(status.messageCap, 300);
+  assert.equal(status.messageCap, 2000);
 });
 
 test("checkPlanCap trips once the limit is exceeded, and only notifies once per period", async () => {

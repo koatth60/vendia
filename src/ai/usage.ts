@@ -1,17 +1,23 @@
 import { prisma } from "../db/client";
 
 // Message caps per plan tier — enforced by checkPlanCap below (gates the bot's auto-reply once
-// exceeded), and also shown to the owner as a usage percentage in the admin panel.
-const PLAN_MESSAGE_CAPS: Record<string, number> = {
-  BASICO: 300,
-  EMPRENDEDOR: 1000,
-  NEGOCIO: 3000,
+// exceeded), and also shown to the owner as a usage percentage in the admin panel. NEGOCIO is
+// deliberately null (unlimited), not Infinity — Infinity doesn't survive JSON.stringify (becomes null
+// on the wire anyway), so we make that explicit and treat null as "no cap" everywhere it's read.
+const PLAN_MESSAGE_CAPS: Record<string, number | null> = {
+  BASICO: 2000,
+  EMPRENDEDOR: 5000,
+  NEGOCIO: null,
 };
+
+function getMessageCap(planTier: string): number | null {
+  return planTier in PLAN_MESSAGE_CAPS ? PLAN_MESSAGE_CAPS[planTier] : PLAN_MESSAGE_CAPS.BASICO;
+}
 
 export async function getPlanUsage(businessId: string) {
   const business = await prisma.business.findUnique({ where: { id: businessId }, select: { planTier: true } });
   const planTier = business?.planTier ?? "BASICO";
-  const messageCap = PLAN_MESSAGE_CAPS[planTier] ?? PLAN_MESSAGE_CAPS.BASICO;
+  const messageCap = getMessageCap(planTier);
 
   const now = new Date();
   const periodStart = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -27,17 +33,19 @@ export async function getPlanUsage(businessId: string) {
     planTier,
     messageCap,
     messagesUsed,
-    usagePercent: Math.round((messagesUsed / messageCap) * 1000) / 10,
+    usagePercent: messageCap === null ? 0 : Math.round((messagesUsed / messageCap) * 1000) / 10,
     periodStart,
   };
 }
 
-// Precios oficiales DeepSeek por 1M tokens (USD), vigentes desde el repricing del 2026-08-16.
+// Precios oficiales DeepSeek por 1M tokens (USD), vigentes desde el repricing del 2026-09-10.
 // Fuente: https://api-docs.deepseek.com/quick_start/pricing
 // Peak: 01:00-04:00 y 06:00-10:00 UTC, lunes a viernes (precio x2 sobre off-peak).
+// "deepseek-v4-flash" y "deepseek-v4-flash-vision-exp" son nombres legacy que DeepSeek sigue aceptando -
+// las llamadas se enrutan a su modelo V4.1-Flash pero se cobran al precio Flash (mas barato que antes).
 const PRICING = {
-  "deepseek-v4-flash": { cacheHit: 0.007, cacheMiss: 0.22, output: 0.66 },
-  "deepseek-v4-flash-vision-exp": { cacheHit: 0.007, cacheMiss: 0.22, output: 0.66 },
+  "deepseek-v4-flash": { cacheHit: 0.003, cacheMiss: 0.15, output: 0.6 },
+  "deepseek-v4-flash-vision-exp": { cacheHit: 0.003, cacheMiss: 0.15, output: 0.6 },
   "deepseek-v4-pro": { cacheHit: 0.022, cacheMiss: 0.66, output: 1.98 },
 } as const;
 
@@ -91,9 +99,9 @@ export async function logAiUsage(params: {
 // is always recorded, only the AI call (and the cost/message-volume it represents) is what gets capped.
 export async function checkPlanCap(
   businessId: string
-): Promise<{ capped: boolean; justCrossed: boolean; messageCap: number; planTier: string }> {
+): Promise<{ capped: boolean; justCrossed: boolean; messageCap: number | null; planTier: string }> {
   const usage = await getPlanUsage(businessId);
-  if (usage.messagesUsed <= usage.messageCap) {
+  if (usage.messageCap === null || usage.messagesUsed <= usage.messageCap) {
     return { capped: false, justCrossed: false, messageCap: usage.messageCap, planTier: usage.planTier };
   }
 
