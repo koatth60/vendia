@@ -14,6 +14,7 @@ import {
   clearPendingOwnerQuestion,
   setHumanControl,
   updateConversationStatus,
+  getRelatedProductNameForMessage,
 } from "../conversation/service";
 import { generateReply } from "../ai/agent";
 import { analyzeReceiptImage } from "../ai/vision";
@@ -148,6 +149,19 @@ whatsappRouter.post("/webhook", async (req, res) => {
     const message = value?.messages?.[0];
     const incomingPhoneNumberId: string | undefined = value?.metadata?.phone_number_id;
 
+    // Meta sends delivery receipts (sent/delivered/read/failed) as `statuses`, not `messages` - these
+    // were previously silently dropped, so a media message that Meta accepted but failed to actually
+    // deliver (can't fetch the URL, unsupported format, etc.) left zero trace anywhere in our logs.
+    const status = value?.statuses?.[0];
+    if (status && !message) {
+      if (status.status === "failed") {
+        console.error("WhatsApp delivery FAILED:", JSON.stringify({ id: status.id, recipient: status.recipient_id, errors: status.errors }));
+      } else {
+        console.log("WhatsApp status:", status.status, status.id, status.recipient_id);
+      }
+      return;
+    }
+
     if (!message || !incomingPhoneNumberId) return;
     if (message.type !== "text" && message.type !== "image" && message.type !== "audio" && message.type !== "interactive") return;
 
@@ -223,6 +237,21 @@ whatsappRouter.post("/webhook", async (req, res) => {
       }
     }
 
+    // If the customer replied/quoted a specific WhatsApp message (long-press "Reply"), and that message
+    // was a product photo/video we sent, tell the model directly which product it was - otherwise it has
+    // to guess or ask "¿cual de los dos?" since WhatsApp doesn't show us the quoted image, only its id.
+    // Keep the raw customer text separate from the marker-prefixed version: the marker itself contains
+    // the words "foto"/"video" and the product's full name, which would otherwise false-trigger the
+    // photo-resend safety net in generateReply (it would think the customer just asked for that photo).
+    const rawText = text;
+    const quotedMessageId: string | undefined = message.context?.id;
+    if (quotedMessageId) {
+      const relatedProductName = await getRelatedProductNameForMessage(quotedMessageId);
+      if (relatedProductName) {
+        text = `[El cliente esta respondiendo a la foto/video de: ${relatedProductName}] ${text}`;
+      }
+    }
+
     try {
       await recordMessage(conversation.id, "CUSTOMER", text, whatsappMessageId, media, imageAnalysis);
     } catch (error) {
@@ -275,7 +304,8 @@ whatsappRouter.post("/webhook", async (req, res) => {
         autoSendPhotoOnQuote: business.autoSendPhotoOnQuote,
         requirePaymentProof: business.requirePaymentProof,
         category: business.businessCategory,
-      }
+      },
+      rawText
     );
     await sendTextMessage(credentials, from, reply);
     await recordMessage(conversation.id, "ASSISTANT", reply);

@@ -7,6 +7,7 @@ import {
   setConversationIntent,
   setHumanControl,
   saveCustomerName,
+  recordMessage,
 } from "../conversation/service";
 import { resolveOrderItems, createOrder, askForCsat, type ResolvedOrderItem } from "../orders/service";
 import {
@@ -19,6 +20,43 @@ import {
   type WhatsappCredentials,
 } from "../whatsapp/client";
 import { prisma } from "../db/client";
+
+// WhatsApp sometimes fails to deliver/render an image if it's sent immediately after another one -
+// a short gap between consecutive media sends avoids that collision.
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Records each sent image/video as its own Message row (whatsappMessageId + relatedProductId), so that
+// when the customer later replies/quotes that specific WhatsApp message, the webhook can look up which
+// product it was and tell the model directly instead of the model having to guess ("¿cual de los dos?").
+async function sendMediaWithSpacing(
+  credentials: WhatsappCredentials,
+  recipientPhone: string,
+  conversationId: string,
+  productId: string,
+  productName: string,
+  media: { type: string; url: string; s3Key: string }[]
+): Promise<void> {
+  for (let i = 0; i < media.length; i++) {
+    if (i > 0) await sleep(1200);
+    const item = media[i];
+    const mediaType = item.type === "IMAGE" ? "IMAGE" : "VIDEO";
+    const wamid =
+      mediaType === "IMAGE"
+        ? await sendImageMessage(credentials, recipientPhone, item.url)
+        : await sendVideoMessage(credentials, recipientPhone, item.url);
+    await recordMessage(
+      conversationId,
+      "ASSISTANT",
+      `[${mediaType === "IMAGE" ? "Foto" : "Video"} de ${productName}]`,
+      wamid || undefined,
+      { s3Key: item.s3Key, type: mediaType },
+      undefined,
+      productId
+    );
+  }
+}
 
 async function describeCustomer(customerId: string, recipientPhone: string): Promise<string> {
   if (!isBsuid(recipientPhone)) return recipientPhone;
@@ -301,10 +339,39 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
     }
     case "get_product_details": {
       const product = await getProductById(businessId, String(input.productId ?? ""));
-      if (product) {
-        await prisma.product.update({ where: { id: product.id }, data: { inquiryCount: { increment: 1 } } });
+      if (!product) return formatProduct(product);
+
+      await prisma.product.update({ where: { id: product.id }, data: { inquiryCount: { increment: 1 } } });
+
+      // Deterministic auto-send: don't rely on the model remembering to separately call
+      // send_product_media on first detail - it sometimes skips it despite the prompt instruction.
+      // Send here in code instead, once per product per conversation (tracked via
+      // Conversation.mediaSentProductIds), gated by the business's autoSendPhotoOnQuote setting.
+      let mediaJustSent = false;
+      if (product.media.length > 0) {
+        const [business, conversation] = await Promise.all([
+          prisma.business.findUnique({ where: { id: businessId }, select: { autoSendPhotoOnQuote: true } }),
+          prisma.conversation.findUnique({ where: { id: context.conversationId }, select: { mediaSentProductIds: true } }),
+        ]);
+        const alreadySent = conversation?.mediaSentProductIds.includes(product.id) ?? false;
+        if (business?.autoSendPhotoOnQuote && !alreadySent) {
+          await sendMediaWithSpacing(
+            context.credentials,
+            context.recipientPhone,
+            context.conversationId,
+            product.id,
+            product.name,
+            product.media
+          );
+          await prisma.conversation.update({
+            where: { id: context.conversationId },
+            data: { mediaSentProductIds: { push: product.id } },
+          });
+          mediaJustSent = true;
+        }
       }
-      return formatProduct(product);
+
+      return { ...formatProduct(product), mediaJustSent };
     }
     case "list_all_products": {
       const results = await listActiveProducts(businessId);
@@ -324,16 +391,15 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
         return { sent: false, product: product.name, reason: "Este producto no tiene fotos ni videos cargados" };
       }
 
-      let sentCount = 0;
-      for (const media of product.media) {
-        if (media.type === "IMAGE") {
-          await sendImageMessage(context.credentials, context.recipientPhone, media.url);
-        } else {
-          await sendVideoMessage(context.credentials, context.recipientPhone, media.url);
-        }
-        sentCount++;
-      }
-      return { sent: true, product: product.name, count: sentCount };
+      await sendMediaWithSpacing(
+        context.credentials,
+        context.recipientPhone,
+        context.conversationId,
+        product.id,
+        product.name,
+        product.media
+      );
+      return { sent: true, product: product.name, count: product.media.length };
     }
     case "get_faq": {
       const results = await listActiveFaqEntries(businessId);

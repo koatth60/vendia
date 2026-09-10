@@ -207,6 +207,7 @@ model Conversation {
   pendingOwnerQuestionMessageId String?            @unique
   contextSummary                String?
   contextSummarizedUpTo         Int?
+  mediaSentProductIds            String[]            @default([])
   order                        Order?
   messages                     Message[]
   createdAt                    DateTime            @default(now())
@@ -239,6 +240,7 @@ model Message {
   mediaType         MediaType?
   imageAnalysis     String?
   whatsappMessageId String?      @unique
+  relatedProductId  String?
   createdAt         DateTime     @default(now())
 }
 

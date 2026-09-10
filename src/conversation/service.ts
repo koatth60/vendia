@@ -32,7 +32,8 @@ export async function recordMessage(
   content: string,
   whatsappMessageId?: string,
   media?: { s3Key: string; type: "IMAGE" | "VIDEO" | "AUDIO" },
-  imageAnalysis?: string
+  imageAnalysis?: string,
+  relatedProductId?: string
 ) {
   await prisma.message.create({
     data: {
@@ -43,12 +44,26 @@ export async function recordMessage(
       mediaS3Key: media?.s3Key,
       mediaType: media?.type,
       imageAnalysis,
+      relatedProductId,
     },
   });
   await prisma.conversation.update({
     where: { id: conversationId },
     data: { updatedAt: new Date() },
   });
+}
+
+export async function getRelatedProductNameForMessage(whatsappMessageId: string): Promise<string | null> {
+  const message = await prisma.message.findUnique({
+    where: { whatsappMessageId },
+    select: { relatedProductId: true },
+  });
+  if (!message?.relatedProductId) return null;
+  const product = await prisma.product.findUnique({
+    where: { id: message.relatedProductId },
+    select: { name: true },
+  });
+  return product?.name ?? null;
 }
 
 export async function updateConversationStatus(

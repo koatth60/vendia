@@ -4,6 +4,8 @@ import { catalogTools, runCatalogTool, type ToolContext } from "./tools";
 import { getRecentHistory } from "../conversation/service";
 import { logAiUsage } from "./usage";
 import { prisma } from "../db/client";
+import { listActiveProducts } from "../catalog/products";
+import { normalizeForMatch, tokenize } from "../search/text";
 
 const BASE_SYSTEM_PROMPT = `Eres un asistente de ventas por WhatsApp para un negocio.
 
@@ -85,7 +87,7 @@ PQR/DEVOLUCIONES/PEDIDOS NO RECIBIDOS/PIDE UN AGENTE: si el cliente trae una que
 devolucion, dice que no le llego su pedido, O pide explicitamente hablar con una persona real, un asesor,
 un agente o un humano (no con vos), usa flag_conversation_intent UNA SOLA VEZ con el tipo correspondiente
 (PQR, DEVOLUCION, NO_RECIBIDO o SOLICITA_AGENTE). Esto escala la conversacion a un humano del negocio -
-el dueno puede seguir la conversacion desde el panel de Vendia y tomar el control el mismo. Despues de
+el dueno puede seguir la conversacion desde el panel de Onix y tomar el control el mismo. Despues de
 usarla, decile al cliente algo breve como "ya le avise a nuestro equipo, en un momento te van a atender
 directamente" - no intentes resolverlo vos mismo ni sigas usando otras herramientas en ese mismo tema.
 
@@ -124,20 +126,25 @@ decime, contame), tono cercano y directo.`,
 "bacán", "al tiro"), sin forzarlos si no vienen al caso.`,
 };
 
-const PHOTO_DIRECTIVE_AUTO = `FOTOS Y VIDEOS: la primera vez que cotices o des detalle de un producto especifico en la
-conversacion, usa send_product_media para mandar su foto automaticamente, sin que el cliente tenga que
-pedirla - pasando el nombre del producto DEL QUE SE ESTA HABLANDO AHORA MISMO. No la reenvies si ya la
-mandaste para ese mismo producto en esta conversacion, salvo que el cliente la pida de nuevo o pida ver
-otro angulo/video. Si el cliente pide ver fotos, imagenes o video explicitamente, usa la herramienta igual.
-No describas la foto en texto ni pongas la URL en el mensaje, la herramienta ya envia el archivo real.
-Revisa el campo "product" que devuelve la herramienta: si no coincide con lo pedido, decilo honestamente.
-Si la herramienta devuelve error o sent:false, nunca digas que ya la mandaste.`;
+const PHOTO_DIRECTIVE_AUTO = `FOTOS Y VIDEOS: cuando uses get_product_details, si es la primera vez que se piden los detalles de ese
+producto en esta conversacion, el sistema ya le manda la foto/video al cliente automaticamente (mira el
+campo "mediaJustSent" en la respuesta de la herramienta) - no llames send_product_media para eso, no hace
+falta. Si el cliente pide ver fotos, imagenes o video de nuevo despues (otro angulo, video, o simplemente
+lo vuelve a pedir), ahi si usa send_product_media pasando el nombre del producto DEL QUE SE ESTA HABLANDO
+AHORA MISMO. No describas la foto en texto ni pongas la URL en el mensaje, la herramienta ya envia el
+archivo real. Si send_product_media devuelve error o sent:false, nunca digas que ya la mandaste.
+Si el mensaje del cliente empieza con "[El cliente esta respondiendo a la foto/video de: NOMBRE]", el
+cliente citó/respondió esa foto puntual - ya sabes de que producto habla, no le preguntes "¿cual de los
+dos?" ni cosas asi, respondé directo sobre ese producto. Nunca repitas ese texto entre corchetes al cliente.`;
 
 const PHOTO_DIRECTIVE_REACTIVE = `FOTOS Y VIDEOS: si el cliente pide ver fotos, imagenes o video de un producto, usa send_product_media
 pasando el nombre del producto DEL QUE SE ESTA HABLANDO AHORA MISMO (no uno mencionado antes en la
 conversacion). No describas la foto en texto ni pongas la URL en el mensaje, la herramienta ya envia el
 archivo real. Revisa el campo "product" que devuelve la herramienta: si no coincide con lo pedido, decilo
-honestamente. Si la herramienta devuelve error o sent:false, nunca digas que ya la mandaste.`;
+honestamente. Si la herramienta devuelve error o sent:false, nunca digas que ya la mandaste.
+Si el mensaje del cliente empieza con "[El cliente esta respondiendo a la foto/video de: NOMBRE]", el
+cliente citó/respondió esa foto puntual - ya sabes de que producto habla, no le preguntes "¿cual de los
+dos?" ni cosas asi, respondé directo sobre ese producto. Nunca repitas ese texto entre corchetes al cliente.`;
 
 const COMPROBANTE_DIRECTIVE_REQUIRED = `COMPROBANTES: si el cliente manda una foto (por ejemplo un comprobante de pago o transferencia), el
 mensaje va a incluir una nota "[Analisis de imagen adjunta]" con lo que se ve en la foto - usa esa
@@ -314,10 +321,19 @@ export async function getOrRefreshContextSummary(conversationId: string, busines
   }
 }
 
+// Safety net for when the model claims "ya te la mande" without actually calling the tool - fires
+// only if nothing was sent this turn AND either the customer explicitly asked for media, or the
+// model's own reply text claims to have sent some, so it never overrides or duplicates what the model
+// already did on its own.
+const PHOTO_REQUEST_PATTERN =
+  /\b(foto|fotos|imagen|imagenes|imágenes|video|videos|muestra|muéstrame|muestrame|enseñ|ense[nñ]a|mandame|mándame|manda la|envia la|envía la|pasame|pásame)\b/i;
+const PHOTO_CLAIM_PATTERN = /\b(te (mand|envi|pas)|aqu[ií] (te|va|van)|ah[ií] (te|va|van))/i;
+
 export async function generateReply(
   conversationId: string,
   context: ToolContext,
-  personality?: BotPersonality | null
+  personality?: BotPersonality | null,
+  customerText?: string
 ): Promise<string> {
   const history = await getRecentHistory(conversationId);
   const contextSummary = await getOrRefreshContextSummary(conversationId, context.businessId);
@@ -339,6 +355,41 @@ export async function generateReply(
   ];
 
   let lastText = "";
+  let mediaSentThisTurn = 0;
+
+  async function finalizeTurn(text: string): Promise<string> {
+    if (mediaSentThisTurn > 0) return text;
+
+    const customerAsked = !!customerText && PHOTO_REQUEST_PATTERN.test(customerText);
+    const modelClaimsSent = PHOTO_CLAIM_PATTERN.test(text) && PHOTO_REQUEST_PATTERN.test(text);
+    if (!customerAsked && !modelClaimsSent) return text;
+
+    // Figure out WHICH product(s) by scanning both the customer's message and the model's own reply
+    // for product-name mentions (token-overlap, not exact substring - the model paraphrases names
+    // constantly, e.g. "Boombox 4 LED" for "Parlante Bluetooth Portatil Boombox 4 LED"). This catches
+    // vague follow-ups like "y los otros productos?" where the model resolved which ones but never
+    // actually called send_product_media for them.
+    const products = await listActiveProducts(context.businessId);
+    const haystack = normalizeForMatch(`${customerText ?? ""} ${text}`);
+    const matched = products.filter((p) => {
+      if (p.media.length === 0) return false;
+      const nameTokens = tokenize(p.name);
+      if (nameTokens.length === 0) return false;
+      const hits = nameTokens.filter((t) => haystack.includes(t)).length;
+      return hits / nameTokens.length >= 0.6;
+    });
+
+    for (let i = 0; i < matched.length; i++) {
+      if (i > 0) await new Promise((resolve) => setTimeout(resolve, 1200));
+      await runCatalogTool(context, "send_product_media", { productName: matched[i].name });
+    }
+
+    if (matched.length === 0 && customerText) {
+      await runCatalogTool(context, "send_product_media", { productName: customerText });
+    }
+
+    return text;
+  }
 
   for (let iteration = 0; iteration < 5; iteration++) {
     const response = await deepseek.chat.completions.create({
@@ -368,7 +419,9 @@ export async function generateReply(
 
     const toolCalls = message.tool_calls ?? [];
     if (toolCalls.length === 0) {
-      return lastText || "Disculpa, tuve un problema procesando tu consulta. Un asesor te va a contactar pronto.";
+      return finalizeTurn(
+        lastText || "Disculpa, tuve un problema procesando tu consulta. Un asesor te va a contactar pronto."
+      );
     }
 
     messages.push(message);
@@ -381,7 +434,11 @@ export async function generateReply(
       } catch {
         input = {};
       }
-      const result = await runCatalogTool(context, call.function.name, input);
+      const result = (await runCatalogTool(context, call.function.name, input)) as {
+        mediaJustSent?: boolean;
+        sent?: boolean;
+      };
+      if (result?.mediaJustSent || result?.sent) mediaSentThisTurn++;
       messages.push({
         role: "tool",
         tool_call_id: call.id,
@@ -390,5 +447,5 @@ export async function generateReply(
     }
   }
 
-  return lastText || "Disculpa, tuve un problema procesando tu consulta. Un asesor te va a contactar pronto.";
+  return finalizeTurn(lastText || "Disculpa, tuve un problema procesando tu consulta. Un asesor te va a contactar pronto.");
 }

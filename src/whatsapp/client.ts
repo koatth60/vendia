@@ -90,13 +90,14 @@ export async function sendImageMessage(
   to: string,
   imageUrl: string,
   caption?: string
-) {
-  return callGraphApi(credentials, {
+): Promise<string> {
+  const result = (await callGraphApi(credentials, {
     messaging_product: "whatsapp",
     ...recipientField(to),
     type: "image",
     image: { link: imageUrl, caption },
-  });
+  })) as { messages?: { id: string }[] };
+  return result.messages?.[0]?.id ?? "";
 }
 
 // Owner-facing alerts (escalations, payment confirmations, password resets) need to reach the owner
@@ -106,7 +107,7 @@ export async function sendImageMessage(
 // silently.
 export async function sendOwnerAlert(credentials: WhatsappCredentials, to: string, bodyText: string): Promise<string> {
   try {
-    return await sendTemplateMessage(credentials, to, "vendia_owner_alert", "es", [bodyText]);
+    return await sendTemplateMessage(credentials, to, "onix_owner_alert", "es", [bodyText]);
   } catch (error) {
     console.error("No se pudo enviar alerta al dueno via plantilla, probando texto libre:", error);
     return sendTextMessage(credentials, to, bodyText);
@@ -141,11 +142,12 @@ export async function sendVideoMessage(
   to: string,
   videoUrl: string,
   caption?: string
-) {
-  return callGraphApi(credentials, {
+): Promise<string> {
+  const result = (await callGraphApi(credentials, {
     messaging_product: "whatsapp",
     ...recipientField(to),
     type: "video",
     video: { link: videoUrl, caption },
-  });
+  })) as { messages?: { id: string }[] };
+  return result.messages?.[0]?.id ?? "";
 }
