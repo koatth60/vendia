@@ -33,6 +33,7 @@
   }
   * { box-sizing: border-box; }
   html, body { max-width: 100%; overflow-x: hidden; }
+  body.no-scroll { overflow-y: hidden; }
   body {
     font-family: "Work Sans", "Segoe UI", system-ui, -apple-system, sans-serif;
     background: var(--bg);
@@ -787,6 +788,7 @@ function switchTab(name) {
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.dataset.tabPanel === name));
   document.querySelector('main').classList.toggle('wide', name === 'conversations');
+  document.body.classList.toggle('no-scroll', name === 'conversations');
   try { localStorage.setItem('vendia-admin-tab', name); } catch {}
 }
 
