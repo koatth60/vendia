@@ -90,7 +90,7 @@
   .tab-btn.active .tab-count { background: var(--brand-light); color: var(--brand-dark); }
 
   main { max-width: 900px; margin: 0 auto; padding: 24px 20px 64px; transition: max-width .15s ease; }
-  main.wide { max-width: 1560px; }
+  main.wide { max-width: 1560px; padding-bottom: 16px; }
 
   .tab-panel { display: none; animation: fadeIn .18s ease; }
   .tab-panel.active { display: block; }
@@ -230,7 +230,7 @@
   .status-SOLD { background: var(--brand-light); color: var(--brand-dark); }
   .status-LOST { background: var(--danger-light); color: var(--danger); }
 
-  .chat-split { display: flex; height: calc(100vh - 260px); min-height: 480px; }
+  .chat-split { display: flex; height: calc(100vh - 200px); min-height: 480px; }
   .chat-split-list { width: 340px; flex-shrink: 0; overflow-y: auto; border-right: 1px solid var(--border); }
   .chat-split-thread {
     flex: 1; min-width: 0; display: flex; flex-direction: column;
