@@ -19,7 +19,7 @@ import {
   recordMessage,
   setCustomerTags,
 } from "../conversation/service";
-import { sendTextMessage, type WhatsappCredentials } from "../whatsapp/client";
+import { sendTextMessage, sendImageMessage, sendVideoMessage, type WhatsappCredentials } from "../whatsapp/client";
 import { getAiUsageSummary, getPlanUsage, logAiUsage } from "../ai/usage";
 import { deepseek, DEEPSEEK_MODEL } from "../ai/client";
 import { getAnalyticsSummary } from "../analytics/service";
@@ -361,10 +361,11 @@ adminRouter.put("/api/conversations/:id/handoff", async (req, res) => {
   res.json({ id: conversation.id, humanControl: conversation.humanControl });
 });
 
-adminRouter.post("/api/conversations/:id/messages", async (req, res) => {
+adminRouter.post("/api/conversations/:id/messages", upload.single("file"), async (req, res) => {
   const text = String(req.body?.text ?? "").trim();
-  if (!text) {
-    res.status(400).json({ error: "Falta el texto del mensaje" });
+  const file = req.file;
+  if (!text && !file) {
+    res.status(400).json({ error: "Falta el texto o el archivo" });
     return;
   }
 
@@ -386,8 +387,22 @@ adminRouter.post("/api/conversations/:id/messages", async (req, res) => {
     accessToken: business.whatsappAccessToken,
   };
 
-  await sendTextMessage(credentials, conversation.customer.phoneNumber, text);
-  await recordMessage(String(req.params.id), "ASSISTANT", text);
+  if (file) {
+    const type = file.mimetype.startsWith("video") ? "VIDEO" : "IMAGE";
+    const folder = type === "VIDEO" ? "videos" : "images";
+    const { key, url } = await uploadMedia(file.buffer, file.mimetype, folder);
+    const wamid =
+      type === "IMAGE"
+        ? await sendImageMessage(credentials, conversation.customer.phoneNumber, url, text || undefined)
+        : await sendVideoMessage(credentials, conversation.customer.phoneNumber, url, text || undefined);
+    await recordMessage(String(req.params.id), "ASSISTANT", text || (type === "IMAGE" ? "[Foto]" : "[Video]"), wamid || undefined, {
+      s3Key: key,
+      type,
+    });
+  } else {
+    const wamid = await sendTextMessage(credentials, conversation.customer.phoneNumber, text);
+    await recordMessage(String(req.params.id), "ASSISTANT", text, wamid || undefined);
+  }
   await setHumanControl(businessId, String(req.params.id), true);
 
   res.status(201).json({ ok: true });
