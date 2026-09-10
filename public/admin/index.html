@@ -381,6 +381,17 @@
       </div>
 
       <div class="settings-group">
+        <div class="settings-group-title">Foto de perfil de WhatsApp</div>
+        <p class="settings-desc">La foto que ven tus clientes en el chat. El nombre del negocio en WhatsApp todavía no se puede cambiar (necesita verificación de Meta), pero la foto sí, en cualquier momento.</p>
+        <div style="display:flex; align-items:center; gap:14px;">
+          <input id="profile-photo-file" type="file" accept="image/*" style="display:none;" onchange="uploadProfilePhoto(this)" />
+          <button class="btn-secondary" type="button" onclick="document.getElementById('profile-photo-file').click()">Subir foto</button>
+          <span id="profile-photo-status" style="font-size:12.5px; color:var(--muted);"></span>
+        </div>
+        <div class="hint">Puede tardar unos minutos en verse actualizada dentro de WhatsApp.</div>
+      </div>
+
+      <div class="settings-group">
         <div class="settings-group-title">Personalidad del bot</div>
         <p class="settings-desc">Así se siente tu bot como propio de tu negocio, no genérico.</p>
         <label>Categoría de tu negocio</label>
@@ -1088,6 +1099,24 @@ async function uploadMedia(productId, input) {
     loadProducts();
   } catch (err) {
     setStatus(`Error subiendo archivo: ${err.message}`, true);
+  }
+}
+
+async function uploadProfilePhoto(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const status = document.getElementById('profile-photo-status');
+  status.textContent = 'Subiendo...';
+  const formData = new FormData();
+  formData.append('file', file);
+  try {
+    await apiFetch('/admin/api/business/profile-photo', { method: 'POST', body: formData });
+    status.textContent = 'Foto actualizada ✓';
+  } catch (err) {
+    status.textContent = '';
+    setStatus(`No se pudo actualizar la foto: ${err.message}`, true);
+  } finally {
+    input.value = '';
   }
 }
 

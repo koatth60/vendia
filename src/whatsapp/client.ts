@@ -1,4 +1,5 @@
 const GRAPH_BASE_URL = "https://graph.facebook.com/v21.0";
+const META_APP_ID = process.env.WHATSAPP_APP_ID ?? "";
 
 export interface WhatsappCredentials {
   phoneNumberId: string;
@@ -150,4 +151,56 @@ export async function sendVideoMessage(
     video: { link: videoUrl, caption },
   })) as { messages?: { id: string }[] };
   return result.messages?.[0]?.id ?? "";
+}
+
+// Setting the WhatsApp business profile photo isn't a plain POST - it needs the Resumable Upload API
+// (separate from the /media endpoint used to send images) to turn the file into a "handle" first, then
+// that handle gets attached to the phone number's business profile. Uses the shared Meta app ID (same
+// app for every business's WABA), not a per-business credential.
+export async function setBusinessProfilePhoto(
+  credentials: WhatsappCredentials,
+  buffer: Buffer,
+  mimeType: string
+): Promise<void> {
+  if (!META_APP_ID) {
+    throw new Error("WHATSAPP_APP_ID no está configurado en el servidor");
+  }
+
+  const sessionResponse = await fetch(
+    `${GRAPH_BASE_URL}/${META_APP_ID}/uploads?file_length=${buffer.length}&file_type=${encodeURIComponent(mimeType)}&access_token=${credentials.accessToken}`,
+    { method: "POST" }
+  );
+  if (!sessionResponse.ok) {
+    throw new Error(`WhatsApp API error creando sesión de subida (${sessionResponse.status}): ${await sessionResponse.text()}`);
+  }
+  const session = (await sessionResponse.json()) as { id: string };
+
+  const uploadResponse = await fetch(`${GRAPH_BASE_URL}/${session.id}`, {
+    method: "POST",
+    headers: {
+      Authorization: `OAuth ${credentials.accessToken}`,
+      file_offset: "0",
+      "Content-Type": mimeType,
+    },
+    body: buffer,
+  });
+  if (!uploadResponse.ok) {
+    throw new Error(`WhatsApp API error subiendo el archivo (${uploadResponse.status}): ${await uploadResponse.text()}`);
+  }
+  const uploaded = (await uploadResponse.json()) as { h: string };
+
+  const profileResponse = await fetch(`${GRAPH_BASE_URL}/${credentials.phoneNumberId}/whatsapp_business_profile`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${credentials.accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      messaging_product: "whatsapp",
+      profile_picture_handle: uploaded.h,
+    }),
+  });
+  if (!profileResponse.ok) {
+    throw new Error(`WhatsApp API error actualizando la foto de perfil (${profileResponse.status}): ${await profileResponse.text()}`);
+  }
 }

@@ -19,7 +19,13 @@ import {
   recordMessage,
   setCustomerTags,
 } from "../conversation/service";
-import { sendTextMessage, sendImageMessage, sendVideoMessage, type WhatsappCredentials } from "../whatsapp/client";
+import {
+  sendTextMessage,
+  sendImageMessage,
+  sendVideoMessage,
+  setBusinessProfilePhoto,
+  type WhatsappCredentials,
+} from "../whatsapp/client";
 import { getAiUsageSummary, getPlanUsage, logAiUsage } from "../ai/usage";
 import { deepseek, DEEPSEEK_MODEL } from "../ai/client";
 import { getAnalyticsSummary } from "../analytics/service";
@@ -94,6 +100,35 @@ adminRouter.put("/api/business", requireOwner, async (req, res) => {
   });
   const { passwordHash: _hash, whatsappAccessToken: _token, ...safe } = business;
   res.json(safe);
+});
+
+adminRouter.post("/api/business/profile-photo", requireOwner, upload.single("file"), async (req, res) => {
+  const file = req.file;
+  if (!file) {
+    res.status(400).json({ error: "No se subió ninguna imagen" });
+    return;
+  }
+
+  const businessId = businessIdOf(req);
+  const business = await prisma.business.findUnique({ where: { id: businessId } });
+  if (!business?.whatsappPhoneNumberId || !business.whatsappAccessToken) {
+    res.status(400).json({ error: "Este negocio no tiene WhatsApp conectado" });
+    return;
+  }
+
+  const credentials: WhatsappCredentials = {
+    phoneNumberId: business.whatsappPhoneNumberId,
+    accessToken: business.whatsappAccessToken,
+  };
+
+  try {
+    await setBusinessProfilePhoto(credentials, file.buffer, file.mimetype);
+  } catch (error) {
+    res.status(502).json({ error: error instanceof Error ? error.message : "No se pudo actualizar la foto" });
+    return;
+  }
+
+  res.json({ ok: true });
 });
 
 adminRouter.delete("/api/reset-test-data", requireOwner, async (req, res) => {
