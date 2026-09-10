@@ -379,6 +379,13 @@ export async function generateReply(
       return hits / nameTokens.length >= 0.6;
     });
 
+    // A generic "muestrame el catalogo" also matches PHOTO_REQUEST_PATTERN (it contains "muestrame"),
+    // and if the model answers by listing the whole catalog by name, every product matches the
+    // token-overlap check above - this used to blast every product's photos at once. Real
+    // single/double-product requests only ever match a couple of names, so cap it: anything wider is
+    // treated as a catalog browse, which should stay text-only.
+    if (matched.length > 2) return text;
+
     for (let i = 0; i < matched.length; i++) {
       if (i > 0) await new Promise((resolve) => setTimeout(resolve, 1200));
       await runCatalogTool(context, "send_product_media", { productName: matched[i].name });
