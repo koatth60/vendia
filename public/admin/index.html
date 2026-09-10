@@ -229,6 +229,26 @@
   .status-SOLD { background: var(--brand-light); color: var(--brand-dark); }
   .status-LOST { background: var(--danger-light); color: var(--danger); }
 
+  .chat-split { display: flex; height: 640px; }
+  .chat-split-list { width: 320px; flex-shrink: 0; overflow-y: auto; border-right: 1px solid var(--border); }
+  .chat-split-thread { flex: 1; min-width: 0; display: flex; flex-direction: column; background: #e9edf0; }
+  .chat-panel-empty { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 13.5px; }
+  .chat-panel-header {
+    display: flex; align-items: center; gap: 12px; padding: 14px 18px;
+    border-bottom: 1px solid var(--border); background: #fff; flex-shrink: 0;
+  }
+  .conv-row.active { background: var(--bg); }
+  .chat-back-btn { display: none; padding: 4px 8px; font-size: 18px; line-height: 1; }
+
+  @media (max-width: 760px) {
+    .chat-split { height: 72vh; }
+    .chat-split-list { width: 100%; border-right: none; }
+    .chat-split-thread { display: none; }
+    .chat-back-btn { display: flex; }
+    .chat-split.chat-split--open .chat-split-list { display: none; }
+    .chat-split.chat-split--open .chat-split-thread { display: flex; }
+  }
+
   .modal-overlay {
     position: fixed; inset: 0; background: rgba(15,23,42,.5); display: flex; align-items: center;
     justify-content: center; z-index: 50; padding: 20px; backdrop-filter: blur(2px);
@@ -606,7 +626,34 @@
         <button class="btn-ghost" onclick="loadConversations()">↻ Actualizar</button>
       </div>
       <div class="card" style="padding:0; overflow:hidden;">
-        <div id="conversations-list"></div>
+        <div class="chat-split" id="chat-split">
+          <div class="chat-split-list" id="conversations-list"></div>
+          <div class="chat-split-thread">
+            <div id="chat-panel-empty" class="chat-panel-empty">Elige una conversación de la lista</div>
+            <div id="chat-panel-active" style="display:none; flex-direction:column; height:100%; min-height:0;">
+              <div class="chat-panel-header">
+                <button class="btn-ghost chat-back-btn" onclick="closeConversation()">‹</button>
+                <div class="conv-avatar" id="modal-avatar"></div>
+                <div class="modal-header-info">
+                  <div class="modal-header-name" id="modal-title"></div>
+                  <div class="modal-header-meta" id="modal-subtitle"></div>
+                </div>
+                <button class="btn-ghost" id="modal-handoff-btn" onclick="toggleHandoff()" style="white-space:nowrap;"></button>
+              </div>
+              <div id="modal-tags" style="display:flex; flex-wrap:wrap; gap:6px; align-items:center; padding:8px 16px; border-bottom:1px solid var(--border); background:#fff;"></div>
+              <div id="modal-thread" class="chat-thread" style="flex:1; max-height:none;"></div>
+              <div id="modal-composer" style="display:none; flex-direction:column; gap:6px; padding:12px; border-top:1px solid var(--border); background:#fff;">
+                <div id="modal-composer-preview" style="display:none; align-items:center; gap:8px; font-size:12px; color:var(--muted);"></div>
+                <div style="display:flex; gap:8px;">
+                  <input id="modal-composer-file" type="file" accept="image/*,video/*" style="display:none;" onchange="onComposerFileChange(this)" />
+                  <button class="btn-secondary" type="button" title="Adjuntar foto o video" onclick="document.getElementById('modal-composer-file').click()">📎</button>
+                  <input id="modal-composer-input" type="text" placeholder="Escribe como el negocio..." style="flex:1;" onkeydown="if(event.key==='Enter') sendManualMessage();" />
+                  <button class="btn-primary" onclick="sendManualMessage()">Enviar</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -690,31 +737,6 @@
         <div class="actions-row" style="width:100%; justify-content:flex-end;">
           <button class="btn-secondary" type="button" onclick="closePhotoCropModal()">Cancelar</button>
           <button class="btn-primary" type="button" onclick="confirmPhotoCrop()">Usar esta foto</button>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <div id="conversation-modal" class="modal-overlay" style="display:none;" onclick="if(event.target===this) closeConversation()">
-    <div class="modal-card">
-      <div class="modal-header">
-        <div class="conv-avatar" id="modal-avatar"></div>
-        <div class="modal-header-info">
-          <div class="modal-header-name" id="modal-title"></div>
-          <div class="modal-header-meta" id="modal-subtitle"></div>
-        </div>
-        <button class="btn-ghost" id="modal-handoff-btn" onclick="toggleHandoff()" style="white-space:nowrap;"></button>
-        <button class="modal-close" onclick="closeConversation()">✕</button>
-      </div>
-      <div id="modal-tags" style="display:flex; flex-wrap:wrap; gap:6px; align-items:center; padding:8px 16px; border-bottom:1px solid var(--border);"></div>
-      <div id="modal-thread" class="chat-thread"></div>
-      <div id="modal-composer" style="display:none; flex-direction:column; gap:6px; padding:12px; border-top:1px solid var(--border);">
-        <div id="modal-composer-preview" style="display:none; align-items:center; gap:8px; font-size:12px; color:var(--muted);"></div>
-        <div style="display:flex; gap:8px;">
-          <input id="modal-composer-file" type="file" accept="image/*,video/*" style="display:none;" onchange="onComposerFileChange(this)" />
-          <button class="btn-secondary" type="button" title="Adjuntar foto o video" onclick="document.getElementById('modal-composer-file').click()">📎</button>
-          <input id="modal-composer-input" type="text" placeholder="Escribe como el negocio..." style="flex:1;" onkeydown="if(event.key==='Enter') sendManualMessage();" />
-          <button class="btn-primary" onclick="sendManualMessage()">Enviar</button>
         </div>
       </div>
     </div>
@@ -1300,7 +1322,7 @@ async function loadConversations() {
         ? `${c.lastMessage.role === 'ASSISTANT' ? 'Tú (bot): ' : ''}${escapeHtml(c.lastMessage.content).slice(0, 80)}`
         : 'Sin mensajes';
       return `
-        <div class="conv-row" onclick="openConversation('${c.id}')">
+        <div class="conv-row${c.id === currentConversationId ? ' active' : ''}" data-conversation-id="${c.id}" onclick="openConversation('${c.id}')">
           <div class="conv-avatar" style="background:${avatarColor(c.customer.phoneNumber)};">${escapeHtml(initial)}</div>
           <div class="conv-info">
             <div class="conv-name">${escapeHtml(displayName)}</div>
@@ -1397,10 +1419,12 @@ function removeTag(tag) {
 }
 
 async function openConversation(id) {
-  const modal = document.getElementById('conversation-modal');
   const thread = document.getElementById('modal-thread');
   currentConversationId = id;
-  modal.style.display = 'flex';
+  document.getElementById('chat-panel-empty').style.display = 'none';
+  document.getElementById('chat-panel-active').style.display = 'flex';
+  document.getElementById('chat-split').classList.add('chat-split--open');
+  document.querySelectorAll('.conv-row').forEach((row) => row.classList.toggle('active', row.dataset.conversationId === id));
   thread.innerHTML = '<div style="text-align:center; color:var(--muted); font-size:13px; padding:20px;">Cargando…</div>';
 
   try {
@@ -1439,7 +1463,10 @@ async function openConversation(id) {
 }
 
 function closeConversation() {
-  document.getElementById('conversation-modal').style.display = 'none';
+  document.getElementById('chat-panel-active').style.display = 'none';
+  document.getElementById('chat-panel-empty').style.display = 'flex';
+  document.getElementById('chat-split').classList.remove('chat-split--open');
+  document.querySelectorAll('.conv-row').forEach((row) => row.classList.remove('active'));
   currentConversationId = null;
   currentCustomerId = null;
   currentCustomerTags = [];
