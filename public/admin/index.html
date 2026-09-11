@@ -1401,14 +1401,22 @@ function closeEditModal() {
 }
 
 // Dragging the description textarea's own resize handle wider than the card should grow the card
-// to match, not just shrink the textarea back down to the card's fixed width.
+// to match, not just shrink the textarea back down to the card's fixed width. ResizeObserver also
+// fires once when the textarea goes from display:none to visible (opening the modal) - that's not a
+// user drag, so only grow the card when the width actually increases from its last known (visible)
+// size, never on that first post-hidden measurement.
 (function watchEditDescWidth() {
   const textarea = document.getElementById('edit-desc');
   const card = document.getElementById('edit-modal-card');
   if (!textarea || !card || typeof ResizeObserver === 'undefined') return;
-  new ResizeObserver(() => {
-    const needed = textarea.offsetWidth + 40; // edit-grid horizontal padding
-    if (needed > card.offsetWidth) card.style.width = `${needed}px`;
+  let lastWidth = 0;
+  new ResizeObserver((entries) => {
+    const width = entries[0].contentRect.width;
+    if (lastWidth > 0 && width > lastWidth) {
+      const needed = Math.ceil(width) + 40; // edit-grid horizontal padding
+      if (needed > card.offsetWidth) card.style.width = `${needed}px`;
+    }
+    lastWidth = width;
   }).observe(textarea);
 })();
 
