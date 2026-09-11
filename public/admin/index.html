@@ -235,6 +235,12 @@
   .edit-grid label { margin-top: 6px; font-size: 11px; }
   .edit-grid .full { grid-column: 1 / -1; }
 
+  .modal-card.modal-card-edit {
+    width: 640px; max-width: 94vw; min-width: 320px; min-height: 380px; max-height: 92vh;
+    resize: both; overflow: auto;
+  }
+  .modal-card-edit #edit-desc { resize: both; max-width: 100%; }
+
   /* Conversations */
   .conv-row {
     display: flex; align-items: center; gap: 12px; padding: 13px 16px; cursor: pointer;
@@ -889,12 +895,12 @@
   </div>
 
   <div id="product-edit-modal" class="modal-overlay" style="display:none;" onclick="if(event.target===this) closeEditModal()">
-    <div class="modal-card" style="max-width:480px;">
+    <div class="modal-card modal-card-edit">
       <div class="modal-header">
         <div class="modal-header-name">Editar producto</div>
         <button class="modal-close" onclick="closeEditModal()">✕</button>
       </div>
-      <div class="edit-grid" style="border-top:none; padding:18px; overflow-y:auto;">
+      <div class="edit-grid" style="border-top:none; padding:18px;">
         <div class="full"><label>Nombre</label><input id="edit-name" /></div>
         <div class="full"><label>Descripción</label><textarea id="edit-desc" style="min-height:100px;"></textarea></div>
         <div><label>Precio</label><input id="edit-price" type="text" inputmode="decimal" onblur="reformatPriceField('edit-price','edit-currency')" /></div>
