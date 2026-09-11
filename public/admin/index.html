@@ -909,7 +909,10 @@ function switchTab(name) {
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.dataset.tabPanel === name));
   document.querySelector('main').classList.toggle('wide', name === 'conversations');
   document.body.classList.toggle('no-scroll', name === 'conversations');
-  if (name === 'conversations') requestAnimationFrame(fitChatSplit);
+  if (name === 'conversations') {
+    requestAnimationFrame(fitChatSplit);
+    markConversationReadIfViewing();
+  }
   try { localStorage.setItem('vendia-admin-tab', name); } catch {}
 }
 
@@ -2595,6 +2598,29 @@ function setRealtimeStatus(connected) {
 // order changes push instantly instead of requiring a manual "↻ Actualizar" click or waiting on a
 // poll. The connect handler (fires on initial load AND on any reconnect after a dropped connection)
 // does one reconciliation refetch so nothing is missed during a gap.
+// `conversationId === currentConversationId` alone is NOT "the owner is looking at it right now" -
+// currentConversationId stays set after switching to a different tab (Pedidos, Analytics, ...), or
+// while the browser tab/window itself is in the background. Without also checking the active tab and
+// page visibility, a message arriving for whatever was last opened got silently marked read even
+// though nobody was looking - the accumulated badge would vanish on its own.
+function isActivelyViewingConversation(conversationId) {
+  return conversationId === currentConversationId
+    && document.querySelector('.tab-btn[data-tab="conversations"]')?.classList.contains('active')
+    && document.visibilityState === 'visible'
+    && document.hasFocus();
+}
+
+// Catches the conversation back up to "read" once the owner is genuinely looking again - e.g. they
+// had a conversation open, switched to another tab while new messages piled up, then switched back.
+function markConversationReadIfViewing() {
+  if (!currentConversationId || !isActivelyViewingConversation(currentConversationId)) return;
+  const row = document.querySelector(`.conv-row[data-conversation-id="${currentConversationId}"]`);
+  if (row && Number(row.dataset.unread) > 0) {
+    setRowUnreadCount(currentConversationId, 0);
+    apiFetch(`/admin/api/conversations/${currentConversationId}`).catch(() => {});
+  }
+}
+
 function initRealtime() {
   const socket = io();
 
@@ -2605,11 +2631,16 @@ function initRealtime() {
   });
   socket.on('disconnect', () => setRealtimeStatus(false));
 
+  document.addEventListener('visibilitychange', markConversationReadIfViewing);
+  window.addEventListener('focus', markConversationReadIfViewing);
+
   socket.on('message:new', ({ conversationId, message, unreadCount }) => {
     if (conversationId === currentConversationId) {
+      // Keep the thread DOM current regardless of visibility, so it's already correct whenever they
+      // do look - just don't treat it as read yet unless they're actually looking right now.
       renderThreadMessages(document.getElementById('modal-thread'), [message]);
-      // Already looking at it - it's read the instant it arrives. Tell the server too, so its
-      // counter doesn't silently drift out of sync with what's actually on screen.
+    }
+    if (isActivelyViewingConversation(conversationId)) {
       setRowUnreadCount(conversationId, 0);
       if (message.role === 'CUSTOMER') {
         apiFetch(`/admin/api/conversations/${conversationId}`).catch(() => {});
