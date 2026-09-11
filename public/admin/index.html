@@ -715,7 +715,7 @@
                 <textarea id="close-sale-message" placeholder="Se usa un mensaje por defecto si lo dejas vacío" style="min-height:56px;"></textarea>
                 <div class="actions-row">
                   <button class="btn-secondary" type="button" onclick="closeSaleFormCancel()">Cancelar</button>
-                  <button class="btn-primary" type="button" onclick="confirmCloseSale()">Confirmar venta</button>
+                  <button class="btn-primary" type="button" id="close-sale-confirm-btn" onclick="confirmCloseSale()">Confirmar venta</button>
                 </div>
               </div>
               <div id="modal-thread" class="chat-thread" style="flex:1; max-height:none;"></div>
@@ -1704,6 +1704,9 @@ function closeSaleFormCancel() {
   document.getElementById('close-sale-notes').value = '';
   document.getElementById('close-sale-message').value = '';
   document.getElementById('close-sale-status').textContent = '';
+  const confirmBtn = document.getElementById('close-sale-confirm-btn');
+  confirmBtn.disabled = false;
+  confirmBtn.textContent = 'Confirmar venta';
 }
 
 async function confirmCloseSale() {
@@ -1721,6 +1724,11 @@ async function confirmCloseSale() {
   const notes = document.getElementById('close-sale-notes').value.trim();
   const customerMessage = document.getElementById('close-sale-message').value.trim();
 
+  const confirmBtn = document.getElementById('close-sale-confirm-btn');
+  const status = document.getElementById('close-sale-status');
+  confirmBtn.disabled = true;
+  confirmBtn.textContent = 'Cerrando venta...';
+  status.textContent = '';
   try {
     await apiFetch(`/admin/api/conversations/${currentConversationId}/close-sale`, {
       method: 'POST',
@@ -1732,6 +1740,11 @@ async function confirmCloseSale() {
     openConversation(currentConversationId);
   } catch (err) {
     setStatus(`No se pudo cerrar la venta: ${err.message}`, true);
+    status.textContent = `Error: ${err.message}`;
+    status.style.color = 'var(--danger)';
+  } finally {
+    confirmBtn.disabled = false;
+    confirmBtn.textContent = 'Confirmar venta';
   }
 }
 
