@@ -72,8 +72,10 @@ async function sendMediaWithSpacing(
 }
 
 async function describeCustomer(customerId: string, recipientPhone: string): Promise<string> {
-  if (!isBsuid(recipientPhone)) return recipientPhone;
   const customer = await prisma.customer.findUnique({ where: { id: customerId } });
+  if (!isBsuid(recipientPhone)) {
+    return customer?.name ? `${customer.name} (${recipientPhone})` : recipientPhone;
+  }
   return customer?.name
     ? `${customer.name} (sin numero visible, privacidad de WhatsApp activada)`
     : "un cliente (sin numero visible, privacidad de WhatsApp activada)";
