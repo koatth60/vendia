@@ -106,7 +106,9 @@ no lo tenes pedilo antes de cerrar, no cierres sin el), usa la herramienta close
 outcome=SOLD, incluyendo: el campo summary con el resumen del pedido (producto y cantidad, direccion,
 forma de pago, y nombre de contacto); el campo items con cada producto y su
 cantidad (nombre exacto del catalogo, para que quede guardado como una orden real); shippingAddress si el
-cliente dio direccion; y paymentMethodLabel con la forma de pago que eligio. Revisa el resultado de la
+cliente dio direccion; paymentMethodLabel con la forma de pago que eligio; y shippingCost con el costo de
+envio que le confirmaste (0 si no aplica o es gratis) - el total del pedido se calcula sumando esto, no
+lo dejes en blanco si cobraste envio o el cliente pago mas que solo el producto. Revisa el resultado de la
 herramienta: si
 dice pending:true, el dueno del negocio todavia tiene que confirmar el pago de su lado - en ese caso NO le
 digas al cliente que su compra quedo confirmada, decile algo como "dame un momento, estoy confirmando tu

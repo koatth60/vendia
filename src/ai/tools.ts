@@ -271,6 +271,11 @@ export const catalogTools: OpenAI.Chat.ChatCompletionTool[] = [
             type: "string",
             description: "SOLO para outcome=SOLD: el nombre de la forma de pago elegida (ej: 'Nequi', 'Contraentrega'), tal como la devolvio get_payment_methods.",
           },
+          shippingCost: {
+            type: "number",
+            description:
+              "SOLO para outcome=SOLD: el costo del envio que le confirmaste al cliente (0 si el envio es gratis o no aplica). El total del pedido se calcula como precio del/los producto(s) mas este valor - siempre que hayas cobrado o mencionado un costo de envio, incluilo aca para que el pedido registrado refleje el total real que pago el cliente, no solo el producto.",
+          },
         },
         required: ["outcome"],
       },
@@ -282,6 +287,7 @@ interface PendingOrderDraft {
   items: ResolvedOrderItem[];
   shippingAddress: string | null;
   paymentMethodLabel: string | null;
+  shippingCost: number | null;
 }
 
 async function requestSaleConfirmation(context: ToolContext, summary: string, draft: PendingOrderDraft): Promise<boolean> {
@@ -530,12 +536,13 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
         const summary = String(input.summary ?? "").trim();
         const shippingAddress = input.shippingAddress ? String(input.shippingAddress).trim() : null;
         const paymentMethodLabel = input.paymentMethodLabel ? String(input.paymentMethodLabel).trim() : null;
+        const shippingCost = input.shippingCost !== undefined && input.shippingCost !== null ? Number(input.shippingCost) : null;
         const items = await resolveOrderItems(
           businessId,
           Array.isArray(input.items) ? (input.items as { productName: string; quantity: number }[]) : []
         );
 
-        const pending = await requestSaleConfirmation(context, summary, { items, shippingAddress, paymentMethodLabel });
+        const pending = await requestSaleConfirmation(context, summary, { items, shippingAddress, paymentMethodLabel, shippingCost });
         if (pending) {
           return {
             closed: false,
@@ -552,6 +559,7 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
           items,
           shippingAddress,
           paymentMethodLabel,
+          shippingCost,
         });
         await askForCsat(context.credentials, order.id, context.recipientPhone);
       }

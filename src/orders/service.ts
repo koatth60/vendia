@@ -46,10 +46,12 @@ export async function createOrder(params: {
   items: ResolvedOrderItem[];
   shippingAddress?: string | null;
   paymentMethodLabel?: string | null;
+  shippingCost?: number | null;
 }) {
-  const { businessId, customerId, conversationId, summary, items, shippingAddress, paymentMethodLabel } = params;
+  const { businessId, customerId, conversationId, summary, items, shippingAddress, paymentMethodLabel, shippingCost } = params;
   const currency = items[0]?.currency ?? "COP";
-  const totalAmount = items.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
+  const itemsTotal = items.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
+  const totalAmount = itemsTotal + (shippingCost || 0);
 
   return prisma.order.create({
     data: {
@@ -59,6 +61,7 @@ export async function createOrder(params: {
       summary,
       shippingAddress: shippingAddress || null,
       paymentMethodLabel: paymentMethodLabel || null,
+      shippingCost: shippingCost || null,
       totalAmount,
       currency,
       items: {
@@ -124,10 +127,11 @@ export async function recordCsatReply(
   return { recorded: true };
 }
 
-function formatOrder<T extends { totalAmount: unknown; items: { unitPrice: unknown }[] }>(order: T) {
+function formatOrder<T extends { totalAmount: unknown; shippingCost: unknown; items: { unitPrice: unknown }[] }>(order: T) {
   return {
     ...order,
     totalAmount: String(order.totalAmount),
+    shippingCost: order.shippingCost !== null ? String(order.shippingCost) : null,
     items: order.items.map((item) => ({ ...item, unitPrice: String(item.unitPrice) })),
   };
 }

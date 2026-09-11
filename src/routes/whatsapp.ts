@@ -100,6 +100,7 @@ async function handleOwnerReply(
       items?: ResolvedOrderItem[];
       shippingAddress?: string | null;
       paymentMethodLabel?: string | null;
+      shippingCost?: number | null;
     } | null;
     const order = await createOrder({
       businessId,
@@ -109,6 +110,7 @@ async function handleOwnerReply(
       items: draft?.items ?? [],
       shippingAddress: draft?.shippingAddress ?? null,
       paymentMethodLabel: draft?.paymentMethodLabel ?? null,
+      shippingCost: draft?.shippingCost ?? null,
     });
     await updateConversationStatus(conversation.id, "SOLD");
     await clearPendingConfirmation(conversation.id);

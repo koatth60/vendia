@@ -676,7 +676,7 @@
                   </div>
                   <div class="modal-header-meta" id="modal-subtitle"></div>
                 </div>
-                <button class="btn-primary" type="button" onclick="openCloseSaleForm()" style="white-space:nowrap;">🎉 Cerrar venta</button>
+                <button class="btn-primary" type="button" id="close-sale-btn" onclick="openCloseSaleForm()" style="white-space:nowrap;">🎉 Cerrar venta</button>
                 <button class="btn-ghost" id="modal-handoff-btn" onclick="toggleHandoff()" style="white-space:nowrap;"></button>
               </div>
               <div id="modal-tags" style="display:flex; flex-wrap:wrap; gap:6px; align-items:center; padding:8px 16px; border-bottom:1px solid var(--border); background:#fff;"></div>
@@ -699,14 +699,16 @@
                 </div>
                 <div class="grid-2">
                   <div>
+                    <label>Costo de envío</label>
+                    <input id="close-sale-shipping" type="number" min="0" placeholder="Ej: 9000, 0 si es gratis" />
+                  </div>
+                  <div>
                     <label>Cédula</label>
                     <input id="close-sale-id" placeholder="Opcional" />
                   </div>
-                  <div>
-                    <label>Celular de contacto</label>
-                    <input id="close-sale-phone" placeholder="Opcional, si es distinto al de WhatsApp" />
-                  </div>
                 </div>
+                <label>Celular de contacto</label>
+                <input id="close-sale-phone" placeholder="Opcional, si es distinto al de WhatsApp" />
                 <label>Notas especiales del pedido (opcional - ej: entrega el martes antes de las 5pm)</label>
                 <textarea id="close-sale-notes" placeholder="Se guarda junto al pedido, no se le manda al cliente" style="min-height:44px;"></textarea>
                 <label>Mensaje de confirmación al cliente (opcional)</label>
@@ -1508,12 +1510,17 @@ function renderThreadMessages(thread, messages) {
   if (nearBottom) thread.scrollTop = thread.scrollHeight;
 }
 
+function updateCloseSaleButtonVisibility(status) {
+  document.getElementById('close-sale-btn').style.display = status === 'SOLD' ? 'none' : 'inline-block';
+}
+
 async function pollConversation() {
   if (!currentConversationId) return;
   try {
     const res = await apiFetch(`/admin/api/conversations/${currentConversationId}`);
     const conversation = await res.json();
     renderHandoffState(conversation.humanControl);
+    updateCloseSaleButtonVisibility(conversation.status);
     renderThreadMessages(document.getElementById('modal-thread'), conversation.messages);
   } catch {
     // silent - next poll retries
@@ -1615,6 +1622,7 @@ async function openConversation(id) {
     const res = await apiFetch(`/admin/api/conversations/${id}`);
     const conversation = await res.json();
     renderHandoffState(conversation.humanControl);
+    updateCloseSaleButtonVisibility(conversation.status);
     currentCustomerId = conversation.customer.id;
     currentCustomerTags = [...(conversation.customer.tags || [])];
     currentCustomerName = conversation.customer.name || '';
@@ -1674,6 +1682,7 @@ async function prefillCloseSaleForm() {
     document.getElementById('close-sale-items').value = (details.items || []).map((i) => `${i.quantity}x ${i.productName}`).join('\n');
     document.getElementById('close-sale-address').value = details.shippingAddress || '';
     document.getElementById('close-sale-payment').value = details.paymentMethodLabel || '';
+    document.getElementById('close-sale-shipping').value = details.shippingCost ?? '';
     document.getElementById('close-sale-id').value = details.idNumber || '';
     document.getElementById('close-sale-phone').value = details.deliveryPhone || '';
     document.getElementById('close-sale-notes').value = details.notes || '';
@@ -1689,6 +1698,7 @@ function closeSaleFormCancel() {
   document.getElementById('close-sale-items').value = '';
   document.getElementById('close-sale-address').value = '';
   document.getElementById('close-sale-payment').value = '';
+  document.getElementById('close-sale-shipping').value = '';
   document.getElementById('close-sale-id').value = '';
   document.getElementById('close-sale-phone').value = '';
   document.getElementById('close-sale-notes').value = '';
@@ -1705,6 +1715,7 @@ async function confirmCloseSale() {
   }
   const shippingAddress = document.getElementById('close-sale-address').value.trim();
   const paymentMethodLabel = document.getElementById('close-sale-payment').value.trim();
+  const shippingCost = document.getElementById('close-sale-shipping').value.trim();
   const idNumber = document.getElementById('close-sale-id').value.trim();
   const deliveryPhone = document.getElementById('close-sale-phone').value.trim();
   const notes = document.getElementById('close-sale-notes').value.trim();
@@ -1714,7 +1725,7 @@ async function confirmCloseSale() {
     await apiFetch(`/admin/api/conversations/${currentConversationId}/close-sale`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ items, shippingAddress, paymentMethodLabel, idNumber, deliveryPhone, notes, customerMessage }),
+      body: JSON.stringify({ items, shippingAddress, paymentMethodLabel, shippingCost, idNumber, deliveryPhone, notes, customerMessage }),
     });
     setStatus('Venta cerrada, pedido registrado ✓');
     closeSaleFormCancel();
@@ -2063,7 +2074,10 @@ function orderCardTop(o) {
     ${o.customer.idNumber ? `<div class="order-card-meta">🪪 Cédula: ${escapeHtml(o.customer.idNumber)}</div>` : ''}
     ${o.customer.deliveryPhone ? `<div class="order-card-meta">📞 ${escapeHtml(o.customer.deliveryPhone)}</div>` : ''}
     <div class="order-card-bottom">
-      <div class="order-card-total">${o.currency} ${Number(o.totalAmount).toLocaleString('es-CO')}</div>
+      <div>
+        <div class="order-card-total">${o.currency} ${Number(o.totalAmount).toLocaleString('es-CO')}</div>
+        ${o.shippingCost ? `<div style="font-size:11px; color:var(--muted);">incluye envío ${o.currency} ${Number(o.shippingCost).toLocaleString('es-CO')}</div>` : ''}
+      </div>
       ${CSAT_EMOJI[o.csatRating] ? `<span style="font-size:16px;" title="Calificación del cliente">${CSAT_EMOJI[o.csatRating]}</span>` : ''}
     </div>
   `;

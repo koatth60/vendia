@@ -12,6 +12,7 @@ Devolve SOLO un JSON con esta forma exacta, sin texto adicional:
   "items": [{"productName": "string", "quantity": number}],
   "shippingAddress": "string o null",
   "paymentMethodLabel": "string o null",
+  "shippingCost": number o null,
   "idNumber": "string o null",
   "deliveryPhone": "string o null",
   "notes": "string o null"
@@ -26,6 +27,9 @@ Devolve SOLO un JSON con esta forma exacta, sin texto adicional:
   no se menciono.
 - "paymentMethodLabel": la forma de pago acordada (ej: "Nequi", "Contraentrega", "Bancolombia"). null si
   no quedo claro.
+- "shippingCost": el costo de envio en numero (sin simbolos ni puntos, ej 9000) si se menciono o cobro
+  explicitamente. null si no se menciono ningun costo de envio o si es gratis (en ese caso usa 0, no
+  null, si el negocio dijo explicitamente "envio gratis").
 - "idNumber": el numero de cedula del cliente si lo dio. null si no se menciono.
 - "deliveryPhone": el celular de contacto para la entrega si lo dio (puede ser distinto al numero de
   WhatsApp). null si no se menciono.
@@ -40,6 +44,7 @@ export interface ExtractedSaleDetails {
   items: { productName: string; quantity: number }[];
   shippingAddress: string | null;
   paymentMethodLabel: string | null;
+  shippingCost: number | null;
   idNumber: string | null;
   deliveryPhone: string | null;
   notes: string | null;
@@ -49,6 +54,7 @@ const EMPTY_RESULT: ExtractedSaleDetails = {
   items: [],
   shippingAddress: null,
   paymentMethodLabel: null,
+  shippingCost: null,
   idNumber: null,
   deliveryPhone: null,
   notes: null,
@@ -102,6 +108,7 @@ export async function extractSaleDetails(businessId: string, conversationId: str
         : [],
       shippingAddress: typeof parsed.shippingAddress === "string" ? parsed.shippingAddress.trim() || null : null,
       paymentMethodLabel: typeof parsed.paymentMethodLabel === "string" ? parsed.paymentMethodLabel.trim() || null : null,
+      shippingCost: typeof parsed.shippingCost === "number" && !Number.isNaN(parsed.shippingCost) ? parsed.shippingCost : null,
       idNumber: typeof parsed.idNumber === "string" ? parsed.idNumber.trim() || null : null,
       deliveryPhone: typeof parsed.deliveryPhone === "string" ? parsed.deliveryPhone.trim() || null : null,
       notes: typeof parsed.notes === "string" ? parsed.notes.trim() || null : null,

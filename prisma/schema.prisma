@@ -85,6 +85,7 @@ model Order {
   summary            String
   shippingAddress    String?
   paymentMethodLabel String?
+  shippingCost       Decimal?     @db.Decimal(12, 2)
   totalAmount        Decimal      @db.Decimal(12, 2)
   currency           String
   csatRating         Int?

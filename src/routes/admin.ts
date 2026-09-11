@@ -600,6 +600,7 @@ adminRouter.post("/api/conversations/:id/close-sale", async (req, res) => {
   const shippingAddress = req.body?.shippingAddress ? String(req.body.shippingAddress).trim() : null;
   const paymentMethodLabel = req.body?.paymentMethodLabel ? String(req.body.paymentMethodLabel).trim() : null;
   const notes = String(req.body?.notes ?? "").trim();
+  const shippingCost = req.body?.shippingCost !== undefined && req.body?.shippingCost !== "" ? Number(req.body.shippingCost) : null;
   const idNumber = req.body?.idNumber ? String(req.body.idNumber).trim() : undefined;
   const deliveryPhone = req.body?.deliveryPhone ? String(req.body.deliveryPhone).trim() : undefined;
   const customerMessage = String(req.body?.customerMessage ?? "").trim();
@@ -652,6 +653,7 @@ adminRouter.post("/api/conversations/:id/close-sale", async (req, res) => {
     items,
     shippingAddress,
     paymentMethodLabel,
+    shippingCost,
   });
   await updateConversationStatus(conversation.id, "SOLD");
 
