@@ -198,6 +198,8 @@ model Customer {
   businessId    String
   phoneNumber   String
   name          String?
+  idNumber      String?
+  deliveryPhone String?
   tags          String[]       @default([])
   conversations Conversation[]
   orders        Order[]

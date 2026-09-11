@@ -141,7 +141,12 @@ export async function listOrdersForBusiness(businessId: string) {
   return Promise.all(
     orders.map(async (order) => ({
       ...formatOrder(order),
-      customer: { phoneNumber: order.customer.phoneNumber, name: order.customer.name },
+      customer: {
+        phoneNumber: order.customer.phoneNumber,
+        name: order.customer.name,
+        idNumber: order.customer.idNumber,
+        deliveryPhone: order.customer.deliveryPhone,
+      },
       shipmentMediaUrl: order.shipmentMediaS3Key ? await getPresignedMediaUrl(order.shipmentMediaS3Key) : null,
     }))
   );

@@ -79,7 +79,14 @@ algo que no tiene que ver con el negocio, respondelo brevemente y redirigi la co
 catalogo.
 
 NOMBRE Y AVANCE: apenas sepas el nombre del cliente (porque se presento, lo diste vos al pedirlo, o lo dio
-para el envio), usa save_customer_name una vez. A medida que la conversacion avanza, usa
+para el envio), usa save_customer_name una vez.
+
+CEDULA Y CELULAR DE CONTACTO: si este negocio pide numero de identificacion (cedula) o un celular de
+contacto para el envio (revisa las instrucciones especificas del negocio), y el cliente lo da, usa
+save_customer_contact_info apenas lo tengas - no hace falta esperar a tener ambos datos, guarda cada uno
+en cuanto lo sepas.
+
+A medida que la conversacion avanza, usa
 update_conversation_status para
 reflejar el momento real: INTERESTED apenas muestre interes concreto en un producto, QUOTED cuando ya le
 diste precio, NEGOTIATING si esta comparando o decidiendo antes de confirmar. No hace falta anunciarle
@@ -378,6 +385,19 @@ function looksLikePersonName(text: string): boolean {
   return !NOT_A_NAME.has(trimmed.toLowerCase());
 }
 
+// Same pattern once more, for cedula/celular de contacto - split into two separate patterns since a
+// business can ask for both in the same message ("cedula y celular"), and a single numeric reply in
+// that case is ambiguous about which one it answers, so the net only fires when the prior turn asked
+// for exactly one of the two (safer to miss it than to save a phone number as a cedula or vice versa).
+const ASK_ID_PATTERN = /\b(numero de (identificaci[oó]n|c[eé]dula)|tu c[eé]dula|c[eé]dula,? por favor)\b/i;
+const ASK_PHONE_PATTERN = /\b(numero de celular|tu celular|celular de contacto|celular,? por favor)\b/i;
+
+function looksLikeIdOrPhone(text: string): boolean {
+  const trimmed = text.trim();
+  if (!/^[\d\s-]{6,15}$/.test(trimmed)) return false;
+  return /\d{6,}/.test(trimmed.replace(/\D/g, ""));
+}
+
 function lastAssistantText(history: { role: string; content: string }[]): string {
   for (let i = history.length - 2; i >= 0; i--) {
     if (history[i].role === "ASSISTANT") return history[i].content;
@@ -415,6 +435,7 @@ export async function generateReply(
   let mediaSentThisTurn = 0;
   let ownerAskedThisTurn = 0;
   let nameSavedThisTurn = 0;
+  let contactSavedThisTurn = 0;
 
   async function finalizeTurn(text: string): Promise<string> {
     if (ownerAskedThisTurn === 0 && ESCALATION_CLAIM_PATTERN.test(text) && customerText) {
@@ -428,6 +449,17 @@ export async function generateReply(
       ASK_NAME_PATTERN.test(lastAssistantText(history))
     ) {
       await runCatalogTool(context, "save_customer_name", { name: customerText.trim() });
+    }
+
+    if (contactSavedThisTurn === 0 && customerText && looksLikeIdOrPhone(customerText)) {
+      const priorAsk = lastAssistantText(history);
+      const askedId = ASK_ID_PATTERN.test(priorAsk);
+      const askedPhone = ASK_PHONE_PATTERN.test(priorAsk);
+      if (askedId && !askedPhone) {
+        await runCatalogTool(context, "save_customer_contact_info", { idNumber: customerText.trim() });
+      } else if (askedPhone && !askedId) {
+        await runCatalogTool(context, "save_customer_contact_info", { deliveryPhone: customerText.trim() });
+      }
     }
 
     if (mediaSentThisTurn > 0) return text;
@@ -526,6 +558,7 @@ export async function generateReply(
       if (result?.mediaJustSent || result?.sent) mediaSentThisTurn++;
       if (call.function.name === "ask_owner") ownerAskedThisTurn++;
       if (call.function.name === "save_customer_name") nameSavedThisTurn++;
+      if (call.function.name === "save_customer_contact_info") contactSavedThisTurn++;
       messages.push({
         role: "tool",
         tool_call_id: call.id,

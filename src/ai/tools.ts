@@ -7,6 +7,7 @@ import {
   setConversationIntent,
   setHumanControl,
   saveCustomerName,
+  saveCustomerContactInfo,
   recordMessage,
   createPendingOwnerQuestion,
 } from "../conversation/service";
@@ -168,6 +169,21 @@ export const catalogTools: OpenAI.Chat.ChatCompletionTool[] = [
           name: { type: "string", description: "El nombre del cliente tal como lo dijo" },
         },
         required: ["name"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "save_customer_contact_info",
+      description:
+        "Guarda el numero de cedula y/o el celular de contacto del cliente cuando los da para el envio (envios nacionales, o si pide contactarlo a un numero distinto al de WhatsApp). Llamala apenas tengas cualquiera de los dos datos, no hace falta esperar a tener ambos.",
+      parameters: {
+        type: "object",
+        properties: {
+          idNumber: { type: "string", description: "Numero de cedula tal como lo dio el cliente" },
+          deliveryPhone: { type: "string", description: "Celular de contacto para la entrega, tal como lo dio el cliente" },
+        },
       },
     },
   },
@@ -426,6 +442,13 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
       if (!name) return { error: "Falta el nombre" };
       await saveCustomerName(context.businessId, context.customerId, name);
       return { saved: true, name };
+    }
+    case "save_customer_contact_info": {
+      const idNumber = input.idNumber ? String(input.idNumber).trim() : undefined;
+      const deliveryPhone = input.deliveryPhone ? String(input.deliveryPhone).trim() : undefined;
+      if (!idNumber && !deliveryPhone) return { error: "Falta la cedula o el celular" };
+      await saveCustomerContactInfo(context.businessId, context.customerId, { idNumber, deliveryPhone });
+      return { saved: true, idNumber, deliveryPhone };
     }
     case "update_conversation_status": {
       const status = ["INTERESTED", "QUOTED", "NEGOTIATING"].includes(String(input.status)) ? (input.status as "INTERESTED" | "QUOTED" | "NEGOTIATING") : null;

@@ -697,6 +697,16 @@
                     <input id="close-sale-payment" placeholder="Ej: Nequi, Contraentrega" />
                   </div>
                 </div>
+                <div class="grid-2">
+                  <div>
+                    <label>Cédula</label>
+                    <input id="close-sale-id" placeholder="Opcional" />
+                  </div>
+                  <div>
+                    <label>Celular de contacto</label>
+                    <input id="close-sale-phone" placeholder="Opcional, si es distinto al de WhatsApp" />
+                  </div>
+                </div>
                 <label>Notas especiales del pedido (opcional - ej: entrega el martes antes de las 5pm)</label>
                 <textarea id="close-sale-notes" placeholder="Se guarda junto al pedido, no se le manda al cliente" style="min-height:44px;"></textarea>
                 <label>Mensaje de confirmación al cliente (opcional)</label>
@@ -1664,6 +1674,8 @@ async function prefillCloseSaleForm() {
     document.getElementById('close-sale-items').value = (details.items || []).map((i) => `${i.quantity}x ${i.productName}`).join('\n');
     document.getElementById('close-sale-address').value = details.shippingAddress || '';
     document.getElementById('close-sale-payment').value = details.paymentMethodLabel || '';
+    document.getElementById('close-sale-id').value = details.idNumber || '';
+    document.getElementById('close-sale-phone').value = details.deliveryPhone || '';
     document.getElementById('close-sale-notes').value = details.notes || '';
     status.textContent = 'Prellenado con la IA - revisa y corrige antes de confirmar ✎';
   } catch (err) {
@@ -1677,6 +1689,8 @@ function closeSaleFormCancel() {
   document.getElementById('close-sale-items').value = '';
   document.getElementById('close-sale-address').value = '';
   document.getElementById('close-sale-payment').value = '';
+  document.getElementById('close-sale-id').value = '';
+  document.getElementById('close-sale-phone').value = '';
   document.getElementById('close-sale-notes').value = '';
   document.getElementById('close-sale-message').value = '';
   document.getElementById('close-sale-status').textContent = '';
@@ -1691,6 +1705,8 @@ async function confirmCloseSale() {
   }
   const shippingAddress = document.getElementById('close-sale-address').value.trim();
   const paymentMethodLabel = document.getElementById('close-sale-payment').value.trim();
+  const idNumber = document.getElementById('close-sale-id').value.trim();
+  const deliveryPhone = document.getElementById('close-sale-phone').value.trim();
   const notes = document.getElementById('close-sale-notes').value.trim();
   const customerMessage = document.getElementById('close-sale-message').value.trim();
 
@@ -1698,7 +1714,7 @@ async function confirmCloseSale() {
     await apiFetch(`/admin/api/conversations/${currentConversationId}/close-sale`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ items, shippingAddress, paymentMethodLabel, notes, customerMessage }),
+      body: JSON.stringify({ items, shippingAddress, paymentMethodLabel, idNumber, deliveryPhone, notes, customerMessage }),
     });
     setStatus('Venta cerrada, pedido registrado ✓');
     closeSaleFormCancel();
@@ -2044,6 +2060,8 @@ function orderCardTop(o) {
     ${o.summary && o.summary.includes('— Nota:') ? `<div class="order-card-meta">📝 ${escapeHtml(o.summary.split('— Nota:')[1].trim())}</div>` : ''}
     ${o.shippingAddress ? `<div class="order-card-meta">📍 ${escapeHtml(o.shippingAddress)}</div>` : ''}
     ${o.paymentMethodLabel ? `<div class="order-card-meta">💳 ${escapeHtml(o.paymentMethodLabel)}</div>` : ''}
+    ${o.customer.idNumber ? `<div class="order-card-meta">🪪 Cédula: ${escapeHtml(o.customer.idNumber)}</div>` : ''}
+    ${o.customer.deliveryPhone ? `<div class="order-card-meta">📞 ${escapeHtml(o.customer.deliveryPhone)}</div>` : ''}
     <div class="order-card-bottom">
       <div class="order-card-total">${o.currency} ${Number(o.totalAmount).toLocaleString('es-CO')}</div>
       ${CSAT_EMOJI[o.csatRating] ? `<span style="font-size:16px;" title="Calificación del cliente">${CSAT_EMOJI[o.csatRating]}</span>` : ''}

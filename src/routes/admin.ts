@@ -20,6 +20,7 @@ import {
   recordMessage,
   setCustomerTags,
   saveCustomerName,
+  saveCustomerContactInfo,
   updateConversationStatus,
 } from "../conversation/service";
 import {
@@ -599,6 +600,8 @@ adminRouter.post("/api/conversations/:id/close-sale", async (req, res) => {
   const shippingAddress = req.body?.shippingAddress ? String(req.body.shippingAddress).trim() : null;
   const paymentMethodLabel = req.body?.paymentMethodLabel ? String(req.body.paymentMethodLabel).trim() : null;
   const notes = String(req.body?.notes ?? "").trim();
+  const idNumber = req.body?.idNumber ? String(req.body.idNumber).trim() : undefined;
+  const deliveryPhone = req.body?.deliveryPhone ? String(req.body.deliveryPhone).trim() : undefined;
   const customerMessage = String(req.body?.customerMessage ?? "").trim();
 
   const parsedItems = itemLines
@@ -633,6 +636,10 @@ adminRouter.post("/api/conversations/:id/close-sale", async (req, res) => {
   if (items.length === 0) {
     res.status(400).json({ error: "Ningún producto coincidió con el catálogo - revisa los nombres" });
     return;
+  }
+
+  if (idNumber || deliveryPhone) {
+    await saveCustomerContactInfo(businessId, conversation.customer.id, { idNumber, deliveryPhone });
   }
 
   const itemsSummary = items.map((i) => `${i.quantity}x ${i.productName}`).join(", ");

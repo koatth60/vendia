@@ -85,6 +85,22 @@ export async function saveCustomerName(businessId: string, customerId: string, n
   });
 }
 
+export async function saveCustomerContactInfo(
+  businessId: string,
+  customerId: string,
+  data: { idNumber?: string; deliveryPhone?: string }
+) {
+  const customer = await prisma.customer.findFirst({ where: { id: customerId, businessId } });
+  if (!customer) return null;
+  return prisma.customer.update({
+    where: { id: customerId },
+    data: {
+      ...(data.idNumber ? { idNumber: data.idNumber } : {}),
+      ...(data.deliveryPhone ? { deliveryPhone: data.deliveryPhone } : {}),
+    },
+  });
+}
+
 export async function setCustomerTags(businessId: string, customerId: string, tags: string[]) {
   const customer = await prisma.customer.findFirst({ where: { id: customerId, businessId } });
   if (!customer) return null;
