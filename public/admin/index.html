@@ -171,6 +171,21 @@
 
   .unread-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--brand); color: #fff; font-size: 11px; font-weight: 700; line-height: 1; }
   .tab-btn .unread-badge { margin-left: 6px; background: var(--danger); }
+
+  .delivery-alert-btn { position: relative; border: none; background: var(--border-soft); width: 36px; height: 36px; border-radius: 50%; font-size: 16px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+  .delivery-alert-btn:hover { background: var(--border); }
+  .delivery-alert-badge { position: absolute; top: -3px; right: -3px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 999px; background: var(--danger); color: #fff; font-size: 10px; font-weight: 700; line-height: 16px; text-align: center; }
+  .delivery-alert-panel { position: absolute; top: calc(100% + 8px); right: 0; width: 340px; max-width: calc(100vw - 32px); max-height: 420px; overflow-y: auto; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-md); box-shadow: var(--shadow-md); z-index: 50; }
+  .delivery-alert-panel-title { padding: 12px 14px; font-weight: 700; font-size: 13px; border-bottom: 1px solid var(--border-soft); color: var(--ink); }
+  .delivery-alert-row { padding: 10px 14px; border-bottom: 1px solid var(--border-soft); font-size: 12.5px; }
+  .delivery-alert-row:last-child { border-bottom: none; }
+  .delivery-alert-row.critical { background: var(--danger-light); }
+  .delivery-alert-row-top { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+  .delivery-alert-row-who { font-weight: 700; color: var(--ink); }
+  .delivery-alert-row-when { color: var(--muted-soft); font-size: 11px; white-space: nowrap; }
+  .delivery-alert-row-error { color: var(--muted); margin-top: 2px; }
+  .delivery-alert-row-dismiss { margin-top: 6px; border: none; background: none; color: var(--brand-dark); font-size: 11.5px; font-weight: 600; cursor: pointer; padding: 0; }
+  .delivery-alert-empty { padding: 20px 14px; text-align: center; color: var(--muted-soft); font-size: 12.5px; }
   .conv-row.has-unread .conv-name { font-weight: 700; }
 
   .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
@@ -390,6 +405,12 @@
       </div>
     </div>
     <div style="display:flex; align-items:center; gap:12px;">
+      <div style="position:relative;">
+        <button id="delivery-alert-btn" class="delivery-alert-btn" onclick="toggleDeliveryAlerts()" title="Mensajes que no llegaron" hidden>
+          🔔<span class="delivery-alert-badge" id="delivery-alert-badge" hidden>0</span>
+        </button>
+        <div id="delivery-alert-panel" class="delivery-alert-panel" hidden></div>
+      </div>
       <div id="session-badge" style="font-size:12.5px; color:var(--muted); text-align:right; line-height:1.3;"></div>
       <button class="logout-btn" onclick="logout()">Cerrar sesión</button>
     </div>
@@ -2704,6 +2725,68 @@ function markConversationReadIfViewing() {
   }
 }
 
+// Surfaces WhatsApp delivery failures Meta reports asynchronously (see src/routes/whatsapp.ts's
+// `statuses` handling + src/delivery/failures.ts) - previously these only reached a pm2 log nobody
+// watches. `critical` (recipient === the business's own contactPhone) means an owner escalation
+// (ask_owner, sale confirmation, etc) never actually reached the owner.
+let deliveryFailures = [];
+
+function deliveryAlertRowHtml(f) {
+  const when = new Date(f.createdAt).toLocaleString('es-CO', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  return `<div class="delivery-alert-row ${f.critical ? 'critical' : ''}">
+    <div class="delivery-alert-row-top">
+      <span class="delivery-alert-row-who">${f.critical ? '⚠️ Al dueño' : 'A cliente'} · ${escapeHtml(f.recipientPhone)}</span>
+      <span class="delivery-alert-row-when">${when}</span>
+    </div>
+    <div class="delivery-alert-row-error">${escapeHtml(f.errorMessage)}</div>
+    <button class="delivery-alert-row-dismiss" onclick="dismissDeliveryFailure('${f.id}')">Marcar visto</button>
+  </div>`;
+}
+
+function renderDeliveryFailures() {
+  const btn = document.getElementById('delivery-alert-btn');
+  const badge = document.getElementById('delivery-alert-badge');
+  const panel = document.getElementById('delivery-alert-panel');
+  const count = deliveryFailures.length;
+  btn.hidden = count === 0;
+  badge.hidden = count === 0;
+  if (count > 0) badge.textContent = count > 9 ? '9+' : String(count);
+  else panel.hidden = true;
+  panel.innerHTML = count === 0
+    ? '<div class="delivery-alert-empty">Sin fallos pendientes</div>'
+    : '<div class="delivery-alert-panel-title">Mensajes que no llegaron</div>' + deliveryFailures.map(deliveryAlertRowHtml).join('');
+}
+
+async function loadDeliveryFailures() {
+  try {
+    const res = await apiFetch('/admin/api/delivery-failures');
+    deliveryFailures = await res.json();
+    renderDeliveryFailures();
+  } catch {}
+}
+
+function toggleDeliveryAlerts() {
+  const panel = document.getElementById('delivery-alert-panel');
+  panel.hidden = !panel.hidden;
+}
+
+async function dismissDeliveryFailure(id) {
+  deliveryFailures = deliveryFailures.filter((f) => f.id !== id);
+  renderDeliveryFailures();
+  try {
+    await apiFetch(`/admin/api/delivery-failures/${id}/resolve`, { method: 'POST' });
+  } catch {
+    loadDeliveryFailures();
+  }
+}
+
+document.addEventListener('click', (e) => {
+  const panel = document.getElementById('delivery-alert-panel');
+  const btn = document.getElementById('delivery-alert-btn');
+  if (!panel || panel.hidden) return;
+  if (!panel.contains(e.target) && e.target !== btn) panel.hidden = true;
+});
+
 function initRealtime() {
   const socket = io();
 
@@ -2775,6 +2858,11 @@ function initRealtime() {
 
   socket.on('order:new', loadOrders);
   socket.on('order:updated', loadOrders);
+
+  socket.on('delivery:failed', (failure) => {
+    deliveryFailures = [failure, ...deliveryFailures];
+    renderDeliveryFailures();
+  });
 }
 
 async function boot() {
@@ -2793,6 +2881,7 @@ async function boot() {
   loadConversations();
   loadFaqEntries();
   loadFaqCandidates();
+  loadDeliveryFailures();
   loadOrders();
   loadAnalytics();
   loadAiUsage();

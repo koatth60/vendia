@@ -25,6 +25,7 @@ import { checkPlanCap } from "../ai/usage";
 import { createOrder, askForCsat, recordCsatReply, type ResolvedOrderItem } from "../orders/service";
 import { recordAskOwnerResolution } from "../catalog/learnedFaq";
 import { getCatalogHintText, findConfidentProductMatch } from "../catalog/products";
+import { recordDeliveryFailure } from "../delivery/failures";
 import { extractFrame } from "../media/videoFrame";
 
 export const whatsappRouter = Router();
@@ -220,6 +221,25 @@ whatsappRouter.post("/webhook", async (req, res) => {
     if (status && !message) {
       if (status.status === "failed") {
         console.error("WhatsApp delivery FAILED:", JSON.stringify({ id: status.id, recipient: status.recipient_id, errors: status.errors }));
+        // Meta reports this asynchronously, after the original send call already returned a wamid that
+        // looked successful - previously this only reached a pm2 log nobody watches. Persist it so the
+        // admin panel can surface it live instead (see src/delivery/failures.ts).
+        const failedForBusiness = incomingPhoneNumberId
+          ? await prisma.business.findUnique({ where: { whatsappPhoneNumberId: incomingPhoneNumberId } })
+          : null;
+        if (failedForBusiness) {
+          const recipient: string = status.recipient_id ?? "";
+          const onlyDigits = (phone: string) => phone.replace(/\D/g, "");
+          const critical = Boolean(failedForBusiness.contactPhone) && onlyDigits(recipient) === onlyDigits(failedForBusiness.contactPhone!);
+          const firstError = status.errors?.[0];
+          await recordDeliveryFailure(failedForBusiness.id, {
+            wamid: status.id ?? "",
+            recipientPhone: recipient,
+            errorCode: firstError?.code ?? null,
+            errorMessage: firstError?.title ? `${firstError.title}: ${firstError?.error_data?.details ?? firstError.message ?? ""}` : "Error desconocido",
+            critical,
+          });
+        }
       } else {
         console.log("WhatsApp status:", status.status, status.id, status.recipient_id);
       }

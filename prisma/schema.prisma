@@ -52,6 +52,7 @@ model Business {
   aiUsageLogs              AiUsageLog[]
   faqEntries               FaqEntry[]
   learnedFaqCandidates     LearnedFaqCandidate[]
+  deliveryFailures         DeliveryFailure[]
   orders                   Order[]
   teamMembers              TeamMember[]
   createdAt                DateTime        @default(now())
@@ -165,6 +166,27 @@ model LearnedFaqCandidate {
   updatedAt      DateTime                  @updatedAt
 
   @@index([businessId, status])
+}
+
+// Meta's delivery-status webhook reports failures asynchronously, after the send call already
+// returned a wamid looking successful (src/routes/whatsapp.ts) - previously that only hit
+// console.error, invisible unless someone went looking in the droplet's pm2 logs over SSH. This
+// persists it so the admin panel can surface it live. `critical` marks a failure to reach the
+// business owner specifically (recipient matches Business.contactPhone) - that's the dangerous case,
+// since it usually means an ask_owner escalation the owner never saw.
+model DeliveryFailure {
+  id             String   @id @default(cuid())
+  business       Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  businessId     String
+  wamid          String
+  recipientPhone String
+  errorCode      Int?
+  errorMessage   String
+  critical       Boolean  @default(false)
+  resolved       Boolean  @default(false)
+  createdAt      DateTime @default(now())
+
+  @@index([businessId, resolved])
 }
 
 model KeyRequest {

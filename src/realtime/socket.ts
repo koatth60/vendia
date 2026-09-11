@@ -43,4 +43,5 @@ export function setupRealtime(server: HttpServer): void {
   realtimeEvents.on("conversation:updated", forward("conversation:updated"));
   realtimeEvents.on("order:new", forward("order:new"));
   realtimeEvents.on("order:updated", forward("order:updated"));
+  realtimeEvents.on("delivery:failed", forward("delivery:failed"));
 }

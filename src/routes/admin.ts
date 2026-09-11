@@ -37,6 +37,7 @@ import { deepseek, DEEPSEEK_MODEL } from "../ai/client";
 import { getAnalyticsSummary } from "../analytics/service";
 import { listFaqEntries, createFaqEntry, updateFaqEntry, deleteFaqEntry } from "../catalog/faq";
 import { listPendingCandidates, approveCandidate, discardCandidate } from "../catalog/learnedFaq";
+import { listUnresolvedDeliveryFailures, resolveDeliveryFailure } from "../delivery/failures";
 import {
   listOrdersForBusiness,
   getOrderForBusiness,
@@ -350,6 +351,20 @@ adminRouter.post("/api/faq-candidates/:id/discard", requireOwner, async (req, re
     res.status(204).send();
   } catch (error) {
     res.status(404).json({ error: error instanceof Error ? error.message : "No se pudo descartar la sugerencia" });
+  }
+});
+
+adminRouter.get("/api/delivery-failures", async (req, res) => {
+  const failures = await listUnresolvedDeliveryFailures(businessIdOf(req));
+  res.json(failures);
+});
+
+adminRouter.post("/api/delivery-failures/:id/resolve", requireOwner, async (req, res) => {
+  try {
+    await resolveDeliveryFailure(businessIdOf(req), String(req.params.id));
+    res.status(204).send();
+  } catch (error) {
+    res.status(404).json({ error: error instanceof Error ? error.message : "No se pudo marcar como visto" });
   }
 });
 

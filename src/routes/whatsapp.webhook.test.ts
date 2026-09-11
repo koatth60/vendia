@@ -35,12 +35,14 @@ before(async () => {
       active: true,
       whatsappPhoneNumberId: `test-phone-${randomUUID()}`,
       whatsappAccessToken: "test-token",
+      contactPhone: "573009990000",
     },
   });
   businessId = business.id;
 });
 
 after(async () => {
+  await prisma.deliveryFailure.deleteMany({ where: { businessId } });
   await prisma.business.deleteMany({ where: { id: businessId } });
   await new Promise((resolve) => server.close(() => resolve(undefined)));
 });
@@ -83,6 +85,30 @@ async function postWebhook(message: Record<string, unknown>) {
             value: {
               metadata: { phone_number_id: business.whatsappPhoneNumberId },
               messages: [{ from: customerPhone, id: `wamid.in-${randomUUID()}`, ...message }],
+            },
+          },
+        ],
+      },
+    ],
+  };
+  const res = await fetch(`${baseUrl}/webhook`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  assert.equal(res.status, 200);
+}
+
+async function postStatusWebhook(status: Record<string, unknown>) {
+  const business = await prisma.business.findUniqueOrThrow({ where: { id: businessId } });
+  const payload = {
+    entry: [
+      {
+        changes: [
+          {
+            value: {
+              metadata: { phone_number_id: business.whatsappPhoneNumberId },
+              statuses: [{ id: `wamid.out-${randomUUID()}`, status: "failed", ...status }],
             },
           },
         ],
@@ -177,6 +203,53 @@ test("webhook: a video message is recorded as VIDEO media and the pipeline keeps
 
   const replySent = outgoing.some((o) => o.type === "text");
   assert.ok(replySent, "the bot should still reply after a video message even if analysis fails");
+});
+
+async function waitForDeliveryFailure(wamid: string, timeoutMs = 10000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const failure = await prisma.deliveryFailure.findFirst({ where: { businessId, wamid } });
+    if (failure) return failure;
+    await new Promise((resolve) => setTimeout(resolve, 150));
+  }
+  throw new Error("Timed out waiting for the delivery failure to be recorded");
+}
+
+test("webhook: a failed delivery status to the owner's number is recorded as critical", async () => {
+  const wamid = `wamid.out-${randomUUID()}`;
+  await postStatusWebhook({
+    id: wamid,
+    recipient_id: "573009990000",
+    errors: [{ code: 131047, title: "Re-engagement message", message: "Re-engagement message" }],
+  });
+
+  const failure = await waitForDeliveryFailure(wamid);
+  assert.equal(failure.critical, true, "a failed send to the business's own contactPhone must be flagged critical");
+  assert.equal(failure.errorCode, 131047);
+  assert.match(failure.errorMessage, /Re-engagement/);
+});
+
+test("webhook: a failed delivery status to a customer's number is recorded as non-critical", async () => {
+  const wamid = `wamid.out-${randomUUID()}`;
+  await postStatusWebhook({
+    id: wamid,
+    recipient_id: "573001234567",
+    errors: [{ code: 131053, title: "Media upload error", message: "Media upload error" }],
+  });
+
+  const failure = await waitForDeliveryFailure(wamid);
+  assert.equal(failure.critical, false, "a failed send to a customer (not the owner) must not be flagged critical");
+});
+
+test("webhook: a delivered/read status (not failed) does not create a delivery failure row", async () => {
+  const wamid = `wamid.out-${randomUUID()}`;
+  await postStatusWebhook({ id: wamid, status: "delivered", recipient_id: "573001234567" });
+  // No poll-to-success here on purpose (nothing should ever appear) - a short beat is enough to prove
+  // the pipeline stays silent, same pattern as the reaction test below.
+  await new Promise((resolve) => setTimeout(resolve, 500));
+
+  const failure = await prisma.deliveryFailure.findFirst({ where: { businessId, wamid } });
+  assert.equal(failure, null);
 });
 
 test("webhook: a reaction (emoji reply) is intentionally NOT recorded as a customer turn", async () => {

@@ -47,3 +47,15 @@ export function emitOrderNew(businessId: string, orderId: string): void {
 export function emitOrderUpdated(businessId: string, orderId: string): void {
   realtimeEvents.emit("order:updated", businessId, { id: orderId });
 }
+
+export interface DeliveryFailureRow {
+  id: string;
+  recipientPhone: string;
+  errorMessage: string;
+  critical: boolean;
+  createdAt: Date;
+}
+
+export function emitDeliveryFailure(businessId: string, failure: DeliveryFailureRow): void {
+  realtimeEvents.emit("delivery:failed", businessId, failure);
+}
