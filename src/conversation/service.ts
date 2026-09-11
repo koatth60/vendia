@@ -265,7 +265,12 @@ export async function findOpenPendingConfirmationsForBusiness(businessId: string
 export async function findPendingOwnerQuestionsDueForReminder(businessId: string, olderThan: Date) {
   const pending = await prisma.pendingOwnerQuestion.findMany({
     where: {
-      conversation: { customer: { businessId } },
+      // Must still be muted - a conversation can move on (owner resolves it some other way, a new sale
+      // closes, etc) without ever clearing this row. A real orphaned row from a 2026-09-11 migration
+      // backfill (see that migration's SQL) triggered a false reminder in production for a conversation
+      // that had already closed a sale hours earlier - reminding about a question that isn't actually
+      // blocking anything anymore.
+      conversation: { customer: { businessId }, humanControl: true },
       remindedAt: null,
       createdAt: { lte: olderThan },
     },

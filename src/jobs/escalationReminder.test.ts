@@ -84,6 +84,34 @@ test("runEscalationReminderJob reminds the owner once for an old unanswered ques
   }
 });
 
+test("runEscalationReminderJob does not remind about a question whose conversation already moved on", async () => {
+  // Regression: a real orphaned PendingOwnerQuestion row (left over from the 2026-09-11 migration that
+  // moved this off a single Conversation column) had humanControl:false - the conversation had already
+  // resolved and even closed a sale - but nothing ever cleared the row, so it looked "due" and produced
+  // a false reminder in production.
+  stubWhatsappFetch();
+  const customer2 = await prisma.customer.create({ data: { businessId, phoneNumber: `573007${Date.now()}` } });
+  const resolvedConversation = await prisma.conversation.create({ data: { customerId: customer2.id, humanControl: false, status: "SOLD" } });
+  try {
+    await prisma.pendingOwnerQuestion.create({
+      data: {
+        conversationId: resolvedConversation.id,
+        wamid: `wamid.orphaned-${randomUUID()}`,
+        question: "(pregunta anterior a la migracion)",
+        createdAt: new Date(Date.now() - 4 * 60 * 60 * 1000),
+      },
+    });
+
+    await runEscalationReminderJob();
+    assert.equal(sentMessages.length, 0, "must not remind about a question whose conversation is no longer muted");
+  } finally {
+    restoreFetch();
+    await prisma.pendingOwnerQuestion.deleteMany({ where: { conversationId: resolvedConversation.id } });
+    await prisma.conversation.deleteMany({ where: { id: resolvedConversation.id } });
+    await prisma.customer.deleteMany({ where: { id: customer2.id } });
+  }
+});
+
 test("runEscalationReminderJob leaves a recent unanswered question alone", async () => {
   stubWhatsappFetch();
   try {
