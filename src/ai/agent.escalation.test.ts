@@ -137,6 +137,34 @@ test("bot does not escalate to ask_owner on a social/conversational message with
   }
 });
 
+test("bot generalizes past the exact wording - a different excuse for a slow reply also doesn't escalate", async () => {
+  stubWhatsappFetch();
+  try {
+    const conversation = await runTurn("Perdon estaba comiendo, ya te respondo");
+    const pending = await prisma.pendingOwnerQuestion.findFirst({ where: { conversationId: conversation.id } });
+    assert.equal(pending, null, "a different social excuse must also not trigger ask_owner - the fix is semantic, not a fixed phrase");
+    assert.equal(conversation.humanControl, false);
+  } finally {
+    restoreFetch();
+  }
+});
+
+test("bot still escalates a real question even when it's wrapped in an apology - the fix must not swallow important messages", async () => {
+  stubWhatsappFetch();
+  try {
+    const conversation = await runTurn(
+      "Disculpa la demora, estaba ocupada. Oye, ¿ustedes hacen envios internacionales a Panama?"
+    );
+    const pending = await prisma.pendingOwnerQuestion.findFirst({ where: { conversationId: conversation.id } });
+    assert.ok(pending, "a real question mixed into an apology must still escalate, not get ignored along with the small talk");
+    assert.equal(conversation.humanControl, true);
+    assert.ok(sentToOwner, "the owner must actually receive the real question");
+    assert.match(sentToOwner!.body, /panam[áa]/i);
+  } finally {
+    restoreFetch();
+  }
+});
+
 test("bot answers directly from the catalog without escalating when a product just isn't sold", async () => {
   stubWhatsappFetch();
   try {
