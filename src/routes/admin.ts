@@ -32,7 +32,7 @@ import { getAiUsageSummary, getPlanUsage, logAiUsage } from "../ai/usage";
 import { deepseek, DEEPSEEK_MODEL } from "../ai/client";
 import { getAnalyticsSummary } from "../analytics/service";
 import { listFaqEntries, createFaqEntry, updateFaqEntry, deleteFaqEntry } from "../catalog/faq";
-import { listOrdersForBusiness } from "../orders/service";
+import { listOrdersForBusiness, getOrderForBusiness, markOrderShipped, markOrderCanceled } from "../orders/service";
 import { uploadMedia } from "../media/s3";
 import {
   listPaymentMethods,
@@ -377,6 +377,67 @@ adminRouter.put("/api/customers/:id/name", async (req, res) => {
 adminRouter.get("/api/orders", async (req, res) => {
   const orders = await listOrdersForBusiness(businessIdOf(req));
   res.json(orders);
+});
+
+adminRouter.put("/api/orders/:id/ship", upload.single("file"), async (req, res) => {
+  const businessId = businessIdOf(req);
+  const note = String(req.body?.note ?? "").trim();
+  const file = req.file;
+
+  const order = await getOrderForBusiness(businessId, String(req.params.id));
+  if (!order) {
+    res.status(404).json({ error: "Pedido no encontrado" });
+    return;
+  }
+
+  const business = await prisma.business.findUnique({ where: { id: businessId } });
+  if (!business?.whatsappPhoneNumberId || !business.whatsappAccessToken) {
+    res.status(400).json({ error: "Este negocio no tiene WhatsApp conectado" });
+    return;
+  }
+  const credentials: WhatsappCredentials = {
+    phoneNumberId: business.whatsappPhoneNumberId,
+    accessToken: business.whatsappAccessToken,
+  };
+
+  const formattedNote = note ? formatForWhatsapp(note) : "";
+  const defaultMessage = "¡Tu pedido fue enviado! 📦 Cualquier duda me escribes.";
+  let mediaS3Key: string | null = null;
+  let mediaType: string | null = null;
+
+  if (file) {
+    const type = file.mimetype.startsWith("video") ? "VIDEO" : "IMAGE";
+    const folder = type === "VIDEO" ? "videos" : "images";
+    const { key, url } = await uploadMedia(file.buffer, file.mimetype, folder);
+    mediaS3Key = key;
+    mediaType = type;
+    const caption = formattedNote || defaultMessage;
+    const wamid =
+      type === "IMAGE"
+        ? await sendImageMessage(credentials, order.customer.phoneNumber, url, caption)
+        : await sendVideoMessage(credentials, order.customer.phoneNumber, url, caption);
+    await recordMessage(order.conversationId, "ASSISTANT", caption, wamid || undefined, { s3Key: key, type });
+  } else {
+    const text = formattedNote || defaultMessage;
+    const wamid = await sendTextMessage(credentials, order.customer.phoneNumber, text);
+    await recordMessage(order.conversationId, "ASSISTANT", text, wamid || undefined);
+  }
+
+  await markOrderShipped(businessId, String(req.params.id), {
+    note: formattedNote || null,
+    mediaS3Key,
+    mediaType,
+  });
+  res.json({ ok: true });
+});
+
+adminRouter.put("/api/orders/:id/cancel", async (req, res) => {
+  const updated = await markOrderCanceled(businessIdOf(req), String(req.params.id));
+  if (!updated) {
+    res.status(404).json({ error: "Pedido no encontrado" });
+    return;
+  }
+  res.json({ ok: true });
 });
 
 adminRouter.get("/api/analytics", async (req, res) => {

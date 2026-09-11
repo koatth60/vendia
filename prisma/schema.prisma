@@ -12,6 +12,12 @@ enum PlanTier {
   NEGOCIO
 }
 
+enum OrderFulfillmentStatus {
+  PENDING
+  SHIPPED
+  CANCELED
+}
+
 model Business {
   id                       String          @id @default(cuid())
   name                     String
@@ -83,10 +89,17 @@ model Order {
   currency           String
   csatRating         Int?
   csatAskedAt        DateTime?
+  fulfillmentStatus  OrderFulfillmentStatus @default(PENDING)
+  shippedAt          DateTime?
+  shipmentNote       String?
+  shipmentMediaS3Key String?
+  shipmentMediaType  String?
+  canceledAt         DateTime?
   items              OrderItem[]
   createdAt          DateTime     @default(now())
 
   @@index([businessId, createdAt])
+  @@index([businessId, fulfillmentStatus])
 }
 
 model OrderItem {

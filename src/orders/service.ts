@@ -1,6 +1,7 @@
 import { prisma } from "../db/client";
 import { searchProducts } from "../catalog/products";
 import { sendInteractiveButtonsMessage, type WhatsappCredentials } from "../whatsapp/client";
+import { getPresignedMediaUrl } from "../media/s3";
 
 export interface ResolvedOrderItem {
   productId: string;
@@ -137,8 +138,46 @@ export async function listOrdersForBusiness(businessId: string) {
     include: { items: true, customer: true },
     orderBy: { createdAt: "desc" },
   });
-  return orders.map((order) => ({
-    ...formatOrder(order),
-    customer: { phoneNumber: order.customer.phoneNumber, name: order.customer.name },
-  }));
+  return Promise.all(
+    orders.map(async (order) => ({
+      ...formatOrder(order),
+      customer: { phoneNumber: order.customer.phoneNumber, name: order.customer.name },
+      shipmentMediaUrl: order.shipmentMediaS3Key ? await getPresignedMediaUrl(order.shipmentMediaS3Key) : null,
+    }))
+  );
+}
+
+export async function getOrderForBusiness(businessId: string, orderId: string) {
+  return prisma.order.findFirst({
+    where: { id: orderId, businessId },
+    include: { customer: true },
+  });
+}
+
+export async function markOrderShipped(
+  businessId: string,
+  orderId: string,
+  data: { note?: string | null; mediaS3Key?: string | null; mediaType?: string | null }
+) {
+  const order = await prisma.order.findFirst({ where: { id: orderId, businessId } });
+  if (!order) return null;
+  return prisma.order.update({
+    where: { id: orderId },
+    data: {
+      fulfillmentStatus: "SHIPPED",
+      shippedAt: new Date(),
+      shipmentNote: data.note || null,
+      shipmentMediaS3Key: data.mediaS3Key || null,
+      shipmentMediaType: data.mediaType || null,
+    },
+  });
+}
+
+export async function markOrderCanceled(businessId: string, orderId: string) {
+  const order = await prisma.order.findFirst({ where: { id: orderId, businessId } });
+  if (!order) return null;
+  return prisma.order.update({
+    where: { id: orderId },
+    data: { fulfillmentStatus: "CANCELED", canceledAt: new Date() },
+  });
 }

@@ -25,6 +25,8 @@
     --card: #ffffff;
     --danger: #dc2626;
     --danger-light: #fef2f2;
+    --warn: #b45309;
+    --warn-light: #fef3c7;
     --radius-lg: 18px;
     --radius-md: 11px;
     --shadow-sm: 0 1px 2px rgba(18,33,26,.05);
@@ -230,6 +232,27 @@
   .status-NEW, .status-INTERESTED, .status-QUOTED, .status-NEGOTIATING { background: var(--border-soft); color: var(--muted); }
   .status-SOLD { background: var(--brand-light); color: var(--brand-dark); }
   .status-LOST { background: var(--danger-light); color: var(--danger); }
+
+  /* Orders */
+  .order-section-head { display: flex; align-items: center; gap: 10px; margin: 30px 0 10px; }
+  .order-section-head:first-of-type { margin-top: 4px; }
+  .order-section-title { font-family: var(--display); font-weight: 700; font-size: 15px; color: var(--ink); }
+  .order-section-note { font-size: 11.5px; color: var(--muted-soft); text-transform: uppercase; letter-spacing: .04em; }
+  .order-card { padding: 14px 16px; border-top: 1px solid var(--border-soft); }
+  .order-card:first-child { border-top: none; }
+  .order-card-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
+  .order-card-name { display: flex; align-items: center; gap: 8px; font-size: 13.5px; font-weight: 700; }
+  .order-card-date { font-size: 12px; color: var(--muted); white-space: nowrap; }
+  .order-card-items { font-size: 13px; margin-top: 5px; }
+  .order-card-meta { font-size: 12px; color: var(--muted); margin-top: 3px; }
+  .order-card-bottom { display: flex; align-items: center; justify-content: space-between; margin-top: 8px; }
+  .order-card-total { font-size: 14px; font-weight: 700; }
+  .order-card-actions { display: flex; gap: 8px; margin-top: 10px; }
+  .order-card-shipment { margin-top: 10px; padding: 10px 12px; background: var(--bg); border-radius: var(--radius-md); font-size: 12.5px; color: var(--ink-soft); }
+  .order-card-shipment img { max-width: 160px; border-radius: 8px; display: block; margin-top: 6px; }
+  .ship-composer { margin-top: 12px; padding: 12px; background: var(--bg); border-radius: var(--radius-md); border: 1px solid var(--border-soft); }
+  .ship-composer textarea { min-height: 60px; }
+  .ship-composer-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
 
   .chat-split { display: flex; height: 480px; min-height: 480px; }
   .chat-split-list { width: 340px; flex-shrink: 0; overflow-y: auto; border-right: 1px solid var(--border); }
@@ -678,8 +701,30 @@
         </div>
         <button class="btn-ghost" onclick="loadOrders()">↻ Actualizar</button>
       </div>
+
+      <div class="order-section-head">
+        <div class="order-section-title">Pendientes de envío</div>
+        <span class="status-badge" id="orders-pending-count" style="background:var(--warn-light); color:var(--warn);">0</span>
+      </div>
       <div class="card" style="padding:0; overflow:hidden;">
-        <div id="orders-list"></div>
+        <div id="orders-pending-list"></div>
+      </div>
+
+      <div class="order-section-head">
+        <div class="order-section-title">Enviados</div>
+        <span class="status-badge" id="orders-shipped-count" style="background:var(--brand-light); color:var(--brand-dark);">0</span>
+      </div>
+      <div class="card" style="padding:0; overflow:hidden;">
+        <div id="orders-shipped-list"></div>
+      </div>
+
+      <div class="order-section-head">
+        <div class="order-section-title">Cancelados</div>
+        <span class="status-badge" id="orders-canceled-count" style="background:var(--danger-light); color:var(--danger);">0</span>
+        <span class="order-section-note">historial</span>
+      </div>
+      <div class="card" style="padding:0; overflow:hidden;">
+        <div id="orders-canceled-list"></div>
       </div>
     </div>
 
@@ -1812,41 +1857,151 @@ async function deleteFaqEntry(id) {
   }
 }
 
+const shipComposerFiles = {};
+
+function orderCardTop(o) {
+  const displayName = o.customer.name || o.customer.phoneNumber;
+  const itemsList = o.items.length > 0
+    ? o.items.map((i) => `${i.quantity}x ${escapeHtml(i.productName)}`).join(', ')
+    : '<span style="color:var(--muted);">sin productos identificados en el catálogo</span>';
+  const date = new Date(o.createdAt).toLocaleString('es-CO', { dateStyle: 'medium', timeStyle: 'short' });
+  return `
+    <div class="order-card-top">
+      <div class="order-card-name">${escapeHtml(displayName)}</div>
+      <div class="order-card-date">${date}</div>
+    </div>
+    <div class="order-card-items">${itemsList}</div>
+    ${o.shippingAddress ? `<div class="order-card-meta">📍 ${escapeHtml(o.shippingAddress)}</div>` : ''}
+    ${o.paymentMethodLabel ? `<div class="order-card-meta">💳 ${escapeHtml(o.paymentMethodLabel)}</div>` : ''}
+    <div class="order-card-bottom">
+      <div class="order-card-total">${o.currency} ${Number(o.totalAmount).toLocaleString('es-CO')}</div>
+      ${CSAT_EMOJI[o.csatRating] ? `<span style="font-size:16px;" title="Calificación del cliente">${CSAT_EMOJI[o.csatRating]}</span>` : ''}
+    </div>
+  `;
+}
+
+function pendingOrderCard(o) {
+  return `
+    <div class="order-card" data-order-id="${o.id}">
+      ${orderCardTop(o)}
+      <div class="order-card-actions">
+        <button class="btn-primary" type="button" onclick="openShipComposer('${o.id}')">✓ Marcar enviado</button>
+        <button class="btn-secondary" type="button" onclick="cancelOrder('${o.id}')">Cancelar</button>
+      </div>
+      <div class="ship-composer" id="ship-composer-${o.id}" style="display:none;">
+        <textarea id="ship-note-${o.id}" placeholder="Mensaje para el cliente (opcional) - ej: número de guía, transportadora..."></textarea>
+        <div class="ship-composer-row">
+          <input type="file" id="ship-file-${o.id}" accept="image/*,video/*" style="display:none;" onchange="onShipFileChange('${o.id}', this)" />
+          <button class="btn-secondary" type="button" onclick="document.getElementById('ship-file-${o.id}').click()">📎 Adjuntar guía/foto</button>
+          <span id="ship-file-name-${o.id}" style="font-size:12px; color:var(--muted);"></span>
+          <div style="flex:1;"></div>
+          <button class="btn-secondary" type="button" onclick="closeShipComposer('${o.id}')">Cancelar</button>
+          <button class="btn-primary" type="button" onclick="confirmShipOrder('${o.id}')">Confirmar envío</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function shippedOrderCard(o) {
+  const shippedDate = o.shippedAt ? new Date(o.shippedAt).toLocaleString('es-CO', { dateStyle: 'medium', timeStyle: 'short' }) : '';
+  const isVideo = o.shipmentMediaUrl && o.shipmentMediaType === 'VIDEO';
+  const media = o.shipmentMediaUrl
+    ? (isVideo ? `<video src="${o.shipmentMediaUrl}" controls style="max-width:160px; border-radius:8px; display:block; margin-top:6px;"></video>` : `<img src="${o.shipmentMediaUrl}" alt="Prueba de envío" />`)
+    : '';
+  return `
+    <div class="order-card" data-order-id="${o.id}">
+      ${orderCardTop(o)}
+      <div class="order-card-shipment">
+        📦 Enviado ${shippedDate ? `· ${shippedDate}` : ''}
+        ${o.shipmentNote ? `<div style="margin-top:4px;">${formatMessageText(o.shipmentNote)}</div>` : ''}
+        ${media}
+      </div>
+    </div>
+  `;
+}
+
+function canceledOrderCard(o) {
+  const canceledDate = o.canceledAt ? new Date(o.canceledAt).toLocaleString('es-CO', { dateStyle: 'medium', timeStyle: 'short' }) : '';
+  return `
+    <div class="order-card" data-order-id="${o.id}" style="opacity:.7;">
+      ${orderCardTop(o)}
+      <div class="order-card-meta" style="margin-top:8px; color:var(--danger);">✕ Cancelado ${canceledDate ? `· ${canceledDate}` : ''}</div>
+    </div>
+  `;
+}
+
+function openShipComposer(id) {
+  document.getElementById(`ship-composer-${id}`).style.display = 'block';
+  document.getElementById(`ship-note-${id}`).focus();
+}
+
+function closeShipComposer(id) {
+  document.getElementById(`ship-composer-${id}`).style.display = 'none';
+  document.getElementById(`ship-note-${id}`).value = '';
+  document.getElementById(`ship-file-name-${id}`).textContent = '';
+  delete shipComposerFiles[id];
+}
+
+function onShipFileChange(id, input) {
+  const file = input.files[0];
+  shipComposerFiles[id] = file || null;
+  document.getElementById(`ship-file-name-${id}`).textContent = file ? file.name : '';
+}
+
+async function confirmShipOrder(id) {
+  const note = document.getElementById(`ship-note-${id}`).value.trim();
+  const file = shipComposerFiles[id];
+  const formData = new FormData();
+  formData.append('note', note);
+  if (file) formData.append('file', file);
+  try {
+    await apiFetch(`/admin/api/orders/${id}/ship`, { method: 'PUT', body: formData });
+    delete shipComposerFiles[id];
+    setStatus('Pedido marcado como enviado ✓');
+    loadOrders();
+  } catch (err) {
+    setStatus(`No se pudo marcar el envío: ${err.message}`, true);
+  }
+}
+
+async function cancelOrder(id) {
+  if (!confirm('¿Cancelar este pedido? El cliente no recibe ningún mensaje automático.')) return;
+  try {
+    await apiFetch(`/admin/api/orders/${id}/cancel`, { method: 'PUT' });
+    loadOrders();
+  } catch (err) {
+    setStatus(`No se pudo cancelar: ${err.message}`, true);
+  }
+}
+
 async function loadOrders() {
-  const container = document.getElementById('orders-list');
+  const pendingEl = document.getElementById('orders-pending-list');
+  const shippedEl = document.getElementById('orders-shipped-list');
+  const canceledEl = document.getElementById('orders-canceled-list');
   try {
     const res = await apiFetch('/admin/api/orders');
     const orders = await res.json();
 
-    if (!Array.isArray(orders) || orders.length === 0) {
-      container.innerHTML = '<div class="empty-state"><div class="big">📦</div>Todavía no hay pedidos cerrados.<br/>Van a aparecer acá apenas el bot confirme una venta.</div>';
-      return;
-    }
+    const pending = orders.filter((o) => o.fulfillmentStatus === 'PENDING');
+    const shipped = orders.filter((o) => o.fulfillmentStatus === 'SHIPPED');
+    const canceled = orders.filter((o) => o.fulfillmentStatus === 'CANCELED');
 
-    container.innerHTML = orders.map((o) => {
-      const displayName = o.customer.name || o.customer.phoneNumber;
-      const itemsList = o.items.length > 0
-        ? o.items.map((i) => `${i.quantity}x ${escapeHtml(i.productName)}`).join(', ')
-        : '<span style="color:var(--muted);">sin productos identificados en el catálogo</span>';
-      const date = new Date(o.createdAt).toLocaleString('es-CO', { dateStyle: 'medium', timeStyle: 'short' });
-      return `
-        <div style="padding:12px 16px; border-top:1px solid var(--border);">
-          <div style="display:flex; justify-content:space-between; gap:10px;">
-            <strong style="font-size:13.5px;">${escapeHtml(displayName)}</strong>
-            <span style="font-size:13px; color:var(--muted);">${date}</span>
-          </div>
-          <div style="font-size:13px; margin-top:4px;">${itemsList}</div>
-          ${o.shippingAddress ? `<div style="font-size:12px; color:var(--muted); margin-top:2px;">📍 ${escapeHtml(o.shippingAddress)}</div>` : ''}
-          ${o.paymentMethodLabel ? `<div style="font-size:12px; color:var(--muted); margin-top:2px;">💳 ${escapeHtml(o.paymentMethodLabel)}</div>` : ''}
-          <div style="display:flex; align-items:center; justify-content:space-between; margin-top:6px;">
-            <div style="font-size:14px; font-weight:700;">${o.currency} ${Number(o.totalAmount).toLocaleString('es-CO')}</div>
-            ${CSAT_EMOJI[o.csatRating] ? `<span style="font-size:16px;" title="Calificación del cliente">${CSAT_EMOJI[o.csatRating]}</span>` : ''}
-          </div>
-        </div>
-      `;
-    }).join('');
+    document.getElementById('orders-pending-count').textContent = pending.length;
+    document.getElementById('orders-shipped-count').textContent = shipped.length;
+    document.getElementById('orders-canceled-count').textContent = canceled.length;
+
+    pendingEl.innerHTML = pending.length
+      ? pending.map(pendingOrderCard).join('')
+      : '<div class="empty-state"><div class="big">📦</div>No hay pedidos pendientes de envío.</div>';
+    shippedEl.innerHTML = shipped.length
+      ? shipped.map(shippedOrderCard).join('')
+      : '<div class="empty-state" style="padding:24px;">Todavía no hay pedidos enviados.</div>';
+    canceledEl.innerHTML = canceled.length
+      ? canceled.map(canceledOrderCard).join('')
+      : '<div class="empty-state" style="padding:24px;">Sin pedidos cancelados.</div>';
   } catch (err) {
-    container.innerHTML = `<div class="empty-state" style="color:var(--danger);">No se pudieron cargar los pedidos: ${escapeHtml(err.message)}</div>`;
+    pendingEl.innerHTML = `<div class="empty-state" style="color:var(--danger);">No se pudieron cargar los pedidos: ${escapeHtml(err.message)}</div>`;
   }
 }
 
