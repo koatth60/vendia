@@ -115,6 +115,18 @@ export async function setHumanControl(businessId: string, conversationId: string
   });
 }
 
+// Called only when the OWNER manually takes control from the admin panel (not when the bot itself
+// auto-escalates via flag_conversation_intent, which sets this same "pide agente" badge in the same
+// breath - clearing it there would erase the flag the bot just set). The badge has done its job once a
+// human is actually handling it; if the customer asks for an agent again later, the bot sets it right
+// back via set_conversation_intent.
+export async function clearAgentRequestFlag(businessId: string, conversationId: string) {
+  await prisma.conversation.updateMany({
+    where: { id: conversationId, customer: { businessId }, intent: "SOLICITA_AGENTE" },
+    data: { intent: null },
+  });
+}
+
 export async function findConversationByPendingConfirmation(pendingConfirmationMessageId: string) {
   return prisma.conversation.findUnique({
     where: { pendingConfirmationMessageId },

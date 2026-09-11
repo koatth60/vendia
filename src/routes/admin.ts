@@ -16,6 +16,7 @@ import {
   listConversationsForBusiness,
   getConversationForBusiness,
   setHumanControl,
+  clearAgentRequestFlag,
   recordMessage,
   setCustomerTags,
   saveCustomerName,
@@ -461,11 +462,13 @@ adminRouter.get("/api/conversations/:id", async (req, res) => {
 
 adminRouter.put("/api/conversations/:id/handoff", async (req, res) => {
   const active = Boolean(req.body?.active);
-  const conversation = await setHumanControl(businessIdOf(req), String(req.params.id), active);
+  const businessId = businessIdOf(req);
+  const conversation = await setHumanControl(businessId, String(req.params.id), active);
   if (!conversation) {
     res.status(404).json({ error: "Conversación no encontrada" });
     return;
   }
+  if (active) await clearAgentRequestFlag(businessId, String(req.params.id));
   res.json({ id: conversation.id, humanControl: conversation.humanControl });
 });
 
@@ -513,6 +516,7 @@ adminRouter.post("/api/conversations/:id/messages", upload.single("file"), async
     await recordMessage(String(req.params.id), "ASSISTANT", formattedText, wamid || undefined);
   }
   await setHumanControl(businessId, String(req.params.id), true);
+  await clearAgentRequestFlag(businessId, String(req.params.id));
 
   res.status(201).json({ ok: true });
 });
