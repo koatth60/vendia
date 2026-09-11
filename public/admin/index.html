@@ -239,7 +239,7 @@
     width: 640px; max-width: 94vw; min-width: 320px; min-height: 380px; max-height: 92vh;
     resize: both; overflow: auto;
   }
-  .modal-card-edit #edit-desc { resize: both; max-width: 100%; }
+  .modal-card-edit #edit-desc { resize: both; max-width: 94vw; }
 
   /* Conversations */
   .conv-row {
@@ -895,7 +895,7 @@
   </div>
 
   <div id="product-edit-modal" class="modal-overlay" style="display:none;" onclick="if(event.target===this) closeEditModal()">
-    <div class="modal-card modal-card-edit">
+    <div id="edit-modal-card" class="modal-card modal-card-edit">
       <div class="modal-header">
         <div class="modal-header-name">Editar producto</div>
         <button class="modal-close" onclick="closeEditModal()">✕</button>
@@ -1399,6 +1399,18 @@ function closeEditModal() {
   editingId = null;
   document.getElementById('product-edit-modal').style.display = 'none';
 }
+
+// Dragging the description textarea's own resize handle wider than the card should grow the card
+// to match, not just shrink the textarea back down to the card's fixed width.
+(function watchEditDescWidth() {
+  const textarea = document.getElementById('edit-desc');
+  const card = document.getElementById('edit-modal-card');
+  if (!textarea || !card || typeof ResizeObserver === 'undefined') return;
+  new ResizeObserver(() => {
+    const needed = textarea.offsetWidth + 40; // edit-grid horizontal padding
+    if (needed > card.offsetWidth) card.style.width = `${needed}px`;
+  }).observe(textarea);
+})();
 
 async function saveEdit() {
   const id = editingId;
