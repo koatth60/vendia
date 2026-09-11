@@ -5,7 +5,7 @@ import { getRecentHistory } from "../conversation/service";
 import { logAiUsage } from "./usage";
 import { prisma } from "../db/client";
 import { listActiveProducts } from "../catalog/products";
-import { normalizeForMatch, tokenize } from "../search/text";
+import { tokenize } from "../search/text";
 
 const BASE_SYSTEM_PROMPT = `Eres un asistente de ventas por WhatsApp para un negocio.
 
@@ -369,13 +369,18 @@ export async function generateReply(
     // constantly, e.g. "Boombox 4 LED" for "Parlante Bluetooth Portatil Boombox 4 LED"). This catches
     // vague follow-ups like "y los otros productos?" where the model resolved which ones but never
     // actually called send_product_media for them.
+    //
+    // Must compare whole tokens, not substrings: haystack.includes(t) on the raw normalized string used
+    // to match "pro" (from "AirPods Pro 2") against the "pro" inside "producto", and single-digit tokens
+    // like "2"/"3" against any stray digit in a price - false-positiving completely unrelated products
+    // into a customer message that never mentioned them.
     const products = await listActiveProducts(context.businessId);
-    const haystack = normalizeForMatch(`${customerText ?? ""} ${text}`);
+    const haystackTokens = new Set(tokenize(`${customerText ?? ""} ${text}`));
     const matched = products.filter((p) => {
       if (p.media.length === 0) return false;
       const nameTokens = tokenize(p.name);
       if (nameTokens.length === 0) return false;
-      const hits = nameTokens.filter((t) => haystack.includes(t)).length;
+      const hits = nameTokens.filter((t) => haystackTokens.has(t)).length;
       return hits / nameTokens.length >= 0.6;
     });
 
