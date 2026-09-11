@@ -60,8 +60,13 @@ test("GET /api/whatsapp-templates returns approved templates when the business h
         ok: true,
         json: async () => ({
           data: [
-            { name: "onix_owner_alert", status: "APPROVED", language: "es" },
-            { name: "seguimiento_post_venta", status: "PENDING", language: "es" },
+            {
+              name: "onix_owner_alert",
+              status: "APPROVED",
+              language: "es",
+              components: [{ type: "BODY", text: "Onix: {{1}}\n\nEntra a zaqisolutions.com y anda a Conversaciones para atender." }],
+            },
+            { name: "seguimiento_post_venta", status: "PENDING", language: "es", components: [{ type: "BODY", text: "no deberia aparecer" }] },
           ],
         }),
       } as Response;
@@ -72,7 +77,9 @@ test("GET /api/whatsapp-templates returns approved templates when the business h
   const res = await fetch(`${baseUrl}/api/whatsapp-templates`);
   assert.equal(res.status, 200);
   const body = await res.json() as { templates: unknown[]; note?: string; error?: string };
-  assert.deepEqual(body.templates, [{ name: "onix_owner_alert", language: "es" }]);
+  assert.deepEqual(body.templates, [
+    { name: "onix_owner_alert", language: "es", bodyText: "Onix: {{1}}\n\nEntra a zaqisolutions.com y anda a Conversaciones para atender." },
+  ]);
 });
 
 test("GET /api/whatsapp-templates returns an empty list with a note when the business has no WABA ID configured", async () => {

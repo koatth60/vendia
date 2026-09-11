@@ -17,15 +17,32 @@ test("listApprovedTemplates returns only APPROVED templates, dropping pending/re
     ok: true,
     json: async () => ({
       data: [
-        { name: "onix_owner_alert", status: "APPROVED", language: "es" },
-        { name: "seguimiento_post_venta", status: "PENDING", language: "es" },
-        { name: "old_rejected_one", status: "REJECTED", language: "es" },
+        {
+          name: "onix_owner_alert",
+          status: "APPROVED",
+          language: "es",
+          components: [{ type: "BODY", text: "Onix: {{1}}\n\nEntra a zaqisolutions.com y anda a Conversaciones para atender." }],
+        },
+        { name: "seguimiento_post_venta", status: "PENDING", language: "es", components: [{ type: "BODY", text: "no deberia aparecer" }] },
+        { name: "old_rejected_one", status: "REJECTED", language: "es", components: [{ type: "BODY", text: "no deberia aparecer" }] },
       ],
     }),
   })) as unknown as typeof fetch;
 
   const templates = await listApprovedTemplates("fake-token", "1400084061566358");
-  assert.deepEqual(templates, [{ name: "onix_owner_alert", language: "es" }]);
+  assert.deepEqual(templates, [
+    { name: "onix_owner_alert", language: "es", bodyText: "Onix: {{1}}\n\nEntra a zaqisolutions.com y anda a Conversaciones para atender." },
+  ]);
+});
+
+test("listApprovedTemplates returns an empty bodyText (not a crash) when a template has no BODY component", async () => {
+  globalThis.fetch = (async () => ({
+    ok: true,
+    json: async () => ({ data: [{ name: "weird_template", status: "APPROVED", language: "es", components: [] }] }),
+  })) as unknown as typeof fetch;
+
+  const templates = await listApprovedTemplates("fake-token", "1400084061566358");
+  assert.deepEqual(templates, [{ name: "weird_template", language: "es", bodyText: "" }]);
 });
 
 test("listApprovedTemplates throws with a readable error when the WhatsApp API call fails", async () => {

@@ -558,6 +558,7 @@
             <label>Plantilla aprobada</label>
             <select id="business-followup-template" onchange="onFollowupTemplateChange()"><option value="">-- Sin seguimiento (desactivado) --</option></select>
             <div class="hint" id="followup-template-hint"></div>
+            <div id="followup-template-preview" class="hint" style="display:none; margin-top:8px; padding:10px; border:1px solid var(--border-soft); border-radius:8px; background:var(--border-soft); white-space:pre-wrap;"></div>
           </div>
           <div>
             <label>Código de idioma de la plantilla</label>
@@ -983,21 +984,34 @@ async function loadWhatsappTemplates() {
     const data = await res.json();
     const templates = data.templates || [];
     select.innerHTML = '<option value="">-- Sin seguimiento (desactivado) --</option>'
-      + templates.map((t) => `<option value="${escapeHtml(t.name)}" data-lang="${escapeHtml(t.language)}">${escapeHtml(t.name)} (${escapeHtml(t.language)})</option>`).join('');
+      + templates.map((t) => `<option value="${escapeHtml(t.name)}" data-lang="${escapeHtml(t.language)}" data-body="${escapeHtml(t.bodyText)}">${escapeHtml(t.name)} (${escapeHtml(t.language)})</option>`).join('');
     if (savedValue && !templates.some((t) => t.name === savedValue)) {
       select.insertAdjacentHTML('beforeend', `<option value="${escapeHtml(savedValue)}">${escapeHtml(savedValue)} (no encontrada o no aprobada)</option>`);
     }
     select.value = savedValue || '';
-    hint.textContent = data.note || (templates.length === 0 ? 'No se encontraron plantillas aprobadas en tu cuenta de WhatsApp.' : '');
+    hint.textContent = data.note || (templates.length === 0 ? 'No se encontraron plantillas aprobadas en tu cuenta de WhatsApp.' : 'Elegí una plantilla para ver exactamente qué dice.');
+    onFollowupTemplateChange();
   } catch (err) {
     hint.textContent = `No se pudo cargar la lista de plantillas: ${err.message}`;
   }
 }
 
+// Nombres como "seguimiento_post_venta" no dicen nada por sí solos - esto muestra el texto real
+// aprobado por Meta (con el {{1}} tal cual, para que quede claro qué parte es dinámica), así el dueño
+// sabe exactamente qué le va a llegar al cliente antes de activarlo.
 function onFollowupTemplateChange() {
   const select = document.getElementById('business-followup-template');
-  const lang = select.selectedOptions[0]?.dataset?.lang;
+  const preview = document.getElementById('followup-template-preview');
+  const opt = select.selectedOptions[0];
+  const lang = opt?.dataset?.lang;
+  const body = opt?.dataset?.body;
   if (lang) document.getElementById('business-followup-language').value = lang;
+  if (body) {
+    preview.textContent = body;
+    preview.style.display = 'block';
+  } else {
+    preview.style.display = 'none';
+  }
 }
 
 const QUICK_INSTRUCTION_CHIPS = [
