@@ -36,8 +36,16 @@ export interface ExtractedSaleDetails {
 
 const EMPTY_RESULT: ExtractedSaleDetails = { items: [], shippingAddress: null, paymentMethodLabel: null, notes: null };
 
+// getRecentHistory defaults to a 20-message window, tuned for the live chat loop's per-turn context
+// cost - too narrow here. A long conversation easily buries the address/payment method (given once,
+// early on) well before the last 20 messages, while a repeated detail (like a delivery-day request)
+// stays in view - confirmed against a real conversation where exactly that happened, address and
+// payment came back empty while notes didn't. Extraction is a one-off synchronous call, not per-turn, so
+// it can afford to read the whole thing.
+const EXTRACT_HISTORY_LIMIT = 300;
+
 export async function extractSaleDetails(businessId: string, conversationId: string): Promise<ExtractedSaleDetails> {
-  const history = await getRecentHistory(conversationId);
+  const history = await getRecentHistory(conversationId, EXTRACT_HISTORY_LIMIT);
   if (history.length === 0) return EMPTY_RESULT;
 
   const transcript = history.map((m) => `${m.role}: ${m.content}`).join("\n");
