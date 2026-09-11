@@ -17,7 +17,7 @@ import {
   getRelatedProductNameForMessage,
 } from "../conversation/service";
 import { generateReply } from "../ai/agent";
-import { analyzeReceiptImage } from "../ai/vision";
+import { analyzeCustomerImage } from "../ai/vision";
 import { transcribeAudio } from "../ai/transcription";
 import { checkPlanCap } from "../ai/usage";
 import { createOrder, askForCsat, recordCsatReply, type ResolvedOrderItem } from "../orders/service";
@@ -64,9 +64,9 @@ async function handleOwnerReply(
     }
     const formattedAnswer = formatForWhatsapp(answerText);
     await sendTextMessage(credentials, pendingQuestion.customer.phoneNumber, formattedAnswer);
-    await recordMessage(pendingQuestion.id, "ASSISTANT", formattedAnswer);
-    await clearPendingOwnerQuestion(pendingQuestion.id);
-    await setHumanControl(businessId, pendingQuestion.id, false);
+    await recordMessage(pendingQuestion.conversationId, "ASSISTANT", formattedAnswer);
+    await clearPendingOwnerQuestion(pendingQuestion.questionId);
+    await setHumanControl(businessId, pendingQuestion.conversationId, false);
     await sendTextMessage(credentials, ownerPhone, "Listo, le reenvie tu respuesta al cliente ✅");
     return;
   }
@@ -220,7 +220,7 @@ whatsappRouter.post("/webhook", async (req, res) => {
         const { key, url } = await uploadMedia(buffer, mimeType, "receipts");
         media = { s3Key: key, type: "IMAGE" };
         text = message.image.caption ?? "";
-        imageAnalysis = await analyzeReceiptImage(business.id, conversation.id, url, text);
+        imageAnalysis = await analyzeCustomerImage(business.id, conversation.id, url, text);
       } catch (error) {
         console.error("No se pudo procesar la imagen entrante:", error);
         text = "[El cliente envio una imagen, pero hubo un problema tecnico y no se pudo procesar. Pedile que la reenvie.]";

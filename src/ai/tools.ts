@@ -8,6 +8,7 @@ import {
   setHumanControl,
   saveCustomerName,
   recordMessage,
+  createPendingOwnerQuestion,
 } from "../conversation/service";
 import { resolveOrderItems, createOrder, askForCsat, type ResolvedOrderItem } from "../orders/service";
 import {
@@ -492,10 +493,7 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
       }
 
       await setHumanControl(businessId, context.conversationId, true);
-      await prisma.conversation.update({
-        where: { id: context.conversationId },
-        data: { pendingOwnerQuestionMessageId: wamid },
-      });
+      await createPendingOwnerQuestion(context.conversationId, wamid, question);
 
       return {
         asked: true,

@@ -622,7 +622,8 @@
         <label id="pm-details-label">Datos (número de cuenta, llave, celular, etc.)</label>
         <textarea id="pm-details" placeholder="Ej: 300 123 4567 a nombre de Aurora Joyas"></textarea>
         <div class="actions-row">
-          <button class="btn-primary owner-only" onclick="addPaymentMethod()">+ Agregar método de pago</button>
+          <button class="btn-secondary owner-only" id="pm-cancel-btn" style="display:none;" onclick="cancelEditPaymentMethod()">Cancelar</button>
+          <button class="btn-primary owner-only" id="pm-submit-btn" onclick="addPaymentMethod()">+ Agregar método de pago</button>
         </div>
         <div id="payment-methods-list" style="margin-top:16px; display:flex; flex-direction:column; gap:8px;"></div>
       </div>
@@ -642,7 +643,8 @@
         <label>Respuesta</label>
         <textarea id="faq-answer" placeholder="Ej: Sí, hacemos envíos a todo el país con Servientrega, 2-4 días hábiles."></textarea>
         <div class="actions-row">
-          <button class="btn-primary owner-only" onclick="addFaqEntry()">+ Agregar pregunta</button>
+          <button class="btn-secondary owner-only" id="faq-cancel-btn" style="display:none;" onclick="cancelEditFaqEntry()">Cancelar</button>
+          <button class="btn-primary owner-only" id="faq-submit-btn" onclick="addFaqEntry()">+ Agregar pregunta</button>
         </div>
         <div id="faq-list" style="margin-top:16px; display:flex; flex-direction:column; gap:8px;"></div>
       </div>
@@ -674,9 +676,36 @@
                   </div>
                   <div class="modal-header-meta" id="modal-subtitle"></div>
                 </div>
+                <button class="btn-primary" type="button" onclick="openCloseSaleForm()" style="white-space:nowrap;">🎉 Cerrar venta</button>
                 <button class="btn-ghost" id="modal-handoff-btn" onclick="toggleHandoff()" style="white-space:nowrap;"></button>
               </div>
               <div id="modal-tags" style="display:flex; flex-wrap:wrap; gap:6px; align-items:center; padding:8px 16px; border-bottom:1px solid var(--border); background:#fff;"></div>
+              <div id="close-sale-form" style="display:none; padding:14px 16px; border-bottom:1px solid var(--border); background:var(--bg);">
+                <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:10px;">
+                  <span id="close-sale-status" style="font-size:12px;"></span>
+                  <button class="btn-secondary" type="button" onclick="prefillCloseSaleForm()" style="white-space:nowrap; font-size:12px; padding:4px 10px;">🔄 Releer conversación</button>
+                </div>
+                <label>Productos (uno por línea, ej: 1x Smartwatch Serie 11 Mini)</label>
+                <textarea id="close-sale-items" placeholder="1x Smartwatch Serie 11 Mini" style="min-height:56px;"></textarea>
+                <div class="grid-2">
+                  <div>
+                    <label>Dirección de envío</label>
+                    <input id="close-sale-address" placeholder="Opcional" />
+                  </div>
+                  <div>
+                    <label>Forma de pago</label>
+                    <input id="close-sale-payment" placeholder="Ej: Nequi, Contraentrega" />
+                  </div>
+                </div>
+                <label>Notas especiales del pedido (opcional - ej: entrega el martes antes de las 5pm)</label>
+                <textarea id="close-sale-notes" placeholder="Se guarda junto al pedido, no se le manda al cliente" style="min-height:44px;"></textarea>
+                <label>Mensaje de confirmación al cliente (opcional)</label>
+                <textarea id="close-sale-message" placeholder="Se usa un mensaje por defecto si lo dejas vacío" style="min-height:56px;"></textarea>
+                <div class="actions-row">
+                  <button class="btn-secondary" type="button" onclick="closeSaleFormCancel()">Cancelar</button>
+                  <button class="btn-primary" type="button" onclick="confirmCloseSale()">Confirmar venta</button>
+                </div>
+              </div>
               <div id="modal-thread" class="chat-thread" style="flex:1; max-height:none;"></div>
               <div id="modal-composer" style="display:none; flex-direction:column; gap:6px; padding:12px; border-top:1px solid var(--border); background:#fff;">
                 <div id="modal-composer-preview" style="display:none; align-items:center; gap:8px; font-size:12px; color:var(--muted);"></div>
@@ -777,6 +806,10 @@
       </div>
     </div>
   </main>
+
+  <div id="image-lightbox" class="modal-overlay" style="display:none; background:rgba(15,23,42,.82); cursor:zoom-out;" onclick="closeImageLightbox()">
+    <img id="image-lightbox-img" src="" style="max-width:92vw; max-height:92vh; border-radius:8px; box-shadow:0 24px 64px rgba(0,0,0,.4);" />
+  </div>
 
   <div id="photo-crop-modal" class="modal-overlay" style="display:none;" onclick="if(event.target===this) closePhotoCropModal()">
     <div class="modal-card" style="max-width:340px;">
@@ -1431,11 +1464,21 @@ let currentCustomerPhone = '';
 let conversationPollTimer = null;
 let renderedMessageIds = new Set();
 
+function openImageLightbox(url) {
+  document.getElementById('image-lightbox-img').src = url;
+  document.getElementById('image-lightbox').style.display = 'flex';
+}
+
+function closeImageLightbox() {
+  document.getElementById('image-lightbox').style.display = 'none';
+  document.getElementById('image-lightbox-img').src = '';
+}
+
 function messageBubbleHtml(m) {
   const isAudio = m.mediaUrl && m.mediaType === 'AUDIO';
   const img = isAudio
     ? `<audio src="${m.mediaUrl}" controls style="margin-bottom:4px;"></audio>`
-    : m.mediaUrl ? `<img src="${m.mediaUrl}" style="max-width:220px; border-radius:6px; display:block; margin-bottom:4px;" />` : '';
+    : m.mediaUrl ? `<img src="${m.mediaUrl}" style="max-width:220px; border-radius:6px; display:block; margin-bottom:4px; cursor:zoom-in;" onclick="openImageLightbox('${m.mediaUrl}')" />` : '';
   const time = new Date(m.createdAt).toLocaleString('es-CO', { hour: '2-digit', minute: '2-digit' });
   return `<div class="bubble bubble-${m.role}${isAudio ? ' bubble-has-audio' : ''}">${img}<span class="bubble-text">${formatMessageText(m.content)}</span><span class="bubble-time">${time}</span></div>`;
 }
@@ -1602,6 +1645,67 @@ function closeConversation() {
   renderedMessageIds = new Set();
   stopConversationPolling();
   clearComposerFile();
+  closeSaleFormCancel();
+}
+
+async function openCloseSaleForm() {
+  document.getElementById('close-sale-form').style.display = 'block';
+  await prefillCloseSaleForm();
+}
+
+async function prefillCloseSaleForm() {
+  if (!currentConversationId) return;
+  const status = document.getElementById('close-sale-status');
+  status.textContent = 'Leyendo la conversación...';
+  status.style.color = 'var(--muted)';
+  try {
+    const res = await apiFetch(`/admin/api/conversations/${currentConversationId}/extract-sale-details`);
+    const details = await res.json();
+    document.getElementById('close-sale-items').value = (details.items || []).map((i) => `${i.quantity}x ${i.productName}`).join('\n');
+    document.getElementById('close-sale-address').value = details.shippingAddress || '';
+    document.getElementById('close-sale-payment').value = details.paymentMethodLabel || '';
+    document.getElementById('close-sale-notes').value = details.notes || '';
+    status.textContent = 'Prellenado con la IA - revisa y corrige antes de confirmar ✎';
+  } catch (err) {
+    status.textContent = `No se pudo prellenar automático (${err.message}) - llena a mano.`;
+    status.style.color = 'var(--danger)';
+  }
+}
+
+function closeSaleFormCancel() {
+  document.getElementById('close-sale-form').style.display = 'none';
+  document.getElementById('close-sale-items').value = '';
+  document.getElementById('close-sale-address').value = '';
+  document.getElementById('close-sale-payment').value = '';
+  document.getElementById('close-sale-notes').value = '';
+  document.getElementById('close-sale-message').value = '';
+  document.getElementById('close-sale-status').textContent = '';
+}
+
+async function confirmCloseSale() {
+  if (!currentConversationId) return;
+  const items = document.getElementById('close-sale-items').value.split('\n').map((l) => l.trim()).filter(Boolean);
+  if (items.length === 0) {
+    setStatus('Agrega al menos un producto', true);
+    return;
+  }
+  const shippingAddress = document.getElementById('close-sale-address').value.trim();
+  const paymentMethodLabel = document.getElementById('close-sale-payment').value.trim();
+  const notes = document.getElementById('close-sale-notes').value.trim();
+  const customerMessage = document.getElementById('close-sale-message').value.trim();
+
+  try {
+    await apiFetch(`/admin/api/conversations/${currentConversationId}/close-sale`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items, shippingAddress, paymentMethodLabel, notes, customerMessage }),
+    });
+    setStatus('Venta cerrada, pedido registrado ✓');
+    closeSaleFormCancel();
+    openConversation(currentConversationId);
+  } catch (err) {
+    setStatus(`No se pudo cerrar la venta: ${err.message}`, true);
+  }
 }
 
 function renderHandoffState(humanControl) {
@@ -1701,18 +1805,22 @@ function pmTypeLabel(type) {
   return { TRANSFERENCIA: 'Transferencia', TARJETA: 'Tarjeta', EFECTIVO: 'Efectivo' }[type] || type;
 }
 
+let paymentMethodsCache = [];
+let editingPaymentMethodId = null;
+
 async function loadPaymentMethods() {
   const container = document.getElementById('payment-methods-list');
   try {
     const res = await apiFetch('/admin/api/payment-methods');
     const methods = await res.json();
+    paymentMethodsCache = Array.isArray(methods) ? methods : [];
 
-    if (!Array.isArray(methods) || methods.length === 0) {
+    if (paymentMethodsCache.length === 0) {
       container.innerHTML = '<div style="font-size:13px; color:var(--muted);">Todavía no agregaste ninguna forma de pago.</div>';
       return;
     }
 
-    container.innerHTML = methods.map((m) => `
+    container.innerHTML = paymentMethodsCache.map((m) => `
       <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px 12px; border:1px solid var(--border); border-radius:var(--radius-md); ${m.active ? '' : 'opacity:.5;'}">
         <div>
           <span class="category-tag" style="margin-right:8px;">${pmTypeLabel(m.type)}</span>
@@ -1720,6 +1828,7 @@ async function loadPaymentMethods() {
           <div style="font-size:12px; color:var(--muted); margin-top:2px; max-width:420px; overflow-wrap:anywhere;">${escapeHtml(m.details)}</div>
         </div>
         <div style="display:flex; gap:6px; flex-shrink:0;">
+          <button class="btn-secondary" onclick="editPaymentMethod('${m.id}')">Editar</button>
           <button class="btn-secondary" onclick="togglePaymentMethod('${m.id}', ${!m.active})">${m.active ? 'Desactivar' : 'Activar'}</button>
           <button class="btn-danger" onclick="deletePaymentMethod('${m.id}')">Eliminar</button>
         </div>
@@ -1728,6 +1837,27 @@ async function loadPaymentMethods() {
   } catch (err) {
     container.innerHTML = `<div style="font-size:13px; color:var(--danger);">No se pudieron cargar: ${escapeHtml(err.message)}</div>`;
   }
+}
+
+function editPaymentMethod(id) {
+  const method = paymentMethodsCache.find((m) => m.id === id);
+  if (!method) return;
+  editingPaymentMethodId = id;
+  document.getElementById('pm-type').value = method.type;
+  onPmTypeChange();
+  document.getElementById('pm-label').value = method.label;
+  document.getElementById('pm-details').value = method.details;
+  document.getElementById('pm-submit-btn').textContent = 'Guardar cambios';
+  document.getElementById('pm-cancel-btn').style.display = 'inline-block';
+  document.getElementById('pm-label').scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+function cancelEditPaymentMethod() {
+  editingPaymentMethodId = null;
+  document.getElementById('pm-label').value = '';
+  document.getElementById('pm-details').value = '';
+  document.getElementById('pm-submit-btn').textContent = '+ Agregar método de pago';
+  document.getElementById('pm-cancel-btn').style.display = 'none';
 }
 
 async function addPaymentMethod() {
@@ -1741,19 +1871,27 @@ async function addPaymentMethod() {
   }
 
   try {
-    await apiFetch('/admin/api/payment-methods', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type, label, details }),
-    });
+    if (editingPaymentMethodId) {
+      await apiFetch(`/admin/api/payment-methods/${editingPaymentMethodId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type, label, details }),
+      });
+      setStatus('Método de pago actualizado ✓');
+    } else {
+      await apiFetch('/admin/api/payment-methods', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type, label, details }),
+      });
+      setStatus('Método de pago agregado ✓');
+    }
   } catch (err) {
-    setStatus(`No se pudo agregar: ${err.message}`, true);
+    setStatus(`No se pudo guardar: ${err.message}`, true);
     return;
   }
 
-  document.getElementById('pm-label').value = '';
-  document.getElementById('pm-details').value = '';
-  setStatus('Método de pago agregado ✓');
+  cancelEditPaymentMethod();
   loadPaymentMethods();
 }
 
@@ -1780,24 +1918,29 @@ async function deletePaymentMethod(id) {
   }
 }
 
+let faqEntriesCache = [];
+let editingFaqId = null;
+
 async function loadFaqEntries() {
   const container = document.getElementById('faq-list');
   try {
     const res = await apiFetch('/admin/api/faq');
     const entries = await res.json();
+    faqEntriesCache = Array.isArray(entries) ? entries : [];
 
-    if (!Array.isArray(entries) || entries.length === 0) {
+    if (faqEntriesCache.length === 0) {
       container.innerHTML = '<div style="font-size:13px; color:var(--muted);">Todavía no agregaste ninguna pregunta frecuente.</div>';
       return;
     }
 
-    container.innerHTML = entries.map((f) => `
+    container.innerHTML = faqEntriesCache.map((f) => `
       <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:10px; padding:10px 12px; border:1px solid var(--border); border-radius:var(--radius-md); ${f.active ? '' : 'opacity:.5;'}">
         <div>
           <strong style="font-size:13.5px;">${escapeHtml(f.question)}</strong>
           <div style="font-size:12px; color:var(--muted); margin-top:2px; max-width:480px; overflow-wrap:anywhere;">${escapeHtml(f.answer)}</div>
         </div>
         <div style="display:flex; gap:6px; flex-shrink:0;">
+          <button class="btn-secondary" onclick="editFaqEntry('${f.id}')">Editar</button>
           <button class="btn-secondary" onclick="toggleFaqEntry('${f.id}', ${!f.active})">${f.active ? 'Desactivar' : 'Activar'}</button>
           <button class="btn-danger" onclick="deleteFaqEntry('${f.id}')">Eliminar</button>
         </div>
@@ -1806,6 +1949,25 @@ async function loadFaqEntries() {
   } catch (err) {
     container.innerHTML = `<div style="font-size:13px; color:var(--danger);">No se pudieron cargar: ${escapeHtml(err.message)}</div>`;
   }
+}
+
+function editFaqEntry(id) {
+  const entry = faqEntriesCache.find((f) => f.id === id);
+  if (!entry) return;
+  editingFaqId = id;
+  document.getElementById('faq-question').value = entry.question;
+  document.getElementById('faq-answer').value = entry.answer;
+  document.getElementById('faq-submit-btn').textContent = 'Guardar cambios';
+  document.getElementById('faq-cancel-btn').style.display = 'inline-block';
+  document.getElementById('faq-question').scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+function cancelEditFaqEntry() {
+  editingFaqId = null;
+  document.getElementById('faq-question').value = '';
+  document.getElementById('faq-answer').value = '';
+  document.getElementById('faq-submit-btn').textContent = '+ Agregar pregunta';
+  document.getElementById('faq-cancel-btn').style.display = 'none';
 }
 
 async function addFaqEntry() {
@@ -1818,19 +1980,27 @@ async function addFaqEntry() {
   }
 
   try {
-    await apiFetch('/admin/api/faq', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ question, answer }),
-    });
+    if (editingFaqId) {
+      await apiFetch(`/admin/api/faq/${editingFaqId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question, answer }),
+      });
+      setStatus('Pregunta frecuente actualizada ✓');
+    } else {
+      await apiFetch('/admin/api/faq', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question, answer }),
+      });
+      setStatus('Pregunta frecuente agregada ✓');
+    }
   } catch (err) {
-    setStatus(`No se pudo agregar: ${err.message}`, true);
+    setStatus(`No se pudo guardar: ${err.message}`, true);
     return;
   }
 
-  document.getElementById('faq-question').value = '';
-  document.getElementById('faq-answer').value = '';
-  setStatus('Pregunta frecuente agregada ✓');
+  cancelEditFaqEntry();
   loadFaqEntries();
 }
 
@@ -1871,6 +2041,7 @@ function orderCardTop(o) {
       <div class="order-card-date">${date}</div>
     </div>
     <div class="order-card-items">${itemsList}</div>
+    ${o.summary && o.summary.includes('— Nota:') ? `<div class="order-card-meta">📝 ${escapeHtml(o.summary.split('— Nota:')[1].trim())}</div>` : ''}
     ${o.shippingAddress ? `<div class="order-card-meta">📍 ${escapeHtml(o.shippingAddress)}</div>` : ''}
     ${o.paymentMethodLabel ? `<div class="order-card-meta">💳 ${escapeHtml(o.paymentMethodLabel)}</div>` : ''}
     <div class="order-card-bottom">

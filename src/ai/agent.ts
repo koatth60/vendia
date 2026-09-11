@@ -60,8 +60,10 @@ hecho la llamada primero.
 
 {{FOTOS}}
 
-PAGOS: cuando el cliente quiera confirmar una compra o pregunte como pagar, usa get_payment_methods para
-saber las formas de pago reales de este negocio y ofrecele esas opciones. Nunca inventes metodos de pago.
+PAGOS: cuando el cliente quiera confirmar una compra, pregunte como pagar, o pregunte el costo del envio
+(el valor del envio contraentrega suele estar en los detalles del metodo de pago correspondiente), usa
+get_payment_methods para saber las formas de pago reales de este negocio y ofrecele esas opciones. Nunca
+inventes metodos de pago ni costos de envio.
 Nunca puedes mandar un mensaje despues de este - cada respuesta es tu unica oportunidad de decir algo en
 este turno. Por eso nunca digas "te mando los datos en un mensaje aparte" ni "en breve te confirmo" sin
 haberlo hecho ya: si el cliente elige una forma de pago, incluye el numero/llave o link real en ese mismo
@@ -163,6 +165,25 @@ podes seguir con el cierre del pedido sin pedirle la foto. Si igual te manda una
 mensaje va a incluir una nota "[Analisis de imagen adjunta]" - usala como confirmacion adicional, pero no
 es obligatoria para cerrar.`;
 
+const PRODUCT_IMAGE_DIRECTIVE = `IMAGEN DE PRODUCTO: si el cliente manda una foto que no es un comprobante de pago - por ejemplo una
+captura de un live, un video, otra conversacion, o red social mostrando un articulo - el mensaje va a
+incluir una nota "[Analisis de imagen adjunta]" con uno de estos prefijos:
+
+- "PRODUCTO:" seguido de una descripcion visual clara (tipo, color, forma, marca/texto visible). Usa esa
+descripcion como termino de busqueda en search_products para ver si coincide con algo del catalogo - no
+le pidas al cliente que describa el producto con palabras, ya tenes una descripcion de la imagen para
+buscar. Si encontras una coincidencia razonable, preguntale "¿te refieres a este?" o similar, mandale la
+foto real del catalogo con send_product_media, y decile el nombre. Si no hay ninguna coincidencia clara,
+decile que no identificaste ese producto en el catalogo y preguntale el nombre o mostrale el catalogo.
+
+- "PRODUCTO_POCO_CLARO:" seguido del motivo (borrosa, muy oscura, muy lejos, etc) - la imagen no se pudo
+describir con confianza. NO llames search_products con una descripcion adivinada. En vez de eso decile al
+cliente que la foto no se ve lo suficientemente clara para identificar el producto, y pedile una foto mas
+clara/cercana o el nombre/referencia del producto.
+
+- "OTRO:" (no es ni comprobante ni producto) - respondele naturalmente sin inventar que es un producto o
+un pago.`;
+
 const CATEGORY_LABELS: Record<string, string> = {
   ropa: "moda y ropa",
   electronica: "electrónica y tecnología",
@@ -193,6 +214,7 @@ function buildSystemPrompt(personality?: BotPersonality | null): string {
     BASE_SYSTEM_PROMPT.replace("{{IDIOMA}}", languageDirective)
       .replace("{{FOTOS}}", photoDirective)
       .replace("{{COMPROBANTES}}", comprobanteDirective),
+    PRODUCT_IMAGE_DIRECTIVE,
   ];
 
   const categoryLabel = personality?.category ? CATEGORY_LABELS[personality.category] : undefined;
@@ -329,6 +351,41 @@ const PHOTO_REQUEST_PATTERN =
   /\b(foto|fotos|imagen|imagenes|imágenes|video|videos|muestra|muéstrame|muestrame|enseñ|ense[nñ]a|mandame|mándame|manda la|envia la|envía la|pasame|pásame)\b/i;
 const PHOTO_CLAIM_PATTERN = /\b(te (mand|envi|pas)|aqu[ií] (te|va|van)|ah[ií] (te|va|van))/i;
 
+// Same failure mode as the photo claim above, for escalation: the model says "ya consulto con el
+// equipo" / "dejame confirmar con el equipo" without actually calling ask_owner - confirmed against a
+// real conversation where a customer's shipping-cost question got this exact non-answer and the owner
+// never received anything, because no tool call ever fired. The system prompt already tells it not to
+// do this (see CRITICO en general) - this is the code-level backstop for when that's not enough.
+const ESCALATION_CLAIM_PATTERN =
+  /\b(equipo|due[ñn][oa]s?)\b.{0,25}\b(consult|confirm|pregunt|revis)|\b(consult|confirm|pregunt|revis)\w*\b.{0,25}\b(equipo|due[ñn][oa]s?)\b/i;
+
+// Same failure mode again, this time for save_customer_name: the bot asks "a nombre de quien hago el
+// pedido?", the customer answers with just their name, and the bot's next reply acknowledges it
+// ("Perfecto, David!") without ever having called save_customer_name - confirmed against a real
+// conversation where the owner had to add the name by hand afterward. Only fires when the bot's PRIOR
+// turn actually asked for the name (so a random two-word customer message elsewhere never gets
+// mistaken for one) and the customer's answer is shaped like a name, not a sentence.
+const ASK_NAME_PATTERN =
+  /\b(a nombre de qui[eé]n|tu nombre completo|nombre completo|c[oó]mo te llamas|cu[aá]l es tu nombre|tu nombre,? por favor)\b/i;
+const NOT_A_NAME = new Set(["si", "sí", "no", "ok", "listo", "gracias", "hola", "buenas", "dale", "vale", "hey", "chao", "claro"]);
+
+function looksLikePersonName(text: string): boolean {
+  const trimmed = text.trim();
+  if (trimmed.length < 3 || trimmed.length > 60) return false;
+  const words = trimmed.split(/\s+/);
+  if (words.length > 4) return false;
+  if (!words.every((w) => /^[A-Za-zÀ-ÿ'-]+$/.test(w))) return false;
+  return !NOT_A_NAME.has(trimmed.toLowerCase());
+}
+
+function lastAssistantText(history: { role: string; content: string }[]): string {
+  for (let i = history.length - 2; i >= 0; i--) {
+    if (history[i].role === "ASSISTANT") return history[i].content;
+    if (history[i].role === "CUSTOMER") break;
+  }
+  return "";
+}
+
 export async function generateReply(
   conversationId: string,
   context: ToolContext,
@@ -356,8 +413,23 @@ export async function generateReply(
 
   let lastText = "";
   let mediaSentThisTurn = 0;
+  let ownerAskedThisTurn = 0;
+  let nameSavedThisTurn = 0;
 
   async function finalizeTurn(text: string): Promise<string> {
+    if (ownerAskedThisTurn === 0 && ESCALATION_CLAIM_PATTERN.test(text) && customerText) {
+      await runCatalogTool(context, "ask_owner", { question: customerText });
+    }
+
+    if (
+      nameSavedThisTurn === 0 &&
+      customerText &&
+      looksLikePersonName(customerText) &&
+      ASK_NAME_PATTERN.test(lastAssistantText(history))
+    ) {
+      await runCatalogTool(context, "save_customer_name", { name: customerText.trim() });
+    }
+
     if (mediaSentThisTurn > 0) return text;
 
     const customerAsked = !!customerText && PHOTO_REQUEST_PATTERN.test(customerText);
@@ -449,8 +521,11 @@ export async function generateReply(
       const result = (await runCatalogTool(context, call.function.name, input)) as {
         mediaJustSent?: boolean;
         sent?: boolean;
+        asked?: boolean;
       };
       if (result?.mediaJustSent || result?.sent) mediaSentThisTurn++;
+      if (call.function.name === "ask_owner") ownerAskedThisTurn++;
+      if (call.function.name === "save_customer_name") nameSavedThisTurn++;
       messages.push({
         role: "tool",
         tool_call_id: call.id,

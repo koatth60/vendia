@@ -32,3 +32,13 @@ export async function togglePaymentMethod(businessId: string, id: string, active
   if (!method) throw new Error("Metodo de pago no encontrado");
   return prisma.paymentMethod.update({ where: { id }, data: { active } });
 }
+
+export async function updatePaymentMethod(
+  businessId: string,
+  id: string,
+  data: Partial<{ type: "TRANSFERENCIA" | "TARJETA" | "EFECTIVO"; label: string; details: string; active: boolean }>
+) {
+  const method = await prisma.paymentMethod.findFirst({ where: { id, businessId } });
+  if (!method) throw new Error("Metodo de pago no encontrado");
+  return prisma.paymentMethod.update({ where: { id }, data });
+}

@@ -94,9 +94,10 @@ test("bot escalates via ask_owner when the FAQ doesn't confirm the specific ques
   stubWhatsappFetch();
   try {
     const conversation = await runTurn("De alguna manera puedo conseguir domicilio gratis?");
+    const pending = await prisma.pendingOwnerQuestion.findFirst({ where: { conversationId: conversation.id } });
     assert.ok(
-      conversation.pendingOwnerQuestionMessageId,
-      "ask_owner should have fired and set pendingOwnerQuestionMessageId - a text reply alone (e.g. 'voy a preguntar') is not enough"
+      pending,
+      "ask_owner should have fired and created a PendingOwnerQuestion row - a text reply alone (e.g. 'voy a preguntar') is not enough"
     );
     assert.equal(conversation.humanControl, true);
     assert.ok(sentToOwner, "expected a WhatsApp message to actually be sent to the owner");
@@ -110,7 +111,8 @@ test("bot answers directly from the catalog without escalating when a product ju
   stubWhatsappFetch();
   try {
     const conversation = await runTurn("Venden celulares?");
-    assert.equal(conversation.pendingOwnerQuestionMessageId, null);
+    const pending = await prisma.pendingOwnerQuestion.findFirst({ where: { conversationId: conversation.id } });
+    assert.equal(pending, null);
     assert.equal(conversation.humanControl, false);
   } finally {
     restoreFetch();

@@ -141,18 +141,28 @@ export async function clearPendingConfirmation(conversationId: string) {
   });
 }
 
-export async function findConversationByPendingOwnerQuestion(pendingOwnerQuestionMessageId: string) {
-  return prisma.conversation.findUnique({
-    where: { pendingOwnerQuestionMessageId },
-    include: { customer: true },
+export async function createPendingOwnerQuestion(conversationId: string, wamid: string, question: string) {
+  await prisma.pendingOwnerQuestion.create({
+    data: { conversationId, wamid, question },
   });
 }
 
-export async function clearPendingOwnerQuestion(conversationId: string) {
-  await prisma.conversation.update({
-    where: { id: conversationId },
-    data: { pendingOwnerQuestionMessageId: null },
+export async function findConversationByPendingOwnerQuestion(wamid: string) {
+  const pending = await prisma.pendingOwnerQuestion.findUnique({
+    where: { wamid },
+    include: { conversation: { include: { customer: true } } },
   });
+  if (!pending) return null;
+  return {
+    questionId: pending.id,
+    question: pending.question,
+    conversationId: pending.conversationId,
+    customer: pending.conversation.customer,
+  };
+}
+
+export async function clearPendingOwnerQuestion(questionId: string) {
+  await prisma.pendingOwnerQuestion.delete({ where: { id: questionId } });
 }
 
 export async function findConversationsDueForFollowUp(businessId: string, olderThan: Date) {

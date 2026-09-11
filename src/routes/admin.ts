@@ -20,6 +20,7 @@ import {
   recordMessage,
   setCustomerTags,
   saveCustomerName,
+  updateConversationStatus,
 } from "../conversation/service";
 import {
   sendTextMessage,
@@ -30,16 +31,26 @@ import {
   type WhatsappCredentials,
 } from "../whatsapp/client";
 import { getAiUsageSummary, getPlanUsage, logAiUsage } from "../ai/usage";
+import { extractSaleDetails } from "../ai/extractSale";
 import { deepseek, DEEPSEEK_MODEL } from "../ai/client";
 import { getAnalyticsSummary } from "../analytics/service";
 import { listFaqEntries, createFaqEntry, updateFaqEntry, deleteFaqEntry } from "../catalog/faq";
-import { listOrdersForBusiness, getOrderForBusiness, markOrderShipped, markOrderCanceled } from "../orders/service";
+import {
+  listOrdersForBusiness,
+  getOrderForBusiness,
+  markOrderShipped,
+  markOrderCanceled,
+  resolveOrderItems,
+  createOrder,
+  askForCsat,
+} from "../orders/service";
 import { uploadMedia } from "../media/s3";
 import {
   listPaymentMethods,
   createPaymentMethod,
   deletePaymentMethod,
   togglePaymentMethod,
+  updatePaymentMethod,
 } from "../catalog/paymentMethods";
 
 export const adminRouter = Router();
@@ -271,8 +282,13 @@ adminRouter.post("/api/payment-methods", requireOwner, async (req, res) => {
 });
 
 adminRouter.put("/api/payment-methods/:id", requireOwner, async (req, res) => {
-  const { active } = req.body;
-  const method = await togglePaymentMethod(businessIdOf(req), String(req.params.id), Boolean(active));
+  const { type, label, details, active } = req.body;
+  if (type === undefined && label === undefined && details === undefined) {
+    const method = await togglePaymentMethod(businessIdOf(req), String(req.params.id), Boolean(active));
+    res.json(method);
+    return;
+  }
+  const method = await updatePaymentMethod(businessIdOf(req), String(req.params.id), { type, label, details, active });
   res.json(method);
 });
 
@@ -553,4 +569,90 @@ adminRouter.post("/api/conversations/:id/messages", upload.single("file"), async
   await clearAgentRequestFlag(businessId, String(req.params.id));
 
   res.status(201).json({ ok: true });
+});
+
+// For sales the owner closes herself (chatting directly with the customer, bypassing the bot entirely) -
+// close_conversation only ever runs as an AI tool call, so a manually-closed sale otherwise never creates
+// an Order and never shows up in Pedidos. This is the deterministic equivalent for that path: no AI
+// involved, so no risk of the model skipping or mishandling it.
+// Prefills the close-sale form by reading the conversation with AI - read-only, no side effects. The
+// owner still reviews/edits every field and clicks "Confirmar venta" herself before anything is created,
+// so a bad extraction just means editing a field, not a wrong order silently going through.
+adminRouter.get("/api/conversations/:id/extract-sale-details", async (req, res) => {
+  const businessId = businessIdOf(req);
+  const conversation = await getConversationForBusiness(businessId, String(req.params.id));
+  if (!conversation) {
+    res.status(404).json({ error: "Conversación no encontrada" });
+    return;
+  }
+  try {
+    const details = await extractSaleDetails(businessId, String(req.params.id));
+    res.json(details);
+  } catch (error) {
+    res.status(502).json({ error: error instanceof Error ? error.message : "No se pudo leer la conversación" });
+  }
+});
+
+adminRouter.post("/api/conversations/:id/close-sale", async (req, res) => {
+  const businessId = businessIdOf(req);
+  const itemLines: string[] = Array.isArray(req.body?.items) ? req.body.items : [];
+  const shippingAddress = req.body?.shippingAddress ? String(req.body.shippingAddress).trim() : null;
+  const paymentMethodLabel = req.body?.paymentMethodLabel ? String(req.body.paymentMethodLabel).trim() : null;
+  const notes = String(req.body?.notes ?? "").trim();
+  const customerMessage = String(req.body?.customerMessage ?? "").trim();
+
+  const parsedItems = itemLines
+    .map((line) => String(line).trim())
+    .filter(Boolean)
+    .map((line) => {
+      const match = line.match(/^(\d+)\s*x\s*(.+)$/i);
+      return match ? { productName: match[2].trim(), quantity: Number(match[1]) } : { productName: line, quantity: 1 };
+    });
+  if (parsedItems.length === 0) {
+    res.status(400).json({ error: "Agrega al menos un producto" });
+    return;
+  }
+
+  const conversation = await getConversationForBusiness(businessId, String(req.params.id));
+  if (!conversation) {
+    res.status(404).json({ error: "Conversación no encontrada" });
+    return;
+  }
+
+  const business = await prisma.business.findUnique({ where: { id: businessId } });
+  if (!business?.whatsappPhoneNumberId || !business.whatsappAccessToken) {
+    res.status(400).json({ error: "Este negocio no tiene WhatsApp conectado" });
+    return;
+  }
+  const credentials: WhatsappCredentials = {
+    phoneNumberId: business.whatsappPhoneNumberId,
+    accessToken: business.whatsappAccessToken,
+  };
+
+  const items = await resolveOrderItems(businessId, parsedItems);
+  if (items.length === 0) {
+    res.status(400).json({ error: "Ningún producto coincidió con el catálogo - revisa los nombres" });
+    return;
+  }
+
+  const itemsSummary = items.map((i) => `${i.quantity}x ${i.productName}`).join(", ");
+  const summary = notes ? `${itemsSummary} — Nota: ${notes}` : itemsSummary;
+  const order = await createOrder({
+    businessId,
+    customerId: conversation.customer.id,
+    conversationId: conversation.id,
+    summary,
+    items,
+    shippingAddress,
+    paymentMethodLabel,
+  });
+  await updateConversationStatus(conversation.id, "SOLD");
+
+  const defaultMessage = "¡Listo! Tu pago quedó confirmado y tu pedido está cerrado. Gracias por tu compra 🎉";
+  const text = formatForWhatsapp(customerMessage) || defaultMessage;
+  const wamid = await sendTextMessage(credentials, conversation.customer.phoneNumber, text);
+  await recordMessage(conversation.id, "ASSISTANT", text, wamid || undefined);
+  await askForCsat(credentials, order.id, conversation.customer.phoneNumber);
+
+  res.json({ ok: true, orderId: order.id });
 });

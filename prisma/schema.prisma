@@ -217,7 +217,7 @@ model Conversation {
   pendingConfirmationMessageId String?             @unique
   pendingOrderSummary          String?
   pendingOrderItems            Json?
-  pendingOwnerQuestionMessageId String?            @unique
+  pendingOwnerQuestions        PendingOwnerQuestion[]
   contextSummary                String?
   contextSummarizedUpTo         Int?
   mediaSentProductIds            String[]            @default([])
@@ -225,6 +225,22 @@ model Conversation {
   messages                     Message[]
   createdAt                    DateTime            @default(now())
   updatedAt                    DateTime            @updatedAt
+}
+
+// One row per question escalated to the owner, instead of a single field on Conversation - a customer
+// asking several distinct questions before the owner replies to the first one used to overwrite that
+// single field each time, so her reply to an earlier question could never be matched back once a later
+// question replaced it. Each escalation now gets its own trackable row, matched by the wamid of the
+// alert the owner actually replies to.
+model PendingOwnerQuestion {
+  id             String       @id @default(cuid())
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  conversationId String
+  wamid          String       @unique
+  question       String
+  createdAt      DateTime     @default(now())
+
+  @@index([conversationId])
 }
 
 enum ConversationStatus {

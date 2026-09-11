@@ -1,16 +1,33 @@
 import { deepseek, DEEPSEEK_VISION_MODEL } from "./client";
 import { logAiUsage } from "./usage";
 
-const VISION_PROMPT = `Estas mirando una imagen que un cliente mando por WhatsApp a un negocio, probablemente un
-comprobante de pago (transferencia bancaria, Nequi, Daviplata, etc).
+const VISION_PROMPT = `Estas mirando una imagen que un cliente mando por WhatsApp a un negocio de ventas.
 
-Describi en 1-2 frases cortas, en espanol neutro, lo que ves. Si parece un comprobante de pago, indica el
-monto, el metodo/banco y la fecha si se alcanzan a leer. Si el monto o los datos no se leen bien, decilo
-explicitamente. Si la imagen NO parece un comprobante de pago, decí solo que no lo es y que muestra.
+Primero decidi que tipo de imagen es:
 
-No agregues nada mas, solo la descripcion.`;
+1. COMPROBANTE DE PAGO (transferencia bancaria, Nequi, Daviplata, etc): describi en 1-2 frases el monto,
+el metodo/banco y la fecha si se alcanzan a leer. Si el monto o los datos no se leen bien, decilo
+explicitamente.
 
-export async function analyzeReceiptImage(
+2. PRODUCTO, imagen CLARA (foto de un producto, captura de un live/video, captura de otro chat o red
+social mostrando un articulo, etc, donde SI se distinguen bien los detalles): el cliente probablemente
+esta preguntando "es este el que tienen?" sin saber el nombre exacto. Describi el articulo en detalle
+visual util para buscarlo en un catalogo: tipo de producto, color(es), forma, material aparente, y
+cualquier texto/marca/modelo visible en la imagen. Se especifico (ej: "reloj inteligente negro, pantalla
+rectangular, correa de silicona" en vez de "un reloj").
+
+3. PRODUCTO, imagen POCO CLARA (se nota que es un producto pero esta borrosa, muy oscura, muy lejos,
+cortada, o con movimiento - no podes describir los detalles con confianza): decilo explicitamente y en
+que consiste el problema (ej: "esta borrosa", "esta muy oscuro", "esta muy lejos para distinguir
+detalles"). No inventes ni adivines detalles que no se ven bien.
+
+4. OTRA COSA (persona, paisaje, meme, etc sin relacion con comprobantes ni productos): decilo en una
+frase corta.
+
+Empeza la respuesta con "COMPROBANTE:", "PRODUCTO:", "PRODUCTO_POCO_CLARO:" o "OTRO:" segun corresponda,
+seguido de la descripcion. No agregues nada mas.`;
+
+export async function analyzeCustomerImage(
   businessId: string,
   conversationId: string,
   imageUrl: string,
