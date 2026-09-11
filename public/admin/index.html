@@ -1539,7 +1539,11 @@ function updateCloseSaleButtonVisibility(status) {
 }
 
 async function pollConversation() {
-  if (!currentConversationId) return;
+  // GET /admin/api/conversations/:id resets that conversation's unread badge as a side effect of
+  // viewing it (see getConversationForBusiness) - polling it unconditionally while merely "open" in
+  // state (regardless of tab/visibility, same gap the message:new handler had) would silently mark it
+  // read every 30s even while the owner is looking at a different tab entirely.
+  if (!currentConversationId || !isActivelyViewingConversation(currentConversationId)) return;
   try {
     const res = await apiFetch(`/admin/api/conversations/${currentConversationId}`);
     const conversation = await res.json();
@@ -2633,6 +2637,15 @@ function initRealtime() {
 
   document.addEventListener('visibilitychange', markConversationReadIfViewing);
   window.addEventListener('focus', markConversationReadIfViewing);
+
+  // The open thread already has its own reconciliation poll (pollConversation), but nothing was
+  // periodically re-syncing the sidebar list itself - if it ever drifted from the server for any
+  // reason (a missed event, a brief disconnect that didn't trigger the connect handler's refetch,
+  // etc.) there was no self-healing, the stale badge would just sit there until a manual reload.
+  setInterval(() => {
+    loadConversations();
+    loadOrders();
+  }, 30000);
 
   socket.on('message:new', ({ conversationId, message, unreadCount }) => {
     if (conversationId === currentConversationId) {
