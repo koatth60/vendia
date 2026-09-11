@@ -1,5 +1,5 @@
 import type OpenAI from "openai";
-import { getProductById, listActiveProducts, searchProducts } from "../catalog/products";
+import { getProductById, listActiveProducts, searchProducts, findConfidentProductMatch } from "../catalog/products";
 import { listActivePaymentMethods } from "../catalog/paymentMethods";
 import { listActiveFaqEntries } from "../catalog/faq";
 import {
@@ -119,17 +119,21 @@ export const catalogTools: OpenAI.Chat.ChatCompletionTool[] = [
     function: {
       name: "send_product_media",
       description:
-        "Envia por WhatsApp las fotos y/o videos reales de un producto especifico. Usar SIEMPRE que el cliente pida ver fotos, imagenes o video de un producto. Esto manda los archivos de verdad, no hace falta describir la imagen en texto aparte. Busca el producto por nombre en el momento, no hace falta pasar ningun ID.",
+        "Envia por WhatsApp las fotos y/o videos reales de un producto especifico. Usar SIEMPRE que el cliente pida ver fotos, imagenes o video de un producto. Esto manda los archivos de verdad, no hace falta describir la imagen en texto aparte. Si ya sabes el ID exacto del producto (porque lo acabas de obtener con search_products o get_product_details en este mismo turno), pasalo en productId - es mas confiable que buscar de nuevo por nombre y evita mandar la foto de un producto distinto al que se esta hablando. Si solo tenes el nombre (el cliente lo escribio en el chat), usa productName.",
       parameters: {
         type: "object",
         properties: {
+          productId: {
+            type: "string",
+            description:
+              "El campo 'id' exacto del producto, si ya lo obtuviste en este turno con search_products o get_product_details. Preferi este sobre productName siempre que lo tengas.",
+          },
           productName: {
             type: "string",
             description:
-              "El nombre (o parte del nombre) del producto tal como lo menciono el cliente en ESTE mensaje, por ejemplo 'smartwatch serie 11 mini' o 'boombox'. Usa siempre el producto del que se esta hablando ahora mismo en la conversacion, no uno mencionado antes.",
+              "El nombre (o parte del nombre) del producto tal como lo menciono el cliente en ESTE mensaje, por ejemplo 'smartwatch serie 11 mini' o 'boombox'. Usa siempre el producto del que se esta hablando ahora mismo en la conversacion, no uno mencionado antes. Solo hace falta si no tenes productId.",
           },
         },
-        required: ["productName"],
       },
     },
   },
@@ -290,6 +294,17 @@ interface PendingOrderDraft {
   shippingCost: number | null;
 }
 
+// Returns true whenever this business requires owner confirmation before closing a sale (i.e. has a
+// contactPhone configured) - the caller must NOT auto-close the order in that case, regardless of
+// whether the alert actually reached the owner. Previously, sendInteractiveButtonsMessage throwing (a
+// real WhatsApp API error, not just an empty response) was uncaught here, which bubbled all the way up
+// through generateReply and was swallowed by the webhook's outer try/catch - the customer got NO reply
+// at all for that turn. And even when it didn't throw, `!wamid` was read as "no confirmation needed",
+// so a failed send silently auto-approved an unconfirmed sale instead of blocking it. Now: buttons are
+// tried first, falling back to plain text (compatible with the same "si"/"no" parsing in
+// handleOwnerReply) if that fails, and the sale is only ever treated as NOT requiring confirmation when
+// no contactPhone is configured at all - a total failure to reach the owner still blocks auto-closing,
+// it just can't be resolved by quote-reply later (logged loudly for manual follow-up instead).
 async function requestSaleConfirmation(context: ToolContext, summary: string, draft: PendingOrderDraft): Promise<boolean> {
   const business = await prisma.business.findUnique({ where: { id: context.businessId } });
   if (!business?.contactPhone) return false;
@@ -302,20 +317,41 @@ async function requestSaleConfirmation(context: ToolContext, summary: string, dr
     "¿Te llego el pago?",
   ].join("\n\n");
 
-  const wamid = await sendInteractiveButtonsMessage(context.credentials, business.contactPhone, text, [
-    { id: "confirm_yes", title: "✅ Si llego" },
-    { id: "confirm_no", title: "❌ No llego" },
-  ]);
-  if (!wamid) return false;
+  let wamid = "";
+  try {
+    wamid = await sendInteractiveButtonsMessage(context.credentials, business.contactPhone, text, [
+      { id: "confirm_yes", title: "✅ Si llego" },
+      { id: "confirm_no", title: "❌ No llego" },
+    ]);
+  } catch (error) {
+    console.error("No se pudo enviar los botones de confirmacion de venta al dueno, probando texto libre:", error);
+  }
 
-  await prisma.conversation.update({
-    where: { id: context.conversationId },
-    data: {
-      pendingConfirmationMessageId: wamid,
-      pendingOrderSummary: summary || null,
-      pendingOrderItems: draft as unknown as object,
-    },
-  });
+  if (!wamid) {
+    try {
+      wamid = await sendTextMessage(
+        context.credentials,
+        business.contactPhone,
+        `${text}\n\nRespondeme "si" o "no" citando este mismo mensaje, por favor.`
+      );
+    } catch (error) {
+      console.error("No se pudo enviar la confirmacion de venta al dueno de ninguna forma (revisar manualmente):", error, {
+        businessId: context.businessId,
+        conversationId: context.conversationId,
+      });
+    }
+  }
+
+  if (wamid) {
+    await prisma.conversation.update({
+      where: { id: context.conversationId },
+      data: {
+        pendingConfirmationMessageId: wamid,
+        pendingOrderSummary: summary || null,
+        pendingOrderItems: draft as unknown as object,
+      },
+    });
+  }
   return true;
 }
 
@@ -401,14 +437,27 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
       return results.map(formatProduct);
     }
     case "send_product_media": {
+      const productId = input.productId ? String(input.productId).trim() : "";
       const query = String(input.productName ?? "");
-      const matches = await searchProducts(businessId, query);
 
-      if (matches.length === 0) {
-        return { error: `No se encontro ningun producto que coincida con "${query}".` };
+      let product: Awaited<ReturnType<typeof getProductById>> | null = null;
+      if (productId) {
+        product = await getProductById(businessId, productId);
+        if (!product) return { error: `No se encontro ningun producto con id "${productId}".` };
+      } else {
+        if (!query) return { error: "Falta productId o productName" };
+        const match = await findConfidentProductMatch(businessId, query);
+        if (match.ambiguous) {
+          return {
+            error: `"${query}" coincide con varios productos por igual: ${match.candidates?.join(", ")}. Pedile al cliente que aclare cual, o usa get_product_details con el ID exacto de uno de search_products.`,
+          };
+        }
+        if (!match.product) {
+          return { error: `No se encontro ningun producto que coincida con confianza con "${query}".` };
+        }
+        product = match.product;
       }
 
-      const product = matches[0];
       await prisma.product.update({ where: { id: product.id }, data: { inquiryCount: { increment: 1 } } });
       if (product.media.length === 0) {
         return { sent: false, product: product.name, reason: "Este producto no tiene fotos ni videos cargados" };
@@ -537,16 +586,23 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
         const shippingAddress = input.shippingAddress ? String(input.shippingAddress).trim() : null;
         const paymentMethodLabel = input.paymentMethodLabel ? String(input.paymentMethodLabel).trim() : null;
         const shippingCost = input.shippingCost !== undefined && input.shippingCost !== null ? Number(input.shippingCost) : null;
-        const items = await resolveOrderItems(
+        const { items, unresolved } = await resolveOrderItems(
           businessId,
           Array.isArray(input.items) ? (input.items as { productName: string; quantity: number }[]) : []
         );
+        if (unresolved.length > 0) {
+          console.warn(
+            `close_conversation: no se pudieron resolver estos items contra el catalogo (businessId=${businessId}, conversationId=${context.conversationId}):`,
+            unresolved
+          );
+        }
 
         const pending = await requestSaleConfirmation(context, summary, { items, shippingAddress, paymentMethodLabel, shippingCost });
         if (pending) {
           return {
             closed: false,
             pending: true,
+            unresolvedItems: unresolved.length > 0 ? unresolved : undefined,
             note: "El dueno del negocio tiene que confirmar el pago primero. No le digas al cliente que su compra quedo confirmada todavia - decile que estas verificando el pago con el equipo.",
           };
         }

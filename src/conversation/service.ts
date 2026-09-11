@@ -181,6 +181,32 @@ export async function clearPendingOwnerQuestion(questionId: string) {
   await prisma.pendingOwnerQuestion.delete({ where: { id: questionId } });
 }
 
+// Used when the owner replies WITHOUT quoting a specific message (common on mobile, where long-pressing
+// to reply is easy to skip) - lets the webhook auto-resolve the reply only when there's exactly one
+// thing open for that business, instead of always demanding a quote even when there's nothing to
+// disambiguate.
+export async function findOpenPendingOwnerQuestionsForBusiness(businessId: string) {
+  const pending = await prisma.pendingOwnerQuestion.findMany({
+    where: { conversation: { customer: { businessId } } },
+    include: { conversation: { include: { customer: true } } },
+    orderBy: { createdAt: "desc" },
+  });
+  return pending.map((p) => ({
+    questionId: p.id,
+    question: p.question,
+    conversationId: p.conversationId,
+    customer: p.conversation.customer,
+  }));
+}
+
+export async function findOpenPendingConfirmationsForBusiness(businessId: string) {
+  return prisma.conversation.findMany({
+    where: { customer: { businessId }, pendingConfirmationMessageId: { not: null } },
+    include: { customer: true },
+    orderBy: { updatedAt: "desc" },
+  });
+}
+
 export async function findConversationsDueForFollowUp(businessId: string, olderThan: Date) {
   return prisma.conversation.findMany({
     where: {

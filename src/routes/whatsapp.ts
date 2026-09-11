@@ -12,6 +12,8 @@ import {
   clearPendingConfirmation,
   findConversationByPendingOwnerQuestion,
   clearPendingOwnerQuestion,
+  findOpenPendingOwnerQuestionsForBusiness,
+  findOpenPendingConfirmationsForBusiness,
   setHumanControl,
   updateConversationStatus,
   getRelatedProductNameForMessage,
@@ -34,7 +36,7 @@ interface OwnerReplyMessage {
   interactive?: { type: string; button_reply?: { id: string; title: string } };
 }
 
-async function handleOwnerReply(
+export async function handleOwnerReply(
   businessId: string,
   credentials: WhatsappCredentials,
   ownerPhone: string,
@@ -46,16 +48,39 @@ async function handleOwnerReply(
   }
 
   const quotedId = message.context?.id;
+  let pendingQuestion = quotedId ? await findConversationByPendingOwnerQuestion(quotedId) : null;
+  let conversation = quotedId ? await findConversationByPendingConfirmation(quotedId) : null;
+
+  // Owner replied without long-pressing to quote a specific message (common on mobile) - only
+  // auto-resolve when there's exactly ONE thing open for this business. With two or more, we still
+  // need the quote to know which one they mean, otherwise a reply meant for one customer could get
+  // forwarded to a different one.
   if (!quotedId) {
-    await sendTextMessage(
-      credentials,
-      ownerPhone,
-      'No identifique a que mensaje te refieres. Por favor responde citando (mantén presionado y "Responder") el mensaje especifico.'
-    );
-    return;
+    const [openQuestions, openConfirmations] = await Promise.all([
+      findOpenPendingOwnerQuestionsForBusiness(businessId),
+      findOpenPendingConfirmationsForBusiness(businessId),
+    ]);
+    const totalOpen = openQuestions.length + openConfirmations.length;
+    if (totalOpen === 1) {
+      if (openQuestions.length === 1) {
+        pendingQuestion = openQuestions[0];
+      } else {
+        conversation = openConfirmations[0];
+      }
+    } else {
+      const hint =
+        totalOpen > 1
+          ? ` Tenes ${totalOpen} cosas esperando respuesta ahora mismo, necesito saber a cual te referis.`
+          : "";
+      await sendTextMessage(
+        credentials,
+        ownerPhone,
+        `No identifique a que mensaje te refieres.${hint} Por favor responde citando (mantén presionado y "Responder") el mensaje especifico.`
+      );
+      return;
+    }
   }
 
-  const pendingQuestion = await findConversationByPendingOwnerQuestion(quotedId);
   if (pendingQuestion) {
     const answerText = message.type === "text" ? (message.text?.body ?? "").trim() : "";
     if (!answerText) {
@@ -71,7 +96,6 @@ async function handleOwnerReply(
     return;
   }
 
-  const conversation = await findConversationByPendingConfirmation(quotedId);
   if (!conversation) {
     await sendTextMessage(
       credentials,
@@ -166,7 +190,13 @@ whatsappRouter.post("/webhook", async (req, res) => {
     }
 
     if (!message || !incomingPhoneNumberId) return;
-    if (message.type !== "text" && message.type !== "image" && message.type !== "audio" && message.type !== "interactive") return;
+    // "reaction" (emoji reacting to a prior message) is intentionally excluded - replying to a 👍 with
+    // bot chatter is noise, not a real customer turn. Every other content type below used to fall
+    // through this same filter and get silently dropped with zero trace (no reply, nothing recorded) -
+    // a customer sharing a location (delivery address), sticker, document (receipt as PDF), or contact
+    // card just got no response at all.
+    const SUPPORTED_MESSAGE_TYPES = new Set(["text", "image", "audio", "interactive", "location", "sticker", "document", "contacts"]);
+    if (!SUPPORTED_MESSAGE_TYPES.has(message.type)) return;
 
     const business = await prisma.business.findUnique({
       where: { whatsappPhoneNumberId: incomingPhoneNumberId },
@@ -227,7 +257,7 @@ whatsappRouter.post("/webhook", async (req, res) => {
         console.error("No se pudo procesar la imagen entrante:", error);
         text = "[El cliente envio una imagen, pero hubo un problema tecnico y no se pudo procesar. Pedile que la reenvie.]";
       }
-    } else {
+    } else if (message.type === "audio") {
       try {
         const { buffer, mimeType } = await downloadMedia(credentials, message.audio.id);
         const { key } = await uploadMedia(buffer, mimeType, "audio");
@@ -238,6 +268,18 @@ whatsappRouter.post("/webhook", async (req, res) => {
         console.error("No se pudo procesar el audio entrante:", error);
         text = "[El cliente envio una nota de voz, pero hubo un problema tecnico y no se pudo procesar. Pedile que la reenvie o escriba el mensaje.]";
       }
+    } else if (message.type === "location") {
+      const loc = message.location ?? {};
+      const parts = [loc.name, loc.address].filter(Boolean).join(", ");
+      const coords = loc.latitude != null && loc.longitude != null ? `lat ${loc.latitude}, lng ${loc.longitude}` : "";
+      text = `[El cliente comparte su ubicacion por WhatsApp${parts ? `: ${parts}` : ""}${coords ? ` (${coords})` : ""}. Si es para la direccion de envio, confirmale la direccion exacta en texto (barrio/calle/numero) antes de cerrar el pedido - una ubicacion de mapa sola no siempre alcanza para el mensajero.]`;
+    } else if (message.type === "sticker") {
+      text = "[El cliente envio un sticker, sin texto.]";
+    } else if (message.type === "document") {
+      const filename = message.document?.filename ?? "sin nombre";
+      text = `[El cliente envio un documento/archivo (${filename}), no una foto. Si esperabas un comprobante de pago, pedile que lo reenvie como foto/imagen para poder revisarlo.]`;
+    } else if (message.type === "contacts") {
+      text = "[El cliente compartio una tarjeta de contacto de WhatsApp.]";
     }
 
     // If the customer replied/quoted a specific WhatsApp message (long-press "Reply"), and that message
@@ -270,7 +312,13 @@ whatsappRouter.post("/webhook", async (req, res) => {
       return;
     }
 
-    const capStatus = await checkPlanCap(business.id);
+    // An image message is very likely a payment receipt for a purchase already in progress - cutting
+    // the customer off here mid-close (right when they send proof of a payment already made) is worse
+    // than letting one extra message through, so the cap only gates plain text/audio turns.
+    const capStatus =
+      message.type === "image"
+        ? { capped: false as const, justCrossed: false, messageCap: null, planTier: business.planTier }
+        : await checkPlanCap(business.id);
     if (capStatus.capped) {
       const capText =
         "Por ahora alcanzamos el límite de mensajes de este mes para este negocio. Un asesor te va a contactar en breve para ayudarte manualmente. ¡Gracias por tu paciencia! 🙏";

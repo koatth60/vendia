@@ -252,3 +252,306 @@ test("search_products falls back to the full catalog (with a note) when no keywo
   assert.ok(result.results.length > 0);
   assert.match(result.note, /catalogo completo/i);
 });
+
+// Regression tests for the "bot sends the wrong product's photos" bug. Root cause: send_product_media
+// re-searched by fuzzy text independently of whatever product the model had already resolved, with no
+// minimum confidence - a single incidental shared word between two unrelated products (e.g. a color
+// mentioned in both a headphones and a smartwatch description) was enough to pick the wrong one.
+
+test("send_product_media sends the product pinned by productId, ignoring any fuzzy-match ambiguity", async () => {
+  stubWhatsappFetch();
+  try {
+    const headphones = await prisma.product.create({
+      data: {
+        businessId,
+        name: "Audifonos Over-Ear Pro Max",
+        description: "Auriculares inalambricos color negro",
+        price: 180000,
+        currency: "COP",
+        stock: 2,
+        media: { create: [{ type: "IMAGE", url: "https://example.com/headphones.jpg", s3Key: "headphones.jpg" }] },
+      },
+    });
+    const watch = await prisma.product.create({
+      data: {
+        businessId,
+        name: "Smartwatch Confidence Test",
+        description: "Reloj compacto color negro",
+        price: 145000,
+        currency: "COP",
+        stock: 5,
+        media: { create: [{ type: "IMAGE", url: "https://example.com/watch.jpg", s3Key: "watch.jpg" }] },
+      },
+    });
+
+    const context = await freshContext();
+    // Ambiguous/weak text on purpose (shares "negro" with both) - passing productId must bypass the
+    // fuzzy matcher entirely and send exactly the pinned product.
+    const result = (await runCatalogTool(context, "send_product_media", {
+      productId: watch.id,
+      productName: "algo negro",
+    })) as { sent: boolean; product: string };
+
+    assert.equal(result.sent, true);
+    assert.equal(result.product, watch.name);
+    assert.equal(sentMessages.length, 0); // image sends aren't captured as text/template in the stub
+    void headphones;
+  } finally {
+    restoreFetch();
+  }
+});
+
+test("send_product_media refuses to guess and sends nothing when the text match is too weak", async () => {
+  stubWhatsappFetch();
+  try {
+    const watch = await prisma.product.create({
+      data: {
+        businessId,
+        name: "Smartwatch Weak Match Test",
+        description: "Reloj compacto, correa de silicona negra",
+        price: 145000,
+        currency: "COP",
+        stock: 5,
+        media: { create: [{ type: "IMAGE", url: "https://example.com/watch2.jpg", s3Key: "watch2.jpg" }] },
+      },
+    });
+
+    const context = await freshContext();
+    const result = (await runCatalogTool(context, "send_product_media", { productName: "gorra negra de algodon" })) as {
+      error?: string;
+    };
+
+    assert.ok(result.error, "expected an error instead of a wrong-guess send");
+    const fresh = await prisma.product.findUniqueOrThrow({ where: { id: watch.id } });
+    assert.equal(fresh.inquiryCount, 0, "a weak/refused match must not touch the product it didn't confidently identify");
+  } finally {
+    restoreFetch();
+  }
+});
+
+test("send_product_media returns an ambiguous error listing both candidates on a tie, sending nothing", async () => {
+  stubWhatsappFetch();
+  try {
+    await prisma.product.create({
+      data: {
+        businessId,
+        name: "Combo Ambiguo Negro",
+        description: "Version negra",
+        price: 100000,
+        currency: "COP",
+        stock: 1,
+        media: { create: [{ type: "IMAGE", url: "https://example.com/a.jpg", s3Key: "a.jpg" }] },
+      },
+    });
+    await prisma.product.create({
+      data: {
+        businessId,
+        name: "Combo Ambiguo Azul",
+        description: "Version azul",
+        price: 100000,
+        currency: "COP",
+        stock: 1,
+        media: { create: [{ type: "IMAGE", url: "https://example.com/b.jpg", s3Key: "b.jpg" }] },
+      },
+    });
+
+    const context = await freshContext();
+    const result = (await runCatalogTool(context, "send_product_media", { productName: "combo ambiguo" })) as {
+      error?: string;
+    };
+
+    assert.ok(result.error);
+    assert.match(result.error!, /Combo Ambiguo Negro/);
+    assert.match(result.error!, /Combo Ambiguo Azul/);
+  } finally {
+    restoreFetch();
+  }
+});
+
+// Regression tests for stock never decrementing on a sale, and duplicate order-item lines never being
+// merged (both found in the same review as the photo-mismatch bug).
+
+test("close_conversation SOLD decrements stock by the quantity sold", async () => {
+  stubWhatsappFetch();
+  const business2 = await prisma.business.create({
+    data: { name: `Test ${randomUUID()}`, email: `test-${randomUUID()}@example.com`, passwordHash: "x" },
+  });
+  const customer2 = await prisma.customer.create({ data: { businessId: business2.id, phoneNumber: `573003${Date.now()}` } });
+  const conversation2 = await prisma.conversation.create({ data: { customerId: customer2.id } });
+  const product = await prisma.product.create({
+    data: { businessId: business2.id, name: "Stock Test Product", description: "x", price: 10000, currency: "COP", stock: 5 },
+  });
+
+  try {
+    const context: ToolContext = {
+      businessId: business2.id,
+      conversationId: conversation2.id,
+      customerId: customer2.id,
+      credentials: { phoneNumberId: "test-id", accessToken: "test-token" },
+      recipientPhone: "573009998877",
+    };
+
+    await runCatalogTool(context, "close_conversation", {
+      outcome: "SOLD",
+      summary: "2x Stock Test Product",
+      items: [{ productName: "Stock Test Product", quantity: 2 }],
+    });
+
+    const fresh = await prisma.product.findUniqueOrThrow({ where: { id: product.id } });
+    assert.equal(fresh.stock, 3);
+  } finally {
+    restoreFetch();
+    await prisma.order.deleteMany({ where: { conversationId: conversation2.id } });
+    await prisma.conversation.deleteMany({ where: { id: conversation2.id } });
+    await prisma.product.deleteMany({ where: { businessId: business2.id } });
+    await prisma.customer.deleteMany({ where: { id: customer2.id } });
+    await prisma.business.deleteMany({ where: { id: business2.id } });
+  }
+});
+
+test("close_conversation SOLD with one unresolvable item still creates the order with only the resolved items", async () => {
+  stubWhatsappFetch();
+  const business2 = await prisma.business.create({
+    data: { name: `Test ${randomUUID()}`, email: `test-${randomUUID()}@example.com`, passwordHash: "x" },
+  });
+  const customer2 = await prisma.customer.create({ data: { businessId: business2.id, phoneNumber: `573006${Date.now()}` } });
+  const conversation2 = await prisma.conversation.create({ data: { customerId: customer2.id } });
+  await prisma.product.create({
+    data: { businessId: business2.id, name: "Producto Real", description: "x", price: 10000, currency: "COP", stock: 10 },
+  });
+
+  try {
+    const context: ToolContext = {
+      businessId: business2.id,
+      conversationId: conversation2.id,
+      customerId: customer2.id,
+      credentials: { phoneNumberId: "test-id", accessToken: "test-token" },
+      recipientPhone: "573009998877",
+    };
+
+    // "Producto Inventado" doesn't exist in this business's catalog at all - resolveOrderItems must not
+    // crash or silently drop the whole order, just the one line it genuinely can't resolve.
+    const result = (await runCatalogTool(context, "close_conversation", {
+      outcome: "SOLD",
+      summary: "1x Producto Real + 1x Producto Inventado",
+      items: [
+        { productName: "Producto Real", quantity: 1 },
+        { productName: "Producto Inventado", quantity: 1 },
+      ],
+    })) as { closed: boolean };
+    assert.equal(result.closed, true);
+
+    const order = await prisma.order.findUniqueOrThrow({ where: { conversationId: conversation2.id }, include: { items: true } });
+    assert.equal(order.items.length, 1);
+    assert.equal(order.items[0].productName, "Producto Real");
+  } finally {
+    restoreFetch();
+    await prisma.order.deleteMany({ where: { conversationId: conversation2.id } });
+    await prisma.conversation.deleteMany({ where: { id: conversation2.id } });
+    await prisma.product.deleteMany({ where: { businessId: business2.id } });
+    await prisma.customer.deleteMany({ where: { id: customer2.id } });
+    await prisma.business.deleteMany({ where: { id: business2.id } });
+  }
+});
+
+test("close_conversation SOLD merges two item lines for the same product into one line with summed quantity", async () => {
+  stubWhatsappFetch();
+  const business2 = await prisma.business.create({
+    data: { name: `Test ${randomUUID()}`, email: `test-${randomUUID()}@example.com`, passwordHash: "x" },
+  });
+  const customer2 = await prisma.customer.create({ data: { businessId: business2.id, phoneNumber: `573004${Date.now()}` } });
+  const conversation2 = await prisma.conversation.create({ data: { customerId: customer2.id } });
+  await prisma.product.create({
+    data: { businessId: business2.id, name: "Dedupe Test Product", description: "x", price: 10000, currency: "COP", stock: 10 },
+  });
+
+  try {
+    const context: ToolContext = {
+      businessId: business2.id,
+      conversationId: conversation2.id,
+      customerId: customer2.id,
+      credentials: { phoneNumberId: "test-id", accessToken: "test-token" },
+      recipientPhone: "573009998877",
+    };
+
+    await runCatalogTool(context, "close_conversation", {
+      outcome: "SOLD",
+      summary: "3x Dedupe Test Product",
+      items: [
+        { productName: "Dedupe Test Product", quantity: 1 },
+        { productName: "Dedupe Test Product", quantity: 2 },
+      ],
+    });
+
+    const order = await prisma.order.findUniqueOrThrow({ where: { conversationId: conversation2.id }, include: { items: true } });
+    assert.equal(order.items.length, 1);
+    assert.equal(order.items[0].quantity, 3);
+  } finally {
+    restoreFetch();
+    await prisma.order.deleteMany({ where: { conversationId: conversation2.id } });
+    await prisma.conversation.deleteMany({ where: { id: conversation2.id } });
+    await prisma.product.deleteMany({ where: { businessId: business2.id } });
+    await prisma.customer.deleteMany({ where: { id: customer2.id } });
+    await prisma.business.deleteMany({ where: { id: business2.id } });
+  }
+});
+
+test("close_conversation SOLD with a payment-confirmation gate: falls back to plain text when the buttons send fails, and still blocks auto-closing", async () => {
+  const business2 = await prisma.business.create({
+    data: {
+      name: `Test ${randomUUID()}`,
+      email: `test-${randomUUID()}@example.com`,
+      passwordHash: "x",
+      contactPhone: "573005550000",
+      contactName: "Owner2",
+    },
+  });
+  const customer2 = await prisma.customer.create({ data: { businessId: business2.id, phoneNumber: `573005${Date.now()}` } });
+  const conversation2 = await prisma.conversation.create({ data: { customerId: customer2.id } });
+
+  const originalFetch2 = globalThis.fetch;
+  let textSent = false;
+  globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body ?? "{}"));
+    if (body.type === "interactive") {
+      // Simulate the buttons send failing outright (e.g. unsupported message type for this WABA).
+      return { ok: false, text: async () => "simulated interactive send failure" } as Response;
+    }
+    if (body.type === "text") {
+      textSent = true;
+      return { ok: true, json: async () => ({ messages: [{ id: `wamid.fallback-${randomUUID()}` }] }) } as Response;
+    }
+    return { ok: true, json: async () => ({ messages: [{ id: `wamid.other-${randomUUID()}` }] }) } as Response;
+  }) as typeof fetch;
+
+  try {
+    const context: ToolContext = {
+      businessId: business2.id,
+      conversationId: conversation2.id,
+      customerId: customer2.id,
+      credentials: { phoneNumberId: "test-id", accessToken: "test-token" },
+      recipientPhone: "573009998877",
+    };
+
+    const result = (await runCatalogTool(context, "close_conversation", {
+      outcome: "SOLD",
+      summary: "Compra con fallback de confirmacion",
+    })) as { closed: boolean; pending: boolean };
+
+    assert.equal(result.closed, false);
+    assert.equal(result.pending, true);
+    assert.equal(textSent, true, "expected the plain-text fallback to have been attempted after buttons failed");
+
+    const order = await prisma.order.findUnique({ where: { conversationId: conversation2.id } });
+    assert.equal(order, null, "must not auto-close an unconfirmed sale just because the buttons send failed");
+
+    const freshConversation = await prisma.conversation.findUniqueOrThrow({ where: { id: conversation2.id } });
+    assert.ok(freshConversation.pendingConfirmationMessageId, "the text-fallback wamid should still be tracked for later owner confirmation");
+  } finally {
+    globalThis.fetch = originalFetch2;
+    await prisma.order.deleteMany({ where: { conversationId: conversation2.id } });
+    await prisma.conversation.deleteMany({ where: { id: conversation2.id } });
+    await prisma.customer.deleteMany({ where: { id: customer2.id } });
+    await prisma.business.deleteMany({ where: { id: business2.id } });
+  }
+});

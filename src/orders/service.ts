@@ -1,5 +1,5 @@
 import { prisma } from "../db/client";
-import { searchProducts } from "../catalog/products";
+import { findConfidentProductMatch } from "../catalog/products";
 import { sendInteractiveButtonsMessage, type WhatsappCredentials } from "../whatsapp/client";
 import { getPresignedMediaUrl } from "../media/s3";
 
@@ -16,26 +16,52 @@ export interface OrderItemInput {
   quantity: number;
 }
 
-// Items that don't match a catalog product are dropped from the structured record -
-// the free-text summary already carries the full human-readable picture regardless.
-export async function resolveOrderItems(businessId: string, items: OrderItemInput[] | undefined): Promise<ResolvedOrderItem[]> {
-  if (!items || items.length === 0) return [];
+export interface ResolveOrderItemsResult {
+  items: ResolvedOrderItem[];
+  unresolved: string[];
+}
 
-  const resolved: ResolvedOrderItem[] = [];
+// Matches by confidence (findConfidentProductMatch), not a blind top-of-search-results guess - a weak
+// or ambiguous match here used to silently record the wrong product (and its price) on a real order.
+// Items that still can't be matched confidently are reported back in `unresolved` instead of vanishing
+// silently - the free-text summary carries them too, but now the caller can act on it (e.g. warn the
+// owner) instead of the structured order record just quietly being short a line.
+// Two input lines resolving to the same product (the model split one item across two tool-call entries,
+// or the customer's order was described twice) are merged into one line with summed quantity, instead of
+// creating duplicate OrderItem rows for the same product.
+export async function resolveOrderItems(businessId: string, items: OrderItemInput[] | undefined): Promise<ResolveOrderItemsResult> {
+  if (!items || items.length === 0) return { items: [], unresolved: [] };
+
+  const byProductId = new Map<string, ResolvedOrderItem>();
+  const unresolved: string[] = [];
+
   for (const item of items) {
     const quantity = Math.max(1, Math.floor(Number(item.quantity) || 1));
-    const matches = await searchProducts(businessId, String(item.productName ?? ""));
-    if (matches.length === 0) continue;
-    const product = matches[0];
-    resolved.push({
-      productId: product.id,
-      productName: product.name,
-      quantity,
-      unitPrice: Number(product.price),
-      currency: product.currency,
-    });
+    const rawName = String(item.productName ?? "").trim();
+    if (!rawName) continue;
+
+    const match = await findConfidentProductMatch(businessId, rawName);
+    if (!match.product) {
+      unresolved.push(rawName);
+      continue;
+    }
+
+    const product = match.product;
+    const existing = byProductId.get(product.id);
+    if (existing) {
+      existing.quantity += quantity;
+    } else {
+      byProductId.set(product.id, {
+        productId: product.id,
+        productName: product.name,
+        quantity,
+        unitPrice: Number(product.price),
+        currency: product.currency,
+      });
+    }
   }
-  return resolved;
+
+  return { items: Array.from(byProductId.values()), unresolved };
 }
 
 export async function createOrder(params: {
@@ -53,28 +79,45 @@ export async function createOrder(params: {
   const itemsTotal = items.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
   const totalAmount = itemsTotal + (shippingCost || 0);
 
-  return prisma.order.create({
-    data: {
-      businessId,
-      customerId,
-      conversationId,
-      summary,
-      shippingAddress: shippingAddress || null,
-      paymentMethodLabel: paymentMethodLabel || null,
-      shippingCost: shippingCost || null,
-      totalAmount,
-      currency,
-      items: {
-        create: items.map((item) => ({
-          productId: item.productId,
-          productName: item.productName,
-          quantity: item.quantity,
-          unitPrice: item.unitPrice,
-          currency: item.currency,
-        })),
+  // Stock was never decremented on a sale - a business could sell more units than it had in the
+  // catalog and never find out until it physically ran out. Decrement in the same transaction as the
+  // order so a real sale always moves the counter, clamped at 0 instead of going negative (an oversell
+  // is still worth recording, but a negative on-hand count is just confusing in the admin panel).
+  return prisma.$transaction(async (tx) => {
+    const order = await tx.order.create({
+      data: {
+        businessId,
+        customerId,
+        conversationId,
+        summary,
+        shippingAddress: shippingAddress || null,
+        paymentMethodLabel: paymentMethodLabel || null,
+        shippingCost: shippingCost || null,
+        totalAmount,
+        currency,
+        items: {
+          create: items.map((item) => ({
+            productId: item.productId,
+            productName: item.productName,
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+            currency: item.currency,
+          })),
+        },
       },
-    },
-    include: { items: true },
+      include: { items: true },
+    });
+
+    for (const item of items) {
+      const product = await tx.product.findUnique({ where: { id: item.productId }, select: { stock: true } });
+      if (!product) continue;
+      await tx.product.update({
+        where: { id: item.productId },
+        data: { stock: Math.max(0, product.stock - item.quantity) },
+      });
+    }
+
+    return order;
   });
 }
 

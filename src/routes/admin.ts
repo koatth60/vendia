@@ -633,9 +633,15 @@ adminRouter.post("/api/conversations/:id/close-sale", async (req, res) => {
     accessToken: business.whatsappAccessToken,
   };
 
-  const items = await resolveOrderItems(businessId, parsedItems);
+  const { items, unresolved } = await resolveOrderItems(businessId, parsedItems);
   if (items.length === 0) {
     res.status(400).json({ error: "Ningún producto coincidió con el catálogo - revisa los nombres" });
+    return;
+  }
+  if (unresolved.length > 0) {
+    res.status(400).json({
+      error: `No pude asociar estos productos con confianza al catálogo, revisa el nombre: ${unresolved.join(", ")}`,
+    });
     return;
   }
 

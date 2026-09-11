@@ -141,18 +141,21 @@ const PHOTO_DIRECTIVE_AUTO = `FOTOS Y VIDEOS: cuando uses get_product_details, s
 producto en esta conversacion, el sistema ya le manda la foto/video al cliente automaticamente (mira el
 campo "mediaJustSent" en la respuesta de la herramienta) - no llames send_product_media para eso, no hace
 falta. Si el cliente pide ver fotos, imagenes o video de nuevo despues (otro angulo, video, o simplemente
-lo vuelve a pedir), ahi si usa send_product_media pasando el nombre del producto DEL QUE SE ESTA HABLANDO
-AHORA MISMO. No describas la foto en texto ni pongas la URL en el mensaje, la herramienta ya envia el
-archivo real. Si send_product_media devuelve error o sent:false, nunca digas que ya la mandaste.
+lo vuelve a pedir), ahi si usa send_product_media - pasando productId si ya lo obtuviste en este turno con
+search_products o get_product_details (mas confiable), o el nombre del producto DEL QUE SE ESTA HABLANDO
+AHORA MISMO si solo tenes el nombre. No describas la foto en texto ni pongas la URL en el mensaje, la
+herramienta ya envia el archivo real. Si send_product_media devuelve error o sent:false, nunca digas que ya la mandaste.
 Si el mensaje del cliente empieza con "[El cliente esta respondiendo a la foto/video de: NOMBRE]", el
 cliente citó/respondió esa foto puntual - ya sabes de que producto habla, no le preguntes "¿cual de los
 dos?" ni cosas asi, respondé directo sobre ese producto. Nunca repitas ese texto entre corchetes al cliente.`;
 
-const PHOTO_DIRECTIVE_REACTIVE = `FOTOS Y VIDEOS: si el cliente pide ver fotos, imagenes o video de un producto, usa send_product_media
-pasando el nombre del producto DEL QUE SE ESTA HABLANDO AHORA MISMO (no uno mencionado antes en la
-conversacion). No describas la foto en texto ni pongas la URL en el mensaje, la herramienta ya envia el
-archivo real. Revisa el campo "product" que devuelve la herramienta: si no coincide con lo pedido, decilo
-honestamente. Si la herramienta devuelve error o sent:false, nunca digas que ya la mandaste.
+const PHOTO_DIRECTIVE_REACTIVE = `FOTOS Y VIDEOS: si el cliente pide ver fotos, imagenes o video de un producto, usa send_product_media -
+pasando productId si ya lo obtuviste en este turno con search_products o get_product_details (mas
+confiable, evita mandar la foto de otro producto), o el nombre del producto DEL QUE SE ESTA HABLANDO AHORA
+MISMO (no uno mencionado antes en la conversacion) si solo tenes el nombre. No describas la foto en texto
+ni pongas la URL en el mensaje, la herramienta ya envia el archivo real. Revisa el campo "product" que
+devuelve la herramienta: si no coincide con lo pedido, decilo honestamente. Si la herramienta devuelve
+error o sent:false, nunca digas que ya la mandaste.
 Si el mensaje del cliente empieza con "[El cliente esta respondiendo a la foto/video de: NOMBRE]", el
 cliente citó/respondió esa foto puntual - ya sabes de que producto habla, no le preguntes "¿cual de los
 dos?" ni cosas asi, respondé directo sobre ese producto. Nunca repitas ese texto entre corchetes al cliente.`;
@@ -181,9 +184,13 @@ incluir una nota "[Analisis de imagen adjunta]" con uno de estos prefijos:
 - "PRODUCTO:" seguido de una descripcion visual clara (tipo, color, forma, marca/texto visible). Usa esa
 descripcion como termino de busqueda en search_products para ver si coincide con algo del catalogo - no
 le pidas al cliente que describa el producto con palabras, ya tenes una descripcion de la imagen para
-buscar. Si encontras una coincidencia razonable, preguntale "¿te refieres a este?" o similar, mandale la
-foto real del catalogo con send_product_media, y decile el nombre. Si no hay ninguna coincidencia clara,
-decile que no identificaste ese producto en el catalogo y preguntale el nombre o mostrale el catalogo.
+buscar. Si encontras una coincidencia razonable, preguntale "¿te refieres a este?" o similar, y mandale la
+foto real del catalogo con send_product_media pasando el productId EXACTO de ese producto (el campo "id"
+que te devolvio search_products) - nunca vuelvas a pasar solo la descripcion de la imagen como
+productName ahi, porque una busqueda de texto nueva puede coincidir con un producto distinto al que le
+estas por confirmar al cliente. Decile el nombre. Si search_products no devuelve ninguna coincidencia
+clara por significado, decile que no identificaste ese producto en el catalogo y preguntale el nombre o
+mostrale el catalogo - no llames send_product_media sin un productId concreto en ese caso.
 
 - "PRODUCTO_POCO_CLARO:" seguido del motivo (borrosa, muy oscura, muy lejos, etc) - la imagen no se pudo
 describir con confianza. NO llames search_products con una descripcion adivinada. En vez de eso decile al
@@ -358,7 +365,10 @@ export async function getOrRefreshContextSummary(conversationId: string, busines
 // already did on its own.
 const PHOTO_REQUEST_PATTERN =
   /\b(foto|fotos|imagen|imagenes|imágenes|video|videos|muestra|muéstrame|muestrame|enseñ|ense[nñ]a|mandame|mándame|manda la|envia la|envía la|pasame|pásame)\b/i;
-const PHOTO_CLAIM_PATTERN = /\b(te (mand|envi|pas)|aqu[ií] (te|va|van)|ah[ií] (te|va|van))/i;
+// Broadened beyond "te mand.." to also catch phrasings without "te" ("ya la mande", "ahi la envio") and
+// "aca"/"aqui esta(n)" - a real conversation slipped through the narrower pattern with "ya se la mande".
+const PHOTO_CLAIM_PATTERN =
+  /\b(te (mand|envi|pas)|ya (te |se la |la |lo )?(mand|envi|pas)\w*|aqu[ií] (te|va|van|est[aá])|ac[aá] (te|va|van|est[aá])|ah[ií] (te|va|van))/i;
 
 // Same failure mode as the photo claim above, for escalation: the model says "ya consulto con el
 // equipo" / "dejame confirmar con el equipo" without actually calling ask_owner - confirmed against a
