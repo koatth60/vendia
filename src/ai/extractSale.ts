@@ -1,5 +1,6 @@
 import { deepseek, DEEPSEEK_MODEL } from "./client";
 import { getRecentHistory } from "../conversation/service";
+import { listActiveProducts } from "../catalog/products";
 import { logAiUsage } from "./usage";
 
 const EXTRACT_PROMPT = `Sos un asistente que lee una conversacion de ventas por WhatsApp entre un negocio y un
@@ -14,8 +15,11 @@ Devolve SOLO un JSON con esta forma exacta, sin texto adicional:
   "notes": "string o null"
 }
 
-- "items": cada producto que el cliente decidio comprar, con la cantidad. Usa el nombre tal como lo
-  escribio o menciono el negocio en la conversacion (no lo traduzcas ni resumas de mas).
+- "items": cada producto que el cliente decidio comprar, con la cantidad. Te paso la lista de nombres
+  reales del catalogo de este negocio - usa el nombre EXACTO de esa lista que corresponda al producto del
+  que se hablo en la conversacion, no una descripcion propia (ej: usa "Smartwatch Serie 11 Mini", no
+  "reloj plateado"). Si el producto del que hablaron no esta en la lista, usa el nombre tal como lo
+  escribio o menciono el negocio en la conversacion.
 - "shippingAddress": la direccion de entrega si se menciono (ciudad, barrio, direccion exacta). null si
   no se menciono.
 - "paymentMethodLabel": la forma de pago acordada (ej: "Nequi", "Contraentrega", "Bancolombia"). null si
@@ -49,13 +53,15 @@ export async function extractSaleDetails(businessId: string, conversationId: str
   if (history.length === 0) return EMPTY_RESULT;
 
   const transcript = history.map((m) => `${m.role}: ${m.content}`).join("\n");
+  const products = await listActiveProducts(businessId);
+  const catalogNames = products.map((p) => p.name).join(", ") || "(catalogo vacio)";
 
   const response = await deepseek.chat.completions.create({
     model: DEEPSEEK_MODEL,
     max_tokens: 500,
     messages: [
       { role: "system", content: EXTRACT_PROMPT },
-      { role: "user", content: transcript },
+      { role: "user", content: `Nombres reales del catalogo de este negocio: ${catalogNames}\n\nConversacion:\n${transcript}` },
     ],
     response_format: { type: "json_object" },
     // @ts-expect-error DeepSeek-specific param, not in the OpenAI SDK types. Disabled: reasoning tokens
