@@ -165,6 +165,58 @@ test("bot still escalates a real question even when it's wrapped in an apology -
   }
 });
 
+test("bot shows a full order summary with the total and asks for confirmation before requesting payment proof", async () => {
+  stubWhatsappFetch();
+  const product = await prisma.product.create({
+    data: { businessId, name: "Audifonos Bluetooth X", description: "Audifonos inalambricos", price: 100000, currency: "COP", stock: 10 },
+  });
+  const paymentMethod = await prisma.paymentMethod.create({
+    data: { businessId, type: "TRANSFERENCIA", label: "Nequi", details: "3001234567" },
+  });
+  const conversation = await prisma.conversation.create({ data: { customerId } });
+  try {
+    // Seed a realistic history where the model already has every required field (product, quantity,
+    // address, payment method, name) - the only thing missing is the order-summary confirmation step,
+    // so this isolates whether the bot shows it unprompted instead of jumping straight to closing.
+    const turns: [("CUSTOMER" | "ASSISTANT"), string][] = [
+      ["CUSTOMER", "Hola, quiero los Audifonos Bluetooth X"],
+      ["ASSISTANT", "¡Hola! Los audifonos van a $100.000. ¿Cuantas unidades quieres?"],
+      ["CUSTOMER", "1"],
+      ["ASSISTANT", "Perfecto, ¿a que direccion lo enviamos?"],
+      ["CUSTOMER", "Calle 123 #45-67, Bogota"],
+      ["ASSISTANT", "¿Como prefieres pagar, Nequi?"],
+      ["CUSTOMER", "Si, Nequi"],
+      ["ASSISTANT", "¿A nombre de quien hago el pedido?"],
+      ["CUSTOMER", "Juan Perez"],
+    ];
+    for (const [role, content] of turns) {
+      await recordMessage(businessId, conversation.id, role, content);
+    }
+
+    const context: ToolContext = {
+      businessId,
+      conversationId: conversation.id,
+      customerId,
+      credentials: { phoneNumberId: "test-phone-id", accessToken: "test-token" },
+      recipientPhone: "573001112233",
+    };
+    const reply = await generateReply(conversation.id, context);
+
+    assert.match(reply, /total/i, "must show a total, not just ask for payment out of nowhere");
+    assert.match(reply, /100[.,]?000/, "the total must reflect the real product price");
+    assert.match(reply, /\?/, "must ask the customer to confirm the summary");
+
+    const order = await prisma.order.findFirst({ where: { conversationId: conversation.id } });
+    assert.equal(order, null, "must not close the sale yet - no confirmation or payment proof received");
+  } finally {
+    restoreFetch();
+    await prisma.message.deleteMany({ where: { conversationId: conversation.id } });
+    await prisma.conversation.deleteMany({ where: { id: conversation.id } });
+    await prisma.paymentMethod.deleteMany({ where: { id: paymentMethod.id } });
+    await prisma.product.deleteMany({ where: { id: product.id } });
+  }
+});
+
 test("bot answers directly from the catalog without escalating when a product just isn't sold", async () => {
   stubWhatsappFetch();
   try {
