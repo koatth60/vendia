@@ -237,7 +237,7 @@ export const catalogTools: OpenAI.Chat.ChatCompletionTool[] = [
     function: {
       name: "ask_owner",
       description:
-        "Usa esta herramienta cuando el cliente pregunta algo que no podes responder con las demas herramientas (catalogo, search_faq, formas de pago) y de verdad no sabes la respuesta. Le manda la pregunta EXACTA del cliente al dueno del negocio por WhatsApp para que la responda el mismo. Cuando el dueno responda, esa respuesta se le reenvia al cliente tal cual, sin que vos intervengas. Mientras tanto el bot deja de responderle a este cliente. NO inventes ni adivines la respuesta - preferi escalar. No la uses para PQR, devoluciones o pedidos no recibidos, para eso usa flag_conversation_intent.",
+        "Usa esta herramienta SOLO cuando el cliente hace una pregunta real que necesita un dato concreto del negocio, y no podes responderla con las demas herramientas (catalogo, get_faq, formas de pago). Le manda la pregunta EXACTA del cliente al dueno del negocio por WhatsApp para que la responda el mismo. Cuando el dueno responda, esa respuesta se le reenvia al cliente tal cual, sin que vos intervengas. Mientras tanto el bot deja de responderle a este cliente - por eso NUNCA la uses para un mensaje social o de charla (saludo, disculpa por tardar, agradecimiento, despedida): eso respondelo vos mismo directo, no es una pregunta que requiera al dueno. NO inventes ni adivines la respuesta a una pregunta real - preferi escalar. No la uses para PQR, devoluciones o pedidos no recibidos, para eso usa flag_conversation_intent.",
       parameters: {
         type: "object",
         properties: {

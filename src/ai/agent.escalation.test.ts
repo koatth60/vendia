@@ -123,6 +123,20 @@ test("bot escalates via ask_owner when the FAQ doesn't confirm the specific ques
   }
 });
 
+test("bot does not escalate to ask_owner on a social/conversational message with no real question", async () => {
+  // Regression: this exact customer message triggered a real false ask_owner escalation in production
+  // on 2026-09-11 - it's an apology for a slow reply, not a question needing the owner's info.
+  stubWhatsappFetch();
+  try {
+    const conversation = await runTurn("Mil disculpas me dormi y hoy he estado bastante ocupada");
+    const pending = await prisma.pendingOwnerQuestion.findFirst({ where: { conversationId: conversation.id } });
+    assert.equal(pending, null, "an apology for being slow to reply is not a question that needs ask_owner");
+    assert.equal(conversation.humanControl, false);
+  } finally {
+    restoreFetch();
+  }
+});
+
 test("bot answers directly from the catalog without escalating when a product just isn't sold", async () => {
   stubWhatsappFetch();
   try {
