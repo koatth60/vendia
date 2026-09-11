@@ -1,6 +1,6 @@
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { listApprovedTemplates } from "./client";
+import { listApprovedTemplates, normalizeTemplateName } from "./client";
 
 let originalFetch: typeof fetch;
 
@@ -60,4 +60,11 @@ test("listApprovedTemplates returns an empty list (not a crash) when the WABA ha
 
   const templates = await listApprovedTemplates("fake-token", "1400084061566358");
   assert.deepEqual(templates, []);
+});
+
+test("normalizeTemplateName produces a name Meta will actually accept", () => {
+  assert.equal(normalizeTemplateName("Descuento de Fin de Semana!!"), "descuento_de_fin_de_semana");
+  assert.equal(normalizeTemplateName("Promoción Día del Padre"), "promocion_dia_del_padre");
+  assert.equal(normalizeTemplateName("  espacios   raros  "), "espacios_raros");
+  assert.equal(normalizeTemplateName("ya_esta_bien"), "ya_esta_bien");
 });

@@ -186,6 +186,16 @@
   .delivery-alert-row-error { color: var(--muted); margin-top: 2px; }
   .delivery-alert-row-dismiss { margin-top: 6px; border: none; background: none; color: var(--brand-dark); font-size: 11.5px; font-weight: 600; cursor: pointer; padding: 0; }
   .delivery-alert-empty { padding: 20px 14px; text-align: center; color: var(--muted-soft); font-size: 12.5px; }
+
+  .tpl-status { display: inline-flex; align-items: center; gap: 4px; padding: 2px 9px; border-radius: 999px; font-size: 11px; font-weight: 700; }
+  .tpl-status-approved { background: var(--brand-light); color: var(--brand-dark); }
+  .tpl-status-pending { background: var(--warn-light); color: var(--warn); }
+  .tpl-status-rejected { background: var(--danger-light); color: var(--danger); }
+  .tpl-row { border: 1px solid var(--border-soft); border-radius: var(--radius-md); padding: 12px 14px; margin-bottom: 8px; }
+  .tpl-row-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .tpl-row-name { font-weight: 700; font-family: monospace; font-size: 13px; }
+  .tpl-row-body { color: var(--muted); font-size: 12.5px; margin-top: 6px; white-space: pre-wrap; }
+  .tpl-row-delete { border: none; background: none; color: var(--danger); font-size: 12px; font-weight: 600; cursor: pointer; padding: 2px; }
   .conv-row.has-unread .conv-name { font-weight: 700; }
 
   .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
@@ -550,7 +560,7 @@
         <div class="hint">Un número distinto al del bot. Cuando un cliente mande el comprobante de pago, el bot te va a escribir a este número pidiendo que confirmes si el pago llegó antes de cerrarle la venta al cliente.</div>
       </div>
 
-      <div class="settings-group settings-group-last">
+      <div class="settings-group">
         <div class="settings-group-title">Seguimiento post-venta</div>
         <p class="settings-desc">Le manda automáticamente una plantilla de WhatsApp a los clientes X horas después de cerrar la venta (ej: "¿cómo te fue con tu compra?"). Requiere que la plantilla ya esté <strong>aprobada por Meta</strong> (categoría Utility, se aprueba en minutos/días, no necesita Tech Provider). Dejá el nombre vacío para desactivarlo.</p>
         <div class="grid-2">
@@ -573,6 +583,26 @@
         <div class="actions-row-end">
           <button class="btn-primary owner-only" onclick="saveBusiness()">Guardar cambios</button>
         </div>
+      </div>
+
+      <div class="settings-group settings-group-last">
+        <div class="settings-group-title">Plantillas de WhatsApp</div>
+        <p class="settings-desc">Crea plantillas nuevas para seguimiento, promociones, etc. Se mandan a revisión de Meta (Utility aprueba rápido, Marketing es más estricto y puede tardar más). Por ahora, texto fijo, sin datos que cambien por cliente.</p>
+        <label>Nombre</label>
+        <input id="tpl-new-name" placeholder="Ej: Descuento de fin de semana" oninput="onTplNamePreview()" />
+        <div class="hint" id="tpl-name-preview"></div>
+        <label>Categoría</label>
+        <select id="tpl-new-category">
+          <option value="UTILITY">Utility (seguimiento, avisos del pedido - aprueba rápido)</option>
+          <option value="MARKETING">Marketing (promos, descuentos - revisión más estricta)</option>
+        </select>
+        <label>Texto del mensaje</label>
+        <textarea id="tpl-new-body" placeholder="Ej: ¡Hola! Tenemos un descuento especial este fin de semana en toda la tienda, escríbenos si quieres aprovecharlo."></textarea>
+        <div class="hint" id="tpl-new-error" style="color:var(--danger);"></div>
+        <div class="actions-row-end">
+          <button class="btn-primary owner-only" onclick="createWhatsappTemplate()">Enviar a revisión</button>
+        </div>
+        <div id="tpl-list" style="margin-top:18px;"></div>
       </div>
 
       <div class="section-title owner-only">Zona de peligro</div>
@@ -969,6 +999,7 @@ async function loadBusiness() {
     document.getElementById('business-followup-language').value = business.followUpTemplateLanguage || 'es';
     document.getElementById('business-followup-hours').value = business.followUpDelayHours || 24;
     loadWhatsappTemplates();
+    loadTemplateList();
   } catch (err) {
     setStatus(`No se pudo cargar el negocio: ${err.message}`, true);
   }
@@ -1011,6 +1042,92 @@ function onFollowupTemplateChange() {
     preview.style.display = 'block';
   } else {
     preview.style.display = 'none';
+  }
+}
+
+// Mirrors normalizeTemplateName in src/whatsapp/client.ts - Meta only accepts lowercase
+// letters/digits/underscores for template names, this shows the owner the real name live instead of
+// them finding out after submitting.
+function normalizeTemplateNamePreview(raw) {
+  return raw
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 512);
+}
+
+function onTplNamePreview() {
+  const raw = document.getElementById('tpl-new-name').value;
+  const normalized = normalizeTemplateNamePreview(raw);
+  document.getElementById('tpl-name-preview').textContent = normalized ? `Se va a crear como: ${normalized}` : '';
+}
+
+function tplStatusBadge(status) {
+  const cls = status === 'APPROVED' ? 'tpl-status-approved' : status === 'REJECTED' ? 'tpl-status-rejected' : 'tpl-status-pending';
+  const label = status === 'APPROVED' ? '🟢 Aprobada' : status === 'REJECTED' ? '🔴 Rechazada' : '🟡 Pendiente';
+  return `<span class="tpl-status ${cls}">${label}</span>`;
+}
+
+function templateRowHtml(t) {
+  return `<div class="tpl-row">
+    <div class="tpl-row-top">
+      <span class="tpl-row-name">${escapeHtml(t.name)}</span>
+      ${tplStatusBadge(t.status)}
+      <button class="tpl-row-delete owner-only" onclick="deleteWhatsappTemplate('${escapeHtml(t.name)}')">🗑 Eliminar</button>
+    </div>
+    <div class="tpl-row-body">${escapeHtml(t.bodyText || '(sin texto)')}</div>
+  </div>`;
+}
+
+async function loadTemplateList() {
+  const container = document.getElementById('tpl-list');
+  try {
+    const res = await apiFetch('/admin/api/whatsapp-templates/all');
+    const data = await res.json();
+    const templates = data.templates || [];
+    container.innerHTML = templates.length === 0
+      ? `<p style="font-size:12.5px; color:var(--muted-soft);">${data.note || 'Todavía no has creado ninguna plantilla.'}</p>`
+      : templates.map(templateRowHtml).join('');
+  } catch (err) {
+    container.innerHTML = `<p style="font-size:12.5px; color:var(--danger);">No se pudo cargar la lista: ${err.message}</p>`;
+  }
+}
+
+async function createWhatsappTemplate() {
+  const errorEl = document.getElementById('tpl-new-error');
+  errorEl.textContent = '';
+  const name = document.getElementById('tpl-new-name').value.trim();
+  const category = document.getElementById('tpl-new-category').value;
+  const bodyText = document.getElementById('tpl-new-body').value.trim();
+  if (!name || !bodyText) {
+    errorEl.textContent = 'Falta el nombre o el texto del mensaje.';
+    return;
+  }
+  try {
+    await apiFetch('/admin/api/whatsapp-templates', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, category, bodyText }),
+    });
+    document.getElementById('tpl-new-name').value = '';
+    document.getElementById('tpl-new-body').value = '';
+    document.getElementById('tpl-name-preview').textContent = '';
+    setStatus('Plantilla enviada a revisión de Meta ✓');
+    loadTemplateList();
+  } catch (err) {
+    errorEl.textContent = err.message;
+  }
+}
+
+async function deleteWhatsappTemplate(name) {
+  if (!confirm(`¿Eliminar la plantilla "${name}"? Si el bot la está usando para seguimiento, dejará de mandarla.`)) return;
+  try {
+    await apiFetch(`/admin/api/whatsapp-templates/${encodeURIComponent(name)}`, { method: 'DELETE' });
+    setStatus('Plantilla eliminada ✓');
+    loadTemplateList();
+  } catch (err) {
+    setStatus(`No se pudo eliminar: ${err.message}`, true);
   }
 }
 

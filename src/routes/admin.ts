@@ -30,6 +30,10 @@ import {
   setBusinessProfilePhoto,
   formatForWhatsapp,
   listApprovedTemplates,
+  listAllTemplates,
+  createTemplate,
+  deleteTemplate,
+  normalizeTemplateName,
   type WhatsappCredentials,
 } from "../whatsapp/client";
 import { getAiUsageSummary, getPlanUsage, logAiUsage } from "../ai/usage";
@@ -138,6 +142,71 @@ adminRouter.get("/api/whatsapp-templates", async (req, res) => {
     res.json({ templates });
   } catch (error) {
     res.status(502).json({ templates: [], error: error instanceof Error ? error.message : "No se pudo consultar las plantillas" });
+  }
+});
+
+adminRouter.get("/api/whatsapp-templates/all", async (req, res) => {
+  const business = await prisma.business.findUnique({ where: { id: businessIdOf(req) } });
+  if (!business?.whatsappAccessToken || !business.whatsappBusinessAccountId) {
+    res.json({ templates: [], note: "Falta configurar el WhatsApp Business Account ID de este negocio (lo hace Zaqi desde el panel interno)." });
+    return;
+  }
+  try {
+    const templates = await listAllTemplates(business.whatsappAccessToken, business.whatsappBusinessAccountId);
+    res.json({ templates });
+  } catch (error) {
+    res.status(502).json({ templates: [], error: error instanceof Error ? error.message : "No se pudo consultar las plantillas" });
+  }
+});
+
+adminRouter.post("/api/whatsapp-templates", requireOwner, async (req, res) => {
+  const business = await prisma.business.findUnique({ where: { id: businessIdOf(req) } });
+  if (!business?.whatsappAccessToken || !business.whatsappBusinessAccountId) {
+    res.status(400).json({ error: "Falta configurar el WhatsApp Business Account ID de este negocio (lo hace Zaqi desde el panel interno)." });
+    return;
+  }
+
+  const { name, category, bodyText } = req.body;
+  const normalizedName = normalizeTemplateName(String(name ?? ""));
+  const text = String(bodyText ?? "").trim();
+  if (!normalizedName) {
+    res.status(400).json({ error: "Falta el nombre de la plantilla" });
+    return;
+  }
+  if (!text) {
+    res.status(400).json({ error: "Falta el texto del mensaje" });
+    return;
+  }
+  if (text.includes("{{")) {
+    res.status(400).json({ error: "Por ahora no se admiten variables ({{1}}, etc) desde el panel - usa texto fijo." });
+    return;
+  }
+  const safeCategory = category === "MARKETING" ? "MARKETING" : "UTILITY";
+
+  try {
+    const result = await createTemplate(business.whatsappAccessToken, business.whatsappBusinessAccountId, {
+      name: normalizedName,
+      category: safeCategory,
+      language: "es",
+      bodyText: text,
+    });
+    res.status(201).json(result);
+  } catch (error) {
+    res.status(502).json({ error: error instanceof Error ? error.message : "No se pudo crear la plantilla" });
+  }
+});
+
+adminRouter.delete("/api/whatsapp-templates/:name", requireOwner, async (req, res) => {
+  const business = await prisma.business.findUnique({ where: { id: businessIdOf(req) } });
+  if (!business?.whatsappAccessToken || !business.whatsappBusinessAccountId) {
+    res.status(400).json({ error: "Falta configurar el WhatsApp Business Account ID de este negocio." });
+    return;
+  }
+  try {
+    await deleteTemplate(business.whatsappAccessToken, business.whatsappBusinessAccountId, String(req.params.name));
+    res.status(204).send();
+  } catch (error) {
+    res.status(502).json({ error: error instanceof Error ? error.message : "No se pudo eliminar la plantilla" });
   }
 });
 

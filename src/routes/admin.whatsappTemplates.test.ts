@@ -13,13 +13,14 @@ import { adminRouter } from "./admin";
 let server: Server;
 let baseUrl: string;
 let businessId: string;
+let sessionRole: string = "OWNER";
 let originalFetch: typeof fetch;
 
 before(async () => {
   const app = express();
   app.use(express.json());
   app.use((req, _res, next) => {
-    (req as unknown as { session: { businessId?: string } }).session = { businessId };
+    (req as unknown as { session: { businessId?: string; role?: string } }).session = { businessId, role: sessionRole };
     next();
   });
   app.use(adminRouter);
@@ -35,6 +36,7 @@ after(async () => {
 
 beforeEach(() => {
   originalFetch = globalThis.fetch;
+  sessionRole = "OWNER";
 });
 
 afterEach(async () => {
@@ -124,4 +126,120 @@ test("GET /api/whatsapp-templates reports an error (not a crash) when the WhatsA
   const body = await res.json() as { templates: unknown[]; note?: string; error?: string };
   assert.deepEqual(body.templates, []);
   assert.ok(body.error);
+});
+
+test("GET /api/whatsapp-templates/all returns every status, not just approved", async () => {
+  const business = await prisma.business.create({
+    data: {
+      name: `Test ${randomUUID()}`,
+      email: `test-${randomUUID()}@example.com`,
+      passwordHash: "x",
+      whatsappAccessToken: "fake-token",
+      whatsappBusinessAccountId: "1400084061566358",
+    },
+  });
+  businessId = business.id;
+
+  globalThis.fetch = (async (url: unknown, init?: RequestInit) => {
+    if (String(url).includes("graph.facebook.com")) {
+      return {
+        ok: true,
+        json: async () => ({
+          data: [
+            { name: "onix_owner_alert", status: "APPROVED", language: "es", category: "UTILITY", components: [{ type: "BODY", text: "ok" }] },
+            { name: "seguimiento_post_venta", status: "PENDING", language: "es", category: "UTILITY", components: [{ type: "BODY", text: "pendiente" }] },
+            { name: "promo_vieja", status: "REJECTED", language: "es", category: "MARKETING", components: [{ type: "BODY", text: "rechazada" }] },
+          ],
+        }),
+      } as Response;
+    }
+    return originalFetch(url as never, init);
+  }) as typeof fetch;
+
+  const res = await fetch(`${baseUrl}/api/whatsapp-templates/all`);
+  assert.equal(res.status, 200);
+  const body = await res.json() as { templates: { name: string; status: string }[] };
+  assert.equal(body.templates.length, 3);
+  assert.ok(body.templates.some((t) => t.status === "PENDING"));
+  assert.ok(body.templates.some((t) => t.status === "REJECTED"));
+});
+
+test("POST /api/whatsapp-templates normalizes the name, forwards to Meta, and rejects a body with variables", async () => {
+  const business = await prisma.business.create({
+    data: {
+      name: `Test ${randomUUID()}`,
+      email: `test-${randomUUID()}@example.com`,
+      passwordHash: "x",
+      whatsappAccessToken: "fake-token",
+      whatsappBusinessAccountId: "1400084061566358",
+    },
+  });
+  businessId = business.id;
+
+  let sentBody: Record<string, unknown> | null = null;
+  globalThis.fetch = (async (url: unknown, init?: RequestInit) => {
+    if (String(url).includes("graph.facebook.com") && (init?.method ?? "GET") === "POST") {
+      sentBody = JSON.parse(String(init?.body ?? "{}"));
+      return { ok: true, json: async () => ({ id: "123", status: "PENDING" }) } as Response;
+    }
+    return originalFetch(url as never, init);
+  }) as typeof fetch;
+
+  const res = await fetch(`${baseUrl}/api/whatsapp-templates`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: "Descuento de Fin de Semana!!", category: "MARKETING", bodyText: "Tenemos ofertas especiales este finde." }),
+  });
+  assert.equal(res.status, 201);
+  assert.ok(sentBody, "expected the create call to reach the WhatsApp API");
+  assert.equal((sentBody as unknown as { name: string }).name, "descuento_de_fin_de_semana");
+  assert.equal((sentBody as unknown as { category: string }).category, "MARKETING");
+
+  const resWithVariable = await fetch(`${baseUrl}/api/whatsapp-templates`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: "otra", category: "UTILITY", bodyText: "Hola {{1}}, gracias por tu compra." }),
+  });
+  assert.equal(resWithVariable.status, 400, "variables aren't supported from the panel yet, must be rejected before calling Meta");
+});
+
+test("POST /api/whatsapp-templates is blocked for a non-owner team member", async () => {
+  const business = await prisma.business.create({
+    data: { name: `Test ${randomUUID()}`, email: `test-${randomUUID()}@example.com`, passwordHash: "x", whatsappAccessToken: "fake-token", whatsappBusinessAccountId: "1400084061566358" },
+  });
+  businessId = business.id;
+  sessionRole = "MEMBER";
+
+  const res = await fetch(`${baseUrl}/api/whatsapp-templates`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: "algo", category: "UTILITY", bodyText: "texto" }),
+  });
+  assert.equal(res.status, 403);
+});
+
+test("DELETE /api/whatsapp-templates/:name forwards to the WhatsApp API", async () => {
+  const business = await prisma.business.create({
+    data: {
+      name: `Test ${randomUUID()}`,
+      email: `test-${randomUUID()}@example.com`,
+      passwordHash: "x",
+      whatsappAccessToken: "fake-token",
+      whatsappBusinessAccountId: "1400084061566358",
+    },
+  });
+  businessId = business.id;
+
+  let deletedName = "";
+  globalThis.fetch = (async (url: unknown, init?: RequestInit) => {
+    if (String(url).includes("graph.facebook.com")) {
+      deletedName = new URL(String(url)).searchParams.get("name") ?? "";
+      return { ok: true, json: async () => ({ success: true }) } as Response;
+    }
+    return originalFetch(url as never, init);
+  }) as typeof fetch;
+
+  const res = await fetch(`${baseUrl}/api/whatsapp-templates/promo_vieja`, { method: "DELETE" });
+  assert.equal(res.status, 204);
+  assert.equal(deletedName, "promo_vieja");
 });
