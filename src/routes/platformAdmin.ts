@@ -3,6 +3,8 @@ import { prisma } from "../db/client";
 import { env } from "../config/env";
 import { requirePlatformAdmin } from "../auth/requirePlatformAdmin";
 import { generateActivationCode } from "../auth/service";
+import { listOwnerMessages } from "../delivery/ownerLog";
+import { listDeliveryFailuresForBusiness, resolveDeliveryFailure } from "../delivery/failures";
 
 export const platformAdminRouter = Router();
 
@@ -81,6 +83,52 @@ platformAdminRouter.patch("/businesses/:id/whatsapp", async (req, res) => {
   });
 
   res.json({ ok: true });
+});
+
+// Merges the bot<->owner message log and Meta's async delivery-failure reports into one chronological
+// timeline, so the platform admin can see "did this business's owner actually get alerted" without
+// grepping pm2 logs. Not exposed to the business's own /admin panel - the owner already sees their
+// side of these messages live in WhatsApp.
+platformAdminRouter.get("/businesses/:id/owner-log", async (req, res) => {
+  const businessId = req.params.id;
+  const [messages, failures] = await Promise.all([
+    listOwnerMessages(businessId),
+    listDeliveryFailuresForBusiness(businessId),
+  ]);
+
+  const timeline = [
+    ...messages.map((m) => ({
+      kind: "message" as const,
+      id: m.id,
+      direction: m.direction,
+      body: m.body,
+      success: m.success,
+      errorMessage: m.errorMessage,
+      createdAt: m.createdAt,
+    })),
+    ...failures.map((f) => ({
+      kind: "delivery_failure" as const,
+      id: f.id,
+      direction: "OUT" as const,
+      body: null,
+      success: false,
+      errorMessage: `Meta reporto que el envio a ${f.recipientPhone} fallo: ${f.errorMessage}`,
+      critical: f.critical,
+      resolved: f.resolved,
+      createdAt: f.createdAt,
+    })),
+  ].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+
+  res.json(timeline);
+});
+
+platformAdminRouter.post("/businesses/:id/delivery-failures/:failureId/resolve", async (req, res) => {
+  try {
+    await resolveDeliveryFailure(req.params.id, req.params.failureId);
+    res.status(204).send();
+  } catch (error) {
+    res.status(404).json({ error: error instanceof Error ? error.message : "No se pudo marcar como visto" });
+  }
 });
 
 platformAdminRouter.get("/key-requests", async (_req, res) => {

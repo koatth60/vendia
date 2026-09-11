@@ -90,6 +90,22 @@ async function runTurn(customerText: string) {
   return prisma.conversation.findUniqueOrThrow({ where: { id: conversation.id } });
 }
 
+async function runTurnWithReply(customerText: string) {
+  const conversation = await prisma.conversation.create({ data: { customerId } });
+  await recordMessage(businessId, conversation.id, "CUSTOMER", customerText);
+
+  const context: ToolContext = {
+    businessId,
+    conversationId: conversation.id,
+    customerId,
+    credentials: { phoneNumberId: "test-phone-id", accessToken: "test-token" },
+    recipientPhone: "573001112233",
+  };
+
+  const reply = await generateReply(conversation.id, context);
+  return { conversation, reply };
+}
+
 test("bot escalates via ask_owner when the FAQ doesn't confirm the specific question", async () => {
   stubWhatsappFetch();
   try {
@@ -116,5 +132,48 @@ test("bot answers directly from the catalog without escalating when a product ju
     assert.equal(conversation.humanControl, false);
   } finally {
     restoreFetch();
+  }
+});
+
+test("bot uses get_order_status to answer with the real shipment status instead of guessing", async () => {
+  stubWhatsappFetch();
+  const priorConversation = await prisma.conversation.create({ data: { customerId } });
+  const order = await prisma.order.create({
+    data: {
+      businessId,
+      customerId,
+      conversationId: priorConversation.id,
+      summary: "1x Smartwatch",
+      totalAmount: 145000,
+      currency: "COP",
+      fulfillmentStatus: "SHIPPED",
+      shippedAt: new Date(),
+      shipmentNote: "Va en camino con Coordinadora",
+    },
+  });
+  try {
+    const { reply } = await runTurnWithReply("Hola, como va mi pedido?");
+    assert.match(reply, /coordinadora|enviad/i, "reply must reflect the real shipment status, not a guess");
+  } finally {
+    restoreFetch();
+    await prisma.order.deleteMany({ where: { id: order.id } });
+    await prisma.conversation.deleteMany({ where: { id: priorConversation.id } });
+  }
+});
+
+test("bot asks for explicit confirmation before canceling an order, instead of canceling right away", async () => {
+  stubWhatsappFetch();
+  const priorConversation = await prisma.conversation.create({ data: { customerId } });
+  const order = await prisma.order.create({
+    data: { businessId, customerId, conversationId: priorConversation.id, summary: "1x Smartwatch", totalAmount: 145000, currency: "COP" },
+  });
+  try {
+    await runTurnWithReply("Quiero cancelar mi pedido");
+    const stillPending = await prisma.order.findUniqueOrThrow({ where: { id: order.id } });
+    assert.equal(stillPending.fulfillmentStatus, "PENDING", "must ask the customer to confirm before actually canceling");
+  } finally {
+    restoreFetch();
+    await prisma.order.deleteMany({ where: { id: order.id } });
+    await prisma.conversation.deleteMany({ where: { id: priorConversation.id } });
   }
 });

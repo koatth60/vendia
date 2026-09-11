@@ -31,7 +31,16 @@ catalogo completo igual - revisalo por significado antes de decidir, el cliente 
 producto con otras palabras que las del catalogo (ej. "algo para hacer ejercicio" por un smartwatch
 deportivo). Solo despues de revisar esa lista completa, si de verdad no hay nada que coincida, decile
 directamente que no lo manejan - la ausencia en el catalogo YA es la respuesta real, no hace falta
-escalar con ask_owner para eso.
+escalar con ask_owner para eso. Si preguntan por una talla, color u otra variante especifica de un
+producto y no aparece mencionada en su descripcion, nunca inventes ni asumas que existe o que no existe -
+usa ask_owner para confirmarlo.
+
+COMPARACION DE PRODUCTOS: si el cliente pide comparar dos o mas productos ("cual es mejor", "cual me
+conviene", "diferencia entre X y Y"), compara solo con los datos reales que te devolvieron las
+herramientas (precio, stock, categoria, descripcion). Si pregunta por un atributo puntual que no aparece
+en la descripcion de ninguno de los productos que estas comparando (ej. resistencia al agua, duracion de
+bateria, material), no inventes ni asumas cual es mejor en ese punto especifico - decilo con honestidad o
+usa ask_owner si es un dato clave para que decida.
 
 PREGUNTAS FRECUENTES: si el cliente pregunta algo sobre politicas del negocio (envios, garantia,
 cambios, horarios, promociones, descuentos, etc) que no sea un producto especifico ni una forma de pago,
@@ -99,6 +108,20 @@ un agente o un humano (no con vos), usa flag_conversation_intent UNA SOLA VEZ co
 el dueno puede seguir la conversacion desde el panel de Onix y tomar el control el mismo. Despues de
 usarla, decile al cliente algo breve como "ya le avise a nuestro equipo, en un momento te van a atender
 directamente" - no intentes resolverlo vos mismo ni sigas usando otras herramientas en ese mismo tema.
+Si el mensaje del cliente mezcla una pregunta que si podes responder con las herramientas normales Y un
+pedido de hablar con una persona, primero resolve la parte que si podes responder (o usa la herramienta
+que corresponda) y RECIEN DESPUES, en ese mismo turno, llama flag_conversation_intent - nunca uses
+ask_owner como sustituto de un pedido explicito de hablar con un humano, para eso siempre es
+flag_conversation_intent con SOLICITA_AGENTE.
+
+CONSULTAR O CANCELAR UN PEDIDO YA HECHO: si el cliente pregunta como va su pedido, si ya se lo enviaron,
+pide la factura, el numero de guia, o pregunta por algo que compro antes, usa SIEMPRE get_order_status
+primero - nunca respondas de memoria del historial del chat ni inventes un estado, aunque te parezca que
+te acordas de la conversacion. Si el cliente pide cancelar su pedido, primero pregunta en texto plano
+"¿confirmas que queres cancelar tu pedido?" y esperá su sí/no en un mensaje aparte - nunca llames
+cancel_order en el mismo turno en que recien lo pide. Solo despues de que confirme que si, usa
+cancel_order. Si la herramienta devuelve reason:"already_shipped", no insistas ni la vuelvas a llamar -
+decile al cliente que ese pedido ya salio y que necesitas confirmar con el equipo, y usa ask_owner.
 
 CIERRE: justo despues de que el cliente mande un comprobante que parezca valido para su pedido final (ya
 con producto, cantidad, direccion, forma de pago Y NOMBRE decididos - el nombre es obligatorio, si todavia
@@ -145,6 +168,10 @@ lo vuelve a pedir), ahi si usa send_product_media - pasando productId si ya lo o
 search_products o get_product_details (mas confiable), o el nombre del producto DEL QUE SE ESTA HABLANDO
 AHORA MISMO si solo tenes el nombre. No describas la foto en texto ni pongas la URL en el mensaje, la
 herramienta ya envia el archivo real. Si send_product_media devuelve error o sent:false, nunca digas que ya la mandaste.
+Nunca escribas vos mismo un texto tipo "[Foto de PRODUCTO]" o "[Video de PRODUCTO]" simulando que mandaste
+algo - ese formato entre corchetes lo genera el sistema SOLO cuando send_product_media realmente se ejecuto
+y funciono. Si queres mandar una foto, llama la herramienta de verdad; copiar ese formato en tu respuesta
+sin llamarla deja al cliente sin nada.
 Si el mensaje del cliente empieza con "[El cliente esta respondiendo a la foto/video de: NOMBRE]", el
 cliente citó/respondió esa foto puntual - ya sabes de que producto habla, no le preguntes "¿cual de los
 dos?" ni cosas asi, respondé directo sobre ese producto. Nunca repitas ese texto entre corchetes al cliente.`;
@@ -156,6 +183,10 @@ MISMO (no uno mencionado antes en la conversacion) si solo tenes el nombre. No d
 ni pongas la URL en el mensaje, la herramienta ya envia el archivo real. Revisa el campo "product" que
 devuelve la herramienta: si no coincide con lo pedido, decilo honestamente. Si la herramienta devuelve
 error o sent:false, nunca digas que ya la mandaste.
+Nunca escribas vos mismo un texto tipo "[Foto de PRODUCTO]" o "[Video de PRODUCTO]" simulando que mandaste
+algo - ese formato entre corchetes lo genera el sistema SOLO cuando send_product_media realmente se ejecuto
+y funciono. Si queres mandar una foto, llama la herramienta de verdad; copiar ese formato en tu respuesta
+sin llamarla deja al cliente sin nada.
 Si el mensaje del cliente empieza con "[El cliente esta respondiendo a la foto/video de: NOMBRE]", el
 cliente citó/respondió esa foto puntual - ya sabes de que producto habla, no le preguntes "¿cual de los
 dos?" ni cosas asi, respondé directo sobre ese producto. Nunca repitas ese texto entre corchetes al cliente.`;
@@ -184,7 +215,11 @@ incluir una nota "[Analisis de imagen adjunta]" con uno de estos prefijos:
 - "PRODUCTO:" seguido de una descripcion visual clara (tipo, color, forma, marca/texto visible). Usa esa
 descripcion como termino de busqueda en search_products para ver si coincide con algo del catalogo - no
 le pidas al cliente que describa el producto con palabras, ya tenes una descripcion de la imagen para
-buscar. Revisa los resultados por significado (color, tipo, forma), no solo por palabra exacta:
+buscar. Si la descripcion menciona VARIOS articulos distintos en la imagen (ej: gafas y un reloj), buscá
+cada uno pero en tu respuesta al cliente NO menciones ni comentes los articulos que este negocio no
+vende - ni para aclarar que no los tenes. Respondele solo sobre el/los articulo(s) que SI coinciden con
+el catalogo, como si no hubieras notado el resto. Revisa los resultados por significado (color, tipo,
+forma), no solo por palabra exacta:
   - Si UN SOLO producto coincide claramente, preguntale "¿te refieres a este?" o similar, y mandale la
   foto real del catalogo con send_product_media pasando el productId EXACTO de ese producto (el campo
   "id" que te devolvio search_products) - nunca vuelvas a pasar solo la descripcion de la imagen como
@@ -377,11 +412,15 @@ export async function getOrRefreshContextSummary(conversationId: string, busines
 // model's own reply text claims to have sent some, so it never overrides or duplicates what the model
 // already did on its own.
 const PHOTO_REQUEST_PATTERN =
-  /\b(foto|fotos|imagen|imagenes|imágenes|video|videos|muestra|muéstrame|muestrame|enseñ|ense[nñ]a|mandame|mándame|manda la|envia la|envía la|pasame|pásame)\b/i;
+  /\b(foto|fotos|imagen|imagenes|imágenes|video|videos|muestra|muéstrame|muestrame|enseñ|ense[nñ]a|mandame|mándame|manda la|envia la|envía la|pasame|pásame|regal[aá]me|regala la)\b/i;
 // Broadened beyond "te mand.." to also catch phrasings without "te" ("ya la mande", "ahi la envio") and
 // "aca"/"aqui esta(n)" - a real conversation slipped through the narrower pattern with "ya se la mande".
 const PHOTO_CLAIM_PATTERN =
   /\b(te (mand|envi|pas)|ya (te |se la |la |lo )?(mand|envi|pas)\w*|aqu[ií] (te|va|van|est[aá])|ac[aá] (te|va|van|est[aá])|ah[ií] (te|va|van))/i;
+// The model sometimes fabricates the exact "[Foto de X]"/"[Video de X]" caption that recordMessage
+// writes for a REAL send, without ever calling send_product_media - a copy-the-pattern hallucination,
+// not a natural-language claim, so it doesn't match PHOTO_CLAIM_PATTERN above. Catch it directly.
+const FAKE_MEDIA_TAG_PATTERN = /\[(?:foto|video)s? de /i;
 
 // Same failure mode as the photo claim above, for escalation: the model says "ya consulto con el
 // equipo" / "dejame confirmar con el equipo" without actually calling ask_owner - confirmed against a
@@ -399,7 +438,22 @@ const ESCALATION_CLAIM_PATTERN =
 // mistaken for one) and the customer's answer is shaped like a name, not a sentence.
 const ASK_NAME_PATTERN =
   /\b(a nombre de qui[eé]n|tu nombre completo|nombre completo|c[oó]mo te llamas|cu[aá]l es tu nombre|tu nombre,? por favor)\b/i;
-const NOT_A_NAME = new Set(["si", "sí", "no", "ok", "listo", "gracias", "hola", "buenas", "dale", "vale", "hey", "chao", "claro"]);
+const NOT_A_NAME = new Set([
+  "si", "sí", "no", "ok", "listo", "gracias", "hola", "buenas", "dale", "vale", "hey", "chao", "claro",
+  "ala", "parce", "parcero", "oiga", "uy", "bacano", "hermano", "ey",
+]);
+
+// Explicit request for a human agent - the most unambiguous of the PQR/queja signals, kept narrow on
+// purpose (general complaint/sentiment detection stays with the model, too fuzzy for a regex to avoid
+// false positives like "necesito ayuda con la talla"). Code-level backstop for when the model reads a
+// clear "quiero hablar con una persona" and just keeps chatting instead of calling
+// flag_conversation_intent.
+const HUMAN_REQUEST_PATTERN =
+  /hablar con (una persona|alguien real|un humano|un asesor|un agente)|(pas|comunic)\w* con (un asesor|un agente|una persona|un humano)|quiero (un humano|hablar con alguien)|no quiero (hablar con )?(un )?bot/i;
+
+export function customerRequestsHuman(text: string): boolean {
+  return HUMAN_REQUEST_PATTERN.test(text);
+}
 
 function looksLikePersonName(text: string): boolean {
   const trimmed = text.trim();
@@ -461,10 +515,15 @@ export async function generateReply(
   let ownerAskedThisTurn = 0;
   let nameSavedThisTurn = 0;
   let contactSavedThisTurn = 0;
+  let intentFlaggedThisTurn = 0;
 
   async function finalizeTurn(text: string): Promise<string> {
     if (ownerAskedThisTurn === 0 && ESCALATION_CLAIM_PATTERN.test(text) && customerText) {
       await runCatalogTool(context, "ask_owner", { question: customerText });
+    }
+
+    if (intentFlaggedThisTurn === 0 && customerText && customerRequestsHuman(customerText)) {
+      await runCatalogTool(context, "flag_conversation_intent", { intent: "SOLICITA_AGENTE" });
     }
 
     if (
@@ -490,8 +549,16 @@ export async function generateReply(
     if (mediaSentThisTurn > 0) return text;
 
     const customerAsked = !!customerText && PHOTO_REQUEST_PATTERN.test(customerText);
-    const modelClaimsSent = PHOTO_CLAIM_PATTERN.test(text) && PHOTO_REQUEST_PATTERN.test(text);
+    const fakeMediaTag = FAKE_MEDIA_TAG_PATTERN.test(text);
+    const modelClaimsSent = (PHOTO_CLAIM_PATTERN.test(text) && PHOTO_REQUEST_PATTERN.test(text)) || fakeMediaTag;
     if (!customerAsked && !modelClaimsSent) return text;
+
+    // The model can only have fabricated this tag, never really sent it (mediaSentThisTurn === 0 here) -
+    // strip it so the customer doesn't see a broken "[Foto de X]" label alongside the real photos we're
+    // about to send below.
+    if (fakeMediaTag) {
+      text = text.replace(/\[(?:foto|video)s? de [^\]]*\]/gi, "").trim();
+    }
 
     // Figure out WHICH product(s) by scanning both the customer's message and the model's own reply
     // for product-name mentions (token-overlap, not exact substring - the model paraphrases names
@@ -515,10 +582,13 @@ export async function generateReply(
 
     // A generic "muestrame el catalogo" also matches PHOTO_REQUEST_PATTERN (it contains "muestrame"),
     // and if the model answers by listing the whole catalog by name, every product matches the
-    // token-overlap check above - this used to blast every product's photos at once. Real
-    // single/double-product requests only ever match a couple of names, so cap it: anything wider is
-    // treated as a catalog browse, which should stay text-only.
-    if (matched.length > 2) return text;
+    // token-overlap check above - this used to blast every product's photos at once. Distinguish that
+    // from a real request for several specific products (e.g. "mandame fotos de estos 3") by comparing
+    // against how many active products exist at all: matching (almost) the entire catalog means "show
+    // me everything", not an itemized request, so only that case stays text-only. A flat cap of 2 used
+    // to silently drop legitimate 3+ product requests.
+    const wholeCatalogMatch = products.length > 1 && matched.length === products.length;
+    if (matched.length > 5 || wholeCatalogMatch) return text;
 
     for (let i = 0; i < matched.length; i++) {
       if (i > 0) await new Promise((resolve) => setTimeout(resolve, 1200));
@@ -532,65 +602,76 @@ export async function generateReply(
     return text;
   }
 
-  for (let iteration = 0; iteration < 5; iteration++) {
-    const response = await deepseek.chat.completions.create({
-      model: DEEPSEEK_MODEL,
-      max_tokens: 1024,
-      messages,
-      tools: catalogTools,
-      // @ts-expect-error DeepSeek-specific param, not in the OpenAI SDK types. Disabled: reasoning
-      // tokens add latency/cost we don't need for a WhatsApp sales reply.
-      thinking: { type: "disabled" },
-    });
+  const FALLBACK_TEXT = "Disculpa, tuve un problema procesando tu consulta. Un asesor te va a contactar pronto.";
 
-    await logAiUsage({
-      businessId: context.businessId,
-      conversationId,
-      kind: "CHAT",
-      model: DEEPSEEK_MODEL,
-      usage: response.usage,
-    });
-
-    const choice = response.choices[0];
-    const message = choice.message;
-
-    if (message.content?.trim()) {
-      lastText = message.content;
-    }
-
-    const toolCalls = message.tool_calls ?? [];
-    if (toolCalls.length === 0) {
-      return finalizeTurn(
-        lastText || "Disculpa, tuve un problema procesando tu consulta. Un asesor te va a contactar pronto."
-      );
-    }
-
-    messages.push(message);
-
-    for (const call of toolCalls) {
-      if (call.type !== "function") continue;
-      let input: Record<string, unknown> = {};
-      try {
-        input = JSON.parse(call.function.arguments || "{}");
-      } catch {
-        input = {};
-      }
-      const result = (await runCatalogTool(context, call.function.name, input)) as {
-        mediaJustSent?: boolean;
-        sent?: boolean;
-        asked?: boolean;
-      };
-      if (result?.mediaJustSent || result?.sent) mediaSentThisTurn++;
-      if (call.function.name === "ask_owner") ownerAskedThisTurn++;
-      if (call.function.name === "save_customer_name") nameSavedThisTurn++;
-      if (call.function.name === "save_customer_contact_info") contactSavedThisTurn++;
-      messages.push({
-        role: "tool",
-        tool_call_id: call.id,
-        content: JSON.stringify(result),
+  try {
+    for (let iteration = 0; iteration < 5; iteration++) {
+      const response = await deepseek.chat.completions.create({
+        model: DEEPSEEK_MODEL,
+        max_tokens: 1024,
+        messages,
+        tools: catalogTools,
+        // @ts-expect-error DeepSeek-specific param, not in the OpenAI SDK types. Disabled: reasoning
+        // tokens add latency/cost we don't need for a WhatsApp sales reply.
+        thinking: { type: "disabled" },
       });
+
+      await logAiUsage({
+        businessId: context.businessId,
+        conversationId,
+        kind: "CHAT",
+        model: DEEPSEEK_MODEL,
+        usage: response.usage,
+      });
+
+      const choice = response.choices[0];
+      const message = choice.message;
+
+      if (message.content?.trim()) {
+        lastText = message.content;
+      }
+
+      const toolCalls = message.tool_calls ?? [];
+      if (toolCalls.length === 0) {
+        return finalizeTurn(lastText || FALLBACK_TEXT);
+      }
+
+      messages.push(message);
+
+      for (const call of toolCalls) {
+        if (call.type !== "function") continue;
+        let input: Record<string, unknown> = {};
+        try {
+          input = JSON.parse(call.function.arguments || "{}");
+        } catch {
+          input = {};
+        }
+        const result = (await runCatalogTool(context, call.function.name, input)) as {
+          mediaJustSent?: boolean;
+          sent?: boolean;
+          asked?: boolean;
+        };
+        if (result?.mediaJustSent || result?.sent) mediaSentThisTurn++;
+        if (call.function.name === "ask_owner") ownerAskedThisTurn++;
+        if (call.function.name === "save_customer_name") nameSavedThisTurn++;
+        if (call.function.name === "save_customer_contact_info") contactSavedThisTurn++;
+        if (call.function.name === "flag_conversation_intent") intentFlaggedThisTurn++;
+        messages.push({
+          role: "tool",
+          tool_call_id: call.id,
+          content: JSON.stringify(result),
+        });
+      }
     }
+  } catch (error) {
+    // A DeepSeek network/API failure used to propagate uncaught out of generateReply - the webhook's
+    // outer try/catch swallowed it with just a console.error, so the customer got NO reply at all for
+    // that turn. Degrade instead: log it and fall through to the same apology text used when the model
+    // itself has nothing to say, still running finalizeTurn's own safety nets (name/contact/photo
+    // backstops) against whatever the customer said this turn.
+    console.error("Fallo la llamada a DeepSeek en generateReply:", error);
+    return finalizeTurn(lastText || FALLBACK_TEXT);
   }
 
-  return finalizeTurn(lastText || "Disculpa, tuve un problema procesando tu consulta. Un asesor te va a contactar pronto.");
+  return finalizeTurn(lastText || FALLBACK_TEXT);
 }

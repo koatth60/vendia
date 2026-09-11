@@ -1,6 +1,7 @@
 import bcrypt from "bcryptjs";
 import { prisma } from "../db/client";
 import { sendOwnerAlert, type WhatsappCredentials } from "../whatsapp/client";
+import { recordOwnerMessage } from "../delivery/ownerLog";
 
 export async function hashPassword(password: string): Promise<string> {
   return bcrypt.hash(password, 12);
@@ -34,13 +35,17 @@ export async function requestPasswordReset(email: string): Promise<void> {
     phoneNumberId: business.whatsappPhoneNumberId,
     accessToken: business.whatsappAccessToken,
   };
+  const resetText = `Tu código para restablecer tu contraseña es: ${code}. Válido por 10 minutos, ignorá este mensaje si no lo pediste vos.`;
   try {
-    await sendOwnerAlert(
-      credentials,
-      business.contactPhone,
-      `Tu código para restablecer tu contraseña es: ${code}. Válido por 10 minutos, ignorá este mensaje si no lo pediste vos.`
-    );
+    await sendOwnerAlert(credentials, business.contactPhone, resetText);
+    await recordOwnerMessage(business.id, { direction: "OUT", body: resetText, success: true });
   } catch (error) {
+    await recordOwnerMessage(business.id, {
+      direction: "OUT",
+      body: resetText,
+      success: false,
+      errorMessage: error instanceof Error ? error.message : String(error),
+    });
     console.error("No se pudo enviar el código de restablecimiento por WhatsApp:", error);
   }
 }

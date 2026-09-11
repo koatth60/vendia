@@ -210,6 +210,18 @@ export async function getOrderForBusiness(businessId: string, orderId: string) {
   });
 }
 
+// Looks up by customerId, not the current conversationId - Order.conversationId is 1:1 with the
+// conversation it was closed in, so it can't be used to find a customer's order history across
+// conversations (e.g. a new open conversation started after the sale closed the previous one).
+export async function getLatestOrderForCustomer(businessId: string, customerId: string) {
+  const order = await prisma.order.findFirst({
+    where: { businessId, customerId },
+    include: { items: true },
+    orderBy: { createdAt: "desc" },
+  });
+  return order ? formatOrder(order) : null;
+}
+
 export async function markOrderShipped(
   businessId: string,
   orderId: string,

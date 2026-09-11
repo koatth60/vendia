@@ -11,7 +11,14 @@ import {
   recordMessage,
   createPendingOwnerQuestion,
 } from "../conversation/service";
-import { resolveOrderItems, createOrder, askForCsat, type ResolvedOrderItem } from "../orders/service";
+import {
+  resolveOrderItems,
+  createOrder,
+  askForCsat,
+  getLatestOrderForCustomer,
+  markOrderCanceled,
+  type ResolvedOrderItem,
+} from "../orders/service";
 import {
   sendImageMessage,
   sendVideoMessage,
@@ -23,6 +30,7 @@ import {
 } from "../whatsapp/client";
 import { prisma } from "../db/client";
 import { getPresignedMediaUrl } from "../media/s3";
+import { recordOwnerMessage } from "../delivery/ownerLog";
 
 // WhatsApp sometimes fails to deliver/render an image if it's sent immediately after another one -
 // a short gap between consecutive media sends avoids that collision.
@@ -301,6 +309,32 @@ export const catalogTools: OpenAI.Chat.ChatCompletionTool[] = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "get_order_status",
+      description:
+        "Consulta el estado real del pedido mas reciente de este cliente: si sigue pendiente, ya fue enviado o fue cancelado, ademas del resumen, nota de envio y total. Usa esta herramienta SIEMPRE que el cliente pregunte como va su pedido, si ya se lo enviaron, pida la factura o el numero de guia, o pregunte por algo que ya compro antes. Nunca respondas de memoria del historial del chat ni inventes un estado - esta herramienta es la unica fuente real.",
+      parameters: {
+        type: "object",
+        properties: {},
+        required: [],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "cancel_order",
+      description:
+        "Cancela el pedido mas reciente de este cliente. USA ESTA HERRAMIENTA SOLO despues de que el cliente ya confirmo explicitamente que si quiere cancelar: primero preguntale en texto plano '¿confirmas que queres cancelar tu pedido?' y esperá su respuesta en un mensaje aparte - nunca la llames en el mismo turno en el que recien pide cancelar. Si el pedido ya fue enviado, esta herramienta lo va a rechazar; en ese caso no insistas, escala con ask_owner.",
+      parameters: {
+        type: "object",
+        properties: {},
+        required: [],
+      },
+    },
+  },
 ];
 
 interface PendingOrderDraft {
@@ -323,7 +357,17 @@ interface PendingOrderDraft {
 // it just can't be resolved by quote-reply later (logged loudly for manual follow-up instead).
 async function requestSaleConfirmation(context: ToolContext, summary: string, draft: PendingOrderDraft): Promise<boolean> {
   const business = await prisma.business.findUnique({ where: { id: context.businessId } });
-  if (!business?.contactPhone) return false;
+  if (!business?.contactPhone) {
+    // No hay a quien mandarle WhatsApp - la venta se autoconfirma igual (comportamiento existente),
+    // pero sin este log quedaba sin ningun rastro de que el dueno nunca se entero en tiempo real.
+    await recordOwnerMessage(context.businessId, {
+      direction: "OUT",
+      body: `Venta autoconfirmada sin aviso al dueno (falta configurar Telefono de contacto en el negocio): ${summary || "sin resumen"}`,
+      success: false,
+      errorMessage: "Sin contactPhone configurado",
+    });
+    return false;
+  }
 
   const greeting = business.contactName ? `Hola ${business.contactName}` : "Hola";
   const customerLabel = await describeCustomer(context.customerId, context.recipientPhone);
@@ -334,12 +378,14 @@ async function requestSaleConfirmation(context: ToolContext, summary: string, dr
   ].join("\n\n");
 
   let wamid = "";
+  let lastError: unknown = null;
   try {
     wamid = await sendInteractiveButtonsMessage(context.credentials, business.contactPhone, text, [
       { id: "confirm_yes", title: "✅ Si llego" },
       { id: "confirm_no", title: "❌ No llego" },
     ]);
   } catch (error) {
+    lastError = error;
     console.error("No se pudo enviar los botones de confirmacion de venta al dueno, probando texto libre:", error);
   }
 
@@ -350,13 +396,22 @@ async function requestSaleConfirmation(context: ToolContext, summary: string, dr
         business.contactPhone,
         `${text}\n\nRespondeme "si" o "no" citando este mismo mensaje, por favor.`
       );
+      lastError = null;
     } catch (error) {
+      lastError = error;
       console.error("No se pudo enviar la confirmacion de venta al dueno de ninguna forma (revisar manualmente):", error, {
         businessId: context.businessId,
         conversationId: context.conversationId,
       });
     }
   }
+
+  await recordOwnerMessage(context.businessId, {
+    direction: "OUT",
+    body: text,
+    success: Boolean(wamid),
+    errorMessage: wamid ? null : lastError instanceof Error ? lastError.message : lastError ? String(lastError) : "Sin wamid",
+  });
 
   if (wamid) {
     await prisma.conversation.update({
@@ -547,11 +602,19 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
         }[intent];
         const greeting = business.contactName ? `Hola ${business.contactName}` : "Hola";
         const customerLabel = await describeCustomer(context.customerId, context.recipientPhone);
-        await sendOwnerAlert(
-          context.credentials,
-          business.contactPhone,
-          `${greeting}, el cliente ${customerLabel} reporto ${label}. El bot dejo de responderle, toma el control vos directamente.`
-        );
+        const intentAlertText = `${greeting}, el cliente ${customerLabel} reporto ${label}. El bot dejo de responderle, toma el control vos directamente.`;
+        try {
+          await sendOwnerAlert(context.credentials, business.contactPhone, intentAlertText);
+          await recordOwnerMessage(businessId, { direction: "OUT", body: intentAlertText, success: true });
+        } catch (error) {
+          await recordOwnerMessage(businessId, {
+            direction: "OUT",
+            body: intentAlertText,
+            success: false,
+            errorMessage: error instanceof Error ? error.message : String(error),
+          });
+          console.error("No se pudo enviar la alerta de intent al dueno:", error);
+        }
       }
 
       return {
@@ -580,7 +643,19 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
         'Respondeme citando (mantén presionado y "Responder") este mismo mensaje con la respuesta y se la reenvio tal cual al cliente.',
       ].join("\n\n");
 
-      const wamid = await sendOwnerAlert(context.credentials, business.contactPhone, text);
+      let wamid = "";
+      let askOwnerError: unknown = null;
+      try {
+        wamid = await sendOwnerAlert(context.credentials, business.contactPhone, text);
+      } catch (error) {
+        askOwnerError = error;
+      }
+      await recordOwnerMessage(businessId, {
+        direction: "OUT",
+        body: text,
+        success: Boolean(wamid),
+        errorMessage: wamid ? null : askOwnerError instanceof Error ? askOwnerError.message : askOwnerError ? String(askOwnerError) : "Sin wamid",
+      });
       if (!wamid) {
         return {
           asked: false,
@@ -634,25 +709,36 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
       // mismo patron de degradacion que requestSaleConfirmation: dos intentos reales antes de rendirse,
       // para que el dueno no se quede sin ningun aviso.
       let wamid = "";
+      let photoAlertError: unknown = null;
       try {
         wamid =
           lastMedia.mediaType === "VIDEO"
             ? await sendVideoMessage(context.credentials, business.contactPhone, mediaUrl, caption)
             : await sendImageMessage(context.credentials, business.contactPhone, mediaUrl, caption);
       } catch (error) {
+        photoAlertError = error;
         console.error("No se pudo reenviar la foto/video como media al dueno, probando con link de texto:", error);
       }
 
       if (!wamid) {
         try {
           wamid = await sendTextMessage(context.credentials, business.contactPhone, `${caption}\n\n${mediaUrl}`);
+          photoAlertError = null;
         } catch (error) {
+          photoAlertError = error;
           console.error("No se pudo enviar NINGUNA notificacion al dueno para identificar el producto (revisar manualmente):", error, {
             businessId,
             conversationId: context.conversationId,
           });
         }
       }
+
+      await recordOwnerMessage(businessId, {
+        direction: "OUT",
+        body: caption,
+        success: Boolean(wamid),
+        errorMessage: wamid ? null : photoAlertError instanceof Error ? photoAlertError.message : photoAlertError ? String(photoAlertError) : "Sin wamid",
+      });
 
       if (!wamid) {
         return {
@@ -691,6 +777,22 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
             `close_conversation: no se pudieron resolver estos items contra el catalogo (businessId=${businessId}, conversationId=${context.conversationId}):`,
             unresolved
           );
+          const business = await prisma.business.findUnique({ where: { id: businessId } });
+          if (business?.contactPhone) {
+            const unresolvedText = `Aviso: en este pedido no pude identificar en el catalogo estos productos que menciono el cliente: ${unresolved.join(", ")}. Revisa el pedido manualmente, puede haber quedado incompleto.`;
+            try {
+              await sendOwnerAlert(context.credentials, business.contactPhone, unresolvedText);
+              await recordOwnerMessage(businessId, { direction: "OUT", body: unresolvedText, success: true });
+            } catch (error) {
+              await recordOwnerMessage(businessId, {
+                direction: "OUT",
+                body: unresolvedText,
+                success: false,
+                errorMessage: error instanceof Error ? error.message : String(error),
+              });
+              console.error("No se pudo avisar al dueno de items no resueltos:", error);
+            }
+          }
         }
 
         const pending = await requestSaleConfirmation(context, summary, { items, shippingAddress, paymentMethodLabel, shippingCost });
@@ -718,6 +820,57 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
 
       await updateConversationStatus(businessId, context.conversationId, outcome);
       return { closed: true, outcome };
+    }
+    case "get_order_status": {
+      const order = await getLatestOrderForCustomer(businessId, context.customerId);
+      if (!order) return { found: false, note: "Este cliente no tiene ningun pedido registrado todavia." };
+      return {
+        found: true,
+        fulfillmentStatus: order.fulfillmentStatus,
+        summary: order.summary,
+        totalAmount: order.totalAmount,
+        currency: order.currency,
+        shippedAt: order.shippedAt,
+        shipmentNote: order.shipmentNote,
+        canceledAt: order.canceledAt,
+        createdAt: order.createdAt,
+      };
+    }
+    case "cancel_order": {
+      const order = await getLatestOrderForCustomer(businessId, context.customerId);
+      if (!order) return { canceled: false, reason: "no_order", note: "Este cliente no tiene ningun pedido registrado." };
+      if (order.fulfillmentStatus === "CANCELED") {
+        return { canceled: false, reason: "already_canceled", note: "Este pedido ya estaba cancelado." };
+      }
+      if (order.fulfillmentStatus === "SHIPPED") {
+        return {
+          canceled: false,
+          reason: "already_shipped",
+          note: "Este pedido ya fue enviado. No lo canceles vos - decile al cliente que necesitas confirmar con el equipo, y usa ask_owner.",
+        };
+      }
+
+      await markOrderCanceled(businessId, order.id);
+
+      const business = await prisma.business.findUnique({ where: { id: businessId } });
+      if (business?.contactPhone) {
+        const customerLabel = await describeCustomer(context.customerId, context.recipientPhone);
+        const cancelAlertText = `Aviso: el pedido de ${customerLabel} fue cancelado por el bot a pedido del cliente.\n\n${order.summary}`;
+        try {
+          await sendOwnerAlert(context.credentials, business.contactPhone, cancelAlertText);
+          await recordOwnerMessage(businessId, { direction: "OUT", body: cancelAlertText, success: true });
+        } catch (error) {
+          await recordOwnerMessage(businessId, {
+            direction: "OUT",
+            body: cancelAlertText,
+            success: false,
+            errorMessage: error instanceof Error ? error.message : String(error),
+          });
+          console.error("No se pudo avisar al dueno de la cancelacion:", error);
+        }
+      }
+
+      return { canceled: true };
     }
     default:
       return { error: `Unknown tool: ${name}` };

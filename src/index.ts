@@ -9,6 +9,7 @@ import { adminRouter } from "./routes/admin";
 import { authRouter } from "./routes/auth";
 import { platformAdminRouter } from "./routes/platformAdmin";
 import { runFollowUpJob } from "./jobs/followUp";
+import { runEscalationReminderJob } from "./jobs/escalationReminder";
 
 const app = express();
 app.set("trust proxy", 1);
@@ -38,3 +39,8 @@ const FOLLOW_UP_INTERVAL_MS = 60 * 60 * 1000;
 setInterval(() => {
   runFollowUpJob().catch((error) => console.error("Error corriendo el job de seguimiento post-venta:", error));
 }, FOLLOW_UP_INTERVAL_MS);
+
+const ESCALATION_REMINDER_INTERVAL_MS = 30 * 60 * 1000;
+setInterval(() => {
+  runEscalationReminderJob().catch((error) => console.error("Error corriendo el job de recordatorio de escalaciones:", error));
+}, ESCALATION_REMINDER_INTERVAL_MS);

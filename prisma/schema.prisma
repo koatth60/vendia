@@ -54,6 +54,7 @@ model Business {
   faqEntries               FaqEntry[]
   learnedFaqCandidates     LearnedFaqCandidate[]
   deliveryFailures         DeliveryFailure[]
+  ownerMessageLogs         OwnerMessageLog[]
   orders                   Order[]
   teamMembers              TeamMember[]
   createdAt                DateTime        @default(now())
@@ -190,6 +191,30 @@ model DeliveryFailure {
   @@index([businessId, resolved])
 }
 
+// Chat-style transcript of everything the bot sends to the business owner (alerts, sale
+// confirmations, ask_owner escalations) and every reply the owner sends back - this is the only
+// place the admin panel can show "did the owner actually get this" as a conversation instead of
+// scattered pm2 log lines. `success: false` covers both a synchronous API error (template not
+// approved, etc.) and the final fallback failing too - see recordOwnerMessage in
+// src/delivery/ownerLog.ts.
+model OwnerMessageLog {
+  id           String                @id @default(cuid())
+  business     Business              @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  businessId   String
+  direction    OwnerMessageDirection
+  body         String
+  success      Boolean               @default(true)
+  errorMessage String?
+  createdAt    DateTime              @default(now())
+
+  @@index([businessId, createdAt])
+}
+
+enum OwnerMessageDirection {
+  OUT
+  IN
+}
+
 model KeyRequest {
   id           String   @id @default(cuid())
   businessName String
@@ -294,6 +319,7 @@ model PendingOwnerQuestion {
   question       String
   kind           PendingOwnerQuestionKind @default(TEXT)
   createdAt      DateTime                 @default(now())
+  remindedAt     DateTime?
 
   @@index([conversationId])
 }

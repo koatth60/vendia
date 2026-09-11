@@ -260,6 +260,33 @@ export async function findOpenPendingConfirmationsForBusiness(businessId: string
   });
 }
 
+// Escalations the owner never answered - one reminder per question (remindedAt gates it so the
+// reminder job doesn't re-send every tick), independent of the sale follow-up job above.
+export async function findPendingOwnerQuestionsDueForReminder(businessId: string, olderThan: Date) {
+  const pending = await prisma.pendingOwnerQuestion.findMany({
+    where: {
+      conversation: { customer: { businessId } },
+      remindedAt: null,
+      createdAt: { lte: olderThan },
+    },
+    include: { conversation: { include: { customer: true } } },
+  });
+  return pending.map((p) => ({
+    questionId: p.id,
+    question: p.question,
+    kind: p.kind,
+    conversationId: p.conversationId,
+    customer: p.conversation.customer,
+  }));
+}
+
+export async function markPendingOwnerQuestionReminded(questionId: string) {
+  await prisma.pendingOwnerQuestion.update({
+    where: { id: questionId },
+    data: { remindedAt: new Date() },
+  });
+}
+
 export async function findConversationsDueForFollowUp(businessId: string, olderThan: Date) {
   return prisma.conversation.findMany({
     where: {

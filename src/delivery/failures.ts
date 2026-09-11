@@ -25,6 +25,16 @@ export async function listUnresolvedDeliveryFailures(businessId: string) {
   });
 }
 
+// Full history (resolved + unresolved) for the platform admin's conversation view - unlike
+// listUnresolvedDeliveryFailures, this isn't scoped to "still needs attention".
+export async function listDeliveryFailuresForBusiness(businessId: string, limit = 200) {
+  return prisma.deliveryFailure.findMany({
+    where: { businessId },
+    orderBy: { createdAt: "desc" },
+    take: limit,
+  });
+}
+
 export async function resolveDeliveryFailure(businessId: string, id: string): Promise<void> {
   const result = await prisma.deliveryFailure.updateMany({
     where: { id, businessId },

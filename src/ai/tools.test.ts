@@ -725,3 +725,159 @@ test("ask_owner_about_photo reports failure (and creates no pending question) wh
     globalThis.fetch = original;
   }
 });
+
+test("get_order_status reports found:false when the customer has no order yet", async () => {
+  const context = await freshContext();
+  const result = await runCatalogTool(context, "get_order_status", {});
+  assert.deepEqual(result, { found: false, note: "Este cliente no tiene ningun pedido registrado todavia." });
+});
+
+test("get_order_status returns the most recent order's real fulfillment status", async () => {
+  const context = await freshContext();
+  await prisma.order.create({
+    data: {
+      businessId,
+      customerId,
+      conversationId: context.conversationId,
+      summary: "1x Smartwatch",
+      totalAmount: 145000,
+      currency: "COP",
+      fulfillmentStatus: "SHIPPED",
+      shippedAt: new Date(),
+      shipmentNote: "Enviado por Interrapidisimo",
+    },
+  });
+
+  const result = (await runCatalogTool(context, "get_order_status", {})) as { found: boolean; fulfillmentStatus: string; shipmentNote: string };
+  assert.equal(result.found, true);
+  assert.equal(result.fulfillmentStatus, "SHIPPED");
+  assert.equal(result.shipmentNote, "Enviado por Interrapidisimo");
+
+  await prisma.order.deleteMany({ where: { conversationId: context.conversationId } });
+});
+
+test("cancel_order reports reason:no_order when the customer has no order", async () => {
+  const context = await freshContext();
+  const result = await runCatalogTool(context, "cancel_order", {});
+  assert.deepEqual(result, { canceled: false, reason: "no_order", note: "Este cliente no tiene ningun pedido registrado." });
+});
+
+test("cancel_order cancels a pending order and notifies the owner", async () => {
+  stubWhatsappFetch();
+  try {
+    const context = await freshContext();
+    await prisma.order.create({
+      data: { businessId, customerId, conversationId: context.conversationId, summary: "1x Smartwatch", totalAmount: 145000, currency: "COP" },
+    });
+
+    const result = await runCatalogTool(context, "cancel_order", {});
+    assert.deepEqual(result, { canceled: true });
+
+    const order = await prisma.order.findUniqueOrThrow({ where: { conversationId: context.conversationId } });
+    assert.equal(order.fulfillmentStatus, "CANCELED");
+    assert.ok(order.canceledAt);
+    assert.equal(sentMessages.length, 1, "owner must be notified about the cancellation");
+    assert.match(sentMessages[0].body, /cancelad/i);
+
+    await prisma.order.deleteMany({ where: { conversationId: context.conversationId } });
+  } finally {
+    restoreFetch();
+  }
+});
+
+test("cancel_order refuses an already-shipped order instead of canceling it", async () => {
+  const context = await freshContext();
+  await prisma.order.create({
+    data: {
+      businessId,
+      customerId,
+      conversationId: context.conversationId,
+      summary: "1x Smartwatch",
+      totalAmount: 145000,
+      currency: "COP",
+      fulfillmentStatus: "SHIPPED",
+      shippedAt: new Date(),
+    },
+  });
+
+  const result = await runCatalogTool(context, "cancel_order", {});
+  assert.equal((result as { canceled: boolean; reason: string }).canceled, false);
+  assert.equal((result as { canceled: boolean; reason: string }).reason, "already_shipped");
+
+  const order = await prisma.order.findUniqueOrThrow({ where: { conversationId: context.conversationId } });
+  assert.equal(order.fulfillmentStatus, "SHIPPED", "must not touch a shipped order's status");
+
+  await prisma.order.deleteMany({ where: { conversationId: context.conversationId } });
+});
+
+test("cancel_order refuses an already-canceled order", async () => {
+  const context = await freshContext();
+  await prisma.order.create({
+    data: {
+      businessId,
+      customerId,
+      conversationId: context.conversationId,
+      summary: "1x Smartwatch",
+      totalAmount: 145000,
+      currency: "COP",
+      fulfillmentStatus: "CANCELED",
+      canceledAt: new Date(),
+    },
+  });
+
+  const result = await runCatalogTool(context, "cancel_order", {});
+  assert.deepEqual(result, { canceled: false, reason: "already_canceled", note: "Este pedido ya estaba cancelado." });
+
+  await prisma.order.deleteMany({ where: { conversationId: context.conversationId } });
+});
+
+test("close_conversation SOLD with unresolvable items notifies the owner about them", async () => {
+  stubWhatsappFetch();
+  try {
+    const context = await freshContext();
+    // context.businessId (the shared fixture) has a contactPhone configured, so this sale also requires
+    // owner confirmation (pending:true, not closed:true) - the unresolved-items alert fires regardless.
+    await runCatalogTool(context, "close_conversation", {
+      outcome: "SOLD",
+      summary: "Pedido con un item que no existe en el catalogo",
+      items: [{ productName: "Producto que no existe en absoluto", quantity: 1 }],
+    });
+
+    assert.equal(sentMessages.length, 1, "owner must be alerted about the unresolved item");
+    assert.match(sentMessages[0].body, /Producto que no existe en absoluto/);
+
+    await prisma.order.deleteMany({ where: { conversationId: context.conversationId } });
+  } finally {
+    restoreFetch();
+  }
+});
+
+test("close_conversation SOLD auto-confirms without a contactPhone but logs it for the platform admin", async () => {
+  const businessNoContact = await prisma.business.create({
+    data: { name: `Test ${randomUUID()}`, email: `test-${randomUUID()}@example.com`, passwordHash: "x" },
+  });
+  const customer2 = await prisma.customer.create({ data: { businessId: businessNoContact.id, phoneNumber: `573003${Date.now()}` } });
+  const conversation2 = await prisma.conversation.create({ data: { customerId: customer2.id } });
+
+  try {
+    const context: ToolContext = {
+      businessId: businessNoContact.id,
+      conversationId: conversation2.id,
+      customerId: customer2.id,
+      credentials: { phoneNumberId: "test-id", accessToken: "test-token" },
+      recipientPhone: "573009998877",
+    };
+    await runCatalogTool(context, "close_conversation", { outcome: "SOLD", summary: "Compra sin telefono de contacto configurado" });
+
+    const logs = await prisma.ownerMessageLog.findMany({ where: { businessId: businessNoContact.id } });
+    assert.equal(logs.length, 1);
+    assert.equal(logs[0].success, false);
+    assert.match(logs[0].body, /sin aviso/i);
+  } finally {
+    await prisma.order.deleteMany({ where: { conversationId: conversation2.id } });
+    await prisma.ownerMessageLog.deleteMany({ where: { businessId: businessNoContact.id } });
+    await prisma.conversation.deleteMany({ where: { id: conversation2.id } });
+    await prisma.customer.deleteMany({ where: { id: customer2.id } });
+    await prisma.business.deleteMany({ where: { id: businessNoContact.id } });
+  }
+});

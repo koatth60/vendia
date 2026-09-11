@@ -48,6 +48,16 @@
   .card button { border: none; border-radius: 8px; padding: 10px 16px; font-size: 13px; font-weight: 600; cursor: pointer; background: var(--green); color: white; }
   .card button:hover { background: var(--green-dark); }
   code { background: #f1f2f4; padding: 2px 7px; border-radius: 5px; font-size: 13px; }
+
+  .log-modal { max-width: 520px; }
+  .log-list { max-height: 60vh; overflow-y: auto; margin: 14px 0; display: flex; flex-direction: column; gap: 10px; padding-right: 4px; }
+  .log-row { max-width: 85%; padding: 8px 12px; border-radius: 10px; font-size: 13px; line-height: 1.4; }
+  .log-row-out { align-self: flex-end; background: var(--green-light); color: var(--ink); }
+  .log-row-in { align-self: flex-start; background: #f1f2f4; color: var(--ink); }
+  .log-row-error { align-self: center; max-width: 100%; background: var(--danger-light); color: var(--danger); border: 1px solid var(--danger); }
+  .log-row-when { font-size: 11px; color: var(--muted); margin-top: 4px; }
+  .log-row-fail-tag { display: inline-block; margin-top: 4px; font-size: 11px; font-weight: 700; color: var(--danger); }
+  .log-empty { text-align: center; color: var(--muted); font-size: 13px; padding: 30px 0; }
 </style>
 </head>
 <body>
@@ -149,6 +159,17 @@
     </div>
   </div>
 
+  <div class="overlay" id="log-overlay">
+    <div class="modal log-modal">
+      <h2>Conversación bot ↔ dueño</h2>
+      <p class="sub" id="log-modal-sub"></p>
+      <div class="log-list" id="log-list"></div>
+      <div class="modal-actions">
+        <button type="button" class="btn-secondary" id="log-close-btn">Cerrar</button>
+      </div>
+    </div>
+  </div>
+
 <script>
 let currentBusinessId = null;
 
@@ -183,12 +204,18 @@ function renderBusinesses(businesses) {
         <span class="badge ${b.whatsappPhoneNumberId ? 'badge-yes' : 'badge-no'}">${b.whatsappPhoneNumberId ? 'Conectado' : 'Sin conectar'}</span>
         ${b.whatsappPhoneNumber ? `<br><span style="color:var(--muted);font-size:12px;">${escapeHtml(b.whatsappPhoneNumber)}</span>` : ''}
       </td>
-      <td><button class="edit-btn" data-id="${b.id}" data-name="${escapeHtml(b.name)}" data-phone-id="${escapeHtml(b.whatsappPhoneNumberId ?? '')}" data-phone="${escapeHtml(b.whatsappPhoneNumber ?? '')}" data-waba-id="${escapeHtml(b.whatsappBusinessAccountId ?? '')}">${b.whatsappPhoneNumberId ? 'Editar' : 'Conectar'}</button></td>
+      <td>
+        <button class="edit-btn" data-id="${b.id}" data-name="${escapeHtml(b.name)}" data-phone-id="${escapeHtml(b.whatsappPhoneNumberId ?? '')}" data-phone="${escapeHtml(b.whatsappPhoneNumber ?? '')}" data-waba-id="${escapeHtml(b.whatsappBusinessAccountId ?? '')}">${b.whatsappPhoneNumberId ? 'Editar' : 'Conectar'}</button>
+        <button class="edit-btn log-btn" data-id="${b.id}" data-name="${escapeHtml(b.name)}" ${b.contactPhone ? '' : 'disabled title="Este negocio no tiene contactPhone configurado"'}>Conversación dueño</button>
+      </td>
     </tr>
   `).join('');
 
-  document.querySelectorAll('.edit-btn').forEach((btn) => {
+  document.querySelectorAll('.edit-btn:not(.log-btn)').forEach((btn) => {
     btn.addEventListener('click', () => openModal(btn.dataset.id, btn.dataset.name, btn.dataset.phoneId, btn.dataset.phone, btn.dataset.wabaId));
+  });
+  document.querySelectorAll('.log-btn').forEach((btn) => {
+    btn.addEventListener('click', () => openLogModal(btn.dataset.id, btn.dataset.name));
   });
 }
 
@@ -339,6 +366,54 @@ document.getElementById('generate-key-btn').addEventListener('click', async () =
 document.getElementById('copy-key-btn').addEventListener('click', () => {
   const code = document.getElementById('new-key-code').textContent;
   navigator.clipboard.writeText(code).catch(() => {});
+});
+
+function logRowHtml(entry) {
+  const when = new Date(entry.createdAt).toLocaleString('es-CO', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+
+  if (entry.kind === 'delivery_failure') {
+    return `<div class="log-row log-row-error">
+      ${escapeHtml(entry.errorMessage)}
+      <div class="log-row-when">${when}${entry.resolved ? ' · marcado visto por el dueño' : ''}</div>
+    </div>`;
+  }
+
+  const side = entry.direction === 'IN' ? 'log-row-in' : 'log-row-out';
+  const label = entry.direction === 'IN' ? 'Dueño → Bot' : 'Bot → Dueño';
+  const failTag = entry.success === false
+    ? `<div class="log-row-fail-tag">⚠ No llegó${entry.errorMessage ? ': ' + escapeHtml(entry.errorMessage) : ''}</div>`
+    : '';
+  return `<div class="log-row ${side}">
+    <strong style="font-size:11px;opacity:.7;">${label}</strong><br>
+    ${escapeHtml(entry.body ?? '')}
+    <div class="log-row-when">${when}</div>
+    ${failTag}
+  </div>`;
+}
+
+async function openLogModal(businessId, businessName) {
+  document.getElementById('log-modal-sub').textContent = businessName;
+  const list = document.getElementById('log-list');
+  list.innerHTML = '<div class="log-empty">Cargando...</div>';
+  document.getElementById('log-overlay').style.display = 'flex';
+
+  const res = await fetch(`/vendia-admin/api/businesses/${businessId}/owner-log`);
+  if (!res.ok) {
+    list.innerHTML = '<div class="log-empty">No se pudo cargar la conversación.</div>';
+    return;
+  }
+  const entries = await res.json();
+  if (entries.length === 0) {
+    list.innerHTML = '<div class="log-empty">Todavía no hay mensajes registrados con el dueño.</div>';
+    return;
+  }
+  // API returns newest-first; the chat reads top-to-bottom oldest-first.
+  list.innerHTML = entries.slice().reverse().map(logRowHtml).join('');
+  list.scrollTop = list.scrollHeight;
+}
+
+document.getElementById('log-close-btn').addEventListener('click', () => {
+  document.getElementById('log-overlay').style.display = 'none';
 });
 
 (async () => {

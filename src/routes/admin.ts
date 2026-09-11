@@ -42,7 +42,6 @@ import { deepseek, DEEPSEEK_MODEL } from "../ai/client";
 import { getAnalyticsSummary } from "../analytics/service";
 import { listFaqEntries, createFaqEntry, updateFaqEntry, deleteFaqEntry } from "../catalog/faq";
 import { listPendingCandidates, approveCandidate, discardCandidate } from "../catalog/learnedFaq";
-import { listUnresolvedDeliveryFailures, resolveDeliveryFailure } from "../delivery/failures";
 import {
   listOrdersForBusiness,
   getOrderForBusiness,
@@ -438,20 +437,6 @@ adminRouter.post("/api/faq-candidates/:id/discard", requireOwner, async (req, re
   }
 });
 
-adminRouter.get("/api/delivery-failures", async (req, res) => {
-  const failures = await listUnresolvedDeliveryFailures(businessIdOf(req));
-  res.json(failures);
-});
-
-adminRouter.post("/api/delivery-failures/:id/resolve", requireOwner, async (req, res) => {
-  try {
-    await resolveDeliveryFailure(businessIdOf(req), String(req.params.id));
-    res.status(204).send();
-  } catch (error) {
-    res.status(404).json({ error: error instanceof Error ? error.message : "No se pudo marcar como visto" });
-  }
-});
-
 adminRouter.get("/api/team", requireOwner, async (req, res) => {
   const members = await prisma.teamMember.findMany({
     where: { businessId: businessIdOf(req) },
@@ -608,11 +593,29 @@ adminRouter.put("/api/orders/:id/ship", upload.single("file"), async (req, res) 
 });
 
 adminRouter.put("/api/orders/:id/cancel", async (req, res) => {
-  const updated = await markOrderCanceled(businessIdOf(req), String(req.params.id));
-  if (!updated) {
+  const businessId = businessIdOf(req);
+  const order = await getOrderForBusiness(businessId, String(req.params.id));
+  if (!order) {
     res.status(404).json({ error: "Pedido no encontrado" });
     return;
   }
+
+  const business = await prisma.business.findUnique({ where: { id: businessId } });
+  if (business?.whatsappPhoneNumberId && business.whatsappAccessToken) {
+    const credentials: WhatsappCredentials = {
+      phoneNumberId: business.whatsappPhoneNumberId,
+      accessToken: business.whatsappAccessToken,
+    };
+    const messageText = "Tu pedido fue cancelado. Cualquier duda me escribes.";
+    try {
+      const wamid = await sendTextMessage(credentials, order.customer.phoneNumber, messageText);
+      await recordMessage(businessId, order.conversationId, "ASSISTANT", messageText, wamid || undefined);
+    } catch (error) {
+      console.error("No se pudo avisar al cliente de la cancelacion del pedido:", error);
+    }
+  }
+
+  await markOrderCanceled(businessId, String(req.params.id));
   res.json({ ok: true });
 });
 

@@ -26,6 +26,7 @@ import { createOrder, askForCsat, recordCsatReply, type ResolvedOrderItem } from
 import { recordAskOwnerResolution } from "../catalog/learnedFaq";
 import { getCatalogHintText, findConfidentProductMatch } from "../catalog/products";
 import { recordDeliveryFailure } from "../delivery/failures";
+import { recordOwnerMessage, trackOwnerSend } from "../delivery/ownerLog";
 import { extractFrame } from "../media/videoFrame";
 
 export const whatsappRouter = Router();
@@ -76,11 +77,8 @@ export async function handleOwnerReply(
         totalOpen > 1
           ? ` Tenes ${totalOpen} cosas esperando respuesta ahora mismo, necesito saber a cual te referis.`
           : "";
-      await sendTextMessage(
-        credentials,
-        ownerPhone,
-        `No identifique a que mensaje te refieres.${hint} Por favor responde citando (mantén presionado y "Responder") el mensaje especifico.`
-      );
+      const noQuoteText = `No identifique a que mensaje te refieres.${hint} Por favor responde citando (mantén presionado y "Responder") el mensaje especifico.`;
+      await trackOwnerSend(businessId, noQuoteText, () => sendTextMessage(credentials, ownerPhone, noQuoteText));
       return;
     }
   }
@@ -88,7 +86,8 @@ export async function handleOwnerReply(
   if (pendingQuestion) {
     const answerText = message.type === "text" ? (message.text?.body ?? "").trim() : "";
     if (!answerText) {
-      await sendTextMessage(credentials, ownerPhone, "Respondeme con un mensaje de texto, citando esa misma pregunta, por favor.");
+      const askTextText = "Respondeme con un mensaje de texto, citando esa misma pregunta, por favor.";
+      await trackOwnerSend(businessId, askTextText, () => sendTextMessage(credentials, ownerPhone, askTextText));
       return;
     }
 
@@ -117,7 +116,8 @@ export async function handleOwnerReply(
       }
       await clearPendingOwnerQuestion(pendingQuestion.questionId);
       await setHumanControl(businessId, pendingQuestion.conversationId, false);
-      await sendTextMessage(credentials, ownerPhone, "Listo, le confirme el producto al cliente ✅");
+      const confirmedProductText = "Listo, le confirme el producto al cliente ✅";
+      await trackOwnerSend(businessId, confirmedProductText, () => sendTextMessage(credentials, ownerPhone, confirmedProductText));
       return;
     }
 
@@ -130,16 +130,14 @@ export async function handleOwnerReply(
     // FAQ entry instead of discarding it after this one use (never auto-published, just queued for
     // review in the admin panel).
     await recordAskOwnerResolution(businessId, pendingQuestion.question, answerText, pendingQuestion.conversationId);
-    await sendTextMessage(credentials, ownerPhone, "Listo, le reenvie tu respuesta al cliente ✅");
+    const forwardedText = "Listo, le reenvie tu respuesta al cliente ✅";
+    await trackOwnerSend(businessId, forwardedText, () => sendTextMessage(credentials, ownerPhone, forwardedText));
     return;
   }
 
   if (!conversation) {
-    await sendTextMessage(
-      credentials,
-      ownerPhone,
-      "Ese mensaje ya no esta esperando respuesta (puede que ya se haya resuelto o haya expirado)."
-    );
+    const expiredText = "Ese mensaje ya no esta esperando respuesta (puede que ya se haya resuelto o haya expirado).";
+    await trackOwnerSend(businessId, expiredText, () => sendTextMessage(credentials, ownerPhone, expiredText));
     return;
   }
 
@@ -151,7 +149,8 @@ export async function handleOwnerReply(
   const isDeny = DENY_WORDS.includes(answer);
 
   if (!isConfirm && !isDeny) {
-    await sendTextMessage(credentials, ownerPhone, 'Respondeme "si" o "no" citando ese mismo mensaje, por favor.');
+    const clarifyText = 'Respondeme "si" o "no" citando ese mismo mensaje, por favor.';
+    await trackOwnerSend(businessId, clarifyText, () => sendTextMessage(credentials, ownerPhone, clarifyText));
     return;
   }
 
@@ -180,14 +179,16 @@ export async function handleOwnerReply(
     await sendTextMessage(credentials, customerPhone, customerText);
     await recordMessage(businessId, conversation.id, "ASSISTANT", customerText);
     await askForCsat(credentials, order.id, customerPhone);
-    await sendTextMessage(credentials, ownerPhone, "Listo, le avise al cliente ✅");
+    const confirmedSaleText = "Listo, le avise al cliente ✅";
+    await trackOwnerSend(businessId, confirmedSaleText, () => sendTextMessage(credentials, ownerPhone, confirmedSaleText));
   } else {
     await clearPendingConfirmation(conversation.id);
     const customerText =
       "No logramos confirmar tu pago todavia. ¿Puedes reenviar una foto mas clara del comprobante o confirmar el monto por texto?";
     await sendTextMessage(credentials, customerPhone, customerText);
     await recordMessage(businessId, conversation.id, "ASSISTANT", customerText);
-    await sendTextMessage(credentials, ownerPhone, "Listo, le pedi al cliente que reenvie el comprobante.");
+    const deniedSaleText = "Listo, le pedi al cliente que reenvie el comprobante.";
+    await trackOwnerSend(businessId, deniedSaleText, () => sendTextMessage(credentials, ownerPhone, deniedSaleText));
   }
 }
 
@@ -279,6 +280,13 @@ whatsappRouter.post("/webhook", async (req, res) => {
 
     const onlyDigits = (phone: string) => phone.replace(/\D/g, "");
     if (business.contactPhone && onlyDigits(from) === onlyDigits(business.contactPhone)) {
+      const ownerIncomingBody =
+        message.type === "interactive"
+          ? (message.interactive?.button_reply?.title ?? message.interactive?.button_reply?.id ?? `[${message.type}]`)
+          : message.type === "text"
+            ? (message.text?.body ?? "")
+            : `[${message.type}]`;
+      await recordOwnerMessage(business.id, { direction: "IN", body: ownerIncomingBody });
       await handleOwnerReply(business.id, credentials, from, message);
       return;
     }
@@ -399,11 +407,8 @@ whatsappRouter.post("/webhook", async (req, res) => {
 
       if (capStatus.justCrossed && business.contactPhone) {
         const greeting = business.contactName ? `Hola ${business.contactName}` : "Hola";
-        await sendOwnerAlert(
-          credentials,
-          business.contactPhone,
-          `${greeting}, tu negocio alcanzó el límite de ${capStatus.messageCap} mensajes de tu plan ${capStatus.planTier} este mes. El bot dejó de responder automáticamente hasta el próximo mes - escribime si querés subir de plan.`
-        );
+        const capAlertText = `${greeting}, tu negocio alcanzó el límite de ${capStatus.messageCap} mensajes de tu plan ${capStatus.planTier} este mes. El bot dejó de responder automáticamente hasta el próximo mes - escribime si querés subir de plan.`;
+        await trackOwnerSend(business.id, capAlertText, () => sendOwnerAlert(credentials, business.contactPhone!, capAlertText));
       }
       return;
     }
