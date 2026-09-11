@@ -21,12 +21,13 @@ export interface ConversationRow {
   intent: string | null;
   humanControl: boolean;
   updatedAt: Date;
+  unreadCount: number;
   customer: { id: string; phoneNumber: string; name: string | null; tags: string[] };
   lastMessage: { role: string; content: string; createdAt: Date } | null;
 }
 
-export function emitNewMessage(businessId: string, conversationId: string, message: MessageEventPayload): void {
-  realtimeEvents.emit("message:new", businessId, { conversationId, message });
+export function emitNewMessage(businessId: string, conversationId: string, message: MessageEventPayload, unreadCount: number): void {
+  realtimeEvents.emit("message:new", businessId, { conversationId, message, unreadCount });
 }
 
 export function emitNewConversation(businessId: string, conversation: ConversationRow): void {

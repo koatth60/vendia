@@ -52,19 +52,27 @@ export async function recordMessage(
       relatedProductId,
     },
   });
-  await prisma.conversation.update({
+  // Only a CUSTOMER message counts as "unread" for the admin - the bot/human replying doesn't need
+  // its own read-tracking, it's already the response to whatever was unread.
+  const updatedConversation = await prisma.conversation.update({
     where: { id: conversationId },
-    data: { updatedAt: new Date() },
+    data: { updatedAt: new Date(), ...(role === "CUSTOMER" ? { unreadCount: { increment: 1 } } : {}) },
+    select: { unreadCount: true },
   });
 
-  emitNewMessage(businessId, conversationId, {
-    id: message.id,
-    role: message.role,
-    content: message.content,
-    mediaUrl: media ? await getPresignedMediaUrl(media.s3Key) : null,
-    mediaType: message.mediaType,
-    createdAt: message.createdAt,
-  });
+  emitNewMessage(
+    businessId,
+    conversationId,
+    {
+      id: message.id,
+      role: message.role,
+      content: message.content,
+      mediaUrl: media ? await getPresignedMediaUrl(media.s3Key) : null,
+      mediaType: message.mediaType,
+      createdAt: message.createdAt,
+    },
+    updatedConversation.unreadCount
+  );
 }
 
 export async function getRelatedProductNameForMessage(whatsappMessageId: string): Promise<string | null> {
@@ -280,6 +288,7 @@ function formatConversationRow(c: {
   intent: string | null;
   humanControl: boolean;
   updatedAt: Date;
+  unreadCount: number;
   customer: { id: string; phoneNumber: string; name: string | null; tags: string[] };
   messages?: { role: string; content: string; mediaType: string | null; createdAt: Date }[];
 }): ConversationRow {
@@ -290,6 +299,7 @@ function formatConversationRow(c: {
     intent: c.intent,
     humanControl: c.humanControl,
     updatedAt: c.updatedAt,
+    unreadCount: c.unreadCount,
     customer: { id: c.customer.id, phoneNumber: c.customer.phoneNumber, name: c.customer.name, tags: c.customer.tags },
     lastMessage: last
       ? { role: last.role, content: last.mediaType === "IMAGE" ? last.content || "📷 Imagen" : last.content, createdAt: last.createdAt }
@@ -320,12 +330,26 @@ export async function getConversationForBusiness(businessId: string, conversatio
   });
   if (!conversation) return null;
 
+  // Opening a conversation in the admin panel IS reading it - reset the unread badge here as a side
+  // effect of the fetch, instead of a separate "mark as read" round trip the frontend would have to
+  // remember to call. Emit so other open admin tabs/devices for this business see the badge clear too.
+  if (conversation.unreadCount > 0) {
+    const updated = await prisma.conversation.update({
+      where: { id: conversationId },
+      data: { unreadCount: 0 },
+      include: { customer: true },
+    });
+    emitConversationUpdated(businessId, formatConversationRow(updated));
+    conversation.unreadCount = 0;
+  }
+
   return {
     id: conversation.id,
     status: conversation.status,
     intent: conversation.intent,
     humanControl: conversation.humanControl,
     updatedAt: conversation.updatedAt,
+    unreadCount: conversation.unreadCount,
     customer: {
       id: conversation.customer.id,
       phoneNumber: conversation.customer.phoneNumber,

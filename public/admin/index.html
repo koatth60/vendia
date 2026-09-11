@@ -161,6 +161,18 @@
   .btn-ghost:hover { color: var(--ink); }
   .actions-row button { flex: 0 0 auto; }
 
+  .realtime-indicator { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--muted); }
+  .realtime-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: 0 0 auto; }
+  .realtime-indicator.is-connected { color: var(--brand); }
+  .realtime-indicator.is-connected .realtime-dot { background: var(--brand); box-shadow: 0 0 0 3px rgba(31,168,85,.18); animation: realtime-pulse 2s ease-in-out infinite; }
+  .realtime-indicator.is-disconnected { color: var(--danger); }
+  .realtime-indicator.is-disconnected .realtime-dot { background: var(--danger); }
+  @keyframes realtime-pulse { 0%, 100% { box-shadow: 0 0 0 3px rgba(31,168,85,.18); } 50% { box-shadow: 0 0 0 6px rgba(31,168,85,.08); } }
+
+  .unread-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--brand); color: #fff; font-size: 11px; font-weight: 700; line-height: 1; }
+  .tab-btn .unread-badge { margin-left: 6px; background: var(--danger); }
+  .conv-row.has-unread .conv-name { font-weight: 700; }
+
   .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
   .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; }
   .actions-row { margin-top: 16px; display: flex; gap: 8px; align-items: center; }
@@ -397,7 +409,7 @@
       <span class="tab-icon">❓</span> FAQ
     </button>
     <button class="tab-btn" data-tab="conversations" onclick="switchTab('conversations')">
-      <span class="tab-icon">💬</span> Conversaciones <span class="tab-count" id="tab-count-conversations">0</span>
+      <span class="tab-icon">💬</span> Conversaciones <span class="tab-count" id="tab-count-conversations">0</span><span class="unread-badge" id="tab-unread-conversations" hidden>0</span>
     </button>
     <button class="tab-btn" data-tab="orders" onclick="switchTab('orders')">
       <span class="tab-icon">📦</span> Pedidos
@@ -656,7 +668,7 @@
           <div class="panel-title">Conversaciones</div>
           <div class="panel-subtitle">Lo que tus clientes le están hablando al bot, en vivo.</div>
         </div>
-        <button class="btn-ghost" onclick="loadConversations()">↻ Actualizar</button>
+        <div class="realtime-indicator" id="realtime-indicator-conversations"><span class="realtime-dot"></span><span class="realtime-indicator-text">Conectando…</span></div>
       </div>
       <div class="card" style="padding:0; overflow:hidden;">
         <div class="chat-split" id="chat-split">
@@ -740,7 +752,7 @@
           <div class="panel-title">Pedidos</div>
           <div class="panel-subtitle">Ventas cerradas con productos, cantidades y total, generadas automáticamente por el bot.</div>
         </div>
-        <button class="btn-ghost" onclick="loadOrders()">↻ Actualizar</button>
+        <div class="realtime-indicator" id="realtime-indicator-orders"><span class="realtime-dot"></span><span class="realtime-indicator-text">Conectando…</span></div>
       </div>
 
       <div class="order-section-head">
@@ -1438,8 +1450,9 @@ function conversationRowHtml(c) {
   const preview = c.lastMessage
     ? `${c.lastMessage.role === 'ASSISTANT' ? 'Tú (bot): ' : ''}${escapeHtml(c.lastMessage.content).slice(0, 80)}`
     : 'Sin mensajes';
+  const unread = c.unreadCount || 0;
   return `
-    <div class="conv-row${c.id === currentConversationId ? ' active' : ''}" data-conversation-id="${c.id}" onclick="openConversation('${c.id}')">
+    <div class="conv-row${c.id === currentConversationId ? ' active' : ''}" data-conversation-id="${c.id}" data-unread="${unread}" onclick="openConversation('${c.id}')">
       <div class="conv-avatar" style="background:${avatarColor(c.customer.phoneNumber)};">${escapeHtml(initial)}</div>
       <div class="conv-info">
         <div class="conv-name">${escapeHtml(displayName)}</div>
@@ -1447,6 +1460,7 @@ function conversationRowHtml(c) {
       </div>
       <div class="conv-meta">
         <div class="conv-time" data-updated-at="${c.updatedAt}">${timeAgo(c.updatedAt)}</div>
+        ${unread > 0 ? `<span class="unread-badge">${unread > 99 ? '99+' : unread}</span>` : ''}
         ${c.humanControl ? '<span class="status-badge" style="background:#fef3c7; color:#92400e;">🙋 En vivo</span>' : ''}
         ${c.intent ? `<span class="status-badge" style="background:#fee2e2; color:#991b1b;">${INTENT_LABELS[c.intent] || c.intent}</span>` : ''}
         <span class="status-badge status-${c.status}">${STATUS_LABELS[c.status] || c.status}</span>
@@ -1464,10 +1478,12 @@ async function loadConversations() {
 
     if (!Array.isArray(conversations) || conversations.length === 0) {
       container.innerHTML = '<div class="empty-state"><div class="big">💬</div>Todavía no hay conversaciones.<br/>Van a aparecer acá apenas un cliente le escriba al bot.</div>';
+      updateTotalUnreadBadge();
       return;
     }
 
     container.innerHTML = conversations.map(conversationRowHtml).join('');
+    updateTotalUnreadBadge();
   } catch (err) {
     container.innerHTML = `<div class="empty-state" style="color:var(--danger);">No se pudieron cargar las conversaciones: ${escapeHtml(err.message)}</div>`;
   }
@@ -1625,6 +1641,10 @@ async function openConversation(id) {
   document.getElementById('chat-split').classList.add('chat-split--open');
   document.querySelectorAll('.conv-row').forEach((row) => row.classList.toggle('active', row.dataset.conversationId === id));
   thread.innerHTML = '<div style="text-align:center; color:var(--muted); font-size:13px; padding:20px;">Cargando…</div>';
+  // Opening it counts as reading it - clear the badge immediately (the server also resets its own
+  // counter as a side effect of the fetch below and broadcasts that, this just avoids waiting on the
+  // round trip for the person who's looking right at it).
+  setRowUnreadCount(id, 0);
 
   try {
     const res = await apiFetch(`/admin/api/conversations/${id}`);
@@ -2525,6 +2545,52 @@ function bumpConversationRow(conversationId, previewText, isAssistant, updatedAt
   return true;
 }
 
+// Patches a row's unread badge in place and keeps the tab-level total in sync. `data-unread` on the
+// row is the source of truth the total is summed from, instead of parsing the badge's own text back
+// into a number (which would mis-parse the "99+" cap).
+function setRowUnreadCount(conversationId, count) {
+  const row = document.querySelector(`.conv-row[data-conversation-id="${conversationId}"]`);
+  if (row) {
+    row.dataset.unread = String(count);
+    let badge = row.querySelector('.unread-badge');
+    if (count > 0) {
+      if (!badge) {
+        badge = document.createElement('span');
+        badge.className = 'unread-badge';
+        row.querySelector('.conv-meta').prepend(badge);
+      }
+      badge.textContent = count > 99 ? '99+' : String(count);
+    } else if (badge) {
+      badge.remove();
+    }
+  }
+  updateTotalUnreadBadge();
+}
+
+function updateTotalUnreadBadge() {
+  let total = 0;
+  document.querySelectorAll('.conv-row').forEach((row) => { total += Number(row.dataset.unread) || 0; });
+  const tabBadge = document.getElementById('tab-unread-conversations');
+  if (!tabBadge) return;
+  if (total > 0) {
+    tabBadge.textContent = total > 99 ? '99+' : String(total);
+    tabBadge.hidden = false;
+  } else {
+    tabBadge.hidden = true;
+  }
+}
+
+function setRealtimeStatus(connected) {
+  ['realtime-indicator-conversations', 'realtime-indicator-orders'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.classList.toggle('is-connected', connected);
+    el.classList.toggle('is-disconnected', !connected);
+    const label = el.querySelector('.realtime-indicator-text');
+    if (label) label.textContent = connected ? 'En vivo' : 'Reconectando…';
+  });
+}
+
 // Socket.IO is the primary realtime channel for the admin panel: new messages, new conversations, and
 // order changes push instantly instead of requiring a manual "↻ Actualizar" click or waiting on a
 // poll. The connect handler (fires on initial load AND on any reconnect after a dropped connection)
@@ -2533,13 +2599,23 @@ function initRealtime() {
   const socket = io();
 
   socket.on('connect', () => {
+    setRealtimeStatus(true);
     loadConversations();
     loadOrders();
   });
+  socket.on('disconnect', () => setRealtimeStatus(false));
 
-  socket.on('message:new', ({ conversationId, message }) => {
+  socket.on('message:new', ({ conversationId, message, unreadCount }) => {
     if (conversationId === currentConversationId) {
       renderThreadMessages(document.getElementById('modal-thread'), [message]);
+      // Already looking at it - it's read the instant it arrives. Tell the server too, so its
+      // counter doesn't silently drift out of sync with what's actually on screen.
+      setRowUnreadCount(conversationId, 0);
+      if (message.role === 'CUSTOMER') {
+        apiFetch(`/admin/api/conversations/${conversationId}`).catch(() => {});
+      }
+    } else {
+      setRowUnreadCount(conversationId, unreadCount);
     }
     const previewText = message.mediaType === 'IMAGE' ? (message.content || '📷 Imagen') : message.content;
     const bumped = bumpConversationRow(conversationId, previewText, message.role === 'ASSISTANT', message.createdAt);
@@ -2554,6 +2630,7 @@ function initRealtime() {
     list.insertAdjacentHTML('afterbegin', conversationRowHtml(c));
     const countEl = document.getElementById('tab-count-conversations');
     if (countEl) countEl.textContent = String(document.querySelectorAll('.conv-row').length);
+    updateTotalUnreadBadge();
   });
 
   socket.on('conversation:updated', (c) => {
@@ -2563,6 +2640,7 @@ function initRealtime() {
     } else {
       loadConversations();
     }
+    updateTotalUnreadBadge();
     if (c.id === currentConversationId) {
       renderHandoffState(c.humanControl);
       updateCloseSaleButtonVisibility(c.status);

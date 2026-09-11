@@ -224,6 +224,7 @@ model Conversation {
   contextSummary                String?
   contextSummarizedUpTo         Int?
   mediaSentProductIds            String[]            @default([])
+  unreadCount                  Int                 @default(0)
   order                        Order?
   messages                     Message[]
   createdAt                    DateTime            @default(now())
