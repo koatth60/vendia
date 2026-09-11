@@ -51,6 +51,7 @@ model Business {
   paymentMethods           PaymentMethod[]
   aiUsageLogs              AiUsageLog[]
   faqEntries               FaqEntry[]
+  learnedFaqCandidates     LearnedFaqCandidate[]
   orders                   Order[]
   teamMembers              TeamMember[]
   createdAt                DateTime        @default(now())
@@ -138,6 +139,32 @@ model FaqEntry {
   answer     String
   active     Boolean  @default(true)
   createdAt  DateTime @default(now())
+}
+
+enum LearnedFaqCandidateStatus {
+  PENDING
+  APPROVED
+  DISCARDED
+}
+
+// A {question, answer} pair captured from a resolved ask_owner exchange - the owner already answered
+// a customer's question once for real, this surfaces it as a suggested FaqEntry instead of discarding
+// it after that one use. Never auto-published: stays PENDING until the owner approves it (possibly
+// editing the wording first) from the admin panel. `occurrences` tracks how many times a
+// near-duplicate question showed up before being reviewed, as a demand signal.
+model LearnedFaqCandidate {
+  id             String                    @id @default(cuid())
+  business       Business                  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  businessId     String
+  question       String
+  answer         String
+  conversationId String?
+  occurrences    Int                       @default(1)
+  status         LearnedFaqCandidateStatus @default(PENDING)
+  createdAt      DateTime                  @default(now())
+  updatedAt      DateTime                  @updatedAt
+
+  @@index([businessId, status])
 }
 
 model KeyRequest {

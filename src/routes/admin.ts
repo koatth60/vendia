@@ -36,6 +36,7 @@ import { extractSaleDetails } from "../ai/extractSale";
 import { deepseek, DEEPSEEK_MODEL } from "../ai/client";
 import { getAnalyticsSummary } from "../analytics/service";
 import { listFaqEntries, createFaqEntry, updateFaqEntry, deleteFaqEntry } from "../catalog/faq";
+import { listPendingCandidates, approveCandidate, discardCandidate } from "../catalog/learnedFaq";
 import {
   listOrdersForBusiness,
   getOrderForBusiness,
@@ -322,6 +323,34 @@ adminRouter.put("/api/faq/:id", requireOwner, async (req, res) => {
 adminRouter.delete("/api/faq/:id", requireOwner, async (req, res) => {
   await deleteFaqEntry(businessIdOf(req), String(req.params.id));
   res.status(204).send();
+});
+
+adminRouter.get("/api/faq-candidates", async (req, res) => {
+  const candidates = await listPendingCandidates(businessIdOf(req));
+  res.json(candidates);
+});
+
+adminRouter.post("/api/faq-candidates/:id/approve", requireOwner, async (req, res) => {
+  const { question, answer } = req.body;
+  if (!question || !answer) {
+    res.status(400).json({ error: "Faltan la pregunta o la respuesta" });
+    return;
+  }
+  try {
+    const entry = await approveCandidate(businessIdOf(req), String(req.params.id), { question, answer });
+    res.status(201).json(entry);
+  } catch (error) {
+    res.status(404).json({ error: error instanceof Error ? error.message : "No se pudo aprobar la sugerencia" });
+  }
+});
+
+adminRouter.post("/api/faq-candidates/:id/discard", requireOwner, async (req, res) => {
+  try {
+    await discardCandidate(businessIdOf(req), String(req.params.id));
+    res.status(204).send();
+  } catch (error) {
+    res.status(404).json({ error: error instanceof Error ? error.message : "No se pudo descartar la sugerencia" });
+  }
 });
 
 adminRouter.get("/api/team", requireOwner, async (req, res) => {

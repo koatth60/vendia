@@ -23,6 +23,7 @@ import { analyzeCustomerImage } from "../ai/vision";
 import { transcribeAudio } from "../ai/transcription";
 import { checkPlanCap } from "../ai/usage";
 import { createOrder, askForCsat, recordCsatReply, type ResolvedOrderItem } from "../orders/service";
+import { recordAskOwnerResolution } from "../catalog/learnedFaq";
 
 export const whatsappRouter = Router();
 
@@ -92,6 +93,10 @@ export async function handleOwnerReply(
     await recordMessage(businessId, pendingQuestion.conversationId, "ASSISTANT", formattedAnswer);
     await clearPendingOwnerQuestion(pendingQuestion.questionId);
     await setHumanControl(businessId, pendingQuestion.conversationId, false);
+    // The owner just answered a real customer question for the first time - surface it as a suggested
+    // FAQ entry instead of discarding it after this one use (never auto-published, just queued for
+    // review in the admin panel).
+    await recordAskOwnerResolution(businessId, pendingQuestion.question, answerText, pendingQuestion.conversationId);
     await sendTextMessage(credentials, ownerPhone, "Listo, le reenvie tu respuesta al cliente ✅");
     return;
   }

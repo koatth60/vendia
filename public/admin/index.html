@@ -648,6 +648,11 @@
           <div class="panel-subtitle">Politicas de envio, garantia, cambios, horarios: lo que el bot debe saber responder sin inventar.</div>
         </div>
       </div>
+      <div class="card" id="faq-candidates-card" hidden>
+        <div class="panel-title" style="font-size:15px;">✨ Sugerencias aprendidas</div>
+        <p style="font-size:13px; color:var(--muted); margin-top:4px;">Preguntas que el bot no supo responder y que ya le contestaste directamente al cliente por WhatsApp. Revisa, ajusta si hace falta, y agrégalas al FAQ para que el bot las sepa la próxima vez.</p>
+        <div id="faq-candidates-list" style="display:flex; flex-direction:column; gap:10px;"></div>
+      </div>
       <div class="card">
         <p style="font-size:13px; color:var(--muted); margin-top:0;">El bot va a buscar acá cuando el cliente pregunte algo que no sea sobre un producto puntual ni sobre formas de pago.</p>
         <label>Pregunta</label>
@@ -2102,6 +2107,77 @@ async function deleteFaqEntry(id) {
   }
 }
 
+// Sugerencias aprendidas: cada fila trae sus propios campos editables (no reutiliza el formulario de
+// arriba) para que "aprobar" sea una sola acción autocontenida, sin tener que rastrear "cuál sugerencia
+// estoy editando ahora" en estado compartido.
+function candidateRowHtml(c) {
+  const freq = c.occurrences > 1
+    ? `<span class="unread-badge" style="background:var(--brand); margin-bottom:8px;">preguntado ${c.occurrences} veces</span>`
+    : '';
+  return `
+    <div style="padding:12px; border:1px solid var(--border); border-radius:var(--radius-md);" data-candidate-id="${c.id}">
+      ${freq}
+      <label style="font-size:12px;">Pregunta</label>
+      <input class="candidate-question" value="${escapeHtml(c.question)}" />
+      <label style="font-size:12px;">Respuesta</label>
+      <textarea class="candidate-answer" rows="2">${escapeHtml(c.answer)}</textarea>
+      <div class="actions-row" style="margin-top:8px;">
+        <button class="btn-secondary" onclick="discardFaqCandidate('${c.id}')">Descartar</button>
+        <button class="btn-primary" onclick="approveFaqCandidate('${c.id}')">Agregar a FAQ</button>
+      </div>
+    </div>
+  `;
+}
+
+async function loadFaqCandidates() {
+  const card = document.getElementById('faq-candidates-card');
+  const container = document.getElementById('faq-candidates-list');
+  try {
+    const res = await apiFetch('/admin/api/faq-candidates');
+    const candidates = await res.json();
+    if (!Array.isArray(candidates) || candidates.length === 0) {
+      card.hidden = true;
+      return;
+    }
+    card.hidden = false;
+    container.innerHTML = candidates.map(candidateRowHtml).join('');
+  } catch {
+    // silent - this is a nice-to-have panel, not worth a visible error banner if it fails to load
+  }
+}
+
+async function approveFaqCandidate(id) {
+  const row = document.querySelector(`[data-candidate-id="${id}"]`);
+  if (!row) return;
+  const question = row.querySelector('.candidate-question').value.trim();
+  const answer = row.querySelector('.candidate-answer').value.trim();
+  if (!question || !answer) {
+    setStatus('Completá la pregunta y la respuesta', true);
+    return;
+  }
+  try {
+    await apiFetch(`/admin/api/faq-candidates/${id}/approve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question, answer }),
+    });
+    setStatus('Agregada al FAQ ✓');
+    loadFaqCandidates();
+    loadFaqEntries();
+  } catch (err) {
+    setStatus(`No se pudo agregar: ${err.message}`, true);
+  }
+}
+
+async function discardFaqCandidate(id) {
+  try {
+    await apiFetch(`/admin/api/faq-candidates/${id}/discard`, { method: 'POST' });
+    loadFaqCandidates();
+  } catch (err) {
+    setStatus(`No se pudo descartar: ${err.message}`, true);
+  }
+}
+
 const shipComposerFiles = {};
 
 function orderCardTop(o) {
@@ -2710,6 +2786,7 @@ async function boot() {
   loadPaymentMethods();
   loadConversations();
   loadFaqEntries();
+  loadFaqCandidates();
   loadOrders();
   loadAnalytics();
   loadAiUsage();

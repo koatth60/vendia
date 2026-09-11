@@ -141,6 +141,33 @@ test("handleOwnerReply still resolves correctly via an explicit quoted message i
   }
 });
 
+test("handleOwnerReply queues the resolved ask_owner exchange as a learned FAQ candidate", async () => {
+  const { customer, conversation } = await makeCustomerAndConversation();
+  const wamid = `wamid.q-${randomUUID()}`;
+  await prisma.pendingOwnerQuestion.create({
+    data: { conversationId: conversation.id, wamid, question: "Tienen envio a Barranquilla?" },
+  });
+
+  try {
+    await handleOwnerReply(businessId, credentials, "573000000001", {
+      type: "text",
+      context: { id: wamid },
+      text: { body: "Si, llega en 4 dias" },
+    });
+
+    const candidate = await prisma.learnedFaqCandidate.findFirst({ where: { businessId, question: "Tienen envio a Barranquilla?" } });
+    assert.ok(candidate, "resolving an ask_owner question should queue it as a suggested FAQ entry");
+    assert.equal(candidate!.answer, "Si, llega en 4 dias");
+    assert.equal(candidate!.status, "PENDING");
+  } finally {
+    await prisma.learnedFaqCandidate.deleteMany({ where: { businessId } });
+    await prisma.pendingOwnerQuestion.deleteMany({ where: { conversationId: conversation.id } });
+    await prisma.message.deleteMany({ where: { conversationId: conversation.id } });
+    await prisma.conversation.deleteMany({ where: { id: conversation.id } });
+    await prisma.customer.deleteMany({ where: { id: customer.id } });
+  }
+});
+
 test("handleOwnerReply tells the owner nothing is pending when there's zero open items and no quote", async () => {
   await handleOwnerReply(businessId, credentials, "573000000001", {
     type: "text",
