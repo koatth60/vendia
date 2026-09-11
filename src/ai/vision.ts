@@ -1,33 +1,10 @@
 import { deepseek, DEEPSEEK_VISION_MODEL } from "./client";
 import { logAiUsage } from "./usage";
+import { escalateToAnthropicVision } from "./visionEscalation";
+import { buildVisionPrompt } from "./visionPrompt";
 
-const VISION_PROMPT = `Estas mirando una imagen que un cliente mando por WhatsApp a un negocio de ventas.
-
-Primero decidi que tipo de imagen es:
-
-1. COMPROBANTE DE PAGO (transferencia bancaria, Nequi, Daviplata, etc): describi en 1-2 frases el monto,
-el metodo/banco y la fecha si se alcanzan a leer. Si el monto o los datos no se leen bien, decilo
-explicitamente.
-
-2. PRODUCTO, imagen CLARA (foto de un producto, captura de un live/video, captura de otro chat o red
-social mostrando un articulo, etc, donde SI se distinguen bien los detalles): el cliente probablemente
-esta preguntando "es este el que tienen?" sin saber el nombre exacto. Describi el articulo en detalle
-visual util para buscarlo en un catalogo: tipo de producto, color(es), forma, material aparente, y
-cualquier texto/marca/modelo visible en la imagen. Se especifico (ej: "reloj inteligente negro, pantalla
-rectangular, correa de silicona" en vez de "un reloj").
-
-3. PRODUCTO, imagen POCO CLARA (se nota que es un producto pero esta borrosa, muy oscura, muy lejos,
-cortada, o con movimiento - no podes describir los detalles con confianza): decilo explicitamente y en
-que consiste el problema (ej: "esta borrosa", "esta muy oscuro", "esta muy lejos para distinguir
-detalles"). No inventes ni adivines detalles que no se ven bien.
-
-4. OTRA COSA (persona, paisaje, meme, etc sin relacion con comprobantes ni productos): decilo en una
-frase corta.
-
-Empeza la respuesta con "COMPROBANTE:", "PRODUCTO:", "PRODUCTO_POCO_CLARO:" o "OTRO:" segun corresponda,
-seguido de la descripcion. No agregues nada mas.`;
-
-async function analyzeOnce(imageUrl: string, caption: string) {
+async function analyzeOnce(imageUrl: string, caption: string, catalogHint: string) {
+  const prompt = buildVisionPrompt(catalogHint);
   const response = await deepseek.chat.completions.create({
     model: DEEPSEEK_VISION_MODEL,
     max_tokens: 256,
@@ -38,7 +15,7 @@ async function analyzeOnce(imageUrl: string, caption: string) {
           { type: "image_url", image_url: { url: imageUrl } },
           {
             type: "text",
-            text: caption ? `${VISION_PROMPT}\n\nMensaje del cliente junto a la foto: "${caption}"` : VISION_PROMPT,
+            text: caption ? `${prompt}\n\nMensaje del cliente junto a la foto: "${caption}"` : prompt,
           },
         ],
       },
@@ -57,13 +34,28 @@ export async function analyzeCustomerImage(
   businessId: string,
   conversationId: string,
   imageUrl: string,
-  caption: string
+  caption: string,
+  catalogHint = ""
 ): Promise<string> {
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
-      const { text, usage } = await analyzeOnce(imageUrl, caption);
+      const { text, usage } = await analyzeOnce(imageUrl, caption, catalogHint);
       await logAiUsage({ businessId, conversationId, kind: "VISION", model: DEEPSEEK_VISION_MODEL, usage });
-      return text || "No se pudo analizar la imagen.";
+      const result = text || "No se pudo analizar la imagen.";
+
+      // DeepSeek ya se rindio con esta imagen especifica (borrosa/oscura/lejos) - antes de aceptar
+      // eso como respuesta final, le damos una segunda opinion a un modelo de vision mas fuerte. Esto
+      // es lo unico que dispara la llamada a Anthropic (nunca en el caso normal/claro) para no gastar
+      // esa API mas de lo estrictamente necesario.
+      if (result.startsWith("PRODUCTO_POCO_CLARO:")) {
+        const escalated = await escalateToAnthropicVision(businessId, conversationId, imageUrl, caption, catalogHint);
+        if (escalated?.startsWith("PRODUCTO:")) {
+          console.log(`Vision escalada a Anthropic resolvio una imagen que DeepSeek no pudo (conversacion ${conversationId}).`);
+          return escalated;
+        }
+      }
+
+      return result;
     } catch (error) {
       console.error(`Error analizando imagen con DeepSeek vision (intento ${attempt}):`, error);
       if (attempt === 2) {

@@ -315,7 +315,16 @@ function formatConversationRow(c: {
     unreadCount: c.unreadCount,
     customer: { id: c.customer.id, phoneNumber: c.customer.phoneNumber, name: c.customer.name, tags: c.customer.tags },
     lastMessage: last
-      ? { role: last.role, content: last.mediaType === "IMAGE" ? last.content || "📷 Imagen" : last.content, createdAt: last.createdAt }
+      ? {
+          role: last.role,
+          content:
+            last.mediaType === "IMAGE"
+              ? last.content || "📷 Imagen"
+              : last.mediaType === "VIDEO"
+                ? last.content || "🎥 Video"
+                : last.content,
+          createdAt: last.createdAt,
+        }
       : null,
   };
 }

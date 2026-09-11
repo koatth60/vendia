@@ -43,10 +43,13 @@ export async function getPlanUsage(businessId: string) {
 // Peak: 01:00-04:00 y 06:00-10:00 UTC, lunes a viernes (precio x2 sobre off-peak).
 // "deepseek-v4-flash" y "deepseek-v4-flash-vision-exp" son nombres legacy que DeepSeek sigue aceptando -
 // las llamadas se enrutan a su modelo V4.1-Flash pero se cobran al precio Flash (mas barato que antes).
+// claude-haiku-4-5: $1/$5 por 1M tokens input/output (sin cache hit distinto, se usa el mismo
+// precio de cacheMiss para el input - Anthropic no tiene peak pricing como DeepSeek).
 const PRICING = {
   "deepseek-v4-flash": { cacheHit: 0.003, cacheMiss: 0.15, output: 0.6 },
   "deepseek-v4-flash-vision-exp": { cacheHit: 0.003, cacheMiss: 0.15, output: 0.6 },
   "deepseek-v4-pro": { cacheHit: 0.022, cacheMiss: 0.66, output: 1.98 },
+  "claude-haiku-4-5-20251001": { cacheHit: 1.0, cacheMiss: 1.0, output: 5.0 },
 } as const;
 
 function isPeakHour(date: Date): boolean {
@@ -65,7 +68,7 @@ interface DeepSeekUsage {
 export async function logAiUsage(params: {
   businessId: string;
   conversationId?: string;
-  kind: "CHAT" | "VISION";
+  kind: "CHAT" | "VISION" | "VISION_ESCALATION";
   model: keyof typeof PRICING;
   usage: DeepSeekUsage | undefined;
 }): Promise<void> {
@@ -76,8 +79,10 @@ export async function logAiUsage(params: {
   const cacheMissTokens = usage.prompt_cache_miss_tokens ?? 0;
   const outputTokens = usage.completion_tokens ?? 0;
 
+  // Anthropic no tiene peak pricing (eso es exclusivo de DeepSeek) - el multiplicador solo aplica a
+  // modelos deepseek-*, nunca a claude-*.
   const now = new Date();
-  const multiplier = isPeakHour(now) ? 2 : 1;
+  const multiplier = model.startsWith("deepseek-") && isPeakHour(now) ? 2 : 1;
   const prices = PRICING[model];
 
   const costUsd =
@@ -125,7 +130,7 @@ export async function getAiUsageSummary(businessId: string, days = 14) {
   const totalCostUsd = logs.reduce((sum, l) => sum + l.costUsd, 0);
   const totalCalls = logs.length;
   const chatCalls = logs.filter((l) => l.kind === "CHAT").length;
-  const visionCalls = logs.filter((l) => l.kind === "VISION").length;
+  const visionCalls = logs.filter((l) => l.kind === "VISION" || l.kind === "VISION_ESCALATION").length;
   const totalInputTokens = logs.reduce((sum, l) => sum + l.cacheHitTokens + l.cacheMissTokens, 0);
   const totalOutputTokens = logs.reduce((sum, l) => sum + l.outputTokens, 0);
 

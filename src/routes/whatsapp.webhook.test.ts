@@ -51,9 +51,16 @@ beforeEach(() => {
   outgoing = [];
   globalThis.fetch = (async (url: unknown, init?: RequestInit) => {
     if (String(url).includes("graph.facebook.com")) {
-      const body = JSON.parse(String(init?.body ?? "{}"));
-      outgoing.push({ type: body.type, body });
-      return { ok: true, json: async () => ({ messages: [{ id: `wamid.test-${randomUUID()}` }] }) } as Response;
+      if ((init?.method ?? "GET") === "POST") {
+        const body = JSON.parse(String(init?.body ?? "{}"));
+        outgoing.push({ type: body.type, body });
+        return { ok: true, json: async () => ({ messages: [{ id: `wamid.test-${randomUUID()}` }] }) } as Response;
+      }
+      // downloadMedia's metadata GET (src/whatsapp/client.ts) - returns where the actual bytes live.
+      return { ok: true, json: async () => ({ url: "https://fake-cdn.example.com/media.mp4", mime_type: "video/mp4" }) } as Response;
+    }
+    if (String(url).includes("fake-cdn.example.com")) {
+      return { ok: true, arrayBuffer: async () => new TextEncoder().encode("fake video bytes").buffer } as Response;
     }
     return originalFetch(url as never, init);
   }) as typeof fetch;
@@ -152,6 +159,24 @@ test("webhook: a contacts card message is recorded, not silently dropped", async
   });
   assert.ok(message);
   assert.match(message!.content, /contacto/i);
+});
+
+test("webhook: a video message is recorded as VIDEO media and the pipeline keeps going even when frame extraction fails", async () => {
+  // No real ffmpeg/video fixture here (see src/media/videoFrame.test.ts for the real extraction
+  // coverage, which skips without ffmpeg on this machine) - this proves the video branch doesn't
+  // crash the webhook and still lets the bot reply when the analysis step fails, same resilience
+  // already relied on for the image branch's try/catch.
+  await postWebhook({ type: "video", video: { id: "video123" } });
+  await waitForAssistantReply();
+
+  const message = await prisma.message.findFirst({
+    where: { conversation: { customer: { businessId, phoneNumber: customerPhone } }, role: "CUSTOMER" },
+  });
+  assert.ok(message, "the video message must be recorded, not silently dropped");
+  assert.equal(message!.mediaType, "VIDEO");
+
+  const replySent = outgoing.some((o) => o.type === "text");
+  assert.ok(replySent, "the bot should still reply after a video message even if analysis fails");
 });
 
 test("webhook: a reaction (emoji reply) is intentionally NOT recorded as a customer turn", async () => {

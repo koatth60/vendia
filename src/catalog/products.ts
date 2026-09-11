@@ -130,6 +130,21 @@ export async function findConfidentProductMatch(
   return { product: withMedia, ambiguous: false };
 }
 
+// Texto corto para darle contexto de negocio al prompt de vision (src/ai/vision.ts) - sin esto el
+// modelo clasifica la imagen a ciegas, sin saber que buscar. Query liviana (sin media) porque se
+// llama en cada mensaje con imagen/video, no solo cuando hace falta.
+const MAX_CATALOG_HINT_ITEMS = 40;
+
+export async function getCatalogHintText(businessId: string): Promise<string> {
+  const products = await prisma.product.findMany({
+    where: { businessId, active: true },
+    select: { name: true, category: true },
+    take: MAX_CATALOG_HINT_ITEMS,
+  });
+  if (products.length === 0) return "";
+  return products.map((p) => (p.category ? `${p.name} (categoria: ${p.category})` : p.name)).join(", ");
+}
+
 export async function createProduct(
   businessId: string,
   data: {

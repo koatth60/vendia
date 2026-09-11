@@ -11,6 +11,7 @@ export const env = {
   databaseUrl: required("DATABASE_URL"),
   deepseekApiKey: process.env.DEEPSEEK_API_KEY ?? "",
   groqApiKey: process.env.GROQ_API_KEY ?? "",
+  anthropicApiKey: process.env.ANTHROPIC_API_KEY ?? "",
   sessionSecret: process.env.SESSION_SECRET ?? "dev-secret-change-me",
   whatsapp: {
     verifyToken: process.env.WHATSAPP_VERIFY_TOKEN ?? "",

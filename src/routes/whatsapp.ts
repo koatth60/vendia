@@ -24,6 +24,8 @@ import { transcribeAudio } from "../ai/transcription";
 import { checkPlanCap } from "../ai/usage";
 import { createOrder, askForCsat, recordCsatReply, type ResolvedOrderItem } from "../orders/service";
 import { recordAskOwnerResolution } from "../catalog/learnedFaq";
+import { getCatalogHintText } from "../catalog/products";
+import { extractFrame } from "../media/videoFrame";
 
 export const whatsappRouter = Router();
 
@@ -200,7 +202,7 @@ whatsappRouter.post("/webhook", async (req, res) => {
     // through this same filter and get silently dropped with zero trace (no reply, nothing recorded) -
     // a customer sharing a location (delivery address), sticker, document (receipt as PDF), or contact
     // card just got no response at all.
-    const SUPPORTED_MESSAGE_TYPES = new Set(["text", "image", "audio", "interactive", "location", "sticker", "document", "contacts"]);
+    const SUPPORTED_MESSAGE_TYPES = new Set(["text", "image", "video", "audio", "interactive", "location", "sticker", "document", "contacts"]);
     if (!SUPPORTED_MESSAGE_TYPES.has(message.type)) return;
 
     const business = await prisma.business.findUnique({
@@ -246,7 +248,7 @@ whatsappRouter.post("/webhook", async (req, res) => {
     const conversation = await getOrCreateOpenConversation(business.id, customer.id);
 
     let text = "";
-    let media: { s3Key: string; type: "IMAGE" | "AUDIO" } | undefined;
+    let media: { s3Key: string; type: "IMAGE" | "VIDEO" | "AUDIO" } | undefined;
     let imageAnalysis: string | undefined;
 
     if (message.type === "text") {
@@ -257,10 +259,25 @@ whatsappRouter.post("/webhook", async (req, res) => {
         const { key, url } = await uploadMedia(buffer, mimeType, "receipts");
         media = { s3Key: key, type: "IMAGE" };
         text = message.image.caption ?? "";
-        imageAnalysis = await analyzeCustomerImage(business.id, conversation.id, url, text);
+        const catalogHint = await getCatalogHintText(business.id);
+        imageAnalysis = await analyzeCustomerImage(business.id, conversation.id, url, text, catalogHint);
       } catch (error) {
         console.error("No se pudo procesar la imagen entrante:", error);
         text = "[El cliente envio una imagen, pero hubo un problema tecnico y no se pudo procesar. Pedile que la reenvie.]";
+      }
+    } else if (message.type === "video") {
+      try {
+        const { buffer, mimeType } = await downloadMedia(credentials, message.video.id);
+        const { key } = await uploadMedia(buffer, mimeType, "videos");
+        media = { s3Key: key, type: "VIDEO" };
+        text = message.video.caption ?? "";
+        const frame = await extractFrame(buffer);
+        const { url: frameUrl } = await uploadMedia(frame, "image/jpeg", "receipts");
+        const catalogHint = await getCatalogHintText(business.id);
+        imageAnalysis = await analyzeCustomerImage(business.id, conversation.id, frameUrl, text, catalogHint);
+      } catch (error) {
+        console.error("No se pudo procesar el video entrante:", error);
+        text = "[El cliente envio un video, pero hubo un problema tecnico y no se pudo analizar. Pedile que mande una foto del producto en vez de video.]";
       }
     } else if (message.type === "audio") {
       try {
@@ -317,11 +334,11 @@ whatsappRouter.post("/webhook", async (req, res) => {
       return;
     }
 
-    // An image message is very likely a payment receipt for a purchase already in progress - cutting
-    // the customer off here mid-close (right when they send proof of a payment already made) is worse
-    // than letting one extra message through, so the cap only gates plain text/audio turns.
+    // An image/video message is very likely a payment receipt (or product photo mid-close) for a
+    // purchase already in progress - cutting the customer off here mid-close is worse than letting
+    // one extra message through, so the cap only gates plain text/audio turns.
     const capStatus =
-      message.type === "image"
+      message.type === "image" || message.type === "video"
         ? { capped: false as const, justCrossed: false, messageCap: null, planTier: business.planTier }
         : await checkPlanCap(business.id);
     if (capStatus.capped) {

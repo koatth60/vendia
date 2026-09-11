@@ -581,7 +581,7 @@
           </div>
         </div>
         <label>Descripción</label>
-        <textarea id="p-description" placeholder="Detalles que la IA usará para responder preguntas de clientes"></textarea>
+        <textarea id="p-description" placeholder="Detalles que la IA usará para responder preguntas de clientes. Incluye color, forma y material (ej: 'Audífono inalámbrico negro, forma de gota, sin cable visible') - esto ayuda al bot a reconocer el producto en fotos que manden los clientes."></textarea>
         <div class="grid-3">
           <div>
             <label>Precio</label>
@@ -1517,9 +1517,12 @@ function closeImageLightbox() {
 
 function messageBubbleHtml(m) {
   const isAudio = m.mediaUrl && m.mediaType === 'AUDIO';
+  const isVideo = m.mediaUrl && m.mediaType === 'VIDEO';
   const img = isAudio
     ? `<audio src="${m.mediaUrl}" controls style="margin-bottom:4px;"></audio>`
-    : m.mediaUrl ? `<img src="${m.mediaUrl}" style="max-width:220px; border-radius:6px; display:block; margin-bottom:4px; cursor:zoom-in;" onclick="openImageLightbox('${m.mediaUrl}')" />` : '';
+    : isVideo
+      ? `<video src="${m.mediaUrl}" controls style="max-width:220px; border-radius:6px; display:block; margin-bottom:4px;"></video>`
+      : m.mediaUrl ? `<img src="${m.mediaUrl}" style="max-width:220px; border-radius:6px; display:block; margin-bottom:4px; cursor:zoom-in;" onclick="openImageLightbox('${m.mediaUrl}')" />` : '';
   const time = new Date(m.createdAt).toLocaleString('es-CO', { hour: '2-digit', minute: '2-digit' });
   return `<div class="bubble bubble-${m.role}${isAudio ? ' bubble-has-audio' : ''}">${img}<span class="bubble-text">${formatMessageText(m.content)}</span><span class="bubble-time">${time}</span></div>`;
 }
@@ -2737,7 +2740,10 @@ function initRealtime() {
     } else {
       setRowUnreadCount(conversationId, unreadCount);
     }
-    const previewText = message.mediaType === 'IMAGE' ? (message.content || '📷 Imagen') : message.content;
+    const previewText =
+      message.mediaType === 'IMAGE' ? (message.content || '📷 Imagen')
+      : message.mediaType === 'VIDEO' ? (message.content || '🎥 Video')
+      : message.content;
     const bumped = bumpConversationRow(conversationId, previewText, message.role === 'ASSISTANT', message.createdAt);
     if (!bumped) loadConversations();
   });

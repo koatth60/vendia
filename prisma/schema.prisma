@@ -313,6 +313,7 @@ enum MessageRole {
 enum AiUsageKind {
   CHAT
   VISION
+  VISION_ESCALATION
 }
 
 model AiUsageLog {
