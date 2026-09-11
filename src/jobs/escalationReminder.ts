@@ -27,7 +27,9 @@ export async function runEscalationReminderJob(): Promise<void> {
     };
 
     for (const pending of dueQuestions) {
-      const text = `Recordatorio: todavia no respondiste esta pregunta de ${pending.customer.name || pending.customer.phoneNumber}, sigue sin poder hablar con el bot:\n\n"${pending.question}"`;
+      // No newlines - the onix_owner_alert template rejects them (WhatsApp error 132018), so a
+      // multi-line body always fell through to the plain-text fallback instead of the real template.
+      const text = `Recordatorio: todavia no respondiste esta pregunta de ${pending.customer.name || pending.customer.phoneNumber}, sigue sin poder hablar con el bot: "${pending.question}"`;
       try {
         const wamid = await sendOwnerAlert(credentials, business.contactPhone, text);
         await recordOwnerMessage(business.id, { direction: "OUT", body: text, success: Boolean(wamid) });
