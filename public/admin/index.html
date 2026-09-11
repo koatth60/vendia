@@ -681,7 +681,7 @@
               <div id="modal-composer" style="display:none; flex-direction:column; gap:6px; padding:12px; border-top:1px solid var(--border); background:#fff;">
                 <div id="modal-composer-preview" style="display:none; align-items:center; gap:8px; font-size:12px; color:var(--muted);"></div>
                 <div style="display:flex; gap:8px;">
-                  <input id="modal-composer-file" type="file" accept="image/*,video/*" style="display:none;" onchange="onComposerFileChange(this)" />
+                  <input id="modal-composer-file" type="file" accept="image/jpeg,image/png,video/*" style="display:none;" onchange="onComposerFileChange(this)" />
                   <button class="btn-secondary" type="button" title="Adjuntar foto o video" onclick="document.getElementById('modal-composer-file').click()">📎</button>
                   <input id="modal-composer-input" type="text" placeholder="Escribe como el negocio..." style="flex:1;" onkeydown="if(event.key==='Enter') sendManualMessage();" />
                   <button class="btn-primary" onclick="sendManualMessage()">Enviar</button>
@@ -1070,7 +1070,7 @@ function renderCard(p) {
         ${thumbs}
         <label class="thumb-add">
           +
-          <input type="file" accept="image/*,video/*" onchange="uploadMedia('${p.id}', this)" />
+          <input type="file" accept="image/jpeg,image/png,video/*" onchange="uploadMedia('${p.id}', this)" />
         </label>
       </div>
       <div class="product-body">
@@ -1891,7 +1891,7 @@ function pendingOrderCard(o) {
       <div class="ship-composer" id="ship-composer-${o.id}" style="display:none;">
         <textarea id="ship-note-${o.id}" placeholder="Mensaje para el cliente (opcional) - ej: número de guía, transportadora..."></textarea>
         <div class="ship-composer-row">
-          <input type="file" id="ship-file-${o.id}" accept="image/*,video/*" style="display:none;" onchange="onShipFileChange('${o.id}', this)" />
+          <input type="file" id="ship-file-${o.id}" accept="image/jpeg,image/png,video/*" style="display:none;" onchange="onShipFileChange('${o.id}', this)" />
           <button class="btn-secondary" type="button" onclick="document.getElementById('ship-file-${o.id}').click()">📎 Adjuntar guía/foto</button>
           <span id="ship-file-name-${o.id}" style="font-size:12px; color:var(--muted);"></span>
           <div style="flex:1;"></div>
@@ -1956,9 +1956,14 @@ async function confirmShipOrder(id) {
   formData.append('note', note);
   if (file) formData.append('file', file);
   try {
-    await apiFetch(`/admin/api/orders/${id}/ship`, { method: 'PUT', body: formData });
+    const res = await apiFetch(`/admin/api/orders/${id}/ship`, { method: 'PUT', body: formData });
+    const data = await res.json();
     delete shipComposerFiles[id];
-    setStatus('Pedido marcado como enviado ✓');
+    if (data.mediaError) {
+      setStatus(`Mensaje enviado, pero el archivo adjunto falló: ${data.mediaError}`, true);
+    } else {
+      setStatus('Pedido marcado como enviado ✓');
+    }
     loadOrders();
   } catch (err) {
     setStatus(`No se pudo marcar el envío: ${err.message}`, true);

@@ -51,6 +51,13 @@ function businessIdOf(req: { session: { businessId?: string } }): string {
   return req.session.businessId as string;
 }
 
+// WhatsApp's Cloud API rejects image/gif outright ("Unsupported Image mime type image/gif") - and it
+// does so asynchronously, after already accepting the send request, so the caller has no synchronous
+// error to react to. Block it at upload time instead of letting it silently fail delivery later.
+function isUnsupportedImageType(mimetype: string): boolean {
+  return mimetype === "image/gif";
+}
+
 adminRouter.get("/api/business", async (req, res) => {
   const business = await prisma.business.findUnique({ where: { id: businessIdOf(req) } });
   if (!business) {
@@ -231,6 +238,10 @@ adminRouter.post("/api/products/:id/media", upload.single("file"), async (req, r
     res.status(400).json({ error: "No file uploaded" });
     return;
   }
+  if (isUnsupportedImageType(req.file.mimetype)) {
+    res.status(400).json({ error: "Formato GIF no soportado todavía - usa JPG, PNG o video." });
+    return;
+  }
 
   const type = req.file.mimetype.startsWith("video") ? "VIDEO" : "IMAGE";
   const folder = type === "VIDEO" ? "videos" : "images";
@@ -385,6 +396,11 @@ adminRouter.put("/api/orders/:id/ship", upload.single("file"), async (req, res) 
   const note = String(req.body?.note ?? "").trim();
   const file = req.file;
 
+  if (file && isUnsupportedImageType(file.mimetype)) {
+    res.status(400).json({ error: "Formato GIF no soportado todavía - usa JPG, PNG o video." });
+    return;
+  }
+
   const order = await getOrderForBusiness(businessId, String(req.params.id));
   if (!order) {
     res.status(404).json({ error: "Pedido no encontrado" });
@@ -403,25 +419,39 @@ adminRouter.put("/api/orders/:id/ship", upload.single("file"), async (req, res) 
 
   const formattedNote = note ? formatForWhatsapp(note) : "";
   const defaultMessage = "¡Tu pedido fue enviado! 📦 Cualquier duda me escribes.";
+
+  // The text notification is the real guarantee here, sent as its own message instead of bundled as a
+  // media caption - WhatsApp accepts a media send request synchronously (giving a wamid) and only fails
+  // it later, asynchronously, if the file itself is rejected (wrong format, download timeout, etc). With
+  // a caption baked into that message, a media failure used to take the whole notification down with it
+  // and the order still got marked "Enviado" as if the customer had heard nothing.
+  const messageText = formattedNote || defaultMessage;
+  const textWamid = await sendTextMessage(credentials, order.customer.phoneNumber, messageText);
+  await recordMessage(order.conversationId, "ASSISTANT", messageText, textWamid || undefined);
+
   let mediaS3Key: string | null = null;
   let mediaType: string | null = null;
+  let mediaError: string | null = null;
 
   if (file) {
-    const type = file.mimetype.startsWith("video") ? "VIDEO" : "IMAGE";
-    const folder = type === "VIDEO" ? "videos" : "images";
-    const { key, url } = await uploadMedia(file.buffer, file.mimetype, folder);
-    mediaS3Key = key;
-    mediaType = type;
-    const caption = formattedNote || defaultMessage;
-    const wamid =
-      type === "IMAGE"
-        ? await sendImageMessage(credentials, order.customer.phoneNumber, url, caption)
-        : await sendVideoMessage(credentials, order.customer.phoneNumber, url, caption);
-    await recordMessage(order.conversationId, "ASSISTANT", caption, wamid || undefined, { s3Key: key, type });
-  } else {
-    const text = formattedNote || defaultMessage;
-    const wamid = await sendTextMessage(credentials, order.customer.phoneNumber, text);
-    await recordMessage(order.conversationId, "ASSISTANT", text, wamid || undefined);
+    try {
+      const type = file.mimetype.startsWith("video") ? "VIDEO" : "IMAGE";
+      const folder = type === "VIDEO" ? "videos" : "images";
+      const { key, url } = await uploadMedia(file.buffer, file.mimetype, folder);
+      const wamid =
+        type === "IMAGE"
+          ? await sendImageMessage(credentials, order.customer.phoneNumber, url)
+          : await sendVideoMessage(credentials, order.customer.phoneNumber, url);
+      mediaS3Key = key;
+      mediaType = type;
+      await recordMessage(order.conversationId, "ASSISTANT", type === "IMAGE" ? "[Foto]" : "[Video]", wamid || undefined, {
+        s3Key: key,
+        type,
+      });
+    } catch (error) {
+      mediaError = error instanceof Error ? error.message : "No se pudo enviar el archivo adjunto";
+      console.error("Error enviando adjunto de envio de pedido:", error);
+    }
   }
 
   await markOrderShipped(businessId, String(req.params.id), {
@@ -429,7 +459,7 @@ adminRouter.put("/api/orders/:id/ship", upload.single("file"), async (req, res) 
     mediaS3Key,
     mediaType,
   });
-  res.json({ ok: true });
+  res.json({ ok: true, mediaError });
 });
 
 adminRouter.put("/api/orders/:id/cancel", async (req, res) => {
@@ -477,6 +507,10 @@ adminRouter.post("/api/conversations/:id/messages", upload.single("file"), async
   const file = req.file;
   if (!text && !file) {
     res.status(400).json({ error: "Falta el texto o el archivo" });
+    return;
+  }
+  if (file && isUnsupportedImageType(file.mimetype)) {
+    res.status(400).json({ error: "Formato GIF no soportado todavía - usa JPG, PNG o video." });
     return;
   }
 
