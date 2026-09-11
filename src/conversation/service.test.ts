@@ -5,7 +5,9 @@ import { prisma } from "../db/client";
 import { recordMessage, getConversationForBusiness } from "./service";
 
 // Regression coverage for the unread-message-count feature: the admin panel badges each conversation
-// with how many CUSTOMER messages haven't been viewed yet, cleared as a side effect of opening it.
+// with how many CUSTOMER messages haven't been viewed yet, but ONLY while the bot has stopped
+// answering (humanControl:true) - while the bot is handling a conversation on its own, every customer
+// message already gets an automatic reply, so it shouldn't count as needing the owner's attention.
 
 let businessId: string;
 let customerId: string;
@@ -26,8 +28,19 @@ after(async () => {
   await prisma.business.deleteMany({ where: { id: businessId } });
 });
 
-test("recordMessage increments unreadCount for CUSTOMER messages but not for ASSISTANT/SYSTEM ones", async () => {
-  const conversation = await prisma.conversation.create({ data: { customerId } });
+test("recordMessage does NOT bump unreadCount for CUSTOMER messages while the bot is handling the conversation", async () => {
+  const conversation = await prisma.conversation.create({ data: { customerId, humanControl: false } });
+
+  await recordMessage(businessId, conversation.id, "CUSTOMER", "hola, cuanto cuesta el smartwatch?");
+  await recordMessage(businessId, conversation.id, "ASSISTANT", "cuesta $145.000 COP");
+  await recordMessage(businessId, conversation.id, "CUSTOMER", "genial, lo quiero");
+
+  const fresh = await prisma.conversation.findUniqueOrThrow({ where: { id: conversation.id } });
+  assert.equal(fresh.unreadCount, 0, "bot-handled traffic must not inflate the unread badge");
+});
+
+test("recordMessage increments unreadCount for CUSTOMER messages while humanControl is on, but not for ASSISTANT/SYSTEM ones", async () => {
+  const conversation = await prisma.conversation.create({ data: { customerId, humanControl: true } });
 
   await recordMessage(businessId, conversation.id, "CUSTOMER", "hola");
   let fresh = await prisma.conversation.findUniqueOrThrow({ where: { id: conversation.id } });
@@ -35,7 +48,7 @@ test("recordMessage increments unreadCount for CUSTOMER messages but not for ASS
 
   await recordMessage(businessId, conversation.id, "ASSISTANT", "hola, en que te ayudo?");
   fresh = await prisma.conversation.findUniqueOrThrow({ where: { id: conversation.id } });
-  assert.equal(fresh.unreadCount, 1, "an assistant reply must not bump the unread counter");
+  assert.equal(fresh.unreadCount, 1, "a reply (bot or the owner typing from the panel) must not bump the unread counter");
 
   await recordMessage(businessId, conversation.id, "CUSTOMER", "quiero el smartwatch");
   fresh = await prisma.conversation.findUniqueOrThrow({ where: { id: conversation.id } });
@@ -43,7 +56,7 @@ test("recordMessage increments unreadCount for CUSTOMER messages but not for ASS
 });
 
 test("getConversationForBusiness resets unreadCount to 0 as a side effect of viewing it", async () => {
-  const conversation = await prisma.conversation.create({ data: { customerId } });
+  const conversation = await prisma.conversation.create({ data: { customerId, humanControl: true } });
   await recordMessage(businessId, conversation.id, "CUSTOMER", "primer mensaje");
   await recordMessage(businessId, conversation.id, "CUSTOMER", "segundo mensaje");
 

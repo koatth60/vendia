@@ -52,13 +52,26 @@ export async function recordMessage(
       relatedProductId,
     },
   });
-  // Only a CUSTOMER message counts as "unread" for the admin - the bot/human replying doesn't need
-  // its own read-tracking, it's already the response to whatever was unread.
-  const updatedConversation = await prisma.conversation.update({
+  // A CUSTOMER message only counts as "unread" while the bot has stopped answering
+  // (humanControl:true - escalated via flag_conversation_intent/ask_owner, or the owner took over
+  // manually). While the bot is handling a conversation on its own, every customer message already
+  // gets an automatic reply - counting those as needing the owner's attention would make the badge
+  // climb on ordinary bot-handled traffic and drown out the conversations that actually need a human.
+  const touched = await prisma.conversation.update({
     where: { id: conversationId },
-    data: { updatedAt: new Date(), ...(role === "CUSTOMER" ? { unreadCount: { increment: 1 } } : {}) },
-    select: { unreadCount: true },
+    data: { updatedAt: new Date() },
+    select: { humanControl: true, unreadCount: true },
   });
+
+  let unreadCount = touched.unreadCount;
+  if (role === "CUSTOMER" && touched.humanControl) {
+    const bumped = await prisma.conversation.update({
+      where: { id: conversationId },
+      data: { unreadCount: { increment: 1 } },
+      select: { unreadCount: true },
+    });
+    unreadCount = bumped.unreadCount;
+  }
 
   emitNewMessage(
     businessId,
@@ -71,7 +84,7 @@ export async function recordMessage(
       mediaType: message.mediaType,
       createdAt: message.createdAt,
     },
-    updatedConversation.unreadCount
+    unreadCount
   );
 }
 
