@@ -75,7 +75,7 @@ function restoreFetch() {
 
 async function runTurn(customerText: string) {
   const conversation = await prisma.conversation.create({ data: { customerId } });
-  await recordMessage(conversation.id, "CUSTOMER", customerText);
+  await recordMessage(businessId, conversation.id, "CUSTOMER", customerText);
 
   const context: ToolContext = {
     businessId,

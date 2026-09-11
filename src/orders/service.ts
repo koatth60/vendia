@@ -2,6 +2,7 @@ import { prisma } from "../db/client";
 import { findConfidentProductMatch } from "../catalog/products";
 import { sendInteractiveButtonsMessage, type WhatsappCredentials } from "../whatsapp/client";
 import { getPresignedMediaUrl } from "../media/s3";
+import { emitOrderNew, emitOrderUpdated } from "../realtime/events";
 
 export interface ResolvedOrderItem {
   productId: string;
@@ -83,7 +84,7 @@ export async function createOrder(params: {
   // catalog and never find out until it physically ran out. Decrement in the same transaction as the
   // order so a real sale always moves the counter, clamped at 0 instead of going negative (an oversell
   // is still worth recording, but a negative on-hand count is just confusing in the admin panel).
-  return prisma.$transaction(async (tx) => {
+  const createdOrder = await prisma.$transaction(async (tx) => {
     const order = await tx.order.create({
       data: {
         businessId,
@@ -119,6 +120,9 @@ export async function createOrder(params: {
 
     return order;
   });
+
+  emitOrderNew(businessId, createdOrder.id);
+  return createdOrder;
 }
 
 const CSAT_BUTTON_RATINGS: Record<string, number> = { csat_1: 1, csat_2: 2, csat_3: 3 };
@@ -213,7 +217,7 @@ export async function markOrderShipped(
 ) {
   const order = await prisma.order.findFirst({ where: { id: orderId, businessId } });
   if (!order) return null;
-  return prisma.order.update({
+  const updated = await prisma.order.update({
     where: { id: orderId },
     data: {
       fulfillmentStatus: "SHIPPED",
@@ -223,13 +227,17 @@ export async function markOrderShipped(
       shipmentMediaType: data.mediaType || null,
     },
   });
+  emitOrderUpdated(businessId, orderId);
+  return updated;
 }
 
 export async function markOrderCanceled(businessId: string, orderId: string) {
   const order = await prisma.order.findFirst({ where: { id: orderId, businessId } });
   if (!order) return null;
-  return prisma.order.update({
+  const updated = await prisma.order.update({
     where: { id: orderId },
     data: { fulfillmentStatus: "CANCELED", canceledAt: new Date() },
   });
+  emitOrderUpdated(businessId, orderId);
+  return updated;
 }

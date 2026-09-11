@@ -33,6 +33,7 @@ function sleep(ms: number): Promise<void> {
 // when the customer later replies/quotes that specific WhatsApp message, the webhook can look up which
 // product it was and tell the model directly instead of the model having to guess ("¿cual de los dos?").
 async function sendMediaWithSpacing(
+  businessId: string,
   credentials: WhatsappCredentials,
   recipientPhone: string,
   conversationId: string,
@@ -49,6 +50,7 @@ async function sendMediaWithSpacing(
         ? await sendImageMessage(credentials, recipientPhone, item.url)
         : await sendVideoMessage(credentials, recipientPhone, item.url);
     await recordMessage(
+      businessId,
       conversationId,
       "ASSISTANT",
       `[${mediaType === "IMAGE" ? "Foto" : "Video"} de ${productName}]`,
@@ -415,6 +417,7 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
         const alreadySent = conversation?.mediaSentProductIds.includes(product.id) ?? false;
         if (business?.autoSendPhotoOnQuote && !alreadySent) {
           await sendMediaWithSpacing(
+            businessId,
             context.credentials,
             context.recipientPhone,
             context.conversationId,
@@ -464,6 +467,7 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
       }
 
       await sendMediaWithSpacing(
+        businessId,
         context.credentials,
         context.recipientPhone,
         context.conversationId,
@@ -508,7 +512,7 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
     case "update_conversation_status": {
       const status = ["INTERESTED", "QUOTED", "NEGOTIATING"].includes(String(input.status)) ? (input.status as "INTERESTED" | "QUOTED" | "NEGOTIATING") : null;
       if (!status) return { error: "Estado invalido" };
-      await updateConversationStatus(context.conversationId, status);
+      await updateConversationStatus(businessId, context.conversationId, status);
       return { updated: true, status };
     }
     case "flag_conversation_intent": {
@@ -516,7 +520,7 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
       const intent = validIntents.includes(input.intent as (typeof validIntents)[number])
         ? (input.intent as (typeof validIntents)[number])
         : "PQR";
-      await setConversationIntent(context.conversationId, intent);
+      await setConversationIntent(businessId, context.conversationId, intent);
       await setHumanControl(businessId, context.conversationId, true);
 
       const business = await prisma.business.findUnique({ where: { id: businessId } });
@@ -620,7 +624,7 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
         await askForCsat(context.credentials, order.id, context.recipientPhone);
       }
 
-      await updateConversationStatus(context.conversationId, outcome);
+      await updateConversationStatus(businessId, context.conversationId, outcome);
       return { closed: true, outcome };
     }
     default:

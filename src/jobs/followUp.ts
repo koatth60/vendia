@@ -30,7 +30,7 @@ export async function runFollowUpJob(): Promise<void> {
           business.followUpTemplateName!,
           business.followUpTemplateLanguage
         );
-        await recordMessage(conversation.id, "ASSISTANT", `[Plantilla de seguimiento enviada: ${business.followUpTemplateName}]`);
+        await recordMessage(business.id, conversation.id, "ASSISTANT", `[Plantilla de seguimiento enviada: ${business.followUpTemplateName}]`);
         await markFollowUpSent(conversation.id);
       } catch (error) {
         console.error(`No se pudo enviar seguimiento para conversacion ${conversation.id}:`, error);

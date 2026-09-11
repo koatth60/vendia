@@ -89,7 +89,7 @@ export async function handleOwnerReply(
     }
     const formattedAnswer = formatForWhatsapp(answerText);
     await sendTextMessage(credentials, pendingQuestion.customer.phoneNumber, formattedAnswer);
-    await recordMessage(pendingQuestion.conversationId, "ASSISTANT", formattedAnswer);
+    await recordMessage(businessId, pendingQuestion.conversationId, "ASSISTANT", formattedAnswer);
     await clearPendingOwnerQuestion(pendingQuestion.questionId);
     await setHumanControl(businessId, pendingQuestion.conversationId, false);
     await sendTextMessage(credentials, ownerPhone, "Listo, le reenvie tu respuesta al cliente ✅");
@@ -136,11 +136,11 @@ export async function handleOwnerReply(
       paymentMethodLabel: draft?.paymentMethodLabel ?? null,
       shippingCost: draft?.shippingCost ?? null,
     });
-    await updateConversationStatus(conversation.id, "SOLD");
+    await updateConversationStatus(businessId, conversation.id, "SOLD");
     await clearPendingConfirmation(conversation.id);
     const customerText = "¡Listo! Tu pago quedo confirmado y tu pedido esta cerrado. Gracias por tu compra 🎉";
     await sendTextMessage(credentials, customerPhone, customerText);
-    await recordMessage(conversation.id, "ASSISTANT", customerText);
+    await recordMessage(businessId, conversation.id, "ASSISTANT", customerText);
     await askForCsat(credentials, order.id, customerPhone);
     await sendTextMessage(credentials, ownerPhone, "Listo, le avise al cliente ✅");
   } else {
@@ -148,7 +148,7 @@ export async function handleOwnerReply(
     const customerText =
       "No logramos confirmar tu pago todavia. ¿Puedes reenviar una foto mas clara del comprobante o confirmar el monto por texto?";
     await sendTextMessage(credentials, customerPhone, customerText);
-    await recordMessage(conversation.id, "ASSISTANT", customerText);
+    await recordMessage(businessId, conversation.id, "ASSISTANT", customerText);
     await sendTextMessage(credentials, ownerPhone, "Listo, le pedi al cliente que reenvie el comprobante.");
   }
 }
@@ -238,7 +238,7 @@ whatsappRouter.post("/webhook", async (req, res) => {
     }
 
     const customer = await getOrCreateCustomer(business.id, from);
-    const conversation = await getOrCreateOpenConversation(customer.id);
+    const conversation = await getOrCreateOpenConversation(business.id, customer.id);
 
     let text = "";
     let media: { s3Key: string; type: "IMAGE" | "AUDIO" } | undefined;
@@ -298,7 +298,7 @@ whatsappRouter.post("/webhook", async (req, res) => {
     }
 
     try {
-      await recordMessage(conversation.id, "CUSTOMER", text, whatsappMessageId, media, imageAnalysis);
+      await recordMessage(business.id, conversation.id, "CUSTOMER", text, whatsappMessageId, media, imageAnalysis);
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
         console.log("Mensaje duplicado de WhatsApp ignorado:", whatsappMessageId);
@@ -323,7 +323,7 @@ whatsappRouter.post("/webhook", async (req, res) => {
       const capText =
         "Por ahora alcanzamos el límite de mensajes de este mes para este negocio. Un asesor te va a contactar en breve para ayudarte manualmente. ¡Gracias por tu paciencia! 🙏";
       await sendTextMessage(credentials, from, capText);
-      await recordMessage(conversation.id, "ASSISTANT", capText);
+      await recordMessage(business.id, conversation.id, "ASSISTANT", capText);
 
       if (capStatus.justCrossed && business.contactPhone) {
         const greeting = business.contactName ? `Hola ${business.contactName}` : "Hola";
@@ -360,7 +360,7 @@ whatsappRouter.post("/webhook", async (req, res) => {
     );
     const formattedReply = formatForWhatsapp(reply);
     await sendTextMessage(credentials, from, formattedReply);
-    await recordMessage(conversation.id, "ASSISTANT", formattedReply);
+    await recordMessage(business.id, conversation.id, "ASSISTANT", formattedReply);
   } catch (error) {
     console.error("Error handling WhatsApp webhook:", error);
   }

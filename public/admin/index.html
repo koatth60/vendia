@@ -845,6 +845,7 @@
     </div>
   </div>
 
+<script src="/socket.io/socket.io.js"></script>
 <script>
 let statusHideTimer = null;
 function setStatus(msg, isError) {
@@ -1429,6 +1430,31 @@ function timeAgo(iso) {
   return `hace ${days} d`;
 }
 
+// Shared between the initial list render and the realtime conversation:new/conversation:updated
+// handlers, so a socket-pushed row looks identical to one loaded via the REST endpoint.
+function conversationRowHtml(c) {
+  const displayName = c.customer.name || c.customer.phoneNumber;
+  const initial = displayName.trim().charAt(0).toUpperCase() || '?';
+  const preview = c.lastMessage
+    ? `${c.lastMessage.role === 'ASSISTANT' ? 'Tú (bot): ' : ''}${escapeHtml(c.lastMessage.content).slice(0, 80)}`
+    : 'Sin mensajes';
+  return `
+    <div class="conv-row${c.id === currentConversationId ? ' active' : ''}" data-conversation-id="${c.id}" onclick="openConversation('${c.id}')">
+      <div class="conv-avatar" style="background:${avatarColor(c.customer.phoneNumber)};">${escapeHtml(initial)}</div>
+      <div class="conv-info">
+        <div class="conv-name">${escapeHtml(displayName)}</div>
+        <div class="conv-preview">${preview}</div>
+      </div>
+      <div class="conv-meta">
+        <div class="conv-time" data-updated-at="${c.updatedAt}">${timeAgo(c.updatedAt)}</div>
+        ${c.humanControl ? '<span class="status-badge" style="background:#fef3c7; color:#92400e;">🙋 En vivo</span>' : ''}
+        ${c.intent ? `<span class="status-badge" style="background:#fee2e2; color:#991b1b;">${INTENT_LABELS[c.intent] || c.intent}</span>` : ''}
+        <span class="status-badge status-${c.status}">${STATUS_LABELS[c.status] || c.status}</span>
+      </div>
+    </div>
+  `;
+}
+
 async function loadConversations() {
   const container = document.getElementById('conversations-list');
   try {
@@ -1441,28 +1467,7 @@ async function loadConversations() {
       return;
     }
 
-    container.innerHTML = conversations.map((c) => {
-      const displayName = c.customer.name || c.customer.phoneNumber;
-      const initial = displayName.trim().charAt(0).toUpperCase() || '?';
-      const preview = c.lastMessage
-        ? `${c.lastMessage.role === 'ASSISTANT' ? 'Tú (bot): ' : ''}${escapeHtml(c.lastMessage.content).slice(0, 80)}`
-        : 'Sin mensajes';
-      return `
-        <div class="conv-row${c.id === currentConversationId ? ' active' : ''}" data-conversation-id="${c.id}" onclick="openConversation('${c.id}')">
-          <div class="conv-avatar" style="background:${avatarColor(c.customer.phoneNumber)};">${escapeHtml(initial)}</div>
-          <div class="conv-info">
-            <div class="conv-name">${escapeHtml(displayName)}</div>
-            <div class="conv-preview">${preview}</div>
-          </div>
-          <div class="conv-meta">
-            <div class="conv-time">${timeAgo(c.updatedAt)}</div>
-            ${c.humanControl ? '<span class="status-badge" style="background:#fef3c7; color:#92400e;">🙋 En vivo</span>' : ''}
-            ${c.intent ? `<span class="status-badge" style="background:#fee2e2; color:#991b1b;">${INTENT_LABELS[c.intent] || c.intent}</span>` : ''}
-            <span class="status-badge status-${c.status}">${STATUS_LABELS[c.status] || c.status}</span>
-          </div>
-        </div>
-      `;
-    }).join('');
+    container.innerHTML = conversations.map(conversationRowHtml).join('');
   } catch (err) {
     container.innerHTML = `<div class="empty-state" style="color:var(--danger);">No se pudieron cargar las conversaciones: ${escapeHtml(err.message)}</div>`;
   }
@@ -1527,9 +1532,12 @@ async function pollConversation() {
   }
 }
 
+// Realtime (Socket.IO) is now the primary delivery path for new messages in the open thread - this
+// poll only survives as a slow reconciliation safety net (missed/dropped socket events), no longer the
+// main mechanism, hence the much longer interval than the old 4s.
 function startConversationPolling() {
   stopConversationPolling();
-  conversationPollTimer = setInterval(pollConversation, 4000);
+  conversationPollTimer = setInterval(pollConversation, 30000);
 }
 
 function stopConversationPolling() {
@@ -2497,6 +2505,74 @@ async function loadRole() {
   });
 }
 
+// Patches the sidebar row in place (preview text + relative time) and bumps it to the top of the
+// list - avoids a full loadConversations() refetch for the common case (a new message on a
+// conversation already visible in the sidebar). Returns false if the row isn't in the DOM yet (a
+// brand-new conversation's first message can arrive before its conversation:new event), so the
+// caller can fall back to a one-off refetch.
+function bumpConversationRow(conversationId, previewText, isAssistant, updatedAtIso) {
+  const row = document.querySelector(`.conv-row[data-conversation-id="${conversationId}"]`);
+  if (!row) return false;
+  const previewEl = row.querySelector('.conv-preview');
+  if (previewEl) previewEl.textContent = `${isAssistant ? 'Tú (bot): ' : ''}${String(previewText ?? '').slice(0, 80)}`;
+  const timeEl = row.querySelector('.conv-time');
+  if (timeEl) {
+    timeEl.dataset.updatedAt = updatedAtIso;
+    timeEl.textContent = timeAgo(updatedAtIso);
+  }
+  const list = document.getElementById('conversations-list');
+  if (list && list.firstElementChild !== row) list.insertBefore(row, list.firstElementChild);
+  return true;
+}
+
+// Socket.IO is the primary realtime channel for the admin panel: new messages, new conversations, and
+// order changes push instantly instead of requiring a manual "↻ Actualizar" click or waiting on a
+// poll. The connect handler (fires on initial load AND on any reconnect after a dropped connection)
+// does one reconciliation refetch so nothing is missed during a gap.
+function initRealtime() {
+  const socket = io();
+
+  socket.on('connect', () => {
+    loadConversations();
+    loadOrders();
+  });
+
+  socket.on('message:new', ({ conversationId, message }) => {
+    if (conversationId === currentConversationId) {
+      renderThreadMessages(document.getElementById('modal-thread'), [message]);
+    }
+    const previewText = message.mediaType === 'IMAGE' ? (message.content || '📷 Imagen') : message.content;
+    const bumped = bumpConversationRow(conversationId, previewText, message.role === 'ASSISTANT', message.createdAt);
+    if (!bumped) loadConversations();
+  });
+
+  socket.on('conversation:new', (c) => {
+    if (document.querySelector(`.conv-row[data-conversation-id="${c.id}"]`)) return;
+    const list = document.getElementById('conversations-list');
+    const emptyState = list.querySelector('.empty-state');
+    if (emptyState) list.innerHTML = '';
+    list.insertAdjacentHTML('afterbegin', conversationRowHtml(c));
+    const countEl = document.getElementById('tab-count-conversations');
+    if (countEl) countEl.textContent = String(document.querySelectorAll('.conv-row').length);
+  });
+
+  socket.on('conversation:updated', (c) => {
+    const row = document.querySelector(`.conv-row[data-conversation-id="${c.id}"]`);
+    if (row) {
+      row.outerHTML = conversationRowHtml(c);
+    } else {
+      loadConversations();
+    }
+    if (c.id === currentConversationId) {
+      renderHandoffState(c.humanControl);
+      updateCloseSaleButtonVisibility(c.status);
+    }
+  });
+
+  socket.on('order:new', loadOrders);
+  socket.on('order:updated', loadOrders);
+}
+
 async function boot() {
   await loadRole();
 
@@ -2516,6 +2592,7 @@ async function boot() {
   loadAnalytics();
   loadAiUsage();
   if (isOwner) loadTeamMembers();
+  initRealtime();
 }
 
 boot();

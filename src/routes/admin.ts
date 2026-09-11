@@ -444,7 +444,7 @@ adminRouter.put("/api/orders/:id/ship", upload.single("file"), async (req, res) 
   // and the order still got marked "Enviado" as if the customer had heard nothing.
   const messageText = formattedNote || defaultMessage;
   const textWamid = await sendTextMessage(credentials, order.customer.phoneNumber, messageText);
-  await recordMessage(order.conversationId, "ASSISTANT", messageText, textWamid || undefined);
+  await recordMessage(businessId, order.conversationId, "ASSISTANT", messageText, textWamid || undefined);
 
   let mediaS3Key: string | null = null;
   let mediaType: string | null = null;
@@ -461,7 +461,7 @@ adminRouter.put("/api/orders/:id/ship", upload.single("file"), async (req, res) 
           : await sendVideoMessage(credentials, order.customer.phoneNumber, url);
       mediaS3Key = key;
       mediaType = type;
-      await recordMessage(order.conversationId, "ASSISTANT", type === "IMAGE" ? "[Foto]" : "[Video]", wamid || undefined, {
+      await recordMessage(businessId, order.conversationId, "ASSISTANT", type === "IMAGE" ? "[Foto]" : "[Video]", wamid || undefined, {
         s3Key: key,
         type,
       });
@@ -558,13 +558,13 @@ adminRouter.post("/api/conversations/:id/messages", upload.single("file"), async
       type === "IMAGE"
         ? await sendImageMessage(credentials, conversation.customer.phoneNumber, url, formattedText || undefined)
         : await sendVideoMessage(credentials, conversation.customer.phoneNumber, url, formattedText || undefined);
-    await recordMessage(String(req.params.id), "ASSISTANT", formattedText || (type === "IMAGE" ? "[Foto]" : "[Video]"), wamid || undefined, {
+    await recordMessage(businessId, String(req.params.id), "ASSISTANT", formattedText || (type === "IMAGE" ? "[Foto]" : "[Video]"), wamid || undefined, {
       s3Key: key,
       type,
     });
   } else {
     const wamid = await sendTextMessage(credentials, conversation.customer.phoneNumber, formattedText);
-    await recordMessage(String(req.params.id), "ASSISTANT", formattedText, wamid || undefined);
+    await recordMessage(businessId, String(req.params.id), "ASSISTANT", formattedText, wamid || undefined);
   }
   await setHumanControl(businessId, String(req.params.id), true);
   await clearAgentRequestFlag(businessId, String(req.params.id));
@@ -661,12 +661,12 @@ adminRouter.post("/api/conversations/:id/close-sale", async (req, res) => {
     paymentMethodLabel,
     shippingCost,
   });
-  await updateConversationStatus(conversation.id, "SOLD");
+  await updateConversationStatus(businessId, conversation.id, "SOLD");
 
   const defaultMessage = "¡Listo! Tu pago quedó confirmado y tu pedido está cerrado. Gracias por tu compra 🎉";
   const text = formatForWhatsapp(customerMessage) || defaultMessage;
   const wamid = await sendTextMessage(credentials, conversation.customer.phoneNumber, text);
-  await recordMessage(conversation.id, "ASSISTANT", text, wamid || undefined);
+  await recordMessage(businessId, conversation.id, "ASSISTANT", text, wamid || undefined);
   await askForCsat(credentials, order.id, conversation.customer.phoneNumber);
 
   res.json({ ok: true, orderId: order.id });

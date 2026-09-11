@@ -1,7 +1,9 @@
 import express from "express";
-import session from "express-session";
+import http from "node:http";
 import path from "path";
 import { env } from "./config/env";
+import { sessionMiddleware } from "./auth/sessionMiddleware";
+import { setupRealtime } from "./realtime/socket";
 import { whatsappRouter } from "./routes/whatsapp";
 import { adminRouter } from "./routes/admin";
 import { authRouter } from "./routes/auth";
@@ -11,19 +13,7 @@ import { runFollowUpJob } from "./jobs/followUp";
 const app = express();
 app.set("trust proxy", 1);
 app.use(express.json());
-app.use(
-  session({
-    secret: env.sessionSecret,
-    resave: false,
-    saveUninitialized: false,
-    cookie: {
-      httpOnly: true,
-      maxAge: 30 * 24 * 60 * 60 * 1000,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-    },
-  })
-);
+app.use(sessionMiddleware);
 
 app.get("/health", (_req, res) => {
   res.json({ status: "ok" });
@@ -37,7 +27,10 @@ app.use("/vendia-admin/api", platformAdminRouter);
 app.use("/vendia-admin", express.static(path.join(__dirname, "..", "public", "vendia-admin")));
 app.use(express.static(path.join(__dirname, "..", "public")));
 
-app.listen(env.port, () => {
+const server = http.createServer(app);
+setupRealtime(server);
+
+server.listen(env.port, () => {
   console.log(`Server listening on port ${env.port}`);
 });
 

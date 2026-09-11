@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "../db/client";
 import { getPresignedMediaUrl } from "../media/s3";
+import { emitNewMessage, emitNewConversation, emitConversationUpdated, type ConversationRow } from "../realtime/events";
 
 export async function getOrCreateCustomer(businessId: string, phoneNumber: string) {
   return prisma.customer.upsert({
@@ -10,7 +11,7 @@ export async function getOrCreateCustomer(businessId: string, phoneNumber: strin
   });
 }
 
-export async function getOrCreateOpenConversation(customerId: string) {
+export async function getOrCreateOpenConversation(businessId: string, customerId: string) {
   const existing = await prisma.conversation.findFirst({
     where: {
       customerId,
@@ -21,12 +22,16 @@ export async function getOrCreateOpenConversation(customerId: string) {
 
   if (existing) return existing;
 
-  return prisma.conversation.create({
+  const conversation = await prisma.conversation.create({
     data: { customerId, status: "NEW" },
+    include: { customer: true },
   });
+  emitNewConversation(businessId, formatConversationRow(conversation));
+  return conversation;
 }
 
 export async function recordMessage(
+  businessId: string,
   conversationId: string,
   role: "CUSTOMER" | "ASSISTANT" | "SYSTEM",
   content: string,
@@ -35,7 +40,7 @@ export async function recordMessage(
   imageAnalysis?: string,
   relatedProductId?: string
 ) {
-  await prisma.message.create({
+  const message = await prisma.message.create({
     data: {
       conversationId,
       role,
@@ -50,6 +55,15 @@ export async function recordMessage(
   await prisma.conversation.update({
     where: { id: conversationId },
     data: { updatedAt: new Date() },
+  });
+
+  emitNewMessage(businessId, conversationId, {
+    id: message.id,
+    role: message.role,
+    content: message.content,
+    mediaUrl: media ? await getPresignedMediaUrl(media.s3Key) : null,
+    mediaType: message.mediaType,
+    createdAt: message.createdAt,
   });
 }
 
@@ -67,13 +81,17 @@ export async function getRelatedProductNameForMessage(whatsappMessageId: string)
 }
 
 export async function updateConversationStatus(
+  businessId: string,
   conversationId: string,
   status: "NEW" | "INTERESTED" | "QUOTED" | "NEGOTIATING" | "SOLD" | "LOST"
 ) {
-  return prisma.conversation.update({
+  const conversation = await prisma.conversation.update({
     where: { id: conversationId },
     data: { status },
+    include: { customer: true },
   });
+  emitConversationUpdated(businessId, formatConversationRow(conversation));
+  return conversation;
 }
 
 export async function saveCustomerName(businessId: string, customerId: string, name: string | null) {
@@ -111,24 +129,31 @@ export async function setCustomerTags(businessId: string, customerId: string, ta
 }
 
 export async function setConversationIntent(
+  businessId: string,
   conversationId: string,
   intent: "PQR" | "DEVOLUCION" | "NO_RECIBIDO" | "SOLICITA_AGENTE"
 ) {
-  return prisma.conversation.update({
+  const conversation = await prisma.conversation.update({
     where: { id: conversationId },
     data: { intent },
+    include: { customer: true },
   });
+  emitConversationUpdated(businessId, formatConversationRow(conversation));
+  return conversation;
 }
 
 export async function setHumanControl(businessId: string, conversationId: string, active: boolean) {
-  const conversation = await prisma.conversation.findFirst({
+  const existing = await prisma.conversation.findFirst({
     where: { id: conversationId, customer: { businessId } },
   });
-  if (!conversation) return null;
-  return prisma.conversation.update({
+  if (!existing) return null;
+  const conversation = await prisma.conversation.update({
     where: { id: conversationId },
     data: { humanControl: active },
+    include: { customer: true },
   });
+  emitConversationUpdated(businessId, formatConversationRow(conversation));
+  return conversation;
 }
 
 // Called only when the OWNER manually takes control from the admin panel (not when the bot itself
@@ -247,6 +272,31 @@ export async function getRecentHistory(conversationId: string, limit = 20) {
   );
 }
 
+// Shared row shape for the conversations sidebar - used both by the REST list endpoint and by the
+// realtime conversation:new/conversation:updated emits, so the two never drift apart.
+function formatConversationRow(c: {
+  id: string;
+  status: string;
+  intent: string | null;
+  humanControl: boolean;
+  updatedAt: Date;
+  customer: { id: string; phoneNumber: string; name: string | null; tags: string[] };
+  messages?: { role: string; content: string; mediaType: string | null; createdAt: Date }[];
+}): ConversationRow {
+  const last = c.messages?.[0];
+  return {
+    id: c.id,
+    status: c.status,
+    intent: c.intent,
+    humanControl: c.humanControl,
+    updatedAt: c.updatedAt,
+    customer: { id: c.customer.id, phoneNumber: c.customer.phoneNumber, name: c.customer.name, tags: c.customer.tags },
+    lastMessage: last
+      ? { role: last.role, content: last.mediaType === "IMAGE" ? last.content || "📷 Imagen" : last.content, createdAt: last.createdAt }
+      : null,
+  };
+}
+
 export async function listConversationsForBusiness(businessId: string) {
   const conversations = await prisma.conversation.findMany({
     where: { customer: { businessId } },
@@ -257,21 +307,7 @@ export async function listConversationsForBusiness(businessId: string) {
     orderBy: { updatedAt: "desc" },
   });
 
-  return conversations.map((c) => ({
-    id: c.id,
-    status: c.status,
-    intent: c.intent,
-    humanControl: c.humanControl,
-    updatedAt: c.updatedAt,
-    customer: { id: c.customer.id, phoneNumber: c.customer.phoneNumber, name: c.customer.name, tags: c.customer.tags },
-    lastMessage: c.messages[0]
-      ? {
-          role: c.messages[0].role,
-          content: c.messages[0].mediaType === "IMAGE" ? c.messages[0].content || "📷 Imagen" : c.messages[0].content,
-          createdAt: c.messages[0].createdAt,
-        }
-      : null,
-  }));
+  return conversations.map(formatConversationRow);
 }
 
 export async function getConversationForBusiness(businessId: string, conversationId: string) {
