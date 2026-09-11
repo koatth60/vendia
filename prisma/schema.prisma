@@ -41,6 +41,7 @@ model Business {
   passwordResetExpiresAt   DateTime?
   capNotifiedAt            DateTime?
   whatsappPhoneNumberId    String?         @unique
+  whatsappBusinessAccountId String?
   whatsappPhoneNumber      String?
   whatsappAccessToken      String?
   followUpTemplateName     String?

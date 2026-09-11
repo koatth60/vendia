@@ -29,6 +29,7 @@ import {
   sendVideoMessage,
   setBusinessProfilePhoto,
   formatForWhatsapp,
+  listApprovedTemplates,
   type WhatsappCredentials,
 } from "../whatsapp/client";
 import { getAiUsageSummary, getPlanUsage, logAiUsage } from "../ai/usage";
@@ -124,6 +125,20 @@ adminRouter.put("/api/business", requireOwner, async (req, res) => {
   });
   const { passwordHash: _hash, whatsappAccessToken: _token, ...safe } = business;
   res.json(safe);
+});
+
+adminRouter.get("/api/whatsapp-templates", async (req, res) => {
+  const business = await prisma.business.findUnique({ where: { id: businessIdOf(req) } });
+  if (!business?.whatsappAccessToken || !business.whatsappBusinessAccountId) {
+    res.json({ templates: [], note: "Falta configurar el WhatsApp Business Account ID de este negocio (lo hace Zaqi desde el panel interno)." });
+    return;
+  }
+  try {
+    const templates = await listApprovedTemplates(business.whatsappAccessToken, business.whatsappBusinessAccountId);
+    res.json({ templates });
+  } catch (error) {
+    res.status(502).json({ templates: [], error: error instanceof Error ? error.message : "No se pudo consultar las plantillas" });
+  }
 });
 
 adminRouter.post("/api/business/profile-photo", requireOwner, upload.single("file"), async (req, res) => {

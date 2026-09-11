@@ -134,6 +134,9 @@
         <input type="text" id="phoneNumber" required autocomplete="off" placeholder="+57 322 8848545" />
         <label>Phone Number ID</label>
         <input type="text" id="phoneNumberId" required autocomplete="off" />
+        <label>WhatsApp Business Account ID (WABA)</label>
+        <input type="text" id="businessAccountId" autocomplete="off" placeholder="Ej: 1400084061566358" />
+        <p style="font-size:12px;color:var(--muted);margin:2px 0 6px;">Lo encuentras en Meta Business Suite → Configuración → Cuentas → Cuentas de WhatsApp. Necesario para poder elegir plantillas aprobadas desde el panel del negocio.</p>
         <label>Access Token</label>
         <input type="text" id="accessToken" required autocomplete="off" placeholder="EAA..." />
         <p style="font-size:12px;color:var(--muted);margin:6px 0 0;">Puede ser el mismo token permanente de otros negocios, si el System User ya tiene esta cuenta de WhatsApp agregada como asset en Meta.</p>
@@ -180,12 +183,12 @@ function renderBusinesses(businesses) {
         <span class="badge ${b.whatsappPhoneNumberId ? 'badge-yes' : 'badge-no'}">${b.whatsappPhoneNumberId ? 'Conectado' : 'Sin conectar'}</span>
         ${b.whatsappPhoneNumber ? `<br><span style="color:var(--muted);font-size:12px;">${escapeHtml(b.whatsappPhoneNumber)}</span>` : ''}
       </td>
-      <td><button class="edit-btn" data-id="${b.id}" data-name="${escapeHtml(b.name)}" data-phone-id="${escapeHtml(b.whatsappPhoneNumberId ?? '')}" data-phone="${escapeHtml(b.whatsappPhoneNumber ?? '')}">${b.whatsappPhoneNumberId ? 'Editar' : 'Conectar'}</button></td>
+      <td><button class="edit-btn" data-id="${b.id}" data-name="${escapeHtml(b.name)}" data-phone-id="${escapeHtml(b.whatsappPhoneNumberId ?? '')}" data-phone="${escapeHtml(b.whatsappPhoneNumber ?? '')}" data-waba-id="${escapeHtml(b.whatsappBusinessAccountId ?? '')}">${b.whatsappPhoneNumberId ? 'Editar' : 'Conectar'}</button></td>
     </tr>
   `).join('');
 
   document.querySelectorAll('.edit-btn').forEach((btn) => {
-    btn.addEventListener('click', () => openModal(btn.dataset.id, btn.dataset.name, btn.dataset.phoneId, btn.dataset.phone));
+    btn.addEventListener('click', () => openModal(btn.dataset.id, btn.dataset.name, btn.dataset.phoneId, btn.dataset.phone, btn.dataset.wabaId));
   });
 }
 
@@ -195,11 +198,12 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
-function openModal(businessId, businessName, currentPhoneNumberId, currentPhoneNumber) {
+function openModal(businessId, businessName, currentPhoneNumberId, currentPhoneNumber, currentBusinessAccountId) {
   currentBusinessId = businessId;
   document.getElementById('modal-sub').textContent = businessName;
   document.getElementById('phoneNumber').value = currentPhoneNumber ?? '';
   document.getElementById('phoneNumberId').value = currentPhoneNumberId ?? '';
+  document.getElementById('businessAccountId').value = currentBusinessAccountId ?? '';
   document.getElementById('accessToken').value = '';
   document.getElementById('modal-error').style.display = 'none';
   document.getElementById('overlay').style.display = 'flex';
@@ -226,12 +230,13 @@ document.getElementById('whatsapp-form').addEventListener('submit', async (e) =>
 
   const phoneNumber = document.getElementById('phoneNumber').value.trim();
   const phoneNumberId = document.getElementById('phoneNumberId').value.trim();
+  const businessAccountId = document.getElementById('businessAccountId').value.trim();
   const accessToken = document.getElementById('accessToken').value.trim();
 
   const res = await fetch(`/vendia-admin/api/businesses/${currentBusinessId}/whatsapp`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ phoneNumber, phoneNumberId, accessToken }),
+    body: JSON.stringify({ phoneNumber, phoneNumberId, accessToken, businessAccountId }),
   });
 
   if (!res.ok) {

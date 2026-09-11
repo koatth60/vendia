@@ -70,6 +70,29 @@ export async function sendInteractiveButtonsMessage(
   return result.messages?.[0]?.id ?? "";
 }
 
+export interface ApprovedTemplate {
+  name: string;
+  language: string;
+}
+
+// Used to populate a dropdown of real, usable templates in the admin panel (src/routes/admin.ts) -
+// instead of the owner having to type the exact template name/language code from memory, which is
+// exactly the kind of thing that goes stale/wrong silently (see the follow-up-template field before
+// this existed). Only APPROVED templates are usable for sending regardless of what's shown here.
+export async function listApprovedTemplates(accessToken: string, wabaId: string): Promise<ApprovedTemplate[]> {
+  const response = await fetch(
+    `${GRAPH_BASE_URL}/${wabaId}/message_templates?fields=name,status,language&limit=200`,
+    { headers: { Authorization: `Bearer ${accessToken}` } }
+  );
+  if (!response.ok) {
+    throw new Error(`WhatsApp API error listing templates (${response.status}): ${await response.text()}`);
+  }
+  const body = (await response.json()) as { data?: { name: string; status: string; language: string }[] };
+  return (body.data ?? [])
+    .filter((t) => t.status === "APPROVED")
+    .map((t) => ({ name: t.name, language: t.language }));
+}
+
 export async function sendTemplateMessage(
   credentials: WhatsappCredentials,
   to: string,

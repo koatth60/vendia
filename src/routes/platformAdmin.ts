@@ -50,6 +50,7 @@ platformAdminRouter.get("/businesses", async (_req, res) => {
       contactPhone: true,
       whatsappPhoneNumberId: true,
       whatsappPhoneNumber: true,
+      whatsappBusinessAccountId: true,
       createdAt: true,
     },
   });
@@ -57,7 +58,7 @@ platformAdminRouter.get("/businesses", async (_req, res) => {
 });
 
 platformAdminRouter.patch("/businesses/:id/whatsapp", async (req, res) => {
-  const { phoneNumberId, phoneNumber, accessToken } = req.body;
+  const { phoneNumberId, phoneNumber, accessToken, businessAccountId } = req.body;
   if (!phoneNumberId || !phoneNumber || !accessToken) {
     res.status(400).json({ error: "Faltan phoneNumberId, phoneNumber o accessToken" });
     return;
@@ -75,6 +76,7 @@ platformAdminRouter.patch("/businesses/:id/whatsapp", async (req, res) => {
       whatsappPhoneNumberId: phoneNumberId,
       whatsappPhoneNumber: phoneNumber,
       whatsappAccessToken: accessToken,
+      whatsappBusinessAccountId: businessAccountId || null,
     },
   });
 
