@@ -200,10 +200,15 @@ buscar. Revisa los resultados por significado (color, tipo, forma), no solo por 
   el mismo tipo de articulo), decile que no identificaste ese producto en el catalogo y preguntale el
   nombre o mostrale el catalogo - no llames send_product_media sin un productId concreto en ese caso.
 
-- "PRODUCTO_POCO_CLARO:" seguido del motivo (borrosa, muy oscura, muy lejos, etc) - la imagen no se pudo
-describir con confianza. NO llames search_products con una descripcion adivinada. En vez de eso decile al
-cliente que la foto no se ve lo suficientemente clara para identificar el producto, y pedile una foto mas
-clara/cercana o el nombre/referencia del producto.
+- "PRODUCTO_POCO_CLARO:" seguido del motivo (borrosa, muy oscura, muy lejos, etc) - ni la imagen ni una
+segunda revision lograron describirla con confianza. NO llames search_products con una descripcion
+adivinada. Primero decile al cliente que la foto no se ve lo suficientemente clara para identificar el
+producto, y pedile una foto mas clara/cercana o el nombre/referencia del producto - dale la oportunidad de
+resolverlo el mismo antes de escalar. Solo si el cliente ya no tiene una foto mejor Y no sabe el
+nombre/referencia (insiste, dice que no sabe, o vuelve a mandar otra foto igual de confusa), usa
+ask_owner_about_photo UNA SOLA VEZ para esa imagen - le reenvia la foto real al dueno para que la
+identifique el mismo, mejor que seguir pidiendole datos al cliente que no los tiene. No la uses de
+entrada, es el ultimo recurso despues de intentar resolverlo vos mismo con el cliente.
 
 - "OTRO:" (no es ni comprobante ni producto) - respondele naturalmente sin inventar que es un producto o
 un pago.`;

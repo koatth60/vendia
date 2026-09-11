@@ -3,7 +3,10 @@ import { env } from "../config/env";
 import { logAiUsage } from "./usage";
 import { buildVisionPrompt } from "./visionPrompt";
 
-export const ANTHROPIC_VISION_MODEL = "claude-haiku-4-5-20251001";
+// Sonnet 5, no Haiku: este llamado ya es el ultimo recurso (solo dispara cuando DeepSeek se rindio),
+// volumen bajo - la diferencia de costo real es chica (2x, no 10x) y la precision extra en detalle
+// visual fino importa justo en este caso (fotos borrosas de un live).
+export const ANTHROPIC_VISION_MODEL = "claude-sonnet-5";
 
 // null cuando no hay key configurada - el resto del modulo trata eso como "escalacion apagada", no
 // como un error. Asi el bot sigue andando normal en negocios/entornos sin ANTHROPIC_API_KEY.

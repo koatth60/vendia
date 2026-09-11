@@ -2,7 +2,7 @@ import { Router } from "express";
 import { Prisma } from "@prisma/client";
 import { env } from "../config/env";
 import { prisma } from "../db/client";
-import { sendTextMessage, sendOwnerAlert, downloadMedia, formatForWhatsapp, type WhatsappCredentials } from "../whatsapp/client";
+import { sendTextMessage, sendImageMessage, sendOwnerAlert, downloadMedia, formatForWhatsapp, type WhatsappCredentials } from "../whatsapp/client";
 import { uploadMedia } from "../media/s3";
 import {
   getOrCreateCustomer,
@@ -24,7 +24,7 @@ import { transcribeAudio } from "../ai/transcription";
 import { checkPlanCap } from "../ai/usage";
 import { createOrder, askForCsat, recordCsatReply, type ResolvedOrderItem } from "../orders/service";
 import { recordAskOwnerResolution } from "../catalog/learnedFaq";
-import { getCatalogHintText } from "../catalog/products";
+import { getCatalogHintText, findConfidentProductMatch } from "../catalog/products";
 import { extractFrame } from "../media/videoFrame";
 
 export const whatsappRouter = Router();
@@ -90,6 +90,36 @@ export async function handleOwnerReply(
       await sendTextMessage(credentials, ownerPhone, "Respondeme con un mensaje de texto, citando esa misma pregunta, por favor.");
       return;
     }
+
+    // PHOTO_PRODUCT (from ask_owner_about_photo, src/ai/tools.ts): the owner is naming a product from a
+    // photo we couldn't identify, not answering a free-text question - try to resolve it to a real
+    // catalog product so the customer gets the actual name/price/photo back, instead of just the owner's
+    // raw words. Falls back to forwarding the raw text (still prefixed) when it doesn't match anything.
+    if (pendingQuestion.kind === "PHOTO_PRODUCT") {
+      const match = await findConfidentProductMatch(businessId, answerText);
+      if (match.product) {
+        const price = `$${match.product.price.toString()} ${match.product.currency}`;
+        const productText = formatForWhatsapp(`Según nuestro equipo, el producto que buscas es: *${match.product.name}* - ${price}`);
+        await sendTextMessage(credentials, pendingQuestion.customer.phoneNumber, productText);
+        await recordMessage(businessId, pendingQuestion.conversationId, "ASSISTANT", productText);
+        if (match.product.media.length > 0) {
+          try {
+            await sendImageMessage(credentials, pendingQuestion.customer.phoneNumber, match.product.media[0].url);
+          } catch (error) {
+            console.error("No se pudo enviar la foto del producto identificado al cliente:", error);
+          }
+        }
+      } else {
+        const fallbackText = formatForWhatsapp(`Según nuestro equipo: ${answerText}`);
+        await sendTextMessage(credentials, pendingQuestion.customer.phoneNumber, fallbackText);
+        await recordMessage(businessId, pendingQuestion.conversationId, "ASSISTANT", fallbackText);
+      }
+      await clearPendingOwnerQuestion(pendingQuestion.questionId);
+      await setHumanControl(businessId, pendingQuestion.conversationId, false);
+      await sendTextMessage(credentials, ownerPhone, "Listo, le confirme el producto al cliente ✅");
+      return;
+    }
+
     const formattedAnswer = formatForWhatsapp(answerText);
     await sendTextMessage(credentials, pendingQuestion.customer.phoneNumber, formattedAnswer);
     await recordMessage(businessId, pendingQuestion.conversationId, "ASSISTANT", formattedAnswer);

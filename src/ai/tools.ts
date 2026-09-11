@@ -22,6 +22,7 @@ import {
   type WhatsappCredentials,
 } from "../whatsapp/client";
 import { prisma } from "../db/client";
+import { getPresignedMediaUrl } from "../media/s3";
 
 // WhatsApp sometimes fails to deliver/render an image if it's sent immediately after another one -
 // a short gap between consecutive media sends avoids that collision.
@@ -238,6 +239,19 @@ export const catalogTools: OpenAI.Chat.ChatCompletionTool[] = [
           },
         },
         required: ["question"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "ask_owner_about_photo",
+      description:
+        "Usa esta herramienta SOLO como ultimo recurso, despues de agotar todo lo demas: el cliente mando una foto o video de un producto, el analisis de imagen no logro identificarlo con confianza (ni siquiera despues de la segunda opinion), YA le pediste una foto mas clara o el nombre y el cliente insiste sin poder darlo, Y search_products no encontro ningun candidato remotamente relacionado para ofrecer. Le reenvia la foto/video REAL del cliente al dueno del negocio por WhatsApp para que diga que producto es - un humano suele reconocer en una foto borrosa algo que la IA no puede. Cuando el dueno responda, se le confirma al cliente automaticamente (con la foto real del catalogo si el dueno nombro un producto que existe ahi). Mientras tanto el bot deja de responderle a este cliente. NO la uses de entrada ni para ahorrarte el paso de buscar en el catalogo primero - es cara en tiempo del dueno, se usa poco.",
+      parameters: {
+        type: "object",
+        properties: {},
+        required: [],
       },
     },
   },
@@ -580,6 +594,84 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
       return {
         asked: true,
         note: "La pregunta quedo escalada al dueno del negocio. No sigas intentando responderla vos mismo ni inventes nada: decile al cliente que estas confirmando esa info con el equipo y le respondes en breve.",
+      };
+    }
+    case "ask_owner_about_photo": {
+      const business = await prisma.business.findUnique({ where: { id: businessId } });
+      if (!business?.contactPhone) {
+        return {
+          asked: false,
+          note: "Este negocio no tiene un numero de contacto configurado para escalar preguntas. Decile al cliente que no tenes esa informacion por ahora.",
+        };
+      }
+
+      const lastMedia = await prisma.message.findFirst({
+        where: {
+          conversationId: context.conversationId,
+          role: "CUSTOMER",
+          mediaS3Key: { not: null },
+          mediaType: { in: ["IMAGE", "VIDEO"] },
+        },
+        orderBy: { createdAt: "desc" },
+      });
+      if (!lastMedia?.mediaS3Key) {
+        return {
+          asked: false,
+          note: "No encontre ninguna foto o video reciente del cliente para reenviar. No uses esta herramienta si el cliente no mando una imagen o video.",
+        };
+      }
+
+      const mediaUrl = await getPresignedMediaUrl(lastMedia.mediaS3Key);
+      const greeting = business.contactName ? `Hola ${business.contactName}` : "Hola";
+      const customerLabel = await describeCustomer(context.customerId, context.recipientPhone);
+      const caption = [
+        `${greeting}, el cliente ${customerLabel} pregunta por este producto y no lo pude identificar en el catalogo.`,
+        "¿Cual es? Respondeme citando (mantén presionado y \"Responder\") este mismo mensaje con el nombre del producto.",
+      ].join("\n\n");
+
+      // Media send first (mejor experiencia, el dueno ve la foto/video directo en el chat). Si eso falla
+      // (API error, tipo de media rechazado, etc), igual intentamos texto plano con el link de la foto -
+      // mismo patron de degradacion que requestSaleConfirmation: dos intentos reales antes de rendirse,
+      // para que el dueno no se quede sin ningun aviso.
+      let wamid = "";
+      try {
+        wamid =
+          lastMedia.mediaType === "VIDEO"
+            ? await sendVideoMessage(context.credentials, business.contactPhone, mediaUrl, caption)
+            : await sendImageMessage(context.credentials, business.contactPhone, mediaUrl, caption);
+      } catch (error) {
+        console.error("No se pudo reenviar la foto/video como media al dueno, probando con link de texto:", error);
+      }
+
+      if (!wamid) {
+        try {
+          wamid = await sendTextMessage(context.credentials, business.contactPhone, `${caption}\n\n${mediaUrl}`);
+        } catch (error) {
+          console.error("No se pudo enviar NINGUNA notificacion al dueno para identificar el producto (revisar manualmente):", error, {
+            businessId,
+            conversationId: context.conversationId,
+          });
+        }
+      }
+
+      if (!wamid) {
+        return {
+          asked: false,
+          note: "No se pudo contactar al dueno de ninguna forma. Decile al cliente que un asesor le va a escribir pronto.",
+        };
+      }
+
+      await setHumanControl(businessId, context.conversationId, true);
+      await createPendingOwnerQuestion(
+        context.conversationId,
+        wamid,
+        "Identificar el producto de la foto/video que mando el cliente",
+        "PHOTO_PRODUCT"
+      );
+
+      return {
+        asked: true,
+        note: "La foto/video quedo escalada al dueno para identificar el producto. No sigas adivinando: decile al cliente que estas confirmando con el equipo cual es ese producto exactamente y le respondes en breve.",
       };
     }
     case "close_conversation": {

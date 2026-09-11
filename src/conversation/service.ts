@@ -203,9 +203,14 @@ export async function clearPendingConfirmation(conversationId: string) {
   });
 }
 
-export async function createPendingOwnerQuestion(conversationId: string, wamid: string, question: string) {
+export async function createPendingOwnerQuestion(
+  conversationId: string,
+  wamid: string,
+  question: string,
+  kind: "TEXT" | "PHOTO_PRODUCT" = "TEXT"
+) {
   await prisma.pendingOwnerQuestion.create({
-    data: { conversationId, wamid, question },
+    data: { conversationId, wamid, question, kind },
   });
 }
 
@@ -218,6 +223,7 @@ export async function findConversationByPendingOwnerQuestion(wamid: string) {
   return {
     questionId: pending.id,
     question: pending.question,
+    kind: pending.kind,
     conversationId: pending.conversationId,
     customer: pending.conversation.customer,
   };
@@ -240,6 +246,7 @@ export async function findOpenPendingOwnerQuestionsForBusiness(businessId: strin
   return pending.map((p) => ({
     questionId: p.id,
     question: p.question,
+    kind: p.kind,
     conversationId: p.conversationId,
     customer: p.conversation.customer,
   }));

@@ -14,6 +14,7 @@ let businessId: string;
 let credentials: WhatsappCredentials;
 let originalFetch: typeof fetch;
 let sentMessages: { to: string; body: string }[];
+let sentMedia: { to: string; type: string }[];
 
 before(async () => {
   const business = await prisma.business.create({
@@ -36,10 +37,12 @@ after(async () => {
 beforeEach(() => {
   originalFetch = globalThis.fetch;
   sentMessages = [];
+  sentMedia = [];
   globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
     const body = JSON.parse(String(init?.body ?? "{}"));
     const to = body.to ?? body.recipient;
     if (body.type === "text") sentMessages.push({ to, body: body.text?.body ?? "" });
+    if (body.type === "image" || body.type === "video") sentMedia.push({ to, type: body.type });
     return { ok: true, json: async () => ({ messages: [{ id: `wamid.test-${randomUUID()}` }] }) } as Response;
   }) as typeof fetch;
 });
@@ -161,6 +164,99 @@ test("handleOwnerReply queues the resolved ask_owner exchange as a learned FAQ c
     assert.equal(candidate!.status, "PENDING");
   } finally {
     await prisma.learnedFaqCandidate.deleteMany({ where: { businessId } });
+    await prisma.pendingOwnerQuestion.deleteMany({ where: { conversationId: conversation.id } });
+    await prisma.message.deleteMany({ where: { conversationId: conversation.id } });
+    await prisma.conversation.deleteMany({ where: { id: conversation.id } });
+    await prisma.customer.deleteMany({ where: { id: customer.id } });
+  }
+});
+
+// PHOTO_PRODUCT: owner is naming a product from a photo/video we couldn't identify (ask_owner_about_photo,
+// src/ai/tools.ts), not answering a free-text question - handleOwnerReply must resolve their answer
+// against the real catalog instead of just forwarding it raw, and must never queue it as a learned FAQ
+// candidate (it's not a reusable text Q&A pair).
+
+test("handleOwnerReply (PHOTO_PRODUCT) resolves the owner's answer to a real catalog product and sends its name, price and photo", async () => {
+  const { customer, conversation } = await makeCustomerAndConversation();
+  const product = await prisma.product.create({
+    data: {
+      businessId,
+      name: `Audifono Bluetooth Negro ${randomUUID()}`,
+      description: "Audifono inalambrico intraauricular",
+      price: 89000,
+      currency: "COP",
+      stock: 4,
+      media: { create: [{ type: "IMAGE", url: "https://example.com/audifono.jpg", s3Key: "audifono.jpg" }] },
+    },
+  });
+  const wamid = `wamid.photo-${randomUUID()}`;
+  await prisma.pendingOwnerQuestion.create({
+    data: {
+      conversationId: conversation.id,
+      wamid,
+      question: "Identificar el producto de la foto/video que mando el cliente",
+      kind: "PHOTO_PRODUCT",
+    },
+  });
+
+  try {
+    await handleOwnerReply(businessId, credentials, "573000000001", {
+      type: "text",
+      context: { id: wamid },
+      text: { body: product.name },
+    });
+
+    const sentToCustomer = sentMessages.find((m) => m.to === customer.phoneNumber);
+    assert.ok(sentToCustomer, "expected the customer to get a confirmation message");
+    assert.match(sentToCustomer!.body, /Según nuestro equipo/);
+    assert.match(sentToCustomer!.body, new RegExp(product.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+
+    const photoSent = sentMedia.find((m) => m.to === customer.phoneNumber && m.type === "image");
+    assert.ok(photoSent, "expected the real catalog photo to be sent, not just text");
+
+    const stillPending = await prisma.pendingOwnerQuestion.findFirst({ where: { conversationId: conversation.id } });
+    assert.equal(stillPending, null);
+
+    const freshConversation = await prisma.conversation.findUniqueOrThrow({ where: { id: conversation.id } });
+    assert.equal(freshConversation.humanControl, false);
+
+    const faqCandidate = await prisma.learnedFaqCandidate.findFirst({ where: { businessId, question: { contains: "foto" } } });
+    assert.equal(faqCandidate, null, "a photo identification must never be queued as a reusable FAQ suggestion");
+  } finally {
+    await prisma.pendingOwnerQuestion.deleteMany({ where: { conversationId: conversation.id } });
+    await prisma.message.deleteMany({ where: { conversationId: conversation.id } });
+    await prisma.conversation.deleteMany({ where: { id: conversation.id } });
+    await prisma.customer.deleteMany({ where: { id: customer.id } });
+    await prisma.product.delete({ where: { id: product.id } });
+  }
+});
+
+test("handleOwnerReply (PHOTO_PRODUCT) falls back to the owner's raw (prefixed) text when it doesn't match any catalog product", async () => {
+  const { customer, conversation } = await makeCustomerAndConversation();
+  const wamid = `wamid.photo-${randomUUID()}`;
+  await prisma.pendingOwnerQuestion.create({
+    data: {
+      conversationId: conversation.id,
+      wamid,
+      question: "Identificar el producto de la foto/video que mando el cliente",
+      kind: "PHOTO_PRODUCT",
+    },
+  });
+
+  try {
+    await handleOwnerReply(businessId, credentials, "573000000001", {
+      type: "text",
+      context: { id: wamid },
+      text: { body: "no se ve claro, no tenemos nada asi" },
+    });
+
+    const sentToCustomer = sentMessages.find((m) => m.to === customer.phoneNumber);
+    assert.ok(sentToCustomer);
+    assert.match(sentToCustomer!.body, /Según nuestro equipo: no se ve claro/);
+
+    const photoSent = sentMedia.find((m) => m.to === customer.phoneNumber);
+    assert.equal(photoSent, undefined, "must not send any photo when the owner's answer didn't resolve to a real product");
+  } finally {
     await prisma.pendingOwnerQuestion.deleteMany({ where: { conversationId: conversation.id } });
     await prisma.message.deleteMany({ where: { conversationId: conversation.id } });
     await prisma.conversation.deleteMany({ where: { id: conversation.id } });

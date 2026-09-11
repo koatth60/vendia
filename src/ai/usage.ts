@@ -43,13 +43,13 @@ export async function getPlanUsage(businessId: string) {
 // Peak: 01:00-04:00 y 06:00-10:00 UTC, lunes a viernes (precio x2 sobre off-peak).
 // "deepseek-v4-flash" y "deepseek-v4-flash-vision-exp" son nombres legacy que DeepSeek sigue aceptando -
 // las llamadas se enrutan a su modelo V4.1-Flash pero se cobran al precio Flash (mas barato que antes).
-// claude-haiku-4-5: $1/$5 por 1M tokens input/output (sin cache hit distinto, se usa el mismo
-// precio de cacheMiss para el input - Anthropic no tiene peak pricing como DeepSeek).
+// claude-sonnet-5: $2/$10 por 1M tokens input/output (sin cache hit distinto, se usa el mismo precio
+// de cacheMiss para el input - Anthropic no tiene peak pricing como DeepSeek).
 const PRICING = {
   "deepseek-v4-flash": { cacheHit: 0.003, cacheMiss: 0.15, output: 0.6 },
   "deepseek-v4-flash-vision-exp": { cacheHit: 0.003, cacheMiss: 0.15, output: 0.6 },
   "deepseek-v4-pro": { cacheHit: 0.022, cacheMiss: 0.66, output: 1.98 },
-  "claude-haiku-4-5-20251001": { cacheHit: 1.0, cacheMiss: 1.0, output: 5.0 },
+  "claude-sonnet-5": { cacheHit: 2.0, cacheMiss: 2.0, output: 10.0 },
 } as const;
 
 function isPeakHour(date: Date): boolean {

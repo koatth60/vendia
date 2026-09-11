@@ -12,6 +12,7 @@ let businessId: string;
 let customerId: string;
 let originalFetch: typeof fetch;
 let sentMessages: { to: string; body: string }[];
+let sentMedia: { to: string; type: string; caption: string }[];
 
 before(async () => {
   const business = await prisma.business.create({
@@ -44,6 +45,7 @@ after(async () => {
 function stubWhatsappFetch() {
   originalFetch = globalThis.fetch;
   sentMessages = [];
+  sentMedia = [];
   globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
     const body = JSON.parse(String(init?.body ?? "{}"));
     const to = body.to ?? body.recipient;
@@ -54,6 +56,8 @@ function stubWhatsappFetch() {
       // template's body component parameters, not a plain text.body field.
       const paramText = body.template?.components?.[0]?.parameters?.[0]?.text ?? "";
       sentMessages.push({ to, body: paramText });
+    } else if (body.type === "image" || body.type === "video") {
+      sentMedia.push({ to, type: body.type, caption: body[body.type]?.caption ?? "" });
     }
     return {
       ok: true,
@@ -553,5 +557,171 @@ test("close_conversation SOLD with a payment-confirmation gate: falls back to pl
     await prisma.conversation.deleteMany({ where: { id: conversation2.id } });
     await prisma.customer.deleteMany({ where: { id: customer2.id } });
     await prisma.business.deleteMany({ where: { id: business2.id } });
+  }
+});
+
+// ask_owner_about_photo: last-resort escalation when the image analysis pipeline (DeepSeek + Claude
+// escalation) genuinely couldn't identify a product photo/video. These test the tool implementation
+// directly (does it find the right media, does it reach the owner, does it degrade gracefully when
+// delivery fails) - not whether the model chooses to call it, which is a prompt-behavior concern.
+
+test("ask_owner_about_photo forwards the customer's most recent photo to the owner and creates a PHOTO_PRODUCT pending question", async () => {
+  stubWhatsappFetch();
+  const context = await freshContext();
+  await prisma.message.create({
+    data: {
+      conversationId: context.conversationId,
+      role: "CUSTOMER",
+      content: "",
+      mediaS3Key: "receipts/some-photo.jpg",
+      mediaType: "IMAGE",
+    },
+  });
+
+  try {
+    const result = (await runCatalogTool(context, "ask_owner_about_photo", {})) as { asked: boolean };
+    assert.equal(result.asked, true);
+
+    const mediaSent = sentMedia.find((m) => m.to === "573000000000" && m.type === "image");
+    assert.ok(mediaSent, "expected the owner to receive the customer's actual photo as a real image message");
+
+    const pending = await prisma.pendingOwnerQuestion.findFirst({ where: { conversationId: context.conversationId } });
+    assert.ok(pending);
+    assert.equal(pending!.kind, "PHOTO_PRODUCT");
+
+    const conversation = await prisma.conversation.findUniqueOrThrow({ where: { id: context.conversationId } });
+    assert.equal(conversation.humanControl, true, "the bot must stop auto-replying while this is pending");
+  } finally {
+    restoreFetch();
+    await prisma.pendingOwnerQuestion.deleteMany({ where: { conversationId: context.conversationId } });
+  }
+});
+
+test("ask_owner_about_photo sends the video (not as an image) when the customer's last media is a video", async () => {
+  stubWhatsappFetch();
+  const context = await freshContext();
+  await prisma.message.create({
+    data: {
+      conversationId: context.conversationId,
+      role: "CUSTOMER",
+      content: "",
+      mediaS3Key: "videos/some-clip.mp4",
+      mediaType: "VIDEO",
+    },
+  });
+
+  try {
+    const result = (await runCatalogTool(context, "ask_owner_about_photo", {})) as { asked: boolean };
+    assert.equal(result.asked, true);
+    assert.equal(sentMedia.length, 1);
+    assert.equal(sentMedia[0].type, "video");
+  } finally {
+    restoreFetch();
+    await prisma.pendingOwnerQuestion.deleteMany({ where: { conversationId: context.conversationId } });
+  }
+});
+
+test("ask_owner_about_photo refuses (does not send anything) when there's no recent customer photo/video", async () => {
+  stubWhatsappFetch();
+  const context = await freshContext();
+
+  try {
+    const result = (await runCatalogTool(context, "ask_owner_about_photo", {})) as { asked: boolean; note: string };
+    assert.equal(result.asked, false);
+    assert.match(result.note, /foto|video/i);
+    assert.equal(sentMedia.length, 0);
+    assert.equal(sentMessages.length, 0);
+  } finally {
+    restoreFetch();
+  }
+});
+
+test("ask_owner_about_photo refuses when the business has no contact phone configured", async () => {
+  const business2 = await prisma.business.create({
+    data: { name: `Test ${randomUUID()}`, email: `test-${randomUUID()}@example.com`, passwordHash: "x" },
+  });
+  const customer2 = await prisma.customer.create({ data: { businessId: business2.id, phoneNumber: `573002${Date.now()}` } });
+  const conversation2 = await prisma.conversation.create({ data: { customerId: customer2.id } });
+  await prisma.message.create({
+    data: { conversationId: conversation2.id, role: "CUSTOMER", content: "", mediaS3Key: "receipts/x.jpg", mediaType: "IMAGE" },
+  });
+
+  stubWhatsappFetch();
+  try {
+    const context: ToolContext = {
+      businessId: business2.id,
+      conversationId: conversation2.id,
+      customerId: customer2.id,
+      credentials: { phoneNumberId: "test-id", accessToken: "test-token" },
+      recipientPhone: "573009998877",
+    };
+    const result = (await runCatalogTool(context, "ask_owner_about_photo", {})) as { asked: boolean };
+    assert.equal(result.asked, false);
+    assert.equal(sentMedia.length, 0);
+  } finally {
+    restoreFetch();
+    await prisma.message.deleteMany({ where: { conversationId: conversation2.id } });
+    await prisma.conversation.deleteMany({ where: { id: conversation2.id } });
+    await prisma.customer.deleteMany({ where: { id: customer2.id } });
+    await prisma.business.deleteMany({ where: { id: business2.id } });
+  }
+});
+
+// Directly addresses the "the owner sometimes doesn't get the bot's messages" reliability concern:
+// this proves there's a real second attempt (plain text with the photo's link) when the native
+// image/video send fails, instead of the owner getting nothing at all.
+test("ask_owner_about_photo falls back to a text message with a link when the native media send fails", async () => {
+  const context = await freshContext();
+  await prisma.message.create({
+    data: { conversationId: context.conversationId, role: "CUSTOMER", content: "", mediaS3Key: "receipts/y.jpg", mediaType: "IMAGE" },
+  });
+
+  const original = globalThis.fetch;
+  const textAttempts: string[] = [];
+  globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body ?? "{}"));
+    if (body.type === "image") {
+      return { ok: false, status: 500, text: async () => "simulated media rejection" } as Response;
+    }
+    if (body.type === "text") {
+      textAttempts.push(body.text?.body ?? "");
+    }
+    return { ok: true, json: async () => ({ messages: [{ id: `wamid.test-${randomUUID()}` }] }) } as Response;
+  }) as typeof fetch;
+
+  try {
+    const result = (await runCatalogTool(context, "ask_owner_about_photo", {})) as { asked: boolean };
+    assert.equal(result.asked, true, "must still succeed via the text fallback, not silently give up");
+    assert.equal(textAttempts.length, 1);
+    assert.match(textAttempts[0], /https?:\/\//, "the fallback text must include a link so the owner can still see the photo");
+
+    const pending = await prisma.pendingOwnerQuestion.findFirst({ where: { conversationId: context.conversationId } });
+    assert.ok(pending, "the fallback wamid must still be tracked so the owner's reply can resolve it");
+  } finally {
+    globalThis.fetch = original;
+    await prisma.pendingOwnerQuestion.deleteMany({ where: { conversationId: context.conversationId } });
+  }
+});
+
+test("ask_owner_about_photo reports failure (and creates no pending question) when neither media nor text delivery work", async () => {
+  const context = await freshContext();
+  await prisma.message.create({
+    data: { conversationId: context.conversationId, role: "CUSTOMER", content: "", mediaS3Key: "receipts/z.jpg", mediaType: "IMAGE" },
+  });
+
+  const original = globalThis.fetch;
+  globalThis.fetch = (async () => ({ ok: false, status: 500, text: async () => "simulated total outage" }) as Response) as typeof fetch;
+
+  try {
+    const result = (await runCatalogTool(context, "ask_owner_about_photo", {})) as { asked: boolean };
+    assert.equal(result.asked, false);
+
+    const pending = await prisma.pendingOwnerQuestion.findFirst({ where: { conversationId: context.conversationId } });
+    assert.equal(pending, null, "must not leave a dangling pending question if the owner was never actually reached");
+
+    const conversation = await prisma.conversation.findUniqueOrThrow({ where: { id: context.conversationId } });
+    assert.equal(conversation.humanControl, false, "must not silently stop the bot from replying if the owner was never reached");
+  } finally {
+    globalThis.fetch = original;
   }
 });

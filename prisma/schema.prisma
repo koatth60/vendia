@@ -264,14 +264,24 @@ model Conversation {
 // question replaced it. Each escalation now gets its own trackable row, matched by the wamid of the
 // alert the owner actually replies to.
 model PendingOwnerQuestion {
-  id             String       @id @default(cuid())
-  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  id             String                   @id @default(cuid())
+  conversation   Conversation             @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   conversationId String
-  wamid          String       @unique
+  wamid          String                   @unique
   question       String
-  createdAt      DateTime     @default(now())
+  kind           PendingOwnerQuestionKind @default(TEXT)
+  createdAt      DateTime                 @default(now())
 
   @@index([conversationId])
+}
+
+// PHOTO_PRODUCT: the owner was sent the customer's actual photo/video to identify (ask_owner_about_photo
+// in src/ai/tools.ts), not a plain text question - handleOwnerReply answers it differently (tries to
+// resolve the owner's reply to a real catalog product and send its photo back, instead of forwarding the
+// owner's raw text as-is).
+enum PendingOwnerQuestionKind {
+  TEXT
+  PHOTO_PRODUCT
 }
 
 enum ConversationStatus {
