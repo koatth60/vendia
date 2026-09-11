@@ -436,6 +436,9 @@
     <button class="tab-btn" data-tab="payments" onclick="switchTab('payments')">
       <span class="tab-icon">💳</span> Pagos
     </button>
+    <button class="tab-btn" data-tab="whatsapp" onclick="switchTab('whatsapp')">
+      <span class="tab-icon">📲</span> WhatsApp
+    </button>
     <button class="tab-btn" data-tab="faq" onclick="switchTab('faq')">
       <span class="tab-icon">❓</span> FAQ
     </button>
@@ -545,7 +548,7 @@
         </div>
       </div>
 
-      <div class="settings-group">
+      <div class="settings-group settings-group-last">
         <div class="settings-group-title">Contacto</div>
         <div class="grid-2">
           <div>
@@ -558,51 +561,6 @@
           </div>
         </div>
         <div class="hint">Un número distinto al del bot. Cuando un cliente mande el comprobante de pago, el bot te va a escribir a este número pidiendo que confirmes si el pago llegó antes de cerrarle la venta al cliente.</div>
-      </div>
-
-      <div class="settings-group">
-        <div class="settings-group-title">Seguimiento post-venta</div>
-        <p class="settings-desc">Le manda automáticamente una plantilla de WhatsApp a los clientes X horas después de cerrar la venta (ej: "¿cómo te fue con tu compra?"). Requiere que la plantilla ya esté <strong>aprobada por Meta</strong> (categoría Utility, se aprueba en minutos/días, no necesita Tech Provider). Dejá el nombre vacío para desactivarlo.</p>
-        <div class="grid-2">
-          <div>
-            <label>Plantilla aprobada</label>
-            <select id="business-followup-template" onchange="onFollowupTemplateChange()"><option value="">-- Sin seguimiento (desactivado) --</option></select>
-            <div class="hint" id="followup-template-hint"></div>
-            <div id="followup-template-preview" class="hint" style="display:none; margin-top:8px; padding:10px; border:1px solid var(--border-soft); border-radius:8px; background:var(--border-soft); white-space:pre-wrap;"></div>
-          </div>
-          <div>
-            <label>Código de idioma de la plantilla</label>
-            <input id="business-followup-language" placeholder="Ej: es o es_CO" />
-          </div>
-        </div>
-        <div class="actions-row" style="margin-top:0;">
-          <button type="button" class="btn-secondary" onclick="loadWhatsappTemplates()" style="font-size:12.5px; padding:6px 12px;">🔄 Actualizar lista de plantillas</button>
-        </div>
-        <label>Horas después de la venta para enviarlo</label>
-        <input id="business-followup-hours" type="number" min="1" placeholder="24" />
-        <div class="actions-row-end">
-          <button class="btn-primary owner-only" onclick="saveBusiness()">Guardar cambios</button>
-        </div>
-      </div>
-
-      <div class="settings-group settings-group-last">
-        <div class="settings-group-title">Plantillas de WhatsApp</div>
-        <p class="settings-desc">Crea plantillas nuevas para seguimiento, promociones, etc. Se mandan a revisión de Meta (Utility aprueba rápido, Marketing es más estricto y puede tardar más). Por ahora, texto fijo, sin datos que cambien por cliente.</p>
-        <label>Nombre</label>
-        <input id="tpl-new-name" placeholder="Ej: Descuento de fin de semana" oninput="onTplNamePreview()" />
-        <div class="hint" id="tpl-name-preview"></div>
-        <label>Categoría</label>
-        <select id="tpl-new-category">
-          <option value="UTILITY">Utility (seguimiento, avisos del pedido - aprueba rápido)</option>
-          <option value="MARKETING">Marketing (promos, descuentos - revisión más estricta)</option>
-        </select>
-        <label>Texto del mensaje</label>
-        <textarea id="tpl-new-body" placeholder="Ej: ¡Hola! Tenemos un descuento especial este fin de semana en toda la tienda, escríbenos si quieres aprovecharlo."></textarea>
-        <div class="hint" id="tpl-new-error" style="color:var(--danger);"></div>
-        <div class="actions-row-end">
-          <button class="btn-primary owner-only" onclick="createWhatsappTemplate()">Enviar a revisión</button>
-        </div>
-        <div id="tpl-list" style="margin-top:18px;"></div>
       </div>
 
       <div class="section-title owner-only">Zona de peligro</div>
@@ -694,6 +652,59 @@
           <button class="btn-primary owner-only" id="pm-submit-btn" onclick="addPaymentMethod()">+ Agregar método de pago</button>
         </div>
         <div id="payment-methods-list" style="margin-top:16px; display:flex; flex-direction:column; gap:8px;"></div>
+      </div>
+    </div>
+
+    <div class="tab-panel" data-tab-panel="whatsapp">
+      <div class="panel-header">
+        <div>
+          <div class="panel-title">WhatsApp</div>
+          <div class="panel-subtitle">Seguimiento automático post-venta y plantillas aprobadas por Meta.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="settings-group-title" style="margin-top:0;">Seguimiento post-venta</div>
+        <p class="settings-desc">Le manda automáticamente una plantilla de WhatsApp a los clientes X horas después de cerrar la venta (ej: "¿cómo te fue con tu compra?"). Requiere que la plantilla ya esté <strong>aprobada por Meta</strong> (categoría Utility, se aprueba en minutos/días, no necesita Tech Provider). Dejá el nombre vacío para desactivarlo.</p>
+        <div class="grid-2">
+          <div>
+            <label>Plantilla aprobada</label>
+            <select id="business-followup-template" onchange="onFollowupTemplateChange()"><option value="">-- Sin seguimiento (desactivado) --</option></select>
+            <div class="hint" id="followup-template-hint"></div>
+            <div id="followup-template-preview" class="hint" style="display:none; margin-top:8px; padding:10px; border:1px solid var(--border-soft); border-radius:8px; background:var(--border-soft); white-space:pre-wrap;"></div>
+          </div>
+          <div>
+            <label>Código de idioma de la plantilla</label>
+            <input id="business-followup-language" placeholder="Ej: es o es_CO" />
+          </div>
+        </div>
+        <div class="actions-row" style="margin-top:0;">
+          <button type="button" class="btn-secondary" onclick="loadWhatsappTemplates()" style="font-size:12.5px; padding:6px 12px;">🔄 Actualizar lista de plantillas</button>
+        </div>
+        <label>Horas después de la venta para enviarlo</label>
+        <input id="business-followup-hours" type="number" min="1" placeholder="24" />
+        <div class="actions-row-end">
+          <button class="btn-primary owner-only" onclick="saveBusiness()">Guardar cambios</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="settings-group-title" style="margin-top:0;">Plantillas de WhatsApp</div>
+        <p class="settings-desc">Crea plantillas nuevas para seguimiento, promociones, etc. Se mandan a revisión de Meta (Utility aprueba rápido, Marketing es más estricto y puede tardar más). Por ahora, texto fijo, sin datos que cambien por cliente.</p>
+        <label>Nombre</label>
+        <input id="tpl-new-name" placeholder="Ej: Descuento de fin de semana" oninput="onTplNamePreview()" />
+        <div class="hint" id="tpl-name-preview"></div>
+        <label>Categoría</label>
+        <select id="tpl-new-category">
+          <option value="UTILITY">Utility (seguimiento, avisos del pedido - aprueba rápido)</option>
+          <option value="MARKETING">Marketing (promos, descuentos - revisión más estricta)</option>
+        </select>
+        <label>Texto del mensaje</label>
+        <textarea id="tpl-new-body" placeholder="Ej: ¡Hola! Tenemos un descuento especial este fin de semana en toda la tienda, escríbenos si quieres aprovecharlo."></textarea>
+        <div class="hint" id="tpl-new-error" style="color:var(--danger);"></div>
+        <div class="actions-row-end">
+          <button class="btn-primary owner-only" onclick="createWhatsappTemplate()">Enviar a revisión</button>
+        </div>
+        <div id="tpl-list" style="margin-top:18px;"></div>
       </div>
     </div>
 
