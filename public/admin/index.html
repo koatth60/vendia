@@ -207,14 +207,14 @@
   .product-card { border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; background: #fff; display: flex; flex-direction: column; box-shadow: var(--shadow-sm); }
   .product-card.inactive { opacity: 0.55; }
   .thumb-strip { display: flex; gap: 4px; padding: 10px 10px 0; overflow-x: auto; }
-  .thumb { width: 52px; height: 52px; border-radius: 8px; object-fit: cover; flex-shrink: 0; border: 1px solid var(--border); }
+  .thumb { width: 60px; height: 60px; border-radius: 8px; object-fit: cover; flex-shrink: 0; border: 1px solid var(--border); cursor: zoom-in; }
   .thumb-wrap { position: relative; flex-shrink: 0; }
   .thumb-remove {
     position: absolute; top: -5px; right: -5px; width: 16px; height: 16px; border-radius: 50%;
     background: var(--danger); color: white; font-size: 10px; line-height: 16px; text-align: center; padding: 0; border: none;
   }
   .thumb-add {
-    width: 52px; height: 52px; border-radius: 8px; border: 1.5px dashed var(--border); flex-shrink: 0;
+    width: 60px; height: 60px; border-radius: 8px; border: 1.5px dashed var(--border); flex-shrink: 0;
     display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 20px; cursor: pointer; position: relative;
   }
   .thumb-add input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
@@ -885,6 +885,33 @@
 
   <div id="image-lightbox" class="modal-overlay" style="display:none; background:rgba(15,23,42,.82); cursor:zoom-out;" onclick="closeImageLightbox()">
     <img id="image-lightbox-img" src="" style="max-width:92vw; max-height:92vh; border-radius:8px; box-shadow:0 24px 64px rgba(0,0,0,.4);" />
+    <video id="image-lightbox-video" src="" controls autoplay style="display:none; max-width:92vw; max-height:92vh; border-radius:8px; box-shadow:0 24px 64px rgba(0,0,0,.4);" onclick="event.stopPropagation()"></video>
+  </div>
+
+  <div id="product-edit-modal" class="modal-overlay" style="display:none;" onclick="if(event.target===this) closeEditModal()">
+    <div class="modal-card" style="max-width:480px;">
+      <div class="modal-header">
+        <div class="modal-header-name">Editar producto</div>
+        <button class="modal-close" onclick="closeEditModal()">✕</button>
+      </div>
+      <div class="edit-grid" style="border-top:none; padding:18px; overflow-y:auto;">
+        <div class="full"><label>Nombre</label><input id="edit-name" /></div>
+        <div class="full"><label>Descripción</label><textarea id="edit-desc" style="min-height:100px;"></textarea></div>
+        <div><label>Precio</label><input id="edit-price" type="text" inputmode="decimal" onblur="reformatPriceField('edit-price','edit-currency')" /></div>
+        <div><label>Moneda</label>
+          <select id="edit-currency" onchange="reformatPriceField('edit-price','edit-currency')">
+            <option value="COP">COP</option>
+            <option value="USD">USD</option>
+          </select>
+        </div>
+        <div><label>Stock</label><input id="edit-stock" type="number" /></div>
+        <div class="full"><label>Categoría</label><input id="edit-cat" /></div>
+        <div class="full" style="display:flex; gap:8px; margin-top:10px;">
+          <button class="btn-primary" onclick="saveEdit()">Guardar</button>
+          <button class="btn-ghost" onclick="closeEditModal()">Cancelar</button>
+        </div>
+      </div>
+    </div>
   </div>
 
   <div id="photo-crop-modal" class="modal-overlay" style="display:none;" onclick="if(event.target===this) closePhotoCropModal()">
@@ -1255,12 +1282,14 @@ async function resetTestData() {
 }
 
 let editingId = null;
+let productsCache = [];
 
 async function loadProducts() {
   const container = document.getElementById('products-container');
   try {
     const res = await apiFetch('/admin/api/products');
     const products = await res.json();
+    productsCache = products;
     document.getElementById('tab-count-catalog').textContent = products.length;
 
     if (products.length === 0) {
@@ -1279,31 +1308,11 @@ function renderCard(p) {
   const thumbs = media.map(m => `
     <span class="thumb-wrap">
       ${m.type === 'VIDEO'
-        ? `<video class="thumb" src="${m.url}"></video>`
-        : `<img class="thumb" src="${m.url}" />`}
+        ? `<video class="thumb" src="${m.url}" onclick="openVideoLightbox('${m.url}')"></video>`
+        : `<img class="thumb" src="${m.url}" onclick="openImageLightbox('${m.url}')" />`}
       <button class="thumb-remove" onclick="deleteMedia('${m.id}')">×</button>
     </span>
   `).join('');
-
-  const editForm = editingId === p.id ? `
-    <div class="edit-grid">
-      <div class="full"><label>Nombre</label><input id="e-name-${p.id}" value="${escapeHtml(p.name)}" /></div>
-      <div class="full"><label>Descripción</label><textarea id="e-desc-${p.id}">${escapeHtml(p.description)}</textarea></div>
-      <div><label>Precio</label><input id="e-price-${p.id}" type="text" inputmode="decimal" value="${formatPriceValue(p.price, p.currency)}" onblur="reformatPriceField('e-price-${p.id}','e-currency-${p.id}')" /></div>
-      <div><label>Moneda</label>
-        <select id="e-currency-${p.id}" onchange="reformatPriceField('e-price-${p.id}','e-currency-${p.id}')">
-          <option value="COP" ${p.currency === 'COP' ? 'selected' : ''}>COP</option>
-          <option value="USD" ${p.currency === 'USD' ? 'selected' : ''}>USD</option>
-        </select>
-      </div>
-      <div><label>Stock</label><input id="e-stock-${p.id}" type="number" value="${p.stock}" /></div>
-      <div class="full"><label>Categoría</label><input id="e-cat-${p.id}" value="${escapeHtml(p.category || '')}" /></div>
-      <div class="full" style="display:flex; gap:6px; margin-top:8px;">
-        <button class="btn-primary" onclick="saveEdit('${p.id}')">Guardar</button>
-        <button class="btn-ghost" onclick="cancelEdit()">Cancelar</button>
-      </div>
-    </div>
-  ` : '';
 
   return `
     <div class="product-card ${p.active ? '' : 'inactive'}">
@@ -1323,7 +1332,6 @@ function renderCard(p) {
         </div>
         ${p.category ? `<span class="category-tag">${escapeHtml(p.category)}</span>` : ''}
       </div>
-      ${editForm}
       <div class="product-footer">
         <button class="btn-secondary" onclick="startEdit('${p.id}')">Editar</button>
         <button class="btn-secondary" onclick="toggleActive('${p.id}', ${!p.active})">${p.active ? 'Desactivar' : 'Activar'}</button>
@@ -1368,16 +1376,32 @@ function formatMessageText(str) {
     .replace(/\*([^\n*]+?)\*/g, '<strong>$1</strong>');
 }
 
-function startEdit(id) { editingId = id; loadProducts(); }
-function cancelEdit() { editingId = null; loadProducts(); }
+function startEdit(id) {
+  const p = productsCache.find((x) => x.id === id);
+  if (!p) return;
+  editingId = id;
+  document.getElementById('edit-name').value = p.name;
+  document.getElementById('edit-desc').value = p.description;
+  document.getElementById('edit-currency').value = p.currency;
+  document.getElementById('edit-price').value = formatPriceValue(p.price, p.currency);
+  document.getElementById('edit-stock').value = p.stock;
+  document.getElementById('edit-cat').value = p.category || '';
+  document.getElementById('product-edit-modal').style.display = 'flex';
+}
 
-async function saveEdit(id) {
-  const name = document.getElementById(`e-name-${id}`).value.trim();
-  const description = document.getElementById(`e-desc-${id}`).value.trim();
-  const currency = document.getElementById(`e-currency-${id}`).value;
-  const price = parsePriceInput(document.getElementById(`e-price-${id}`).value, currency);
-  const stock = document.getElementById(`e-stock-${id}`).value;
-  const category = document.getElementById(`e-cat-${id}`).value.trim();
+function closeEditModal() {
+  editingId = null;
+  document.getElementById('product-edit-modal').style.display = 'none';
+}
+
+async function saveEdit() {
+  const id = editingId;
+  const name = document.getElementById('edit-name').value.trim();
+  const description = document.getElementById('edit-desc').value.trim();
+  const currency = document.getElementById('edit-currency').value;
+  const price = parsePriceInput(document.getElementById('edit-price').value, currency);
+  const stock = document.getElementById('edit-stock').value;
+  const category = document.getElementById('edit-cat').value.trim();
 
   try {
     await apiFetch(`/admin/api/products/${id}`, {
@@ -1385,7 +1409,7 @@ async function saveEdit(id) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name, description, price, currency, stock, category }),
     });
-    editingId = null;
+    closeEditModal();
     setStatus('Producto actualizado ✓');
     loadProducts();
   } catch (err) {
@@ -1681,13 +1705,30 @@ let conversationPollTimer = null;
 let renderedMessageIds = new Set();
 
 function openImageLightbox(url) {
+  const video = document.getElementById('image-lightbox-video');
+  video.pause();
+  video.style.display = 'none';
+  video.src = '';
+  document.getElementById('image-lightbox-img').style.display = '';
   document.getElementById('image-lightbox-img').src = url;
+  document.getElementById('image-lightbox').style.display = 'flex';
+}
+
+function openVideoLightbox(url) {
+  document.getElementById('image-lightbox-img').style.display = 'none';
+  document.getElementById('image-lightbox-img').src = '';
+  const video = document.getElementById('image-lightbox-video');
+  video.style.display = '';
+  video.src = url;
   document.getElementById('image-lightbox').style.display = 'flex';
 }
 
 function closeImageLightbox() {
   document.getElementById('image-lightbox').style.display = 'none';
   document.getElementById('image-lightbox-img').src = '';
+  const video = document.getElementById('image-lightbox-video');
+  video.pause();
+  video.src = '';
 }
 
 function messageBubbleHtml(m) {
