@@ -587,6 +587,33 @@ function looksLikePersonName(text: string): boolean {
 const ASK_ID_PATTERN = /\b(numero de (identificaci[oó]n|c[eé]dula)|tu c[eé]dula|c[eé]dula,? por favor)\b/i;
 const ASK_PHONE_PATTERN = /\b(numero de celular|tu celular|celular de contacto|celular,? por favor)\b/i;
 
+const PAYMENT_MENTION_PATTERN = /nequi|bancolombia|daviplata|titular|transferencia|llave/i;
+
+// Prompt instructions alone weren't enough to stop the model from occasionally fabricating an entire
+// fake account number + titular for a real payment method (seen in production: a completely invented
+// Nequi number and name, not even close to the real configured one - real money risk). This is the hard
+// backstop: if the reply mentions payment details but contains a 7+ digit run that isn't in ANY of the
+// real configured methods, don't trust the model's text at all - replace it with the real data verbatim.
+export function guardAgainstPaymentHallucination(
+  text: string,
+  paymentMethods: { label: string; details: string }[] | null
+): string {
+  if (!paymentMethods?.length || !PAYMENT_MENTION_PATTERN.test(text)) return text;
+  const knownDigits = paymentMethods.map((m) => m.details.replace(/\D/g, "")).join("|");
+  const digitRuns = text.match(/\d{7,}/g) ?? [];
+  const hasUnverifiedNumber = digitRuns.some((run) => !knownDigits.includes(run));
+  if (!hasUnverifiedNumber) return text;
+
+  console.error("Dato de pago inventado por el modelo, reemplazado por los datos reales configurados:", {
+    modelText: text,
+    realMethods: paymentMethods,
+  });
+  return [
+    "¡Perfecto! Estos son los datos reales para el pago:",
+    ...paymentMethods.map((m) => `*${m.label}*\n${m.details}`),
+  ].join("\n\n");
+}
+
 function looksLikeIdOrPhone(text: string): boolean {
   const trimmed = text.trim();
   if (!/^[\d\s-]{6,15}$/.test(trimmed)) return false;
@@ -632,8 +659,11 @@ export async function generateReply(
   let nameSavedThisTurn = 0;
   let contactSavedThisTurn = 0;
   let intentFlaggedThisTurn = 0;
+  let paymentMethodsThisTurn: { type: string; label: string; details: string }[] | null = null;
 
   async function finalizeTurn(text: string): Promise<string> {
+    text = guardAgainstPaymentHallucination(text, paymentMethodsThisTurn);
+
     if (ownerAskedThisTurn === 0 && ESCALATION_CLAIM_PATTERN.test(text) && customerText) {
       await runCatalogTool(context, "ask_owner", { question: customerText });
     }
@@ -766,12 +796,16 @@ export async function generateReply(
           mediaJustSent?: boolean;
           sent?: boolean;
           asked?: boolean;
+          methods?: { type: string; label: string; details: string }[];
         };
         if (result?.mediaJustSent || result?.sent) mediaSentThisTurn++;
         if (call.function.name === "ask_owner") ownerAskedThisTurn++;
         if (call.function.name === "save_customer_name") nameSavedThisTurn++;
         if (call.function.name === "save_customer_contact_info") contactSavedThisTurn++;
         if (call.function.name === "flag_conversation_intent") intentFlaggedThisTurn++;
+        if (call.function.name === "get_payment_methods" && Array.isArray(result?.methods)) {
+          paymentMethodsThisTurn = result.methods;
+        }
         messages.push({
           role: "tool",
           tool_call_id: call.id,
