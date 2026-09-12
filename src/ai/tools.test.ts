@@ -991,3 +991,45 @@ test("get_previous_conversation falls back to pendingOrderSummary when contextSu
     await prisma.customer.deleteMany({ where: { id: freshCustomer.id } });
   }
 });
+
+test("get_shipping_rate_for_city resolves a Cundinamarca municipio to the Regional tier", async () => {
+  await prisma.shippingRate.create({ data: { businessId, label: "Regional (otros municipios de Cundinamarca)", cost: 12500, sortOrder: 3 } });
+  await prisma.shippingCityRule.create({
+    data: { businessId, city: "Zipaquirá", normalizedCity: "zipaquira", label: "Regional (otros municipios de Cundinamarca)" },
+  });
+  try {
+    const context = await freshContext();
+    const result = (await runCatalogTool(context, "get_shipping_rate_for_city", { city: "zipaquira" })) as {
+      matched: boolean;
+      label: string;
+      cost: string;
+    };
+    assert.equal(result.matched, true);
+    assert.equal(result.label, "Regional (otros municipios de Cundinamarca)");
+    assert.equal(Number(result.cost), 12500);
+  } finally {
+    await prisma.shippingCityRule.deleteMany({ where: { businessId } });
+    await prisma.shippingRate.deleteMany({ where: { businessId } });
+  }
+});
+
+test("get_shipping_rate_for_city resolves a department capital to the Nacional tier", async () => {
+  await prisma.shippingRate.create({ data: { businessId, label: "Nacional (principales ciudades de Colombia)", cost: 18500, sortOrder: 4 } });
+  await prisma.shippingCityRule.create({
+    data: { businessId, city: "Medellín", normalizedCity: "medellin", label: "Nacional (principales ciudades de Colombia)" },
+  });
+  try {
+    const context = await freshContext();
+    const result = (await runCatalogTool(context, "get_shipping_rate_for_city", { city: "Medellin" })) as {
+      matched: boolean;
+      label: string;
+      cost: string;
+    };
+    assert.equal(result.matched, true);
+    assert.equal(result.label, "Nacional (principales ciudades de Colombia)");
+    assert.equal(Number(result.cost), 18500);
+  } finally {
+    await prisma.shippingCityRule.deleteMany({ where: { businessId } });
+    await prisma.shippingRate.deleteMany({ where: { businessId } });
+  }
+});

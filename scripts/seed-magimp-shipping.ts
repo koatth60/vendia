@@ -19,6 +19,38 @@ const CITY_RULES = [
   { city: "Soacha", label: "Soacha" },
 ];
 
+// Real, sourced data (not invented): Cundinamarca's 116 municipios (Wikipedia's
+// "Anexo:Municipios_de_Cundinamarca"), Soacha excluded since it already has its own tier above. Maps to
+// the "Regional" tier per the business's own script ("otros municipios de Cundinamarca").
+const CUNDINAMARCA_MUNICIPIOS = [
+  "Chocontá", "Machetá", "Manta", "Sesquilé", "Suesca", "Tibirita", "Villapinzón", "Agua de Dios",
+  "Girardot", "Guataquí", "Jerusalén", "Nariño", "Nilo", "Ricaurte", "Tocaima", "Caparrapí", "Guaduas",
+  "Puerto Salgar", "Albán", "La Peña", "La Vega", "Nimaima", "Nocaima", "Quebradanegra", "San Francisco",
+  "Sasaima", "Supatá", "Útica", "Vergara", "Villeta", "Gachalá", "Gachetá", "Gama", "Guasca", "Guatavita",
+  "Junín", "La Calera", "Ubalá", "Beltrán", "Bituima", "Chaguaní", "Guayabal de Síquima", "Pulí",
+  "San Juan de Rioseco", "Vianí", "Medina", "Paratebueno", "Cáqueza", "Chipaque", "Choachí", "Fómeque",
+  "Fosca", "Guayabetal", "Gutiérrez", "Quetame", "Ubaque", "Une", "El Peñón", "La Palma", "Pacho", "Paime",
+  "San Cayetano", "Topaipí", "Villagómez", "Yacopí", "Cajicá", "Chía", "Cogua", "Cota", "Gachancipá",
+  "Nemocón", "Sopó", "Tabio", "Tenjo", "Tocancipá", "Zipaquirá", "Bojacá", "El Rosal", "Facatativá",
+  "Funza", "Madrid", "Mosquera", "Subachoque", "Zipacón", "Sibaté", "Arbeláez", "Cabrera", "Fusagasugá",
+  "Granada", "Pandi", "Pasca", "San Bernardo", "Silvania", "Tibacuy", "Venecia", "Anapoima", "Anolaima",
+  "Apulo", "Cachipay", "El Colegio", "La Mesa", "Quipile", "San Antonio del Tequendama", "Tena", "Viotá",
+  "Carmen de Carupa", "Cucunubá", "Fúquene", "Guachetá", "Lenguazaque", "Simijaca", "Susa", "Sutatausa",
+  "Tausa", "Ubaté",
+];
+
+// Colombia's 32 department capitals (Wikipedia's "Anexo:Capitales_departamentales_de_Colombia_por_población"),
+// Bogotá excluded (own tier). "Capital de departamento" is a simple, sourced heuristic for "principal
+// city" per the business's "Nacional (principales ciudades de Colombia)" tier - a few of these (Mitú,
+// Leticia, Puerto Carreño) are remote Amazon/Orinoquía capitals arguably closer to "Difícil Acceso" in
+// spirit, accepted as a known simplification rather than left unclassified.
+const DEPARTMENT_CAPITALS = [
+  "Medellín", "Cali", "Barranquilla", "Cartagena", "Cúcuta", "Bucaramanga", "Villavicencio", "Santa Marta",
+  "Valledupar", "Ibagué", "Montería", "Pereira", "Manizales", "Pasto", "Neiva", "Popayán", "Armenia",
+  "Sincelejo", "Riohacha", "Tunja", "Yopal", "Florencia", "Quibdó", "Arauca", "Mocoa", "San Andrés",
+  "San José del Guaviare", "Leticia", "Inírida", "Mitú", "Puerto Carreño",
+];
+
 async function main() {
   const business = await prisma.business.findFirst({ where: { name: { contains: "MAGByLizN", mode: "insensitive" } } });
   if (!business) {
@@ -42,6 +74,23 @@ async function main() {
       await createShippingCityRule(business.id, rule);
     }
     console.log(`Cargadas ${CITY_RULES.length} reglas de ciudad para ${business.name}.`);
+  }
+
+  const REGIONAL_LABEL = "Regional (otros municipios de Cundinamarca)";
+  const NACIONAL_LABEL = "Nacional (principales ciudades de Colombia)";
+  const existingTaxonomyRules = await prisma.shippingCityRule.count({ where: { businessId: business.id, label: { in: [REGIONAL_LABEL, NACIONAL_LABEL] } } });
+  if (existingTaxonomyRules > 0) {
+    console.log(`Ya hay ${existingTaxonomyRules} reglas de taxonomia (Regional/Nacional) cargadas para ${business.name}, no se duplican.`);
+  } else {
+    for (const city of CUNDINAMARCA_MUNICIPIOS) {
+      await createShippingCityRule(business.id, { city, label: REGIONAL_LABEL });
+    }
+    for (const city of DEPARTMENT_CAPITALS) {
+      await createShippingCityRule(business.id, { city, label: NACIONAL_LABEL });
+    }
+    console.log(
+      `Cargadas ${CUNDINAMARCA_MUNICIPIOS.length} reglas Regional + ${DEPARTMENT_CAPITALS.length} reglas Nacional para ${business.name}.`
+    );
   }
 
   await prisma.business.update({ where: { id: business.id }, data: { ownerReminderMinutes: 5 } });

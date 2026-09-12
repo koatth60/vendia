@@ -290,8 +290,598 @@
       }
     ],
     "shippingCityRules": [
-      { "city": "Bogotá", "label": "Bogotá" },
-      { "city": "Soacha", "label": "Soacha" }
+      {
+        "city": "Bogotá",
+        "label": "Bogotá"
+      },
+      {
+        "city": "Soacha",
+        "label": "Soacha"
+      },
+      {
+        "city": "Chocontá",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Machetá",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Manta",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Sesquilé",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Suesca",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Tibirita",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Villapinzón",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Agua de Dios",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Girardot",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Guataquí",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Jerusalén",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Nariño",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Nilo",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Ricaurte",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Tocaima",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Caparrapí",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Guaduas",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Puerto Salgar",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Albán",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "La Peña",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "La Vega",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Nimaima",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Nocaima",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Quebradanegra",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "San Francisco",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Sasaima",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Supatá",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Útica",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Vergara",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Villeta",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Gachalá",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Gachetá",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Gama",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Guasca",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Guatavita",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Junín",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "La Calera",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Ubalá",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Beltrán",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Bituima",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Chaguaní",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Guayabal de Síquima",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Pulí",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "San Juan de Rioseco",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Vianí",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Medina",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Paratebueno",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Cáqueza",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Chipaque",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Choachí",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Fómeque",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Fosca",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Guayabetal",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Gutiérrez",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Quetame",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Ubaque",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Une",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "El Peñón",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "La Palma",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Pacho",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Paime",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "San Cayetano",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Topaipí",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Villagómez",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Yacopí",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Cajicá",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Chía",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Cogua",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Cota",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Gachancipá",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Nemocón",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Sopó",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Tabio",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Tenjo",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Tocancipá",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Zipaquirá",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Bojacá",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "El Rosal",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Facatativá",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Funza",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Madrid",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Mosquera",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Subachoque",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Zipacón",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Sibaté",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Arbeláez",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Cabrera",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Fusagasugá",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Granada",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Pandi",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Pasca",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "San Bernardo",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Silvania",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Tibacuy",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Venecia",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Anapoima",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Anolaima",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Apulo",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Cachipay",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "El Colegio",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "La Mesa",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Quipile",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "San Antonio del Tequendama",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Tena",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Viotá",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Carmen de Carupa",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Cucunubá",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Fúquene",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Guachetá",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Lenguazaque",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Simijaca",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Susa",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Sutatausa",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Tausa",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Ubaté",
+        "label": "Regional (otros municipios de Cundinamarca)"
+      },
+      {
+        "city": "Medellín",
+        "label": "Nacional (principales ciudades de Colombia)"
+      },
+      {
+        "city": "Cali",
+        "label": "Nacional (principales ciudades de Colombia)"
+      },
+      {
+        "city": "Barranquilla",
+        "label": "Nacional (principales ciudades de Colombia)"
+      },
+      {
+        "city": "Cartagena",
+        "label": "Nacional (principales ciudades de Colombia)"
+      },
+      {
+        "city": "Cúcuta",
+        "label": "Nacional (principales ciudades de Colombia)"
+      },
+      {
+        "city": "Bucaramanga",
+        "label": "Nacional (principales ciudades de Colombia)"
+      },
+      {
+        "city": "Villavicencio",
+        "label": "Nacional (principales ciudades de Colombia)"
+      },
+      {
+        "city": "Santa Marta",
+        "label": "Nacional (principales ciudades de Colombia)"
+      },
+      {
+        "city": "Valledupar",
+        "label": "Nacional (principales ciudades de Colombia)"
+      },
+      {
+        "city": "Ibagué",
+        "label": "Nacional (principales ciudades de Colombia)"
+      },
+      {
+        "city": "Montería",
+        "label": "Nacional (principales ciudades de Colombia)"
+      },
+      {
+        "city": "Pereira",
+        "label": "Nacional (principales ciudades de Colombia)"
+      },
+      {
+        "city": "Manizales",
+        "label": "Nacional (principales ciudades de Colombia)"
+      },
+      {
+        "city": "Pasto",
+        "label": "Nacional (principales ciudades de Colombia)"
+      },
+      {
+        "city": "Neiva",
+        "label": "Nacional (principales ciudades de Colombia)"
+      },
+      {
+        "city": "Popayán",
+        "label": "Nacional (principales ciudades de Colombia)"
+      },
+      {
+        "city": "Armenia",
+        "label": "Nacional (principales ciudades de Colombia)"
+      },
+      {
+        "city": "Sincelejo",
+        "label": "Nacional (principales ciudades de Colombia)"
+      },
+      {
+        "city": "Riohacha",
+        "label": "Nacional (principales ciudades de Colombia)"
+      },
+      {
+        "city": "Tunja",
+        "label": "Nacional (principales ciudades de Colombia)"
+      },
+      {
+        "city": "Yopal",
+        "label": "Nacional (principales ciudades de Colombia)"
+      },
+      {
+        "city": "Florencia",
+        "label": "Nacional (principales ciudades de Colombia)"
+      },
+      {
+        "city": "Quibdó",
+        "label": "Nacional (principales ciudades de Colombia)"
+      },
+      {
+        "city": "Arauca",
+        "label": "Nacional (principales ciudades de Colombia)"
+      },
+      {
+        "city": "Mocoa",
+        "label": "Nacional (principales ciudades de Colombia)"
+      },
+      {
+        "city": "San Andrés",
+        "label": "Nacional (principales ciudades de Colombia)"
+      },
+      {
+        "city": "San José del Guaviare",
+        "label": "Nacional (principales ciudades de Colombia)"
+      },
+      {
+        "city": "Leticia",
+        "label": "Nacional (principales ciudades de Colombia)"
+      },
+      {
+        "city": "Inírida",
+        "label": "Nacional (principales ciudades de Colombia)"
+      },
+      {
+        "city": "Mitú",
+        "label": "Nacional (principales ciudades de Colombia)"
+      },
+      {
+        "city": "Puerto Carreño",
+        "label": "Nacional (principales ciudades de Colombia)"
+      }
     ],
     "faqEntries": [
       {
