@@ -498,6 +498,13 @@ const PAYMENT_OPTIONS_CLAIM_PATTERN = /\b(te comparto|te paso|aqu[ií] (est[aá]
 // mistaken for one) and the customer's answer is shaped like a name, not a sentence.
 const ASK_NAME_PATTERN =
   /\b(a nombre de qui[eé]n|tu nombre completo|nombre completo|c[oó]mo te llamas|cu[aá]l es tu nombre|tu nombre,? por favor)\b/i;
+
+// Same failure mode once more, for the case the prior fix didn't cover: the customer volunteers their
+// name unprompted ("Hola soy David", "mi nombre es Maria Jose") instead of answering a question that
+// asked for it - ASK_NAME_PATTERN never matches because the bot never asked, so the tool call depended
+// entirely on the model remembering to do it on its own. That's the gap behind the recurring "the bot
+// isn't saving the name automatically anymore, we've had to add it by hand" complaint.
+const SELF_INTRO_NAME_PATTERN = /\b(?:soy|me llamo|mi nombre es)\s+([A-Za-zÀ-ÿ'-]+(?:\s+[A-Za-zÀ-ÿ'-]+){0,3})/i;
 const NOT_A_NAME = new Set([
   "si", "sí", "no", "ok", "listo", "gracias", "hola", "buenas", "dale", "vale", "hey", "chao", "claro",
   "ala", "parce", "parcero", "oiga", "uy", "bacano", "hermano", "ey",
@@ -601,6 +608,27 @@ function looksLikePersonName(text: string): boolean {
   return !NOT_A_NAME.has(trimmed.toLowerCase());
 }
 
+// "soy"/"mi nombre es"/"me llamo" also introduce non-name words in ordinary Spanish ("soy de Bogota",
+// "soy yo", "soy nuevo por aca") - looksLikePersonName alone doesn't catch these since they're still
+// 1-4 alphabetic words. Reject when the word right after the trigger is one of these common cases
+// instead of a name.
+const SELF_INTRO_STOPWORDS = new Set([
+  "de", "yo", "nuevo", "nueva", "quien", "quién", "asi", "así", "cliente", "el", "la", "los", "las",
+  "un", "una", "aqui", "aquí", "aca", "acá", "alli", "allí", "ahi", "ahí", "bien", "mal", "nadie", "alguien",
+]);
+
+// Pulls a name out of an unprompted self-introduction ("Hola soy David Gomez"), independent of whatever
+// the bot last said. Exported for a cheap pure-function regression test - no need to hit the real LLM
+// just to check this extraction.
+export function extractSelfIntroducedName(customerText: string): string | null {
+  const match = customerText.match(SELF_INTRO_NAME_PATTERN);
+  if (!match) return null;
+  const candidate = match[1].trim();
+  const firstWord = candidate.split(/\s+/)[0].toLowerCase();
+  if (SELF_INTRO_STOPWORDS.has(firstWord)) return null;
+  return looksLikePersonName(candidate) ? candidate : null;
+}
+
 // Same pattern once more, for cedula/celular de contacto - split into two separate patterns since a
 // business can ask for both in the same message ("cedula y celular"), and a single numeric reply in
 // that case is ambiguous about which one it answers, so the net only fires when the prior turn asked
@@ -702,13 +730,15 @@ export async function generateReply(
       await runCatalogTool(context, "flag_conversation_intent", { intent: "SOLICITA_AGENTE" });
     }
 
-    if (
-      nameSavedThisTurn === 0 &&
-      customerText &&
-      looksLikePersonName(customerText) &&
-      ASK_NAME_PATTERN.test(lastAssistantText(history))
-    ) {
-      await runCatalogTool(context, "save_customer_name", { name: customerText.trim() });
+    if (nameSavedThisTurn === 0 && customerText) {
+      if (looksLikePersonName(customerText) && ASK_NAME_PATTERN.test(lastAssistantText(history))) {
+        await runCatalogTool(context, "save_customer_name", { name: customerText.trim() });
+      } else {
+        const selfIntroName = extractSelfIntroducedName(customerText);
+        if (selfIntroName) {
+          await runCatalogTool(context, "save_customer_name", { name: selfIntroName });
+        }
+      }
     }
 
     if (contactSavedThisTurn === 0 && customerText && looksLikeIdOrPhone(customerText)) {
