@@ -37,7 +37,7 @@ import {
   type WhatsappCredentials,
 } from "../whatsapp/client";
 import { getAiUsageSummary, getPlanUsage, logAiUsage } from "../ai/usage";
-import { buildOrderClosedMessage } from "../ai/agent";
+import { generateClosingMessage } from "../ai/agent";
 import { extractSaleDetails } from "../ai/extractSale";
 import { deepseek, DEEPSEEK_MODEL } from "../ai/client";
 import { getAnalyticsSummary } from "../analytics/service";
@@ -795,7 +795,17 @@ adminRouter.post("/api/conversations/:id/close-sale", async (req, res) => {
   });
   await updateConversationStatus(businessId, conversation.id, "SOLD");
 
-  const text = formatForWhatsapp(customerMessage) || buildOrderClosedMessage(business);
+  const text =
+    formatForWhatsapp(customerMessage) ||
+    (await generateClosingMessage(businessId, conversation.id, business, {
+      customerName: conversation.customer.name,
+      summary: order.summary,
+      shippingAddress: order.shippingAddress,
+      paymentMethodLabel: order.paymentMethodLabel,
+      shippingCost: order.shippingCost != null ? Number(order.shippingCost) : null,
+      totalAmount: Number(order.totalAmount),
+      currency: order.currency,
+    }));
   const wamid = await sendTextMessage(credentials, conversation.customer.phoneNumber, text);
   await recordMessage(businessId, conversation.id, "ASSISTANT", text, wamid || undefined);
   await askForCsat(credentials, order.id, conversation.customer.phoneNumber);

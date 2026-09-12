@@ -18,7 +18,7 @@ import {
   updateConversationStatus,
   getRelatedProductNameForMessage,
 } from "../conversation/service";
-import { generateReply, buildOrderClosedMessage } from "../ai/agent";
+import { generateReply, generateClosingMessage } from "../ai/agent";
 import { analyzeCustomerImage } from "../ai/vision";
 import { transcribeAudio } from "../ai/transcription";
 import { checkPlanCap } from "../ai/usage";
@@ -177,9 +177,17 @@ export async function handleOwnerReply(
     await clearPendingConfirmation(conversation.id);
     const business = await prisma.business.findUnique({
       where: { id: businessId },
-      select: { botTone: true, assistantName: true },
+      select: { botTone: true, assistantName: true, customInstructions: true },
     });
-    const customerText = buildOrderClosedMessage(business ?? {});
+    const customerText = await generateClosingMessage(businessId, conversation.id, business ?? {}, {
+      customerName: conversation.customer.name,
+      summary: order.summary,
+      shippingAddress: order.shippingAddress,
+      paymentMethodLabel: order.paymentMethodLabel,
+      shippingCost: order.shippingCost != null ? Number(order.shippingCost) : null,
+      totalAmount: Number(order.totalAmount),
+      currency: order.currency,
+    });
     await sendTextMessage(credentials, customerPhone, customerText);
     await recordMessage(businessId, conversation.id, "ASSISTANT", customerText);
     await askForCsat(credentials, order.id, customerPhone);

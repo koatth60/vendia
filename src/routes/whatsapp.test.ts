@@ -274,3 +274,61 @@ test("handleOwnerReply tells the owner nothing is pending when there's zero open
   assert.ok(sentToOwner);
   assert.match(sentToOwner!.body, /No identifique/i);
 });
+
+// Real DeepSeek call (no mocking) - covers the fix where the deterministic owner-confirms-payment path
+// used to always send one hardcoded generic closing string, ignoring a business's own closing script
+// defined in customInstructions (e.g. MAG.IMP's "Etapa 4: Cierre Oficial" template with placeholders).
+test("handleOwnerReply confirms payment and follows the business's own closing script from customInstructions, filling in real order data", async () => {
+  const business2 = await prisma.business.create({
+    data: {
+      name: `Test ${randomUUID()}`,
+      email: `test-${randomUUID()}@example.com`,
+      passwordHash: "x",
+      contactPhone: "573000000002",
+      contactName: "Owner2",
+      customInstructions: `Etapa de cierre (REGLA MANDATORIA): una vez el pago este confirmado, cierra la
+conversacion enviando UNICAMENTE este mensaje exacto, reemplazando los placeholders con los datos reales
+del pedido, sin agregar ni modificar nada mas:
+"Listo [Nombre del cliente], tu pedido por un total de [Total] quedo cerrado. Gracias por tu compra."`,
+    },
+  });
+  const customer = await prisma.customer.create({
+    data: { businessId: business2.id, phoneNumber: `57300${Date.now()}9`, name: "Camila" },
+  });
+  const wamid = `wamid.confirm-${randomUUID()}`;
+  const conversation = await prisma.conversation.create({
+    data: {
+      customerId: customer.id,
+      pendingConfirmationMessageId: wamid,
+      pendingOrderSummary: "1x Producto Test",
+      pendingOrderItems: {
+        items: [{ productId: "test-product-id", productName: "Producto Test", quantity: 1, unitPrice: 50000, currency: "COP" }],
+        shippingAddress: "Calle 1, Bogota",
+        paymentMethodLabel: "Nequi",
+        shippingCost: 0,
+      },
+    },
+  });
+
+  try {
+    await handleOwnerReply(business2.id, credentials, "573000000002", {
+      type: "text",
+      text: { body: "si" },
+      context: { id: wamid },
+    });
+
+    const sentToCustomer = sentMessages.find((m) => m.to === customer.phoneNumber);
+    assert.ok(sentToCustomer, "expected a closing message sent to the customer");
+    assert.match(sentToCustomer!.body, /Camila/, "must use the business's own template, filled with the real customer name");
+    assert.match(sentToCustomer!.body, /50\s?\.?000/, "must fill in the real order total, not a placeholder");
+
+    const order = await prisma.order.findUnique({ where: { conversationId: conversation.id } });
+    assert.ok(order, "expected an order to actually be created");
+  } finally {
+    await prisma.order.deleteMany({ where: { conversationId: conversation.id } });
+    await prisma.message.deleteMany({ where: { conversationId: conversation.id } });
+    await prisma.conversation.deleteMany({ where: { id: conversation.id } });
+    await prisma.customer.deleteMany({ where: { id: customer.id } });
+    await prisma.business.deleteMany({ where: { id: business2.id } });
+  }
+});

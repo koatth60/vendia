@@ -82,8 +82,14 @@ hecho la llamada primero.
 
 PAGOS: cuando el cliente quiera confirmar una compra, pregunte como pagar, o pregunte el costo del envio
 (el valor del envio contraentrega suele estar en los detalles del metodo de pago correspondiente), usa
-get_payment_methods para saber las formas de pago reales de este negocio y ofrecele esas opciones. Nunca
-inventes metodos de pago ni costos de envio.
+get_payment_methods para saber las formas de pago reales de este negocio y ofrecele esas opciones. Volvé a
+llamar get_payment_methods cada vez que necesites repetir o confirmar un numero/llave/cuenta de pago,
+aunque ya lo hayas visto antes en esta misma conversacion - copia el numero, la llave y el nombre del
+titular EXACTAMENTE como los devuelve la herramienta en ESE momento, nunca de memoria ni parafraseando lo
+que recordas de mensajes anteriores (un digito mal recordado es plata real perdida). El titular de un
+metodo de pago es siempre una persona (el nombre que puso el negocio en los detalles del metodo), nunca el
+nombre del negocio ni el tuyo - si la herramienta no menciona explicitamente un titular, no inventes uno.
+Nunca inventes metodos de pago ni costos de envio.
 Nunca puedes mandar un mensaje despues de este - cada respuesta es tu unica oportunidad de decir algo en
 este turno. Por eso nunca digas "te mando los datos en un mensaje aparte" ni "en breve te confirmo" sin
 haberlo hecho ya: si el cliente elige una forma de pago, incluye el numero/llave o link real en ese mismo
@@ -488,16 +494,81 @@ export function customerRequestsHuman(text: string): boolean {
   return HUMAN_REQUEST_PATTERN.test(text);
 }
 
-// Used for the deterministic order-closed confirmation sent once the owner confirms payment (bypasses
-// the LLM entirely, so it has to bake the business's configured personality in by hand instead of
-// relying on the system prompt) - dialect doesn't change this particular sentence (no "tenés"/"tienes"
-// style conjugation in it), only tone (formality/emoji) and an optional sign-off actually vary it.
+// Fallback for the order-closed confirmation when there's no customInstructions to follow, or the
+// one-shot closing generation below fails/returns nothing - dialect doesn't change this particular
+// sentence (no "tenés"/"tienes" style conjugation in it), only tone (formality/emoji) and sign-off vary.
 export function buildOrderClosedMessage(business: { botTone?: string | null; assistantName?: string | null }): string {
   const formal = business.botTone === "formal" || business.botTone === "profesional";
   const signOff = business.assistantName?.trim() ? ` - ${business.assistantName.trim()}` : "";
   return formal
     ? `Tu pago quedo confirmado y tu pedido esta cerrado. Gracias por tu compra.${signOff}`
     : `¡Listo! Tu pago quedo confirmado y tu pedido esta cerrado. Gracias por tu compra 🎉${signOff}`;
+}
+
+const CLOSING_MESSAGE_PROMPT = `El dueno de este negocio acaba de confirmar que el pago de este pedido esta correcto. Tu unica tarea es
+generar el mensaje final de cierre para el cliente, usando los datos reales del pedido que te paso abajo.
+
+Si mas abajo hay instrucciones especificas de este negocio que incluyen su propio script/plantilla de
+cierre (por ciudad, modalidad de pago, etc - a veces llamado "Etapa de cierre" o similar), USALA TAL CUAL
+esta escrita, reemplazando cada placeholder (nombre del cliente, precios, etc) con los datos reales del
+pedido de abajo - no inventes, no cambies el texto de la plantilla, no agregues nada que la plantilla no
+pida. Elegi la variante correcta de la plantilla segun la ciudad y la modalidad de pago real de este
+pedido. Si el negocio NO definio un script propio de cierre en sus instrucciones, generá un mensaje corto,
+calido, agradeciendo la compra y confirmando que el pedido quedo cerrado.
+
+Respondé SOLO con el mensaje final para el cliente, en texto plano, sin comillas ni explicaciones.`;
+
+export interface ClosingOrderFacts {
+  customerName: string | null;
+  summary: string;
+  shippingAddress: string | null;
+  paymentMethodLabel: string | null;
+  shippingCost: number | null;
+  totalAmount: number;
+  currency: string;
+}
+
+// One-shot completion (no tools, no agent loop) - deliberately NOT routed through generateReply/the
+// tool-calling agent, since this fires from the deterministic owner-confirms-payment code path where
+// re-running the full agent could re-trigger close_conversation or other tools and double up the order.
+export async function generateClosingMessage(
+  businessId: string,
+  conversationId: string,
+  business: { customInstructions?: string | null; botTone?: string | null; assistantName?: string | null },
+  order: ClosingOrderFacts
+): Promise<string> {
+  if (!business.customInstructions?.trim()) return buildOrderClosedMessage(business);
+
+  const orderFacts = `Instrucciones especificas de este negocio:
+${business.customInstructions.trim()}
+
+Datos reales de este pedido:
+- Cliente: ${order.customerName ?? "(sin nombre registrado)"}
+- Resumen: ${order.summary}
+- Direccion de envio: ${order.shippingAddress ?? "(no registrada)"}
+- Forma de pago: ${order.paymentMethodLabel ?? "(no registrada)"}
+- Costo de envio: ${order.shippingCost != null ? order.shippingCost : "(no registrado)"}
+- Total: ${order.totalAmount} ${order.currency}`;
+
+  try {
+    const response = await deepseek.chat.completions.create({
+      model: DEEPSEEK_MODEL,
+      max_tokens: 400,
+      messages: [
+        { role: "system", content: CLOSING_MESSAGE_PROMPT },
+        { role: "user", content: orderFacts },
+      ],
+      // @ts-expect-error DeepSeek-specific param, not in the OpenAI SDK types. Disabled: reasoning tokens
+      // leave message.content empty for a short generation task like this one.
+      thinking: { type: "disabled" },
+    });
+    await logAiUsage({ businessId, conversationId, kind: "CHAT", model: DEEPSEEK_MODEL, usage: response.usage });
+    const text = response.choices[0]?.message?.content?.trim();
+    return text || buildOrderClosedMessage(business);
+  } catch (error) {
+    console.error("No se pudo generar el mensaje de cierre personalizado, usando el generico:", error);
+    return buildOrderClosedMessage(business);
+  }
 }
 
 function looksLikePersonName(text: string): boolean {
