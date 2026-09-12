@@ -1,6 +1,8 @@
 import { prisma } from "../db/client";
 import type { OrderFulfillmentStatus } from "@prisma/client";
 import { findConfidentProductMatch } from "../catalog/products";
+import { canonicalColors } from "../catalog/attributeTaxonomy";
+import { normalizeForMatch } from "../search/text";
 import { sendInteractiveButtonsMessage, type WhatsappCredentials } from "../whatsapp/client";
 import { getPresignedMediaUrl } from "../media/s3";
 import { emitOrderNew, emitOrderUpdated } from "../realtime/events";
@@ -8,6 +10,8 @@ import { emitOrderNew, emitOrderUpdated } from "../realtime/events";
 export interface ResolvedOrderItem {
   productId: string;
   productName: string;
+  variantId?: string | null;
+  variantLabel?: string | null;
   quantity: number;
   unitPrice: number;
   currency: string;
@@ -16,11 +20,54 @@ export interface ResolvedOrderItem {
 export interface OrderItemInput {
   productName: string;
   quantity: number;
+  // Free text describing which color/size the customer picked (e.g. "rojo", "rojo talla M") - only
+  // meaningful when the matched product has variants (see ProductVariant in schema.prisma). Matched by
+  // the same color-synonym canonicalization used for catalog search, not exact string equality.
+  variantLabel?: string;
 }
 
 export interface ResolveOrderItemsResult {
   items: ResolvedOrderItem[];
   unresolved: string[];
+  // Product names that DO have variants (color/size options) but the given variantLabel didn't resolve
+  // to exactly one of them - either nothing was given, or it matched more than one equally. Real
+  // production incident (2026-09-12): a sale closed without ever asking the customer's color. The caller
+  // must refuse to close the sale while this is non-empty, not just warn about it like `unresolved`.
+  needsAttribute: string[];
+}
+
+type VariantForMatch = { id: string; color: string | null; size: string | null; active: boolean };
+
+// Scored the same way findConfidentProductMatch scores products: a hit on color (2) or size (2), refuse
+// to guess on a tie or on zero evidence - see that function's comment for the "why weak evidence isn't
+// enough to commit to a real order line" rationale, same logic applies here one level down.
+function matchVariant(variants: VariantForMatch[], label: string): { variant: VariantForMatch | null; ambiguous: boolean } {
+  const active = variants.filter((v) => v.active);
+  if (active.length === 0) return { variant: null, ambiguous: false };
+  if (active.length === 1) return { variant: active[0], ambiguous: false };
+
+  const labelColors = canonicalColors(label);
+  const labelNorm = normalizeForMatch(label);
+
+  const scored = active
+    .map((v) => {
+      let score = 0;
+      if (v.color && labelColors.includes(canonicalColors(v.color)[0])) score += 2;
+      if (v.size && labelNorm.includes(normalizeForMatch(v.size))) score += 2;
+      return { v, score };
+    })
+    .filter((s) => s.score > 0)
+    .sort((a, b) => b.score - a.score);
+
+  if (scored.length === 0) return { variant: null, ambiguous: false };
+  const tied = scored.filter((s) => s.score === scored[0].score);
+  if (tied.length > 1) return { variant: null, ambiguous: true };
+  return { variant: scored[0].v, ambiguous: false };
+}
+
+function formatVariantLabel(color: string | null, size: string | null): string | null {
+  const parts = [color, size].filter(Boolean);
+  return parts.length ? parts.join(" / ") : null;
 }
 
 // Matches by confidence (findConfidentProductMatch), not a blind top-of-search-results guess - a weak
@@ -28,14 +75,15 @@ export interface ResolveOrderItemsResult {
 // Items that still can't be matched confidently are reported back in `unresolved` instead of vanishing
 // silently - the free-text summary carries them too, but now the caller can act on it (e.g. warn the
 // owner) instead of the structured order record just quietly being short a line.
-// Two input lines resolving to the same product (the model split one item across two tool-call entries,
-// or the customer's order was described twice) are merged into one line with summed quantity, instead of
-// creating duplicate OrderItem rows for the same product.
+// Two input lines resolving to the same product+variant (the model split one item across two tool-call
+// entries, or the customer's order was described twice) are merged into one line with summed quantity,
+// instead of creating duplicate OrderItem rows.
 export async function resolveOrderItems(businessId: string, items: OrderItemInput[] | undefined): Promise<ResolveOrderItemsResult> {
-  if (!items || items.length === 0) return { items: [], unresolved: [] };
+  if (!items || items.length === 0) return { items: [], unresolved: [], needsAttribute: [] };
 
-  const byProductId = new Map<string, ResolvedOrderItem>();
+  const byKey = new Map<string, ResolvedOrderItem>();
   const unresolved: string[] = [];
+  const needsAttribute: string[] = [];
 
   for (const item of items) {
     const quantity = Math.max(1, Math.floor(Number(item.quantity) || 1));
@@ -49,13 +97,29 @@ export async function resolveOrderItems(businessId: string, items: OrderItemInpu
     }
 
     const product = match.product;
-    const existing = byProductId.get(product.id);
+    let variantId: string | null = null;
+    let variantLabel: string | null = null;
+
+    if (product.variants.length > 0) {
+      const { variant, ambiguous } = matchVariant(product.variants, item.variantLabel ?? "");
+      if (!variant) {
+        needsAttribute.push(`${product.name}${ambiguous ? " (color/talla ambiguo)" : ""}`);
+        continue;
+      }
+      variantId = variant.id;
+      variantLabel = formatVariantLabel(variant.color, variant.size);
+    }
+
+    const key = `${product.id}|${variantId ?? ""}`;
+    const existing = byKey.get(key);
     if (existing) {
       existing.quantity += quantity;
     } else {
-      byProductId.set(product.id, {
+      byKey.set(key, {
         productId: product.id,
         productName: product.name,
+        variantId,
+        variantLabel,
         quantity,
         unitPrice: Number(product.price),
         currency: product.currency,
@@ -63,7 +127,7 @@ export async function resolveOrderItems(businessId: string, items: OrderItemInpu
     }
   }
 
-  return { items: Array.from(byProductId.values()), unresolved };
+  return { items: Array.from(byKey.values()), unresolved, needsAttribute };
 }
 
 export async function createOrder(params: {
@@ -101,6 +165,8 @@ export async function createOrder(params: {
           create: items.map((item) => ({
             productId: item.productId,
             productName: item.productName,
+            variantId: item.variantId || null,
+            variantLabel: item.variantLabel || null,
             quantity: item.quantity,
             unitPrice: item.unitPrice,
             currency: item.currency,
@@ -111,6 +177,17 @@ export async function createOrder(params: {
     });
 
     for (const item of items) {
+      // A variant sale decrements that variant's own stock, not the parent product's (which a
+      // multi-variant product doesn't meaningfully track - see ProductVariant in schema.prisma).
+      if (item.variantId) {
+        const variant = await tx.productVariant.findUnique({ where: { id: item.variantId }, select: { stock: true } });
+        if (!variant) continue;
+        await tx.productVariant.update({
+          where: { id: item.variantId },
+          data: { stock: Math.max(0, variant.stock - item.quantity) },
+        });
+        continue;
+      }
       const product = await tx.product.findUnique({ where: { id: item.productId }, select: { stock: true } });
       if (!product) continue;
       await tx.product.update({

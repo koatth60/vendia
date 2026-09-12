@@ -2,7 +2,16 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { prisma } from "../db/client";
-import { searchProducts, findConfidentProductMatch } from "./products";
+import {
+  searchProducts,
+  findConfidentProductMatch,
+  createProduct,
+  createProductVariant,
+  updateProductVariant,
+  deleteProductVariant,
+  listActiveProducts,
+  findProductsByAttributes,
+} from "./products";
 
 let businessId: string;
 let productId: string;
@@ -155,4 +164,156 @@ test("findConfidentProductMatch matches confidently on a clear catalog name hit"
   const result = await findConfidentProductMatch(businessId, "boombox");
   assert.equal(result.ambiguous, false);
   assert.equal(result.product?.id, productId);
+});
+
+// Coverage for the ProductVariant layer added for the category/color/talla plan (2026-09-12): a product
+// sold in several colors/sizes under one name, each with its own stock, independent of the simple
+// single-color case (Product.color/size directly).
+test("createProductVariant/updateProductVariant/deleteProductVariant manage a color+size sub-item", async () => {
+  const business = await prisma.business.create({
+    data: { name: `Test ${randomUUID()}`, email: `test-${randomUUID()}@example.com`, passwordHash: "x" },
+  });
+  try {
+    const product = await createProduct(business.id, {
+      name: "Diadema M4",
+      description: "Diadema bluetooth disponible en varios colores",
+      price: 45000,
+      currency: "COP",
+      stock: 0,
+    });
+
+    const variant = await createProductVariant(business.id, product.id, { color: "Rojo", stock: 2 });
+    assert.equal(variant.color, "Rojo");
+    assert.equal(variant.stock, 2);
+
+    const updated = await updateProductVariant(business.id, variant.id, { stock: 5 });
+    assert.equal(updated.stock, 5);
+
+    const [withVariants] = await listActiveProducts(business.id);
+    assert.equal(withVariants.variants.length, 1);
+    assert.equal(withVariants.variants[0].id, variant.id);
+
+    await deleteProductVariant(business.id, variant.id);
+    const [afterDelete] = await listActiveProducts(business.id);
+    assert.equal(afterDelete.variants.length, 0);
+  } finally {
+    await prisma.product.deleteMany({ where: { businessId: business.id } });
+    await prisma.business.delete({ where: { id: business.id } });
+  }
+});
+
+test("createProductVariant refuses a variant for a product belonging to a different business", async () => {
+  const otherBusiness = await prisma.business.create({
+    data: { name: `Test ${randomUUID()}`, email: `test-${randomUUID()}@example.com`, passwordHash: "x" },
+  });
+  try {
+    await assert.rejects(() => createProductVariant(otherBusiness.id, productId, { color: "Azul", stock: 1 }));
+  } finally {
+    await prisma.business.delete({ where: { id: otherBusiness.id } });
+  }
+});
+
+// Coverage for find_products_by_attributes (2026-09-12 plan): the deterministic filter meant to replace
+// "reloj negro also returns airpods and non-black watches", a real reported bug caused by the media
+// backstop's prose scan matching any product NAME mentioned in text regardless of color/category.
+test("findProductsByAttributes: category+color only returns products that actually match both, not the whole catalog", async () => {
+  const business = await prisma.business.create({
+    data: { name: `Test ${randomUUID()}`, email: `test-${randomUUID()}@example.com`, passwordHash: "x" },
+  });
+  try {
+    await prisma.product.createMany({
+      data: [
+        { businessId: business.id, name: "Smartwatch Serie 11", description: "Reloj negro elegante", price: 100000, currency: "COP", stock: 5, category: "reloj", color: "Negro" },
+        { businessId: business.id, name: "Smartwatch Gen 9", description: "Reloj disponible en color oscuro", price: 80000, currency: "COP", stock: 5, category: "reloj", color: "Oscuro" },
+        { businessId: business.id, name: "Smartwatch V20", description: "Reloj deportivo", price: 90000, currency: "COP", stock: 5, category: "reloj", color: "Azul" },
+        { businessId: business.id, name: "Airpods Pro 2", description: "Audifonos inalambricos negros", price: 60000, currency: "COP", stock: 5, category: "audifonos", color: "Negro" },
+      ],
+    });
+
+    const result = await findProductsByAttributes(business.id, { category: "reloj", color: "negro" });
+    assert.equal(result.matches.length, 2, "must match the two black/dark watches, not the blue one or the headphones");
+    const names = result.matches.map((m) => m.productName).sort();
+    assert.deepEqual(names, ["Smartwatch Gen 9", "Smartwatch Serie 11"]);
+  } finally {
+    await prisma.product.deleteMany({ where: { businessId: business.id } });
+    await prisma.business.delete({ where: { id: business.id } });
+  }
+});
+
+test("findProductsByAttributes: a variant-level match returns only that variant, not the whole product's other colors", async () => {
+  const business = await prisma.business.create({
+    data: { name: `Test ${randomUUID()}`, email: `test-${randomUUID()}@example.com`, passwordHash: "x" },
+  });
+  try {
+    const product = await createProduct(business.id, {
+      name: "Diadema M4",
+      description: "Diadema bluetooth disponible en varios colores",
+      price: 45000,
+      currency: "COP",
+      stock: 0,
+      category: "diademas",
+    });
+    const red = await createProductVariant(business.id, product.id, { color: "Rojo", stock: 2 });
+    await createProductVariant(business.id, product.id, { color: "Amarillo", stock: 1 });
+    await createProductVariant(business.id, product.id, { color: "Verde", stock: 3 });
+
+    const result = await findProductsByAttributes(business.id, { color: "rojo" });
+    assert.equal(result.matches.length, 1);
+    assert.equal(result.matches[0].variantId, red.id);
+    assert.equal(result.matches[0].variantLabel, "Rojo");
+  } finally {
+    await prisma.product.deleteMany({ where: { businessId: business.id } });
+    await prisma.business.delete({ where: { id: business.id } });
+  }
+});
+
+// The "el rosadito" example from the plan: a bare color with no category, present across several
+// categories, must come back flagged as spanning categories so the caller asks instead of guessing.
+test("findProductsByAttributes: a color with no category, present in several categories, reports categoriesFound", async () => {
+  const business = await prisma.business.create({
+    data: { name: `Test ${randomUUID()}`, email: `test-${randomUUID()}@example.com`, passwordHash: "x" },
+  });
+  try {
+    await prisma.product.createMany({
+      data: [
+        { businessId: business.id, name: "Audifonos Bluetooth X", description: "Disponibles", price: 40000, currency: "COP", stock: 5, category: "audifonos", color: "Rosado" },
+        { businessId: business.id, name: "Diadema Basica", description: "Disponible", price: 20000, currency: "COP", stock: 5, category: "diademas", color: "Rosadito" },
+        { businessId: business.id, name: "Smartwatch Kids", description: "Disponible", price: 50000, currency: "COP", stock: 5, category: "smartwatch", color: "Fucsia" },
+      ],
+    });
+
+    const result = await findProductsByAttributes(business.id, { color: "rosadito" });
+    assert.equal(result.matches.length, 3);
+    assert.deepEqual(new Set(result.categoriesFound), new Set(["audifonos", "diademas", "smartwatch"]));
+  } finally {
+    await prisma.product.deleteMany({ where: { businessId: business.id } });
+    await prisma.business.delete({ where: { id: business.id } });
+  }
+});
+
+test("findProductsByAttributes: refuses to dump the whole catalog when neither color nor category is given", async () => {
+  const result = await findProductsByAttributes(businessId, {});
+  assert.deepEqual(result, { matches: [], categoriesFound: [] });
+});
+
+test("createProduct stores color and size for the simple single-variant case", async () => {
+  const business = await prisma.business.create({
+    data: { name: `Test ${randomUUID()}`, email: `test-${randomUUID()}@example.com`, passwordHash: "x" },
+  });
+  try {
+    const product = await createProduct(business.id, {
+      name: "Camiseta basica",
+      description: "Camiseta de algodon",
+      price: 35000,
+      currency: "COP",
+      stock: 10,
+      color: "Negro",
+      size: "M",
+    });
+    assert.equal(product.color, "Negro");
+    assert.equal(product.size, "M");
+  } finally {
+    await prisma.product.deleteMany({ where: { businessId: business.id } });
+    await prisma.business.delete({ where: { id: business.id } });
+  }
 });

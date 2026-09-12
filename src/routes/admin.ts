@@ -7,6 +7,9 @@ import {
   listAllProducts,
   updateProduct,
   addProductMedia,
+  createProductVariant,
+  updateProductVariant,
+  deleteProductVariant,
 } from "../catalog/products";
 import { prisma } from "../db/client";
 import { requireAuth } from "../auth/requireAuth";
@@ -303,7 +306,7 @@ adminRouter.get("/api/products", async (req, res) => {
 });
 
 adminRouter.post("/api/products", async (req, res) => {
-  const { name, description, price, currency, stock, category } = req.body;
+  const { name, description, price, currency, stock, category, color, size } = req.body;
   const product = await createProduct(businessIdOf(req), {
     name,
     description,
@@ -311,12 +314,14 @@ adminRouter.post("/api/products", async (req, res) => {
     currency,
     stock: Number(stock ?? 0),
     category: category || undefined,
+    color: color || undefined,
+    size: size || undefined,
   });
   res.status(201).json(product);
 });
 
 adminRouter.put("/api/products/:id", async (req, res) => {
-  const { name, description, price, currency, stock, category, active } = req.body;
+  const { name, description, price, currency, stock, category, color, size, active } = req.body;
   const product = await updateProduct(businessIdOf(req), String(req.params.id), {
     name,
     description,
@@ -324,6 +329,8 @@ adminRouter.put("/api/products/:id", async (req, res) => {
     currency,
     stock: stock !== undefined ? Number(stock) : undefined,
     category: category === "" ? null : category,
+    color: color === "" ? null : color,
+    size: size === "" ? null : size,
     active,
   });
   res.json(product);
@@ -331,6 +338,34 @@ adminRouter.put("/api/products/:id", async (req, res) => {
 
 adminRouter.delete("/api/products/:id", async (req, res) => {
   await deleteProduct(businessIdOf(req), String(req.params.id));
+  res.status(204).send();
+});
+
+// Variants are optional (see ProductVariant in schema.prisma) - a business whose products don't need
+// per-color/size stock+photos never touches these routes and nothing here affects their catalog.
+adminRouter.post("/api/products/:id/variants", async (req, res) => {
+  const { color, size, stock } = req.body;
+  const variant = await createProductVariant(businessIdOf(req), String(req.params.id), {
+    color: color || undefined,
+    size: size || undefined,
+    stock: Number(stock ?? 0),
+  });
+  res.status(201).json(variant);
+});
+
+adminRouter.put("/api/variants/:id", async (req, res) => {
+  const { color, size, stock, active } = req.body;
+  const variant = await updateProductVariant(businessIdOf(req), String(req.params.id), {
+    color: color === "" ? null : color,
+    size: size === "" ? null : size,
+    stock: stock !== undefined ? Number(stock) : undefined,
+    active,
+  });
+  res.json(variant);
+});
+
+adminRouter.delete("/api/variants/:id", async (req, res) => {
+  await deleteProductVariant(businessIdOf(req), String(req.params.id));
   res.status(204).send();
 });
 
@@ -347,7 +382,10 @@ adminRouter.post("/api/products/:id/media", upload.single("file"), async (req, r
   const type = req.file.mimetype.startsWith("video") ? "VIDEO" : "IMAGE";
   const folder = type === "VIDEO" ? "videos" : "images";
   const { key, url } = await uploadMedia(req.file.buffer, req.file.mimetype, folder);
-  const media = await addProductMedia(businessIdOf(req), String(req.params.id), { type, url, s3Key: key });
+  // req.body.variantId (set by the admin UI when uploading photos for one specific color/size, not the
+  // product overall) comes through as a plain form field alongside the multipart file.
+  const variantId = req.body.variantId ? String(req.body.variantId) : undefined;
+  const media = await addProductMedia(businessIdOf(req), String(req.params.id), { type, url, s3Key: key }, variantId);
   res.status(201).json(media);
 });
 

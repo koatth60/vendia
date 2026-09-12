@@ -19,49 +19,49 @@ enum OrderFulfillmentStatus {
 }
 
 model Business {
-  id                       String          @id @default(cuid())
-  name                     String
-  description              String?
-  customInstructions       String?
-  assistantName            String?
-  botTone                  String?
-  botDialect               String?
-  botGreeting              String?
-  botNeverSay              String?
-  autoSendPhotoOnQuote     Boolean         @default(true)
-  requirePaymentProof      Boolean         @default(true)
-  businessCategory         String?
-  email                    String          @unique
-  passwordHash             String
-  planTier                 PlanTier        @default(BASICO)
-  active                   Boolean         @default(false)
-  contactPhone             String?
-  contactName              String?
-  passwordResetCode        String?
-  passwordResetExpiresAt   DateTime?
-  capNotifiedAt            DateTime?
-  whatsappPhoneNumberId    String?         @unique
+  id                        String                @id @default(cuid())
+  name                      String
+  description               String?
+  customInstructions        String?
+  assistantName             String?
+  botTone                   String?
+  botDialect                String?
+  botGreeting               String?
+  botNeverSay               String?
+  autoSendPhotoOnQuote      Boolean               @default(true)
+  requirePaymentProof       Boolean               @default(true)
+  businessCategory          String?
+  email                     String                @unique
+  passwordHash              String
+  planTier                  PlanTier              @default(BASICO)
+  active                    Boolean               @default(false)
+  contactPhone              String?
+  contactName               String?
+  passwordResetCode         String?
+  passwordResetExpiresAt    DateTime?
+  capNotifiedAt             DateTime?
+  whatsappPhoneNumberId     String?               @unique
   whatsappBusinessAccountId String?
-  whatsappPhoneNumber      String?
-  whatsappAccessToken      String?
-  followUpTemplateName     String?
-  followUpTemplateLanguage String          @default("es")
-  followUpDelayHours       Int             @default(24)
-  ownerReminderMinutes     Int             @default(180)
-  products                 Product[]
-  customers                Customer[]
-  paymentMethods           PaymentMethod[]
-  shippingRates            ShippingRate[]
-  shippingCityRules        ShippingCityRule[]
-  aiUsageLogs              AiUsageLog[]
-  faqEntries               FaqEntry[]
-  learnedFaqCandidates     LearnedFaqCandidate[]
-  deliveryFailures         DeliveryFailure[]
-  ownerMessageLogs         OwnerMessageLog[]
-  orders                   Order[]
-  teamMembers              TeamMember[]
-  createdAt                DateTime        @default(now())
-  updatedAt                DateTime        @updatedAt
+  whatsappPhoneNumber       String?
+  whatsappAccessToken       String?
+  followUpTemplateName      String?
+  followUpTemplateLanguage  String                @default("es")
+  followUpDelayHours        Int                   @default(24)
+  ownerReminderMinutes      Int                   @default(180)
+  products                  Product[]
+  customers                 Customer[]
+  paymentMethods            PaymentMethod[]
+  shippingRates             ShippingRate[]
+  shippingCityRules         ShippingCityRule[]
+  aiUsageLogs               AiUsageLog[]
+  faqEntries                FaqEntry[]
+  learnedFaqCandidates      LearnedFaqCandidate[]
+  deliveryFailures          DeliveryFailure[]
+  ownerMessageLogs          OwnerMessageLog[]
+  orders                    Order[]
+  teamMembers               TeamMember[]
+  createdAt                 DateTime              @default(now())
+  updatedAt                 DateTime              @updatedAt
 }
 
 enum PaymentMethodType {
@@ -120,18 +120,18 @@ model ShippingCityRule {
 }
 
 model Order {
-  id                 String       @id @default(cuid())
-  business           Business     @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  id                 String                 @id @default(cuid())
+  business           Business               @relation(fields: [businessId], references: [id], onDelete: Cascade)
   businessId         String
-  customer           Customer     @relation(fields: [customerId], references: [id])
+  customer           Customer               @relation(fields: [customerId], references: [id])
   customerId         String
-  conversation       Conversation @relation(fields: [conversationId], references: [id])
-  conversationId     String       @unique
+  conversation       Conversation           @relation(fields: [conversationId], references: [id])
+  conversationId     String                 @unique
   summary            String
   shippingAddress    String?
   paymentMethodLabel String?
-  shippingCost       Decimal?     @db.Decimal(12, 2)
-  totalAmount        Decimal      @db.Decimal(12, 2)
+  shippingCost       Decimal?               @db.Decimal(12, 2)
+  totalAmount        Decimal                @db.Decimal(12, 2)
   currency           String
   csatRating         Int?
   csatAskedAt        DateTime?
@@ -142,21 +142,27 @@ model Order {
   shipmentMediaType  String?
   canceledAt         DateTime?
   items              OrderItem[]
-  createdAt          DateTime     @default(now())
+  createdAt          DateTime               @default(now())
 
   @@index([businessId, createdAt])
   @@index([businessId, fulfillmentStatus])
 }
 
 model OrderItem {
-  id          String  @id @default(cuid())
-  order       Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  orderId     String
-  productId   String?
-  productName String
-  quantity    Int
-  unitPrice   Decimal @db.Decimal(12, 2)
-  currency    String
+  id           String  @id @default(cuid())
+  order        Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderId      String
+  productId    String?
+  productName  String
+  // Denormalized the same way productId/productName already are (no @relation, resolved at read time,
+  // same rationale as ShippingCityRule.label above) - which color/size actually sold, so order summaries
+  // and owner notifications can show it without a join, and it survives the variant later being renamed
+  // or deleted.
+  variantId    String?
+  variantLabel String?
+  quantity     Int
+  unitPrice    Decimal @db.Decimal(12, 2)
+  currency     String
 }
 
 enum TeamRole {
@@ -277,30 +283,61 @@ model ActivationKey {
 }
 
 model Product {
-  id           String         @id @default(cuid())
-  business     Business       @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  id           String           @id @default(cuid())
+  business     Business         @relation(fields: [businessId], references: [id], onDelete: Cascade)
   businessId   String
   name         String
   description  String
-  price        Decimal        @db.Decimal(12, 2)
-  currency     String         @default("USD")
-  stock        Int            @default(0)
+  price        Decimal          @db.Decimal(12, 2)
+  currency     String           @default("USD")
+  stock        Int              @default(0)
   category     String?
-  active       Boolean        @default(true)
-  inquiryCount Int            @default(0)
+  // Single color/size products only (e.g. this exact watch model only comes in black, or this exact
+  // shirt row only comes in size M - the same "one product per color/size" pattern this catalog already
+  // uses for watches). A product that comes in SEVERAL colors/sizes under one name (e.g. "Diadema M4" in
+  // red/yellow/green) uses ProductVariant below instead, which carries its own stock and own photos per
+  // color/size.
+  color        String?
+  size         String?
+  active       Boolean          @default(true)
+  inquiryCount Int              @default(0)
   media        ProductMedia[]
-  createdAt    DateTime       @default(now())
-  updatedAt    DateTime       @updatedAt
+  variants     ProductVariant[]
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+}
+
+// Optional sub-item layer for a product that has multiple color/size options each with independent stock
+// and photos (e.g. one headband model in 3 colors, or a clothing item in several sizes). A Product with no
+// rows here behaves exactly as before - this is additive, not a replacement for the simple case.
+model ProductVariant {
+  id        String         @id @default(cuid())
+  product   Product        @relation(fields: [productId], references: [id], onDelete: Cascade)
+  productId String
+  color     String?
+  size      String?
+  stock     Int            @default(0)
+  active    Boolean        @default(true)
+  media     ProductMedia[]
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  @@index([productId])
 }
 
 model ProductMedia {
-  id        String    @id @default(cuid())
-  product   Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  id        String          @id @default(cuid())
+  product   Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
   productId String
+  // Set when this photo belongs to one specific variant's color (not the product in general) - lets
+  // send_product_media attach only the red headband's photos when the customer asked for red, instead of
+  // every photo the product has across all colors.
+  variant   ProductVariant? @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  variantId String?
   type      MediaType
   url       String
   s3Key     String
-  createdAt DateTime  @default(now())
+  createdAt DateTime        @default(now())
 }
 
 enum MediaType {
@@ -326,26 +363,26 @@ model Customer {
 }
 
 model Conversation {
-  id                           String              @id @default(cuid())
-  customer                     Customer            @relation(fields: [customerId], references: [id])
+  id                           String                 @id @default(cuid())
+  customer                     Customer               @relation(fields: [customerId], references: [id])
   customerId                   String
-  status                       ConversationStatus  @default(NEW)
+  status                       ConversationStatus     @default(NEW)
   intent                       ConversationIntent?
-  humanControl                 Boolean             @default(false)
-  humanControlAckSent          Boolean             @default(false)
+  humanControl                 Boolean                @default(false)
+  humanControlAckSent          Boolean                @default(false)
   followUpSentAt               DateTime?
-  pendingConfirmationMessageId String?             @unique
+  pendingConfirmationMessageId String?                @unique
   pendingOrderSummary          String?
   pendingOrderItems            Json?
   pendingOwnerQuestions        PendingOwnerQuestion[]
-  contextSummary                String?
-  contextSummarizedUpTo         Int?
-  mediaSentProductIds            String[]            @default([])
-  unreadCount                  Int                 @default(0)
+  contextSummary               String?
+  contextSummarizedUpTo        Int?
+  mediaSentProductIds          String[]               @default([])
+  unreadCount                  Int                    @default(0)
   order                        Order?
   messages                     Message[]
-  createdAt                    DateTime            @default(now())
-  updatedAt                    DateTime            @updatedAt
+  createdAt                    DateTime               @default(now())
+  updatedAt                    DateTime               @updatedAt
 }
 
 // One row per question escalated to the owner, instead of a single field on Conversation - a customer

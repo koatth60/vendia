@@ -1,6 +1,7 @@
 import { prisma } from "../db/client";
 import { getPresignedMediaUrl, deleteMedia as deleteMediaFromS3 } from "../media/s3";
 import { tokenize, normalizeForMatch } from "../search/text";
+import { canonicalColors, canonicalizeCategoryWord } from "./attributeTaxonomy";
 
 async function withFreshMediaUrls<T extends { media: { s3Key: string; url: string }[] }>(
   products: T[]
@@ -13,31 +14,51 @@ async function withFreshMediaUrls<T extends { media: { s3Key: string; url: strin
   return products;
 }
 
+// Variants carry their own media array (see ProductVariant in schema.prisma) - re-signs those S3 URLs
+// too, same as withFreshMediaUrls does for the product-level media array.
+async function withFreshVariantMediaUrls<T extends { variants: { media: { s3Key: string; url: string }[] }[] }>(
+  products: T[]
+): Promise<T[]> {
+  for (const product of products) {
+    for (const variant of product.variants) {
+      for (const media of variant.media) {
+        media.url = await getPresignedMediaUrl(media.s3Key);
+      }
+    }
+  }
+  return products;
+}
+
+const PRODUCT_INCLUDE = { media: true, variants: { include: { media: true } } } as const;
+
 export async function listActiveProducts(businessId: string) {
   const products = await prisma.product.findMany({
     where: { businessId, active: true },
-    include: { media: true },
+    include: PRODUCT_INCLUDE,
     orderBy: { createdAt: "desc" },
   });
+  await withFreshVariantMediaUrls(products);
   return withFreshMediaUrls(products);
 }
 
 export async function listAllProducts(businessId: string) {
   const products = await prisma.product.findMany({
     where: { businessId },
-    include: { media: true },
+    include: PRODUCT_INCLUDE,
     orderBy: { createdAt: "desc" },
   });
+  await withFreshVariantMediaUrls(products);
   return withFreshMediaUrls(products);
 }
 
 export async function getProductById(businessId: string, id: string) {
   const product = await prisma.product.findFirst({
     where: { id, businessId },
-    include: { media: true },
+    include: PRODUCT_INCLUDE,
   });
   if (!product) return null;
-  const [withMedia] = await withFreshMediaUrls([product]);
+  const [withVariantMedia] = await withFreshVariantMediaUrls([product]);
+  const [withMedia] = await withFreshMediaUrls([withVariantMedia]);
   return withMedia;
 }
 
@@ -65,7 +86,7 @@ export async function searchProducts(businessId: string, query: string) {
 
   const products = await prisma.product.findMany({
     where: { businessId, active: true },
-    include: { media: true },
+    include: PRODUCT_INCLUDE,
   });
 
   // Tie-break by id so results are deterministic across calls - without it, two products scoring
@@ -79,6 +100,7 @@ export async function searchProducts(businessId: string, query: string) {
     .sort((a, b) => b.score - a.score || a.product.id.localeCompare(b.product.id))
     .map(({ product }) => product);
 
+  await withFreshVariantMediaUrls(matches);
   return withFreshMediaUrls(matches);
 }
 
@@ -108,7 +130,7 @@ export async function findConfidentProductMatch(
 
   const products = await prisma.product.findMany({
     where: { businessId, active: true },
-    include: { media: true },
+    include: PRODUCT_INCLUDE,
   });
 
   const scored = products
@@ -126,8 +148,106 @@ export async function findConfidentProductMatch(
     return { product: null, ambiguous: true, candidates: [top, ...tied].map((s) => s.product.name) };
   }
 
-  const [withMedia] = await withFreshMediaUrls([top.product]);
+  const [withVariantMedia] = await withFreshVariantMediaUrls([top.product]);
+  const [withMedia] = await withFreshMediaUrls([withVariantMedia]);
   return { product: withMedia, ambiguous: false };
+}
+
+export interface AttributeMatch {
+  productId: string;
+  productName: string;
+  category: string | null;
+  // Set when this match is one specific color/size option of a multi-variant product (see
+  // ProductVariant in schema.prisma) - null means the whole product matched (the simple single-
+  // color/size case, or a category-only query with no color given).
+  variantId: string | null;
+  variantLabel: string | null;
+  price: string;
+  currency: string;
+  stock: number;
+  mediaCount: number;
+}
+
+function formatVariantLabel(color: string | null | undefined, size: string | null | undefined): string | null {
+  const parts = [color, size].filter((p): p is string => Boolean(p));
+  return parts.length ? parts.join(" / ") : null;
+}
+
+// The deterministic replacement for "reloj negro also matches headphones and every other color" (real
+// production bug, 2026-09-12): unlike searchProducts' scored keyword soup, this FILTERS - a color given
+// must actually match (via canonicalColors, so "negro"/"oscuro" are the same bucket - see
+// attributeTaxonomy.ts for why), a category given must actually match. A product with variants
+// contributes one result PER matching variant (so "reloj negro" on a product with red/black/blue variants
+// returns only the black one, with only that color's own photos), never the whole product blindly.
+export async function findProductsByAttributes(
+  businessId: string,
+  attrs: { category?: string; color?: string; freeText?: string }
+): Promise<{ matches: AttributeMatch[]; categoriesFound: string[] }> {
+  const targetColors = new Set([...canonicalColors(attrs.color ?? ""), ...canonicalColors(attrs.freeText ?? "")]);
+  const targetCategory = attrs.category ? canonicalizeCategoryWord(attrs.category) : null;
+
+  // Neither a real color nor a real category to filter by - falling through would return the entire
+  // catalog, which is just listActiveProducts under a different name and invites the same "blast
+  // everything" failure this tool exists to prevent. Refuse instead of guessing.
+  if (targetColors.size === 0 && !targetCategory) {
+    return { matches: [], categoriesFound: [] };
+  }
+
+  const products = await prisma.product.findMany({
+    where: { businessId, active: true },
+    include: PRODUCT_INCLUDE,
+  });
+
+  const matches: AttributeMatch[] = [];
+
+  for (const product of products) {
+    if (targetCategory) {
+      const productCategory = product.category ? canonicalizeCategoryWord(product.category) : null;
+      if (productCategory !== targetCategory) continue;
+    }
+
+    if (product.variants.length > 0) {
+      for (const variant of product.variants) {
+        if (!variant.active) continue;
+        if (targetColors.size > 0) {
+          const variantColors = variant.color ? canonicalColors(variant.color) : [];
+          if (!variantColors.some((c) => targetColors.has(c))) continue;
+        }
+        const media = variant.media.length > 0 ? variant.media : product.media;
+        matches.push({
+          productId: product.id,
+          productName: product.name,
+          category: product.category,
+          variantId: variant.id,
+          variantLabel: formatVariantLabel(variant.color, variant.size),
+          price: product.price.toString(),
+          currency: product.currency,
+          stock: variant.stock,
+          mediaCount: media.length,
+        });
+      }
+      continue;
+    }
+
+    if (targetColors.size > 0) {
+      const productColors = canonicalColors(`${product.color ?? ""} ${product.name} ${product.description}`);
+      if (!productColors.some((c) => targetColors.has(c))) continue;
+    }
+    matches.push({
+      productId: product.id,
+      productName: product.name,
+      category: product.category,
+      variantId: null,
+      variantLabel: formatVariantLabel(product.color, product.size),
+      price: product.price.toString(),
+      currency: product.currency,
+      stock: product.stock,
+      mediaCount: product.media.length,
+    });
+  }
+
+  const categoriesFound = [...new Set(matches.map((m) => m.category).filter((c): c is string => Boolean(c)))];
+  return { matches, categoriesFound };
 }
 
 // Texto corto para darle contexto de negocio al prompt de vision (src/ai/vision.ts) - sin esto el
@@ -154,6 +274,8 @@ export async function createProduct(
     currency?: string;
     stock: number;
     category?: string;
+    color?: string;
+    size?: string;
   }
 ) {
   return prisma.product.create({ data: { ...data, businessId } });
@@ -169,6 +291,8 @@ export async function updateProduct(
     currency: string;
     stock: number;
     category: string | null;
+    color: string | null;
+    size: string | null;
     active: boolean;
   }>
 ) {
@@ -178,21 +302,30 @@ export async function updateProduct(
 }
 
 export async function deleteProduct(businessId: string, id: string) {
-  const product = await prisma.product.findFirst({ where: { id, businessId }, include: { media: true } });
+  const product = await prisma.product.findFirst({
+    where: { id, businessId },
+    include: { media: true, variants: { include: { media: true } } },
+  });
   if (!product) throw new Error("Producto no encontrado");
-  await Promise.all(product.media.map((m) => deleteMediaFromS3(m.s3Key)));
+  const variantMediaKeys = product.variants.flatMap((v) => v.media.map((m) => m.s3Key));
+  await Promise.all([...product.media, ...variantMediaKeys.map((s3Key) => ({ s3Key }))].map((m) => deleteMediaFromS3(m.s3Key)));
   return prisma.product.delete({ where: { id } });
 }
 
 export async function addProductMedia(
   businessId: string,
   productId: string,
-  media: { type: "IMAGE" | "VIDEO"; url: string; s3Key: string }
+  media: { type: "IMAGE" | "VIDEO"; url: string; s3Key: string },
+  variantId?: string
 ) {
   const product = await prisma.product.findFirst({ where: { id: productId, businessId } });
   if (!product) throw new Error("Producto no encontrado");
+  if (variantId) {
+    const variant = await prisma.productVariant.findFirst({ where: { id: variantId, productId } });
+    if (!variant) throw new Error("Variante no encontrada");
+  }
   return prisma.productMedia.create({
-    data: { ...media, productId },
+    data: { ...media, productId, variantId },
   });
 }
 
@@ -204,4 +337,36 @@ export async function deleteProductMedia(businessId: string, mediaId: string) {
   await prisma.productMedia.delete({ where: { id: mediaId } });
   await deleteMediaFromS3(media.s3Key);
   return media;
+}
+
+// Variants are the opt-in layer for a product sold in several colors/sizes under one name (see
+// ProductVariant in schema.prisma) - a product with none behaves exactly as it did before this existed.
+export async function createProductVariant(
+  businessId: string,
+  productId: string,
+  data: { color?: string; size?: string; stock: number }
+) {
+  const product = await prisma.product.findFirst({ where: { id: productId, businessId } });
+  if (!product) throw new Error("Producto no encontrado");
+  return prisma.productVariant.create({ data: { ...data, productId } });
+}
+
+export async function updateProductVariant(
+  businessId: string,
+  variantId: string,
+  data: Partial<{ color: string | null; size: string | null; stock: number; active: boolean }>
+) {
+  const variant = await prisma.productVariant.findFirst({ where: { id: variantId, product: { businessId } } });
+  if (!variant) throw new Error("Variante no encontrada");
+  return prisma.productVariant.update({ where: { id: variantId }, data });
+}
+
+export async function deleteProductVariant(businessId: string, variantId: string) {
+  const variant = await prisma.productVariant.findFirst({
+    where: { id: variantId, product: { businessId } },
+    include: { media: true },
+  });
+  if (!variant) throw new Error("Variante no encontrada");
+  await Promise.all(variant.media.map((m) => deleteMediaFromS3(m.s3Key)));
+  return prisma.productVariant.delete({ where: { id: variantId } });
 }

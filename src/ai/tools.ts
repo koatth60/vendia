@@ -1,5 +1,11 @@
 import type OpenAI from "openai";
-import { getProductById, listActiveProducts, searchProducts, findConfidentProductMatch } from "../catalog/products";
+import {
+  getProductById,
+  listActiveProducts,
+  searchProducts,
+  findConfidentProductMatch,
+  findProductsByAttributes,
+} from "../catalog/products";
 import { listActivePaymentMethods } from "../catalog/paymentMethods";
 import { listShippingRates, resolveShippingRateForCity } from "../catalog/shippingRates";
 import { listActiveFaqEntries } from "../catalog/faq";
@@ -107,6 +113,31 @@ export const catalogTools: OpenAI.Chat.ChatCompletionTool[] = [
   {
     type: "function",
     function: {
+      name: "find_products_by_attributes",
+      description:
+        "Busca productos por categoria y/o color reales del catalogo (no por texto libre) - usala SIEMPRE que el cliente pida un tipo de producto con un color o categoria especifica (ej: 'reloj negro', 'el rosadito', 'audifonos rojos') en vez de search_products, para no mezclar categorias o colores que no pidio. Si el color no aparece en ninguna categoria clara, te devuelve los resultados agrupados por categoria para que le preguntes al cliente cual - nunca asumas ni mandes fotos de todas mezcladas.",
+      parameters: {
+        type: "object",
+        properties: {
+          category: {
+            type: "string",
+            description: "Categoria que pidio el cliente (ej: 'reloj', 'audifonos'), si la dijo o se infiere claramente. Opcional.",
+          },
+          color: {
+            type: "string",
+            description: "Color que pidio el cliente (ej: 'negro', 'rosado'), tal como lo dijo. Opcional.",
+          },
+          freeText: {
+            type: "string",
+            description: "El resto del mensaje del cliente relacionado al pedido, por si el color esta mencionado ahi y no en el campo color (ej: diminutivos como 'rosadito').",
+          },
+        },
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "get_product_details",
       description:
         "Obtiene el detalle completo de un producto especifico por su ID, incluyendo precio, stock y URLs de fotos/videos.",
@@ -152,6 +183,11 @@ export const catalogTools: OpenAI.Chat.ChatCompletionTool[] = [
             type: "string",
             description:
               "El nombre del producto que el cliente menciono en ESTE mensaje (el que se esta hablando ahora, no uno anterior). Solo si no tenes productId. Si el cliente respondio con un numero de una lista tuya, resolvelo al nombre real antes de pasarlo aca (ver SELECCION POR NUMERO).",
+          },
+          variantId: {
+            type: "string",
+            description:
+              "SOLO si ese producto tiene variantes (varios colores/tallas) y find_products_by_attributes ya te dio el 'variantId' del color/talla exacto que el cliente quiere - manda solo las fotos de ESE color, no las de todos. No inventes un variantId, solo usa el que te devolvio la herramienta.",
           },
         },
       },
@@ -326,6 +362,11 @@ export const catalogTools: OpenAI.Chat.ChatCompletionTool[] = [
               properties: {
                 productName: { type: "string", description: "Nombre del producto, tal como aparece en el catalogo" },
                 quantity: { type: "number", description: "Cantidad comprada de ese producto" },
+                variantLabel: {
+                  type: "string",
+                  description:
+                    "SOLO si ese producto tiene varios colores/tallas (variantes): el color y/o talla que el cliente eligio, tal como lo dijo (ej: 'rojo', 'M', 'rojo talla M'). Si el producto tiene variantes y todavia no sabes cual, NO llames esta herramienta - preguntale primero.",
+                },
               },
               required: ["productName", "quantity"],
             },
@@ -503,6 +544,43 @@ export interface ToolContext {
 export async function runCatalogTool(context: ToolContext, name: string, input: Record<string, unknown>) {
   const { businessId } = context;
   switch (name) {
+    case "find_products_by_attributes": {
+      const category = input.category ? String(input.category).trim() : undefined;
+      const color = input.color ? String(input.color).trim() : undefined;
+      const freeText = input.freeText ? String(input.freeText).trim() : undefined;
+      const { matches, categoriesFound } = await findProductsByAttributes(businessId, { category, color, freeText });
+
+      if (matches.length === 0) {
+        return {
+          matches: [],
+          note: "No hay ningun producto activo que cumpla ese color/categoria en el catalogo real. No inventes que si hay - decile al cliente honestamente que no tenes esa combinacion, o usa search_products si crees que puede estar descrito distinto.",
+        };
+      }
+
+      // Ambiguous on purpose: matches span more than one category and the model didn't give a category
+      // to narrow by - this is the "el rosadito" case (pink exists in headphones, headbands AND a
+      // smartwatch). Group by category so the model asks which one instead of guessing or blasting every
+      // match's photos.
+      const ambiguousAcrossCategories = !category && categoriesFound.length > 1;
+
+      return {
+        matches: matches.map((m) => ({
+          productId: m.productId,
+          productName: m.productName,
+          category: m.category,
+          variantId: m.variantId,
+          variantLabel: m.variantLabel,
+          price: m.price,
+          currency: m.currency,
+          stock: m.stock,
+          hasMedia: m.mediaCount > 0,
+        })),
+        ambiguousAcrossCategories,
+        note: ambiguousAcrossCategories
+          ? "Estos resultados son de VARIAS categorias distintas - no asumas cual quiere el cliente ni mandes fotos todavia. Mostrale las opciones agrupadas por categoria (usa 'productName' y 'category' de cada una) y preguntale cual es, antes de llamar send_product_media."
+          : "Estos son los productos/variantes reales que cumplen lo que pidio el cliente - no menciones ni mandes fotos de ningun otro color/categoria que no este en esta lista.",
+      };
+    }
     case "search_products": {
       const results = await searchProducts(businessId, String(input.query ?? ""));
       if (results.length > 0) return results.map(formatProduct);
@@ -583,7 +661,21 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
       }
 
       await prisma.product.update({ where: { id: product.id }, data: { inquiryCount: { increment: 1 } } });
-      if (product.media.length === 0) {
+
+      // A variantId (from find_products_by_attributes) scopes the send to just that color/size's own
+      // photos - falls back to the product's general media only if that variant has none of its own,
+      // never to a DIFFERENT variant's photos (would send the wrong color).
+      const variantId = input.variantId ? String(input.variantId).trim() : "";
+      let media = product.media;
+      let variantLabel: string | null = null;
+      if (variantId) {
+        const variant = product.variants.find((v) => v.id === variantId);
+        if (!variant) return { error: `No se encontro la variante "${variantId}" de este producto.` };
+        variantLabel = [variant.color, variant.size].filter(Boolean).join(" / ") || null;
+        media = variant.media.length > 0 ? variant.media : product.media;
+      }
+
+      if (media.length === 0) {
         return { sent: false, product: product.name, reason: "Este producto no tiene fotos ni videos cargados" };
       }
 
@@ -593,10 +685,10 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
         context.recipientPhone,
         context.conversationId,
         product.id,
-        product.name,
-        product.media
+        variantLabel ? `${product.name} (${variantLabel})` : product.name,
+        media
       );
-      return { sent: true, product: product.name, count: product.media.length };
+      return { sent: true, product: product.name, variant: variantLabel, count: media.length };
     }
     case "get_faq": {
       const results = await listActiveFaqEntries(businessId);
@@ -842,10 +934,22 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
         const shippingAddress = input.shippingAddress ? String(input.shippingAddress).trim() : null;
         const paymentMethodLabel = input.paymentMethodLabel ? String(input.paymentMethodLabel).trim() : null;
         const shippingCost = input.shippingCost !== undefined && input.shippingCost !== null ? Number(input.shippingCost) : null;
-        const { items, unresolved } = await resolveOrderItems(
+        const { items, unresolved, needsAttribute } = await resolveOrderItems(
           businessId,
-          Array.isArray(input.items) ? (input.items as { productName: string; quantity: number }[]) : []
+          Array.isArray(input.items) ? (input.items as { productName: string; quantity: number; variantLabel?: string }[]) : []
         );
+
+        // Real production incident (2026-09-12): a sale closed without ever asking the customer's color.
+        // Unlike `unresolved` below (which only warns the owner and still closes), this BLOCKS the close -
+        // the product exists and matched fine, but which color/size sold is still unknown, and that's not
+        // something an owner can fix after the fact from an alert message the way a misspelled name is.
+        if (needsAttribute.length > 0) {
+          return {
+            closed: false,
+            note: `Antes de cerrar el pedido todavia falta preguntarle al cliente el color/talla de: ${needsAttribute.join(", ")}. Pregunta cual color o talla quiere de cada uno (mostrale las opciones reales que tenga ese producto) y volve a llamar close_conversation recien cuando lo tengas.`,
+          };
+        }
+
         if (unresolved.length > 0) {
           console.warn(
             `close_conversation: no se pudieron resolver estos items contra el catalogo (businessId=${businessId}, conversationId=${context.conversationId}):`,

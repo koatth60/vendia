@@ -488,7 +488,7 @@
         <div class="settings-group-title">Personalidad del bot</div>
         <p class="settings-desc">Así se siente tu bot como propio de tu negocio, no genérico.</p>
         <label>Categoría de tu negocio</label>
-        <select id="bot-category" onchange="renderInstructionChips()">
+        <select id="bot-category" onchange="renderInstructionChips(); updateTallaFieldVisibility()">
           <option value="">Elige la que más se parezca (opcional)</option>
           <option value="ropa">Moda y ropa</option>
           <option value="electronica">Electrónica y tecnología</option>
@@ -609,6 +609,17 @@
             <input id="p-stock" type="number" value="0" />
           </div>
         </div>
+        <div class="grid-2">
+          <div>
+            <label>Color (opcional, si este producto viene en un solo color)</label>
+            <input id="p-color" placeholder="Ej: Negro" />
+          </div>
+          <div id="p-size-wrapper" hidden>
+            <label>Talla (opcional, si este producto viene en una sola talla)</label>
+            <input id="p-size" placeholder="Ej: M" />
+          </div>
+        </div>
+        <div class="hint">¿Este producto viene en varios colores o tallas, cada uno con su propio stock y fotos? Guárdalo primero y agrega las variantes desde su tarjeta abajo.</div>
         <div class="actions-row">
           <button class="btn-primary" onclick="addProduct()">+ Agregar producto</button>
         </div>
@@ -915,6 +926,8 @@
         </div>
         <div><label>Stock</label><input id="edit-stock" type="number" /></div>
         <div class="full"><label>Categoría</label><input id="edit-cat" /></div>
+        <div><label>Color (si es un solo color)</label><input id="edit-color" placeholder="Ej: Negro" /></div>
+        <div id="edit-size-wrapper" hidden><label>Talla (si es una sola talla)</label><input id="edit-size" placeholder="Ej: M" /></div>
         <div class="full" style="display:flex; gap:8px; margin-top:10px;">
           <button class="btn-primary" onclick="saveEdit()">Guardar</button>
           <button class="btn-ghost" onclick="closeEditModal()">Cancelar</button>
@@ -1020,6 +1033,7 @@ async function loadBusiness() {
     document.getElementById('bot-require-proof').checked = business.requirePaymentProof !== false;
     document.getElementById('bot-category').value = business.businessCategory || '';
     renderInstructionChips();
+    updateTallaFieldVisibility();
     document.getElementById('business-contact-name').value = business.contactName || '';
     document.getElementById('business-contact-phone').value = business.contactPhone || '';
     document.getElementById('business-followup-template').dataset.saved = business.followUpTemplateName || '';
@@ -1312,6 +1326,18 @@ async function loadProducts() {
   }
 }
 
+// Shows the Talla input on the add/edit product forms only for businesses whose category is "ropa" -
+// other verticals (electronica, joyeria, etc) rarely need per-product size, so it stays hidden by
+// default instead of cluttering every business's form with a field they'll never use. Color stays
+// always visible since it's relevant across most verticals, not just clothing.
+function updateTallaFieldVisibility() {
+  const isRopa = document.getElementById('bot-category').value === 'ropa';
+  const addWrapper = document.getElementById('p-size-wrapper');
+  const editWrapper = document.getElementById('edit-size-wrapper');
+  if (addWrapper) addWrapper.hidden = !isRopa;
+  if (editWrapper) editWrapper.hidden = !isRopa;
+}
+
 function renderCard(p) {
   const media = p.media || [];
   const thumbs = media.map(m => `
@@ -1322,6 +1348,8 @@ function renderCard(p) {
       <button class="thumb-remove" onclick="deleteMedia('${m.id}')">×</button>
     </span>
   `).join('');
+
+  const variants = p.variants || [];
 
   return `
     <div class="product-card ${p.active ? '' : 'inactive'}">
@@ -1339,7 +1367,12 @@ function renderCard(p) {
           <span class="price-tag">${p.currency} ${formatPriceValue(p.price, p.currency)}</span>
           <span class="stock-badge ${p.stock > 0 ? 'stock-ok' : 'stock-zero'}">${p.stock > 0 ? p.stock + ' en stock' : 'sin stock'}</span>
         </div>
-        ${p.category ? `<span class="category-tag">${escapeHtml(p.category)}</span>` : ''}
+        <div class="product-meta">
+          ${p.category ? `<span class="category-tag">${escapeHtml(p.category)}</span>` : ''}
+          ${p.color ? `<span class="category-tag">Color: ${escapeHtml(p.color)}</span>` : ''}
+          ${p.size ? `<span class="category-tag">Talla: ${escapeHtml(p.size)}</span>` : ''}
+        </div>
+        ${renderVariantSection(p.id, variants)}
       </div>
       <div class="product-footer">
         <button class="btn-secondary" onclick="startEdit('${p.id}')">Editar</button>
@@ -1348,6 +1381,118 @@ function renderCard(p) {
       </div>
     </div>
   `;
+}
+
+// Variants are for a product sold in several colors/sizes under one name, each with its OWN stock and
+// OWN photos (e.g. one headband model in red/yellow/green) - see ProductVariant in schema.prisma. Most
+// products never use this; it only renders rows when they exist, plus a small always-available form to
+// add the first one.
+function renderVariantSection(productId, variants) {
+  const rows = variants.map(v => {
+    const vMedia = v.media || [];
+    const vThumbs = vMedia.map(m => `
+      <span class="thumb-wrap">
+        ${m.type === 'VIDEO'
+          ? `<video class="thumb" src="${m.url}" onclick="openVideoLightbox('${m.url}')"></video>`
+          : `<img class="thumb" src="${m.url}" onclick="openImageLightbox('${m.url}')" />`}
+        <button class="thumb-remove" onclick="deleteMedia('${m.id}')">×</button>
+      </span>
+    `).join('');
+    return `
+      <div class="variant-row" style="border-top:1px solid var(--border); padding-top:8px; margin-top:8px;">
+        <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
+          <input placeholder="Color" value="${escapeHtml(v.color || '')}" style="width:100px;" onchange="updateVariant('${v.id}', 'color', this.value)" />
+          <input placeholder="Talla" value="${escapeHtml(v.size || '')}" style="width:80px;" onchange="updateVariant('${v.id}', 'size', this.value)" />
+          <input type="number" placeholder="Stock" value="${v.stock}" style="width:80px;" onchange="updateVariant('${v.id}', 'stock', this.value)" />
+          <button class="btn-danger" style="padding:4px 8px;" onclick="deleteVariant('${v.id}', '${productId}')">Eliminar</button>
+        </div>
+        <div class="thumb-strip" style="margin-top:6px;">
+          ${vThumbs}
+          <label class="thumb-add">
+            +
+            <input type="file" accept="image/jpeg,image/png,video/*" onchange="uploadVariantMedia('${productId}', '${v.id}', this)" />
+          </label>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  return `
+    <div class="variant-section" style="margin-top:10px;">
+      <div style="font-size:11.5px; font-weight:600; color:var(--muted);">Variantes (colores/tallas con stock y fotos propias)</div>
+      ${rows}
+      <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin-top:8px;">
+        <input id="new-variant-color-${productId}" placeholder="Color" style="width:100px;" />
+        <input id="new-variant-size-${productId}" placeholder="Talla" style="width:80px;" />
+        <input id="new-variant-stock-${productId}" type="number" placeholder="Stock" value="0" style="width:80px;" />
+        <button class="btn-secondary" style="padding:4px 8px;" onclick="addVariant('${productId}')">+ Variante</button>
+      </div>
+    </div>
+  `;
+}
+
+async function addVariant(productId) {
+  const color = document.getElementById(`new-variant-color-${productId}`).value.trim();
+  const size = document.getElementById(`new-variant-size-${productId}`).value.trim();
+  const stock = document.getElementById(`new-variant-stock-${productId}`).value;
+  if (!color && !size) {
+    setStatus('La variante necesita al menos un color o una talla', true);
+    return;
+  }
+  try {
+    await apiFetch(`/admin/api/products/${productId}/variants`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ color, size, stock }),
+    });
+    setStatus('Variante agregada ✓');
+    loadProducts();
+  } catch (err) {
+    setStatus(`No se pudo agregar la variante: ${err.message}`, true);
+  }
+}
+
+async function updateVariant(variantId, field, value) {
+  try {
+    await apiFetch(`/admin/api/variants/${variantId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ [field]: value }),
+    });
+    setStatus('Variante actualizada ✓');
+  } catch (err) {
+    setStatus(`No se pudo actualizar la variante: ${err.message}`, true);
+    loadProducts();
+  }
+}
+
+async function deleteVariant(variantId, productId) {
+  if (!confirm('¿Eliminar esta variante y sus fotos?')) return;
+  try {
+    await apiFetch(`/admin/api/variants/${variantId}`, { method: 'DELETE' });
+    loadProducts();
+  } catch (err) {
+    setStatus(`No se pudo eliminar la variante: ${err.message}`, true);
+  }
+}
+
+async function uploadVariantMedia(productId, variantId, input) {
+  const file = input.files[0];
+  if (!file) return;
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('variantId', variantId);
+  setStatus('Subiendo archivo...');
+  try {
+    await apiFetch(`/admin/api/products/${productId}/media`, {
+      method: 'POST',
+      body: formData,
+    });
+    setStatus('Archivo subido ✓');
+    loadProducts();
+  } catch (err) {
+    setStatus(`Error subiendo archivo: ${err.message}`, true);
+  }
 }
 
 function parsePriceInput(str, currency) {
@@ -1395,6 +1540,8 @@ function startEdit(id) {
   document.getElementById('edit-price').value = formatPriceValue(p.price, p.currency);
   document.getElementById('edit-stock').value = p.stock;
   document.getElementById('edit-cat').value = p.category || '';
+  document.getElementById('edit-color').value = p.color || '';
+  document.getElementById('edit-size').value = p.size || '';
   document.getElementById('product-edit-modal').style.display = 'flex';
 }
 
@@ -1431,12 +1578,14 @@ async function saveEdit() {
   const price = parsePriceInput(document.getElementById('edit-price').value, currency);
   const stock = document.getElementById('edit-stock').value;
   const category = document.getElementById('edit-cat').value.trim();
+  const color = document.getElementById('edit-color').value.trim();
+  const size = document.getElementById('edit-size').value.trim();
 
   try {
     await apiFetch(`/admin/api/products/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, description, price, currency, stock, category }),
+      body: JSON.stringify({ name, description, price, currency, stock, category, color, size }),
     });
     closeEditModal();
     setStatus('Producto actualizado ✓');
@@ -1453,6 +1602,8 @@ async function addProduct() {
   const price = parsePriceInput(document.getElementById('p-price').value, currency);
   const stock = document.getElementById('p-stock').value;
   const category = document.getElementById('p-category').value.trim();
+  const color = document.getElementById('p-color').value.trim();
+  const size = document.getElementById('p-size').value.trim();
 
   if (!name || !description || !price) {
     setStatus('Nombre, descripción y precio son obligatorios', true);
@@ -1463,7 +1614,7 @@ async function addProduct() {
     await apiFetch('/admin/api/products', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, description, price, currency, stock, category }),
+      body: JSON.stringify({ name, description, price, currency, stock, category, color, size }),
     });
   } catch (err) {
     setStatus(`No se pudo agregar: ${err.message}`, true);
@@ -1475,6 +1626,8 @@ async function addProduct() {
   document.getElementById('p-price').value = '';
   document.getElementById('p-stock').value = '0';
   document.getElementById('p-category').value = '';
+  document.getElementById('p-color').value = '';
+  document.getElementById('p-size').value = '';
 
   setStatus('Producto agregado ✓');
   loadProducts();

@@ -45,12 +45,17 @@ de adivinar o de decir que "no cargo" el producto. Esta regla NO aplica si tu ul
 celular, cantidad, confirmacion de un total u otro dato del pedido - un numero en esas respuestas es el dato
 real que pediste (cedula, celular, cantidad), tratalo como tal, nunca como posicion de una lista.
 
-VARIANTES DEL MISMO PRODUCTO: si un producto tiene varias variantes (color, material, tamaño, modelo) y el
-cliente muestra interes en el (por nombre, categoria, o algo generico como "el combo" o "un smartwatch")
-sin especificar cual, nunca le preguntes "cual te interesa" o pidas mas datos a ciegas - primero consulta el
-catalogo real (search_products o list_all_products) y mostrale las opciones que de verdad existen en ESE
-mismo mensaje, preguntando cual prefiere. Si el producto no tiene variantes, no preguntes nada, segui
-directo con el detalle.
+BUSQUEDA POR CATEGORIA Y/O COLOR: si el cliente pide un producto por categoria y/o color (ej. "reloj
+negro", "el rosadito", "audifonos rojos"), usa find_products_by_attributes en vez de search_products - te
+devuelve solo lo que existe en ese color/categoria real, nunca menciones ni mandes fotos de otro color o
+categoria que no pidio. Si el color existe en varias categorias distintas y no especifico cual, te llega
+agrupado por categoria: mostraselo asi y pregunta cual es, ANTES de mandar ninguna foto.
+
+VARIANTES DEL MISMO PRODUCTO: mismo principio para un producto YA identificado con varias variantes
+(color, material, tamaño, modelo) - si el cliente muestra interes sin especificar cual, nunca le preguntes
+"cual te interesa" o pidas mas datos a ciegas: consulta el catalogo real y mostrale las opciones que de
+verdad existen en ESE mismo mensaje, preguntando cual prefiere. Si el producto no tiene variantes, no
+preguntes nada, segui directo con el detalle.
 
 COMPARACION DE PRODUCTOS: si el cliente pide comparar dos o mas productos ("cual es mejor", "cual me
 conviene", "diferencia entre X y Y"), compara solo con los datos reales que te devolvieron las
@@ -490,23 +495,45 @@ export async function getOrRefreshContextSummary(conversationId: string, busines
 // only if nothing was sent this turn AND either the customer explicitly asked for media, or the
 // model's own reply text claims to have sent some, so it never overrides or duplicates what the model
 // already did on its own.
-const PHOTO_REQUEST_PATTERN =
+export const PHOTO_REQUEST_PATTERN =
   /\b(foto|fotos|imagen|imagenes|imágenes|video|videos|muestra|muéstrame|muestrame|enseñ|ense[nñ]a|mandame|mándame|manda la|envia la|envía la|pasame|pásame|regal[aá]me|regala la)\b/i;
 // Broadened beyond "te mand.." to also catch phrasings without "te" ("ya la mande", "ahi la envio") and
 // "aca"/"aqui esta(n)" - a real conversation slipped through the narrower pattern with "ya se la mande".
-const PHOTO_CLAIM_PATTERN =
+export const PHOTO_CLAIM_PATTERN =
   /\b(te (mand|envi|pas)|ya (te |se la |la |lo )?(mand|envi|pas)\w*|aqu[ií] (te|va|van|est[aá])|ac[aá] (te|va|van|est[aá])|ah[ií] (te|va|van))/i;
+// "te (mand|envi|pas)" above also matches a conditional offer inside a still-open clarifying question
+// ("Dime el número o el nombre y te paso fotos y detalles, ¿cuál prefieres?") - that's a promise
+// contingent on the customer's answer, not a claim that photos already went out. Real production bug
+// (2026-09-12): bot listed 4 options with that exact phrasing on the FIRST turn (nothing asked yet by
+// the customer), the claim pattern fired anyway, and the media backstop below matched all 4 option
+// names present in the bot's own reply text - sending 4 unrequested photos, several not even matching
+// what the customer asked for, before the customer had picked one.
+export const OPEN_CLARIFYING_QUESTION_PATTERN =
+  /\bcu[aá]l\b.{0,30}\b(prefer|interes|te (gust|llam))|\bdime\b.{0,20}\b(n[uú]mero|nombre)\b/i;
 // The model sometimes fabricates the exact "[Foto de X]"/"[Video de X]" caption that recordMessage
 // writes for a REAL send, without ever calling send_product_media - a copy-the-pattern hallucination,
 // not a natural-language claim, so it doesn't match PHOTO_CLAIM_PATTERN above. Catch it directly.
 const FAKE_MEDIA_TAG_PATTERN = /\[(?:foto|video)s? de /i;
+
+// Shared guard for the three claim-patterns below: each was built to catch a dropped-promise bug (model
+// says it'll do something, never calls the real tool), but the same claim wording also shows up inside a
+// conditional OFFER still awaiting the customer's go-ahead ("¿Quieres que consulte con el equipo?", "Si
+// prefieres te comparto las opciones de pago", "...en cuanto confirmes el pedido") - not a claim that the
+// action already happened. Confirmed same bug class as PHOTO_CLAIM_PATTERN/OPEN_CLARIFYING_QUESTION_PATTERN
+// above (2026-09-12 photo regression): without this, ask_owner/get_payment_methods/search_products fire on
+// an unresolved offer, before the customer agreed to it - worst case is ESCALATION, which pings the real
+// owner with no customer consent. Verified against both the offer phrasings above and the original
+// dropped-promise phrasings each pattern was built for (see agent.claimBackstopGuards.test.ts) - the guard
+// doesn't suppress the real cases, only the conditional-offer ones.
+export const OFFER_OR_PENDING_CONFIRMATION_PATTERN =
+  /\b(si (quieres|prefieres|gustas|deseas)|(quieres|prefieres|gustar[ií]as?|gustas|deseas)\b.{0,15}\bque\b|en cuanto (confirmes|me digas|decidas|me cuentes))/i;
 
 // Same failure mode as the photo claim above, for escalation: the model says "ya consulto con el
 // equipo" / "dejame confirmar con el equipo" without actually calling ask_owner - confirmed against a
 // real conversation where a customer's shipping-cost question got this exact non-answer and the owner
 // never received anything, because no tool call ever fired. The system prompt already tells it not to
 // do this (see CRITICO en general) - this is the code-level backstop for when that's not enough.
-const ESCALATION_CLAIM_PATTERN =
+export const ESCALATION_CLAIM_PATTERN =
   /\b(equipo|due[ñn][oa]s?)\b.{0,25}\b(consult|confirm|pregunt|revis)|\b(consult|confirm|pregunt|revis)\w*\b.{0,25}\b(equipo|due[ñn][oa]s?)\b/i;
 
 // Same failure mode once more, this time for get_payment_methods: the bot asks "que medio prefieres
@@ -515,7 +542,7 @@ const ESCALATION_CLAIM_PATTERN =
 // "opciones de pago" again before getting an actual answer. No digit run at all in the text is the tell
 // that nothing real was attached (a message that actually lists payment methods always has numbers in
 // it).
-const PAYMENT_OPTIONS_CLAIM_PATTERN = /\b(te comparto|te paso|aqu[ií] (est[aá]n|tenes)|estas son)\b.{0,20}\bopciones\b/i;
+export const PAYMENT_OPTIONS_CLAIM_PATTERN = /\b(te comparto|te paso|aqu[ií] (est[aá]n|tenes)|estas son)\b.{0,20}\bopciones\b/i;
 
 // Same failure mode once more, this time for the catalog: the bot says "dejame revisar el catalogo para
 // confirmarte bien" (or similar) and stops there without ever calling search_products/list_all_products -
@@ -524,7 +551,7 @@ const PAYMENT_OPTIONS_CLAIM_PATTERN = /\b(te comparto|te paso|aqu[ií] (est[aá]
 // this turn - re-runs search_products with the customer's own message as the query (search_products
 // already falls back to the full catalog on no keyword match, see CATALOGO above) and appends a plain list
 // so the customer gets something real instead of a dropped promise.
-const CATALOG_CHECK_CLAIM_PATTERN =
+export const CATALOG_CHECK_CLAIM_PATTERN =
   /\bcat[aá]logo\b.{0,25}\b(revis|confirm|consult|chequ|mir[ao])|\b(revis|confirm|consult|chequ|mir[ao])\w*\b.{0,25}\bcat[aá]logo\b/i;
 
 // Same failure mode again, this time for save_customer_name: the bot asks "a nombre de quien hago el
@@ -815,6 +842,12 @@ export async function generateReply(
   let catalogCheckedThisTurn = 0;
   let paymentMethodsThisTurn: { type: string; label: string; details: string }[] | null = null;
   let shippingRatesThisTurn: { label: string; cost: string }[] | null = null;
+  // Set only when find_products_by_attributes ran this turn AND resolved unambiguously (not spanning
+  // several categories with no category given - see "el rosadito" handling in tools.ts). This is the
+  // real fix for "reloj negro sends airpods/wrong colors" (2026-09-12): the media backstop below prefers
+  // this already-scoped result set over guessing from prose whenever it's available, instead of
+  // re-deriving "which products" by scanning text for any name overlap (blind to color/category).
+  let attributeMatchThisTurn: { productId: string; productName: string; variantId: string | null }[] | null = null;
 
   async function finalizeTurn(text: string): Promise<string> {
     text = guardAgainstPaymentHallucination(text, paymentMethodsThisTurn);
@@ -830,7 +863,12 @@ export async function generateReply(
     }
     guardAgainstShippingCostHallucination(text, shippingRatesThisTurn);
 
-    if (!paymentMethodsThisTurn && !/\d{6,}/.test(text) && PAYMENT_OPTIONS_CLAIM_PATTERN.test(text)) {
+    if (
+      !paymentMethodsThisTurn &&
+      !/\d{6,}/.test(text) &&
+      PAYMENT_OPTIONS_CLAIM_PATTERN.test(text) &&
+      !OFFER_OR_PENDING_CONFIRMATION_PATTERN.test(text)
+    ) {
       const result = (await runCatalogTool(context, "get_payment_methods", {})) as {
         methods?: { label: string; details: string }[];
       };
@@ -839,7 +877,12 @@ export async function generateReply(
       }
     }
 
-    if (catalogCheckedThisTurn === 0 && customerText && CATALOG_CHECK_CLAIM_PATTERN.test(text)) {
+    if (
+      catalogCheckedThisTurn === 0 &&
+      customerText &&
+      CATALOG_CHECK_CLAIM_PATTERN.test(text) &&
+      !OFFER_OR_PENDING_CONFIRMATION_PATTERN.test(text)
+    ) {
       const result = (await runCatalogTool(context, "search_products", { query: customerText })) as
         | { id: string; name: string; price: string; currency: string }[]
         | { results?: { id: string; name: string; price: string; currency: string }[] };
@@ -852,7 +895,12 @@ export async function generateReply(
       }
     }
 
-    if (ownerAskedThisTurn === 0 && ESCALATION_CLAIM_PATTERN.test(text) && customerText) {
+    if (
+      ownerAskedThisTurn === 0 &&
+      ESCALATION_CLAIM_PATTERN.test(text) &&
+      customerText &&
+      !OFFER_OR_PENDING_CONFIRMATION_PATTERN.test(text)
+    ) {
       await runCatalogTool(context, "ask_owner", { question: customerText });
     }
 
@@ -886,7 +934,11 @@ export async function generateReply(
 
     const customerAsked = !!customerText && PHOTO_REQUEST_PATTERN.test(customerText);
     const fakeMediaTag = FAKE_MEDIA_TAG_PATTERN.test(text);
-    const modelClaimsSent = (PHOTO_CLAIM_PATTERN.test(text) && PHOTO_REQUEST_PATTERN.test(text)) || fakeMediaTag;
+    const modelClaimsSent =
+      (PHOTO_CLAIM_PATTERN.test(text) &&
+        PHOTO_REQUEST_PATTERN.test(text) &&
+        !OPEN_CLARIFYING_QUESTION_PATTERN.test(text)) ||
+      fakeMediaTag;
     if (!customerAsked && !modelClaimsSent) return text;
 
     // The model can only have fabricated this tag, never really sent it (mediaSentThisTurn === 0 here) -
@@ -896,11 +948,26 @@ export async function generateReply(
       text = text.replace(/\[(?:foto|video)s? de [^\]]*\]/gi, "").trim();
     }
 
-    // Figure out WHICH product(s) by scanning the customer's message, the model's own reply, AND the
-    // bot's own PRIOR turn (token-overlap, not exact substring - the model paraphrases names constantly,
-    // e.g. "Boombox 4 LED" for "Parlante Bluetooth Portatil Boombox 4 LED"). This catches vague
-    // follow-ups like "y los otros productos?" where the model resolved which ones but never actually
-    // called send_product_media for them.
+    // Prefer this turn's ALREADY-SCOPED find_products_by_attributes result over re-deriving "which
+    // products" by scanning prose - that scan is blind to category/color (any product NAME mention
+    // counts), which is exactly how "reloj negro" used to also send airpods and non-black watches (real
+    // production bug, 2026-09-12): the bot's own clarifying reply lists every candidate by name, so the
+    // prose scan matched all of them regardless of color. When the model called the real filter this
+    // turn, trust its result instead of re-guessing from text.
+    if (attributeMatchThisTurn && attributeMatchThisTurn.length <= 5) {
+      for (let i = 0; i < attributeMatchThisTurn.length; i++) {
+        if (i > 0) await new Promise((resolve) => setTimeout(resolve, 1200));
+        const m = attributeMatchThisTurn[i];
+        await runCatalogTool(context, "send_product_media", { productId: m.productId, variantId: m.variantId ?? undefined });
+      }
+      return text;
+    }
+
+    // Fallback for everything else (direct product-name requests, vague follow-ups like "y los otros
+    // productos?") - scanning the customer's message, the model's own reply, AND the bot's own PRIOR turn
+    // (token-overlap, not exact substring - the model paraphrases names constantly, e.g. "Boombox 4 LED"
+    // for "Parlante Bluetooth Portatil Boombox 4 LED"). Blind to color/category by design (it only knows
+    // product NAMES), which is exactly why the branch above takes priority whenever it's available.
     //
     // The prior-turn scan matters for a real, reported failure: bot lists 4 numbered smartwatch options
     // ("1. Serie 11 Mini... 2. Serie 12 Ultra 3...") and asks which one; customer replies "Muestrame
@@ -991,6 +1058,8 @@ export async function generateReply(
           matched?: boolean;
           label?: string;
           cost?: string;
+          matches?: { productId: string; productName: string; variantId: string | null }[];
+          ambiguousAcrossCategories?: boolean;
         };
         if (result?.mediaJustSent || result?.sent) mediaSentThisTurn++;
         if (call.function.name === "ask_owner") ownerAskedThisTurn++;
@@ -1008,6 +1077,14 @@ export async function generateReply(
         }
         if (call.function.name === "get_shipping_rate_for_city" && result?.matched && result.label && result.cost) {
           shippingRatesThisTurn = [...(shippingRatesThisTurn ?? []), { label: result.label, cost: result.cost }];
+        }
+        if (
+          call.function.name === "find_products_by_attributes" &&
+          !result?.ambiguousAcrossCategories &&
+          Array.isArray(result?.matches) &&
+          result.matches.length > 0
+        ) {
+          attributeMatchThisTurn = result.matches;
         }
         messages.push({
           role: "tool",
