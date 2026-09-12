@@ -17,6 +17,7 @@ import {
   getConversationForBusiness,
   setHumanControl,
   clearAgentRequestFlag,
+  clearPendingOwnerQuestionsForConversation,
   recordMessage,
   setCustomerTags,
   saveCustomerName,
@@ -45,7 +46,9 @@ import { listFaqEntries, createFaqEntry, updateFaqEntry, deleteFaqEntry } from "
 import { listPendingCandidates, approveCandidate, discardCandidate } from "../catalog/learnedFaq";
 import {
   listOrdersForBusiness,
+  countOrdersByStatus,
   getOrderForBusiness,
+  getOrderByConversationId,
   markOrderShipped,
   markOrderCanceled,
   resolveOrderItems,
@@ -517,9 +520,21 @@ adminRouter.put("/api/customers/:id/name", async (req, res) => {
   res.json({ id: customer.id, name: customer.name });
 });
 
+const ORDER_STATUSES = ["PENDING", "SHIPPED", "CANCELED"] as const;
+
 adminRouter.get("/api/orders", async (req, res) => {
-  const orders = await listOrdersForBusiness(businessIdOf(req));
-  res.json(orders);
+  const status = ORDER_STATUSES.includes(req.query.status as (typeof ORDER_STATUSES)[number])
+    ? (req.query.status as (typeof ORDER_STATUSES)[number])
+    : "PENDING";
+  const skip = Math.max(Number(req.query.skip) || 0, 0);
+  const take = Math.min(Math.max(Number(req.query.take) || 20, 1), 100);
+  const result = await listOrdersForBusiness(businessIdOf(req), status, skip, take);
+  res.json(result);
+});
+
+adminRouter.get("/api/orders/counts", async (req, res) => {
+  const counts = await countOrdersByStatus(businessIdOf(req));
+  res.json(counts);
 });
 
 adminRouter.put("/api/orders/:id/ship", upload.single("file"), async (req, res) => {
@@ -700,6 +715,7 @@ adminRouter.post("/api/conversations/:id/messages", upload.single("file"), async
   }
   await setHumanControl(businessId, String(req.params.id), true);
   await clearAgentRequestFlag(businessId, String(req.params.id));
+  await clearPendingOwnerQuestionsForConversation(String(req.params.id));
 
   res.status(201).json({ ok: true });
 });
@@ -781,6 +797,11 @@ adminRouter.post("/api/conversations/:id/close-sale", async (req, res) => {
     await saveCustomerContactInfo(businessId, conversation.customer.id, { idNumber, deliveryPhone });
   }
 
+  if (await getOrderByConversationId(conversation.id)) {
+    res.status(400).json({ error: "Esta conversación ya tiene un pedido registrado." });
+    return;
+  }
+
   const itemsSummary = items.map((i) => `${i.quantity}x ${i.productName}`).join(", ");
   const summary = notes ? `${itemsSummary} — Nota: ${notes}` : itemsSummary;
   const order = await createOrder({
@@ -809,6 +830,7 @@ adminRouter.post("/api/conversations/:id/close-sale", async (req, res) => {
   const wamid = await sendTextMessage(credentials, conversation.customer.phoneNumber, text);
   await recordMessage(businessId, conversation.id, "ASSISTANT", text, wamid || undefined);
   await askForCsat(credentials, order.id, conversation.customer.phoneNumber);
+  await clearPendingOwnerQuestionsForConversation(conversation.id);
 
   res.json({ ok: true, orderId: order.id });
 });

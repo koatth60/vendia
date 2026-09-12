@@ -402,19 +402,20 @@ whatsappRouter.post("/webhook", async (req, res) => {
     if (conversation.humanControl) {
       console.log("Conversacion en control humano, el bot no responde:", conversation.id);
       // Silence with zero acknowledgment reads as the bot being broken to the customer, and the owner
-      // ends up having to jump in just to say "we got your message". Send one heads-up per pause period
-      // (checked against the last ASSISTANT message so it doesn't repeat on every follow-up message from
-      // the same customer while still paused), then stay quiet until the owner/admin actually resumes it.
+      // ends up having to jump in just to say "we got your message". Send one heads-up per pause period,
+      // gated on a dedicated flag (not "does the last ASSISTANT message match the ack text") - the owner's
+      // own manual replies are also recorded with role ASSISTANT, so comparing against the last ASSISTANT
+      // message re-fired the ack after every manual reply that wasn't itself the ack. Stay quiet until the
+      // owner/admin actually resumes it, which resets the flag.
       const HUMAN_CONTROL_ACK = "Ya te leimos, en un momento te contesta el equipo directamente 🙏";
-      const lastAssistantMessage = await prisma.message.findFirst({
-        where: { conversationId: conversation.id, role: "ASSISTANT" },
-        orderBy: { createdAt: "desc" },
-        select: { content: true },
-      });
-      if (lastAssistantMessage?.content !== HUMAN_CONTROL_ACK) {
+      if (!conversation.humanControlAckSent) {
         try {
           const wamid = await sendTextMessage(credentials, from, HUMAN_CONTROL_ACK);
           await recordMessage(business.id, conversation.id, "ASSISTANT", HUMAN_CONTROL_ACK, wamid || undefined);
+          await prisma.conversation.update({
+            where: { id: conversation.id },
+            data: { humanControlAckSent: true },
+          });
         } catch (error) {
           console.error("No se pudo mandar el acuse de recibo durante control humano:", error);
         }

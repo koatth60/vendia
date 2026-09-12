@@ -30,6 +30,9 @@ before(async () => {
 
 after(async () => {
   await prisma.pendingOwnerQuestion.deleteMany({ where: { conversationId } });
+  // The customer-followup send now writes a real Message row (see CUSTOMER_FOLLOWUP_TEXT), which the
+  // Conversation FK blocks deleting without clearing first.
+  await prisma.message.deleteMany({ where: { conversationId } });
   await prisma.conversation.deleteMany({ where: { id: conversationId } });
   await prisma.customer.deleteMany({ where: { businessId } });
   await prisma.business.deleteMany({ where: { id: businessId } });
@@ -69,8 +72,12 @@ test("runEscalationReminderJob reminds the owner once for an old unanswered ques
 
     await runEscalationReminderJob();
 
-    assert.equal(sentMessages.length, 1, "owner must get exactly one reminder");
+    // One reminder to the owner (repeating the customer's question) and one proactive follow-up to the
+    // customer itself ("seguimos revisando") - previously only the owner side existed, leaving the
+    // customer with zero heads-up while a real business's own script promised exactly this follow-up.
+    assert.equal(sentMessages.length, 2, "owner reminder + customer follow-up must both go out");
     assert.match(sentMessages[0].body, /Medellin/);
+    assert.match(sentMessages[1].body, /revisando/i);
 
     const updated = await prisma.pendingOwnerQuestion.findUniqueOrThrow({ where: { id: pending.id } });
     assert.ok(updated.remindedAt, "remindedAt must be set so this question is never reminded again");

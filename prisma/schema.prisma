@@ -47,9 +47,12 @@ model Business {
   followUpTemplateName     String?
   followUpTemplateLanguage String          @default("es")
   followUpDelayHours       Int             @default(24)
+  ownerReminderMinutes     Int             @default(180)
   products                 Product[]
   customers                Customer[]
   paymentMethods           PaymentMethod[]
+  shippingRates            ShippingRate[]
+  shippingCityRules        ShippingCityRule[]
   aiUsageLogs              AiUsageLog[]
   faqEntries               FaqEntry[]
   learnedFaqCandidates     LearnedFaqCandidate[]
@@ -76,6 +79,44 @@ model PaymentMethod {
   details    String
   active     Boolean           @default(true)
   createdAt  DateTime          @default(now())
+}
+
+// A structured price per shipping tier (city/zone label -> real cost), so the agent has a real number to
+// fetch instead of only the free-text tier table a business writes into its own customInstructions -
+// mirrors PaymentMethod's role for payment data. Optional: a business with no rows here just isn't
+// affected, its customInstructions prose keeps working exactly as before.
+model ShippingRate {
+  id         String   @id @default(cuid())
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  businessId String
+  label      String
+  cost       Decimal  @db.Decimal(12, 2)
+  sortOrder  Int      @default(0)
+  createdAt  DateTime @default(now())
+
+  @@index([businessId])
+}
+
+// A literal, exact city-name -> ShippingRate.label mapping. Deliberately NOT a full city taxonomy: this
+// only structurally solves the enumerable case (a business typing "Bogota"/"Soacha" as an exact rule) -
+// abstract regional tiers (e.g. "principales ciudades de Colombia") stay pure model judgment via
+// customInstructions, exactly as today. `label` is a plain string reference to ShippingRate.label,
+// resolved at READ time rather than a relation/FK to ShippingRate.id: if that ShippingRate row is later
+// renamed or deleted, this row does NOT become an invalid FK - it just silently stops resolving to a real
+// cost, treated identically to "no rule configured" instead of crashing. `city` keeps the original
+// as-typed text for any future admin UI; `normalizedCity` (lowercase, accent-stripped via
+// normalizeForMatch) is the actual match key, so "Bogota" and "Bogotá" both resolve to the same rule.
+model ShippingCityRule {
+  id             String   @id @default(cuid())
+  business       Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  businessId     String
+  city           String
+  normalizedCity String
+  label          String
+  createdAt      DateTime @default(now())
+
+  @@unique([businessId, normalizedCity])
+  @@index([businessId])
 }
 
 model Order {
@@ -291,6 +332,7 @@ model Conversation {
   status                       ConversationStatus  @default(NEW)
   intent                       ConversationIntent?
   humanControl                 Boolean             @default(false)
+  humanControlAckSent          Boolean             @default(false)
   followUpSentAt               DateTime?
   pendingConfirmationMessageId String?             @unique
   pendingOrderSummary          String?

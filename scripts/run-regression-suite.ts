@@ -1,4 +1,5 @@
 import { prisma } from "../src/db/client";
+import { normalizeForMatch } from "../src/search/text";
 import { generateReply } from "../src/ai/agent";
 import { recordMessage } from "../src/conversation/service";
 import catalogFixture from "../src/ai/regression/fixtures/catalog.json";
@@ -33,6 +34,7 @@ interface CatalogBusiness {
   products: { name: string; description: string; price: string; currency: string; stock: number; category: string | null; active: boolean }[];
   paymentMethods: { type: "TRANSFERENCIA" | "TARJETA" | "EFECTIVO"; label: string; details: string; active: boolean }[];
   shippingRates: { label: string; cost: string; sortOrder: number }[];
+  shippingCityRules: { city: string; label: string }[];
   faqEntries: { question: string; answer: string }[];
 }
 
@@ -55,6 +57,7 @@ async function seedBusiness(fixture: CatalogBusiness) {
     await prisma.customer.deleteMany({ where: { businessId: existing.id } });
     await prisma.product.deleteMany({ where: { businessId: existing.id } });
     await prisma.paymentMethod.deleteMany({ where: { businessId: existing.id } });
+    await prisma.shippingCityRule.deleteMany({ where: { businessId: existing.id } });
     await prisma.shippingRate.deleteMany({ where: { businessId: existing.id } });
     await prisma.faqEntry.deleteMany({ where: { businessId: existing.id } });
     await prisma.business.delete({ where: { id: existing.id } });
@@ -88,6 +91,9 @@ async function seedBusiness(fixture: CatalogBusiness) {
       },
       paymentMethods: { create: fixture.paymentMethods },
       shippingRates: { create: fixture.shippingRates.map((r) => ({ ...r, cost: r.cost })) },
+      shippingCityRules: {
+        create: fixture.shippingCityRules.map((r) => ({ city: r.city, normalizedCity: normalizeForMatch(r.city), label: r.label })),
+      },
       faqEntries: { create: fixture.faqEntries },
     },
   });

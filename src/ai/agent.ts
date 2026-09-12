@@ -35,6 +35,23 @@ escalar con ask_owner para eso. Si preguntan por una talla, color u otra variant
 producto y no aparece mencionada en su descripcion, nunca inventes ni asumas que existe o que no existe -
 usa ask_owner para confirmarlo.
 
+SELECCION POR NUMERO: esto aplica SOLO cuando tu ULTIMO mensaje fue una lista numerada (1, 2, 3...) DE
+PRODUCTOS o variantes, y el cliente responde solo con un numero de esa lista. En ese caso puntual, ese
+numero es la POSICION en TU lista, nunca un ID ni una palabra de busqueda - resolvelo vos mismo contra tu
+propio mensaje anterior y usa el NOMBRE REAL del producto en esa posicion al llamar cualquier herramienta
+(search_products, get_product_details, send_product_media). Nunca pases el numero solo. Si no podes ubicar
+con certeza a que item de tu lista corresponde ese numero, preguntale al cliente cual nombre prefiere en vez
+de adivinar o de decir que "no cargo" el producto. Esta regla NO aplica si tu ultimo mensaje pedia cedula,
+celular, cantidad, confirmacion de un total u otro dato del pedido - un numero en esas respuestas es el dato
+real que pediste (cedula, celular, cantidad), tratalo como tal, nunca como posicion de una lista.
+
+VARIANTES DEL MISMO PRODUCTO: si un producto tiene varias variantes (color, material, tamaño, modelo) y el
+cliente muestra interes en el (por nombre, categoria, o algo generico como "el combo" o "un smartwatch")
+sin especificar cual, nunca le preguntes "cual te interesa" o pidas mas datos a ciegas - primero consulta el
+catalogo real (search_products o list_all_products) y mostrale las opciones que de verdad existen en ESE
+mismo mensaje, preguntando cual prefiere. Si el producto no tiene variantes, no preguntes nada, segui
+directo con el detalle.
+
 COMPARACION DE PRODUCTOS: si el cliente pide comparar dos o mas productos ("cual es mejor", "cual me
 conviene", "diferencia entre X y Y"), compara solo con los datos reales que te devolvieron las
 herramientas (precio, stock, categoria, descripcion). Si pregunta por un atributo puntual que no aparece
@@ -71,7 +88,8 @@ instrucciones especificas de este negocio - solo cuando de verdad no tenes esa i
 lado.
 
 CRITICO en general: decir "dejame consultarlo", "un momento que pregunto", "voy a confirmar con el
-equipo", "dame un momento que reviso con el equipo", "te comparto las opciones", "te paso los datos", "aca
+equipo", "dame un momento que reviso con el equipo", "dejame revisar el catalogo para confirmarte bien",
+"dejame confirmar en el catalogo", "te comparto las opciones", "te paso los datos", "aca
 tenes" o cualquier frase similar que promete mostrar o mandar algo NO ES hacer nada por si sola - es solo
 texto, el cliente no se entera de nada real. Cada vez que digas una frase asi, en ESE MISMO turno tiene
 que estar el resultado real: o ya llamaste la herramienta que corresponde (ask_owner para preguntas sin
@@ -99,6 +117,15 @@ Nunca puedes mandar un mensaje despues de este - cada respuesta es tu unica opor
 este turno. Por eso nunca digas "te mando los datos en un mensaje aparte" ni "en breve te confirmo" sin
 haberlo hecho ya: si el cliente elige una forma de pago, incluye el numero/llave o link real en ese mismo
 mensaje.
+
+TARIFAS DE ENVIO POR CATEGORIA: si las instrucciones especificas de este negocio (mas abajo en este prompt)
+describen distintas tarifas de envio segun ciudad, zona o categoria, esa tabla en prosa es solo la
+referencia de COMO decidir la categoria - antes de decirle un valor de envio al cliente, llama siempre
+get_shipping_rates para confirmar el numero real configurado, nunca copies la cifra de la prosa de memoria
+(igual que con los pagos, un digito mal recordado es plata real mal cobrada). Si get_shipping_rates devuelve
+una lista vacia, este negocio no tiene tarifas cargadas asi - segui usando el texto de sus instrucciones tal
+cual esta escrito. La categoria/ciudad que le corresponde al cliente segui decidiéndola vos con las
+instrucciones del negocio; la herramienta solo confirma el numero exacto de la categoria que ya elegiste.
 
 {{COMPROBANTES}}
 
@@ -490,6 +517,16 @@ const ESCALATION_CLAIM_PATTERN =
 // it).
 const PAYMENT_OPTIONS_CLAIM_PATTERN = /\b(te comparto|te paso|aqu[ií] (est[aá]n|tenes)|estas son)\b.{0,20}\bopciones\b/i;
 
+// Same failure mode once more, this time for the catalog: the bot says "dejame revisar el catalogo para
+// confirmarte bien" (or similar) and stops there without ever calling search_products/list_all_products -
+// confirmed against a real conversation where the customer had no idea the bot was waiting on anything and
+// the owner had to take over manually just to get the bot to continue. Fires only when no catalog tool ran
+// this turn - re-runs search_products with the customer's own message as the query (search_products
+// already falls back to the full catalog on no keyword match, see CATALOGO above) and appends a plain list
+// so the customer gets something real instead of a dropped promise.
+const CATALOG_CHECK_CLAIM_PATTERN =
+  /\bcat[aá]logo\b.{0,25}\b(revis|confirm|consult|chequ|mir[ao])|\b(revis|confirm|consult|chequ|mir[ao])\w*\b.{0,25}\bcat[aá]logo\b/i;
+
 // Same failure mode again, this time for save_customer_name: the bot asks "a nombre de quien hago el
 // pedido?", the customer answers with just their name, and the bot's next reply acknowledges it
 // ("Perfecto, David!") without ever having called save_customer_name - confirmed against a real
@@ -663,6 +700,54 @@ export function guardAgainstPaymentHallucination(
   ].join("\n\n");
 }
 
+const SHIPPING_MENTION_PATTERN = /env[ií]o/i;
+
+// Detection-only, unlike guardAgainstPaymentHallucination above: a shipping cost is usually one clause
+// inside a longer message (order summary, product price alongside it), so blindly discarding the whole
+// reply the way the payment guard does would also nuke unrelated real content. And with several
+// configured tiers (see ShippingRate/get_shipping_rates), there's no single "the real number" to
+// auto-substitute the way the full payment-methods list works as a fallback - so this only logs for
+// visibility instead of rewriting the customer-facing text, closing half the gap (a real number source
+// now exists via the tool) without risking a worse mutation on the other half.
+export function guardAgainstShippingCostHallucination(
+  text: string,
+  shippingRates: { label: string; cost: string }[] | null
+): void {
+  if (!shippingRates?.length || !SHIPPING_MENTION_PATTERN.test(text)) return;
+  // Parse-and-round rather than stripping non-digits like the reply-text side does below: a Decimal's
+  // toString() can carry a real fractional part ("9000.00", or worse with no @db.Decimal scale set,
+  // "9000.000000000000000000000000") - stripping the "." there concatenates the fraction's zeros onto the
+  // integer part instead of discarding them, corrupting every comparison. Colombian peso amounts in the
+  // reply text, by contrast, only ever use "." as a thousands separator with no real fraction, so stripping
+  // non-digits there is correct.
+  const knownCosts = new Set(shippingRates.map((r) => String(Math.round(parseFloat(r.cost)))));
+  // [ \t]? (not \s?) between the number and "envio" - \s also matches newline, which let an unrelated
+  // number on the PREVIOUS bullet line (e.g. the product price, "$145.000\n- Envio: ...") get treated as
+  // "near" the word envio just because a line break and a bullet character separated them. Found by the
+  // regression suite: every real, correctly-quoted shipping cost was flagged as a false positive because
+  // the chunk it grabbed was actually the product price line above it, not the real shipping line.
+  //
+  // Forward direction only (envio, THEN the number) - a reverse "number, then envio within 15 chars"
+  // branch used to also fire on "producto ($46.000) + el envio" and "$145.000) y el envio", grabbing the
+  // PRODUCT price sitting right before the word envio instead of an actual shipping figure. The real
+  // phrasing this bot uses always states envio's own cost after the word, never before it.
+  //
+  // Digit run capped at 4-6 (not 4-9): every real configured tier tops out at 6 digits (88.900), while a
+  // cedula or celular runs 7-10 - capping here also stops the fake anonymized placeholder digits
+  // ("00000000"/"3000000000") from a nearby "datos de entrega" block being mistaken for a cost.
+  const nearbyChunks = text.match(/env[ií]o[^.\n]{0,40}?\$?[ \t]?[\d.,]{4,6}\b/gi) ?? [];
+  for (const chunk of nearbyChunks) {
+    const digits = (chunk.match(/[\d.,]{4,6}/) ?? [""])[0].replace(/\D/g, "");
+    if (digits.length >= 4 && digits.length <= 6 && !knownCosts.has(digits)) {
+      console.error("Costo de envio mencionado no coincide con ninguna tarifa real configurada - revisar:", {
+        modelText: text,
+        realRates: shippingRates,
+      });
+      return;
+    }
+  }
+}
+
 function looksLikeIdOrPhone(text: string): boolean {
   const trimmed = text.trim();
   if (!/^[\d\s-]{6,15}$/.test(trimmed)) return false;
@@ -708,10 +793,23 @@ export async function generateReply(
   let nameSavedThisTurn = 0;
   let contactSavedThisTurn = 0;
   let intentFlaggedThisTurn = 0;
+  let catalogCheckedThisTurn = 0;
   let paymentMethodsThisTurn: { type: string; label: string; details: string }[] | null = null;
+  let shippingRatesThisTurn: { label: string; cost: string }[] | null = null;
 
   async function finalizeTurn(text: string): Promise<string> {
     text = guardAgainstPaymentHallucination(text, paymentMethodsThisTurn);
+
+    // Verify shipping-cost mentions even if the model never called get_shipping_rates this turn (it may
+    // have paraphrased a business's own free-text tier table instead) - fetch the real rates ourselves
+    // just for this check whenever shipping is mentioned. Read-only, no side effect on the order/reply.
+    if (!shippingRatesThisTurn && SHIPPING_MENTION_PATTERN.test(text)) {
+      const shippingResult = (await runCatalogTool(context, "get_shipping_rates", {})) as {
+        rates?: { label: string; cost: string }[];
+      };
+      if (shippingResult?.rates?.length) shippingRatesThisTurn = shippingResult.rates;
+    }
+    guardAgainstShippingCostHallucination(text, shippingRatesThisTurn);
 
     if (!paymentMethodsThisTurn && !/\d{6,}/.test(text) && PAYMENT_OPTIONS_CLAIM_PATTERN.test(text)) {
       const result = (await runCatalogTool(context, "get_payment_methods", {})) as {
@@ -719,6 +817,19 @@ export async function generateReply(
       };
       if (result?.methods?.length) {
         text = `${text}\n\n${result.methods.map((m) => `*${m.label}*\n${m.details}`).join("\n\n")}`;
+      }
+    }
+
+    if (catalogCheckedThisTurn === 0 && customerText && CATALOG_CHECK_CLAIM_PATTERN.test(text)) {
+      const result = (await runCatalogTool(context, "search_products", { query: customerText })) as
+        | { id: string; name: string; price: string; currency: string }[]
+        | { results?: { id: string; name: string; price: string; currency: string }[] };
+      const products = Array.isArray(result) ? result : result?.results ?? [];
+      if (products.length > 0) {
+        text = `${text}\n\n${products
+          .slice(0, 8)
+          .map((p) => `*${p.name}* — $${p.price} ${p.currency}`)
+          .join("\n")}`;
       }
     }
 
@@ -857,14 +968,27 @@ export async function generateReply(
           sent?: boolean;
           asked?: boolean;
           methods?: { type: string; label: string; details: string }[];
+          rates?: { label: string; cost: string }[];
+          matched?: boolean;
+          label?: string;
+          cost?: string;
         };
         if (result?.mediaJustSent || result?.sent) mediaSentThisTurn++;
         if (call.function.name === "ask_owner") ownerAskedThisTurn++;
         if (call.function.name === "save_customer_name") nameSavedThisTurn++;
         if (call.function.name === "save_customer_contact_info") contactSavedThisTurn++;
         if (call.function.name === "flag_conversation_intent") intentFlaggedThisTurn++;
+        if (["search_products", "get_product_details", "list_all_products"].includes(call.function.name)) {
+          catalogCheckedThisTurn++;
+        }
         if (call.function.name === "get_payment_methods" && Array.isArray(result?.methods)) {
           paymentMethodsThisTurn = result.methods;
+        }
+        if (call.function.name === "get_shipping_rates" && Array.isArray(result?.rates) && result.rates.length > 0) {
+          shippingRatesThisTurn = result.rates;
+        }
+        if (call.function.name === "get_shipping_rate_for_city" && result?.matched && result.label && result.cost) {
+          shippingRatesThisTurn = [...(shippingRatesThisTurn ?? []), { label: result.label, cost: result.cost }];
         }
         messages.push({
           role: "tool",

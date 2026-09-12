@@ -1,0 +1,411 @@
+<!doctype html>
+<title>Anatomía de Onix</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Work+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+
+:root{
+  --bg:#F6F8F4;
+  --surface:#FFFFFF;
+  --surface-2:#EFF3EC;
+  --border:#DCE3D7;
+  --text:#141B16;
+  --text-muted:#5B6B5F;
+  --accent:#146B52;
+  --accent-strong:#0E5240;
+  --accent-soft:#E1F0E8;
+  --good:#2E8F57;
+  --good-soft:#E3F3E8;
+  --warn:#B5791A;
+  --warn-soft:#FAEDD6;
+  --critical:#B93B33;
+  --critical-soft:#FBE3E1;
+  --shadow: 0 1px 2px rgba(20,27,22,.06), 0 8px 24px -12px rgba(20,27,22,.12);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0D1310;
+    --surface:#141C17;
+    --surface-2:#1A241D;
+    --border:#28352C;
+    --text:#E8ECE6;
+    --text-muted:#94A497;
+    --accent:#52CBA2;
+    --accent-strong:#7BDBB8;
+    --accent-soft:#173C31;
+    --good:#5FCB85;
+    --good-soft:#173A28;
+    --warn:#E3A54C;
+    --warn-soft:#3A2E14;
+    --critical:#E36B62;
+    --critical-soft:#3B1D1A;
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 12px 28px -14px rgba(0,0,0,.55);
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0D1310;
+  --surface:#141C17;
+  --surface-2:#1A241D;
+  --border:#28352C;
+  --text:#E8ECE6;
+  --text-muted:#94A497;
+  --accent:#52CBA2;
+  --accent-strong:#7BDBB8;
+  --accent-soft:#173C31;
+  --good:#5FCB85;
+  --good-soft:#173A28;
+  --warn:#E3A54C;
+  --warn-soft:#3A2E14;
+  --critical:#E36B62;
+  --critical-soft:#3B1D1A;
+  --shadow: 0 1px 2px rgba(0,0,0,.3), 0 12px 28px -14px rgba(0,0,0,.55);
+}
+
+*{box-sizing:border-box;}
+body{
+  background:var(--bg);
+  color:var(--text);
+  font-family:'Work Sans', system-ui, sans-serif;
+  line-height:1.55;
+  padding-inline:20px;
+}
+h1,h2,h3{
+  font-family:'Space Grotesk', system-ui, sans-serif;
+  text-wrap:balance;
+  color:var(--text);
+  letter-spacing:-0.01em;
+}
+code, .mono{ font-family:'IBM Plex Mono', ui-monospace, monospace; }
+
+a{ color:var(--accent-strong); }
+
+.wrap{ max-width:960px; margin-inline:auto; padding-block:28px 80px; }
+
+/* ---- top nav ---- */
+.topnav{
+  position:sticky; top:0; z-index:20;
+  margin-inline:-20px; padding-inline:20px;
+  background:color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter:blur(8px);
+  border-bottom:1px solid var(--border);
+}
+.topnav-inner{
+  max-width:960px; margin-inline:auto;
+  display:flex; gap:18px; overflow-x:auto;
+  padding-block:12px;
+  scrollbar-width:thin;
+}
+.topnav-inner a{
+  white-space:nowrap; font-size:.82rem; font-weight:500;
+  text-decoration:none; color:var(--text-muted);
+  padding-block:4px; border-bottom:2px solid transparent;
+}
+.topnav-inner a:hover{ color:var(--text); border-color:var(--border); }
+
+/* ---- header ---- */
+.eyebrow{
+  font-family:'IBM Plex Mono', monospace; font-size:.72rem; letter-spacing:.09em;
+  text-transform:uppercase; color:var(--accent-strong); font-weight:600;
+}
+h1{ font-size:clamp(1.7rem, 4vw, 2.5rem); margin:.4em 0 .3em; }
+.lede{ color:var(--text-muted); font-size:1.02rem; max-width:62ch; }
+
+/* ---- stat strip ---- */
+.stats{
+  display:grid; grid-template-columns:repeat(auto-fit, minmax(140px,1fr));
+  gap:1px; background:var(--border); border:1px solid var(--border); border-radius:12px;
+  overflow:hidden; margin-block:28px;
+}
+.stat{ background:var(--surface); padding:16px 18px; }
+.stat b{ display:block; font-family:'Space Grotesk'; font-size:1.7rem; }
+.stat span{ color:var(--text-muted); font-size:.8rem; }
+
+section{ margin-block:56px; scroll-margin-top:70px; }
+h2{ font-size:1.4rem; display:flex; align-items:center; gap:10px; }
+h2 .num{ font-family:'IBM Plex Mono'; color:var(--text-muted); font-size:.85rem; font-weight:400; }
+h3{ font-size:1.05rem; margin-block:1.4em .5em; }
+p{ margin-block:.7em; }
+
+/* ---- cards / grid ---- */
+.card{
+  background:var(--surface); border:1px solid var(--border); border-radius:12px;
+  padding:16px 18px; box-shadow:var(--shadow);
+}
+.rule-grid{ display:grid; gap:12px; }
+.rule-card{
+  background:var(--surface); border:1px solid var(--border); border-radius:10px;
+  padding:14px 16px;
+}
+.rule-card h4{ margin:0 0 4px; font-size:.95rem; font-family:'Work Sans'; font-weight:600; }
+.rule-card p{ margin:0; color:var(--text-muted); font-size:.88rem; }
+.tag{
+  display:inline-block; font-family:'IBM Plex Mono'; font-size:.68rem; letter-spacing:.03em;
+  padding:2px 8px; border-radius:100px; margin-bottom:8px; font-weight:500;
+}
+.tag.generic{ background:var(--accent-soft); color:var(--accent-strong); }
+.tag.backstop{ background:var(--surface-2); color:var(--text-muted); border:1px solid var(--border); }
+
+/* ---- tool table ---- */
+.table-wrap{ overflow-x:auto; border:1px solid var(--border); border-radius:12px; }
+table{ width:100%; border-collapse:collapse; font-size:.88rem; min-width:560px; }
+th,td{ text-align:left; padding:10px 14px; border-bottom:1px solid var(--border); vertical-align:top; }
+th{ background:var(--surface-2); font-family:'Space Grotesk'; font-weight:600; font-size:.78rem; text-transform:uppercase; letter-spacing:.04em; color:var(--text-muted); }
+tr:last-child td{ border-bottom:none; }
+td.tool-name{ font-family:'IBM Plex Mono'; font-size:.82rem; color:var(--accent-strong); white-space:nowrap; }
+
+/* ---- layers ---- */
+.layers{ display:grid; gap:12px; }
+.layer{
+  border-radius:12px; padding:16px 18px; border:1px solid var(--border);
+  display:grid; grid-template-columns:auto 1fr; gap:14px; align-items:start;
+}
+.layer .n{ font-family:'Space Grotesk'; font-weight:700; font-size:1.3rem; color:var(--text-muted); }
+.layer.data{ background:var(--good-soft); }
+.layer.data .n{ color:var(--good); }
+.layer.prompt{ background:var(--accent-soft); }
+.layer.prompt .n{ color:var(--accent-strong); }
+.layer.code{ background:var(--surface-2); }
+
+/* ---- findings ---- */
+.finding{
+  border:1px solid var(--border); border-radius:12px; padding:16px 18px; margin-block:14px;
+  border-left-width:4px;
+}
+.finding.critical{ border-left-color:var(--critical); }
+.finding.high{ border-left-color:var(--warn); }
+.finding.medium{ border-left-color:var(--warn); }
+.finding.ok{ border-left-color:var(--good); }
+.finding.note{ border-left-color:var(--text-muted); }
+.sev{
+  font-family:'IBM Plex Mono'; font-size:.68rem; letter-spacing:.05em; font-weight:600;
+  padding:2px 9px; border-radius:100px; text-transform:uppercase;
+}
+.sev.critical{ background:var(--critical-soft); color:var(--critical); }
+.sev.high, .sev.medium{ background:var(--warn-soft); color:var(--warn); }
+.sev.ok{ background:var(--good-soft); color:var(--good); }
+.sev.note{ background:var(--surface-2); color:var(--text-muted); }
+.finding h4{ margin:8px 0 6px; font-size:1rem; }
+.finding .evidence{
+  margin-top:10px; font-family:'IBM Plex Mono'; font-size:.78rem; color:var(--text-muted);
+  background:var(--surface-2); border-radius:8px; padding:8px 10px; white-space:pre-wrap;
+}
+
+blockquote{
+  margin:14px 0; padding:2px 0 2px 16px; border-left:3px solid var(--border);
+  color:var(--text-muted); font-size:.92rem;
+}
+
+.pill-row{ display:flex; flex-wrap:wrap; gap:8px; margin-block:10px; }
+.pill{
+  font-family:'IBM Plex Mono'; font-size:.76rem; background:var(--surface-2);
+  border:1px solid var(--border); border-radius:100px; padding:4px 11px; color:var(--text-muted);
+}
+
+footer{ color:var(--text-muted); font-size:.82rem; border-top:1px solid var(--border); padding-top:18px; }
+
+@media (max-width:600px){
+  .layer{ grid-template-columns:1fr; }
+}
+</style>
+
+<nav class="topnav"><div class="topnav-inner">
+  <a href="#llm">¿Qué es un LLM?</a>
+  <a href="#flujo">Flujo de un mensaje</a>
+  <a href="#capas">3 capas</a>
+  <a href="#reglas">Reglas genéricas</a>
+  <a href="#herramientas">Herramientas</a>
+  <a href="#negocio">Por negocio</a>
+  <a href="#magimp">MAGByLizN</a>
+  <a href="#hallazgos">Hallazgos</a>
+  <a href="#ruta">Hoja de ruta</a>
+</div></nav>
+
+<div class="wrap">
+
+  <div class="eyebrow">Documentación técnica — 2026-09-12</div>
+  <h1>Anatomía de Onix</h1>
+  <p class="lede">Qué tiene construido el bot de ventas hoy, cómo decide qué decir, dónde termina el prompt genérico y empieza el guion de un negocio, y qué se contradice entre ambos. Basado en el código real de <code>src/ai/</code> y en la configuración real cargada en la base de datos de producción.</p>
+
+  <div class="stats">
+    <div class="stat"><b>19</b><span>reglas genéricas activas</span></div>
+    <div class="stat"><b>15</b><span>herramientas (tools) que puede llamar</span></div>
+    <div class="stat"><b>5</b><span>backstops de código (anti-alucinación)</span></div>
+    <div class="stat"><b>2</b><span>negocios activos hoy</span></div>
+    <div class="stat"><b>6</b><span>hallazgos en el guion de MAGByLizN</span></div>
+  </div>
+
+  <section id="llm">
+    <h2><span class="num">00</span> ¿Qué es un LLM?</h2>
+    <p>Un LLM (<em>Large Language Model</em> — DeepSeek en el caso de Onix) es un modelo que predice la palabra más probable que sigue, entrenado sobre una cantidad enorme de texto. No es una base de datos: no "sabe" el precio de tu Smartwatch Serie 11 Mini ni el número de tu Nequi. Lo único que sabe es cómo sonar como una persona escribiendo, y razonar en lenguaje natural.</p>
+    <p>Por eso Onix nunca deja que el modelo "recuerde" un precio o un número de cuenta de memoria — cada vez que necesita un dato real, tiene que llamar una <strong>herramienta</strong> (una función de código que sí consulta la base de datos real) y usar exactamente lo que esa herramienta devuelve. Si no lo hace, el modelo va a "rellenar" el hueco con algo que suena plausible pero es falso — eso es una <strong>alucinación</strong>, y es exactamente lo que pasó con el Nequi de "Elizabeth Ríos" anoche.</p>
+    <p>El <strong>prompt</strong> es simplemente el texto de instrucciones que se le manda al modelo antes de cada mensaje del cliente — "sé breve", "nunca inventes precios", "si el cliente elige un número de una lista, resolvelo así". "Entrenar" al bot, en la práctica de Onix, no es ajustar el modelo (eso sería carísimo y no lo hacemos) — es escribir mejor este texto, y respaldar las partes críticas con código que no depende de que el modelo se acuerde de la regla.</p>
+  </section>
+
+  <section id="flujo">
+    <h2><span class="num">01</span> Cómo fluye un mensaje</h2>
+    <p>Desde que un cliente escribe por WhatsApp hasta que recibe una respuesta:</p>
+    <pre class="mermaid">
+flowchart TB
+  C["Cliente en WhatsApp"] --> W["Webhook de Meta<br/>src/routes/whatsapp.ts"]
+  W --> H{"¿Conversación<br/>en control humano?"}
+  H -- "sí" --> ACK["Un solo aviso 'ya te leímos'<br/>y silencio hasta que el dueño suelte el control"]
+  H -- "no" --> HIST["Últimos 20 mensajes<br/>+ resumen de lo más viejo"]
+  HIST --> PROMPT["Prompt del sistema =<br/>reglas genéricas + personalidad + guion propio del negocio"]
+  PROMPT --> LLM["DeepSeek<br/>(hasta 5 vueltas de herramientas)"]
+  LLM -- "llama herramienta" --> TOOLS["15 herramientas:<br/>catálogo, pagos, pedidos, escalar…"]
+  TOOLS --> DB[("PostgreSQL / S3")]
+  TOOLS --> LLM
+  LLM --> BACKSTOPS["Backstops de código:<br/>¿inventó un número de pago?<br/>¿prometió algo sin cumplirlo?"]
+  BACKSTOPS --> R["Respuesta final"]
+  R --> C
+  ADMIN["Panel /admin"] -.->|"tomar / soltar control"| H
+    </pre>
+  </section>
+
+  <section id="capas">
+    <h2><span class="num">02</span> Las 3 capas — y por qué esto no es "meterle más código"</h2>
+    <p>La pregunta de si agregar más reglas hace a Onix más lento o más robusto depende de en qué capa se agrega la regla:</p>
+    <div class="layers">
+      <div class="layer data">
+        <div class="n">1</div>
+        <div><h3 style="margin-top:0">Datos reales (herramientas + base de datos)</h3><p>Precio, stock, métodos de pago, estado de un pedido. Siempre correcto porque no pasa por el modelo — el modelo solo lo copia. Esta capa nunca se "olvida" de nada.</p></div>
+      </div>
+      <div class="layer prompt">
+        <div class="n">2</div>
+        <div><h3 style="margin-top:0">Reglas de prompt (instrucciones en español)</h3><p>"Si hay variantes, mostralas", "un dato a la vez", tono del negocio. Guían el comportamiento pero compiten por la atención del modelo — cuantas más hay, más chance de que una se pierda bajo presión. Esta es la capa que se prueba y se corrige con casos reales.</p></div>
+      </div>
+      <div class="layer code">
+        <div class="n">3</div>
+        <div><h3 style="margin-top:0">Backstops de código (red de seguridad)</h3><p>Después de que el modelo responde, código determinista revisa la respuesta: ¿mencionó un número de pago que no está en la lista real? Se reemplaza. ¿prometió el catálogo sin mostrarlo? Se lo agrega. Esta capa no se degrada nunca, sin importar cuánto crezca el prompt — no es una instrucción más, es un chequeo aparte.</p></div>
+      </div>
+    </div>
+    <p style="margin-top:16px">Agregar texto a la capa 2 sin límite sí tiene un techo real: no es velocidad (el prompt actual son ~4.800 tokens de reglas genéricas más las del negocio — lejos del límite de DeepSeek), es <strong>atención</strong> — un prompt con 40 reglas contradictorias entre sí es peor que uno con 15 claras. La forma de crecer sin ese techo es mover todo lo que toca plata o datos reales a la capa 1 o 3, y dejar la capa 2 solo para tono y estilo de conversación.</p>
+  </section>
+
+  <section id="reglas">
+    <h2><span class="num">03</span> Reglas genéricas — aplican a todo negocio</h2>
+    <p>Viven en <code>src/ai/agent.ts</code>, en <code>BASE_SYSTEM_PROMPT</code> y sus variantes. Se arman una vez y las hereda cualquier negocio nuevo, sin escribir código de nuevo.</p>
+    <div class="rule-grid">
+      <div class="rule-card"><span class="tag generic">estilo</span><h4>Tono humano, un dato a la vez</h4><p>Nunca tira 3 preguntas juntas en lista numerada; pide un dato, espera respuesta.</p></div>
+      <div class="rule-card"><span class="tag generic">idioma</span><h4>Bilingüe automático</h4><p>Si el cliente escribe en otro idioma, responde en ese idioma; vuelve al español configurado si el cliente vuelve.</p></div>
+      <div class="rule-card"><span class="tag generic">catálogo</span><h4>Catálogo por significado</h4><p><code>search_products</code> revisa por significado, no solo palabra exacta ("algo para hacer ejercicio" → smartwatch deportivo). Nunca inventa precio, stock ni características.</p></div>
+      <div class="rule-card"><span class="tag generic">catálogo</span><h4>Selección por número <span class="mono" style="font-size:.7rem">(hoy)</span></h4><p>Si mostró una lista numerada de productos y el cliente responde solo con un número, lo resuelve contra su propia lista — nunca pasa el número suelto a una herramienta. No aplica si la última pregunta fue cédula/celular/cantidad.</p></div>
+      <div class="rule-card"><span class="tag generic">catálogo</span><h4>Variantes del mismo producto <span class="mono" style="font-size:.7rem">(hoy)</span></h4><p>Si hay color/material/talla distintos y el cliente muestra interés genérico, primero consulta el catálogo real y muestra las opciones — nunca pregunta "cuál preferís" a ciegas.</p></div>
+      <div class="rule-card"><span class="tag generic">catálogo</span><h4>Comparación de productos</h4><p>Compara solo con datos reales devueltos por las herramientas; si falta un atributo puntual, lo dice con honestidad en vez de inventar cuál es mejor.</p></div>
+      <div class="rule-card"><span class="tag generic">faq</span><h4>Preguntas frecuentes por significado</h4><p><code>get_faq</code> antes de responder políticas; una entrada relacionada que no confirma explícitamente no se usa para negar ni inferir.</p></div>
+      <div class="rule-card"><span class="tag generic">honestidad</span><h4>Cuándo no sabés algo</h4><p>Un saludo o charla social nunca escala; una pregunta real sin respuesta confirmada en catálogo/FAQ/pagos/guion propio sí usa <code>ask_owner</code> — nunca "no tengo eso registrado" por cuenta propia.</p></div>
+      <div class="rule-card"><span class="tag generic">anti-promesa</span><h4>Anti-promesa-vacía <span class="tag backstop">+ backstop</span></h4><p>"Dejame consultarlo", "te comparto las opciones" solo vale si en ese mismo mensaje ya está el resultado real. Respaldado por código: si el mensaje reclama haber revisado el catálogo, los pagos, o haber escalado, y la herramienta correspondiente no corrió, el código la llama y completa la respuesta él mismo.</p></div>
+      <div class="rule-card"><span class="tag generic">fotos</span><h4>Fotos y video reales</h4><p>Nunca describe ni escribe <code>[Foto de X]</code> a mano — solo <code>send_product_media</code> manda el archivo real. Auto-envío en la primera cotización si el negocio lo activó.</p></div>
+      <div class="rule-card"><span class="tag generic">fotos</span><h4>Foto enviada por el cliente</h4><p>Distingue comprobante de pago vs foto de producto (redes/captura) vs imagen ambigua; busca en catálogo por descripción visual, nunca le pide al cliente que describa lo que ya mandó en foto.</p></div>
+      <div class="rule-card"><span class="tag generic">pagos</span><h4>Pagos reales <span class="tag backstop">+ backstop</span></h4><p>Nunca parafrasea un número de memoria — vuelve a llamar <code>get_payment_methods</code> cada vez. Backstop: si el texto final menciona datos de pago con un número de 7+ dígitos que no está en ningún método configurado, se descarta y se reemplaza por los datos reales.</p></div>
+      <div class="rule-card"><span class="tag generic">pedido</span><h4>Resumen y total antes del pago</h4><p>Flujo genérico (si el negocio no tiene el suyo propio): resumen por escrito con total, confirmación explícita del cliente, recién ahí se pide el comprobante.</p></div>
+      <div class="rule-card"><span class="tag generic">comprobantes</span><h4>Comprobantes</h4><p>Obligatorio u opcional según configuración del negocio; nunca cierra un pedido solo porque el cliente dijo "ya pagué" si el negocio exige comprobante.</p></div>
+      <div class="rule-card"><span class="tag generic">seguimiento</span><h4>Nombre y avance</h4><p><code>save_customer_name</code> una vez que lo sabe; <code>update_conversation_status</code> refleja el embudo (interesado / cotizado / negociando) sin avisarle al cliente.</p></div>
+      <div class="rule-card"><span class="tag generic">datos</span><h4>Cédula y celular de contacto</h4><p>Guarda cada dato apenas lo tiene, no espera a tener ambos.</p></div>
+      <div class="rule-card"><span class="tag generic">escalamiento</span><h4>PQR / devoluciones / pedir un humano</h4><p><code>flag_conversation_intent</code> una sola vez; resuelve primero lo que sí puede responder en el mismo turno, y recién después escala.</p></div>
+      <div class="rule-card"><span class="tag generic">pedido</span><h4>Consultar o cancelar un pedido</h4><p>Siempre <code>get_order_status</code>, nunca de memoria. Cancelación requiere confirmación explícita en un mensaje aparte antes de llamar <code>cancel_order</code>.</p></div>
+      <div class="rule-card"><span class="tag generic">cierre</span><h4>Cierre de venta</h4><p><code>close_conversation</code> con <code>outcome=SOLD</code> solo tras comprobante + resumen confirmado; si queda <code>pending</code>, nunca le dice al cliente que ya cerró.</p></div>
+    </div>
+  </section>
+
+  <section id="herramientas">
+    <h2><span class="num">04</span> Las 15 herramientas</h2>
+    <p>Son las únicas puertas hacia datos reales — el modelo no puede tocar la base de datos ni WhatsApp de ninguna otra forma.</p>
+    <div class="table-wrap"><table>
+      <tr><th>Herramienta</th><th>Para qué</th></tr>
+      <tr><td class="tool-name">search_products</td><td>Busca en el catálogo por palabra clave; si no hay match exacto, devuelve todo el catálogo activo para revisar por significado.</td></tr>
+      <tr><td class="tool-name">get_product_details</td><td>Detalle completo por ID real (nunca por el número de orden 1,2,3 que ve el cliente); dispara el auto-envío de foto la primera vez.</td></tr>
+      <tr><td class="tool-name">list_all_products</td><td>Catálogo completo activo.</td></tr>
+      <tr><td class="tool-name">send_product_media</td><td>Manda la foto/video real de un producto por WhatsApp.</td></tr>
+      <tr><td class="tool-name">get_faq</td><td>Trae todas las preguntas frecuentes configuradas por el negocio.</td></tr>
+      <tr><td class="tool-name">get_payment_methods</td><td>Formas de pago reales configuradas (número, titular, costo de envío asociado).</td></tr>
+      <tr><td class="tool-name">save_customer_name</td><td>Guarda el nombre del cliente cuando se sabe.</td></tr>
+      <tr><td class="tool-name">save_customer_contact_info</td><td>Guarda cédula y/o celular de entrega.</td></tr>
+      <tr><td class="tool-name">update_conversation_status</td><td>Marca el avance interno: interesado / cotizado / negociando.</td></tr>
+      <tr><td class="tool-name">flag_conversation_intent</td><td>Escala PQR, devolución, "no me llegó", o pedido explícito de un humano.</td></tr>
+      <tr><td class="tool-name">ask_owner</td><td>Manda la pregunta exacta del cliente al dueño por WhatsApp cuando no hay respuesta real disponible.</td></tr>
+      <tr><td class="tool-name">ask_owner_about_photo</td><td>Reenvía al dueño una foto de producto que no se pudo identificar en el catálogo.</td></tr>
+      <tr><td class="tool-name">close_conversation</td><td>Cierra la venta (SOLD, con resumen/ítems/total real) o la marca perdida (LOST).</td></tr>
+      <tr><td class="tool-name">get_order_status</td><td>Estado real de un pedido ya hecho.</td></tr>
+      <tr><td class="tool-name">cancel_order</td><td>Cancela el pedido más reciente, solo tras confirmación explícita del cliente.</td></tr>
+    </table></div>
+  </section>
+
+  <section id="negocio">
+    <h2><span class="num">05</span> Qué es genérico y qué es de cada negocio</h2>
+    <p>Un negocio nuevo no reescribe código — carga <em>datos</em>: catálogo, métodos de pago, FAQ, y opcionalmente estos campos de personalidad:</p>
+    <div class="pill-row">
+      <span class="pill">assistantName</span><span class="pill">botTone</span><span class="pill">botDialect</span>
+      <span class="pill">botGreeting</span><span class="pill">botNeverSay</span><span class="pill">autoSendPhotoOnQuote</span>
+      <span class="pill">requirePaymentProof</span><span class="pill">businessCategory</span><span class="pill">customInstructions</span>
+    </div>
+    <p><code>customInstructions</code> es el único campo de texto libre — el guion propio del negocio. Se inyecta con <strong>prioridad alta</strong>: si el negocio ya definió su propio paso a paso (orden para pedir datos, cómo calcular envío, plantilla de cierre), ese guion manda sobre las secciones genéricas de arriba. Lo único que nunca cede es la obligación de usar las herramientas para datos reales — aunque el guion del negocio esté escrito como texto humano ("muestra las opciones de pago") sin mencionar ninguna herramienta, igual tiene que llamar <code>get_payment_methods</code> para conseguir el dato real.</p>
+  </section>
+
+  <section id="magimp">
+    <h2><span class="num">06</span> El caso real: MAGByLizN (MAG.IMP)</h2>
+    <p>Hoy hay 2 negocios en la base de datos: <strong>Aurora Joyas</strong> (cuenta de prueba, sin personalidad configurada) y <strong>MAGByLizN</strong> (el cliente real, con un guion propio de 4 etapas en <code>customInstructions</code>). Resumen de ese guion:</p>
+    <ul>
+      <li><strong>Etapa 1</strong> — saludo, pedir nombre, tratar "linda/bella" a mujeres y "Sr." a hombres según el nombre, corregir si se equivoca.</li>
+      <li><strong>Etapa 2</strong> — ciudad y barrio, validar que sea de Colombia, tarifa de envío por 7 categorías de ciudad (Bogotá $9.000 … Vereda $88.900), elegir modalidad de pago del envío.</li>
+      <li><strong>Etapa 3</strong> — método de pago del producto, resumen y total, pedir comprobante, avisar al dueño y esperar que confirme.</li>
+      <li><strong>Etapa 4</strong> — mensaje de cierre EXACTO según ciudad + modalidad, sin improvisar una palabra.</li>
+      <li><strong>Excepciones</strong> — si no sabe algo: avisa al cliente, escala al dueño, y si pasan <strong>5 minutos</strong> sin respuesta, le avisa al cliente "seguimos revisando" y le manda un recordatorio al dueño.</li>
+    </ul>
+  </section>
+
+  <section id="hallazgos">
+    <h2><span class="num">07</span> Hallazgos — qué está aplicado, qué falta, qué se contradice</h2>
+
+    <div class="finding critical">
+      <span class="sev critical">crítico</span>
+      <h4>El seguimiento de 5 minutos prometido al cliente no existe</h4>
+      <p>El guion de MAGByLizN promete: si en 5 minutos el dueño no respondió, avisarle al cliente "seguimos revisando tu consulta" y mandarle un recordatorio al dueño. El código real (<code>src/jobs/escalationReminder.ts</code>) solo hace la segunda mitad — y a las <strong>3 horas</strong>, no a los 5 minutos — y el aviso es <em>solo para el dueño</em>. El cliente nunca recibe ningún mensaje proactivo; si no vuelve a escribir, se queda esperando en silencio.</p>
+      <div class="evidence">REMINDER_THRESHOLD_HOURS = 3  →  src/jobs/escalationReminder.ts:6
+No existe ningún envío proactivo al cliente en todo el código.</div>
+    </div>
+
+    <div class="finding high">
+      <span class="sev high">alto</span>
+      <h4>Las tarifas de envío por ciudad no tienen respaldo de datos</h4>
+      <p>La tabla de 7 tarifas (Bogotá, Soacha, Regional, Nacional, Municipal, Difícil Acceso, Vereda) vive solo como texto dentro de <code>customInstructions</code>. No hay ninguna herramienta que valide si una ciudad es de Colombia, ni a qué categoría pertenece un barrio — el modelo decide todo eso de memoria propia, sin ningún dato real que lo confirme. Un barrio ambiguo o una ciudad mal clasificada cobra la tarifa equivocada sin que ningún backstop lo note (a diferencia de los pagos, acá no hay red de seguridad de código).</p>
+    </div>
+
+    <div class="finding medium">
+      <span class="sev medium">medio</span>
+      <h4>"¿Continuar con la conversación anterior?" no tiene ningún dato detrás</h4>
+      <p>Etapa 1.3 del guion le pide al bot preguntar si el cliente quiere seguir una conversación anterior o empezar una nueva. El sistema no distingue conversaciones cerradas de una nueva de ninguna forma que el modelo pueda consultar — no hay herramienta para eso. El bot puede terminar preguntando algo que no tiene cómo responder ni resolver de verdad.</p>
+    </div>
+
+    <div class="finding ok">
+      <span class="sev ok">confirmado</span>
+      <h4>Plantillas de cierre exactas — sí implementado</h4>
+      <p>La exigencia de Etapa 4 (texto literal, sin improvisar) está resuelta por <code>generateClosingMessage()</code>: una llamada aparte al modelo, sin herramientas, que solo rellena la plantilla real del negocio con los datos del pedido.</p>
+    </div>
+
+    <div class="finding ok">
+      <span class="sev ok">confirmado</span>
+      <h4>Aviso al dueño antes de cerrar — sí implementado</h4>
+      <p>Etapa 3.6 (avisar al dueño y esperar que confirme el pago antes del cierre oficial) es exactamente el mecanismo <code>pending:true</code> de <code>close_conversation</code> + alerta por WhatsApp al dueño ya construido.</p>
+    </div>
+
+    <div class="finding note">
+      <span class="sev note">a vigilar</span>
+      <h4>Trato "linda/bella" vs "Sr." adivinando el género por el nombre</h4>
+      <p>Es una decisión propia del negocio, no un bug de Onix — pero depende de que el modelo adivine bien el género por el nombre. Ya tiene su propio mecanismo de corrección si falla ("mil disculpas, con gusto"), así que el riesgo es de tono, no de dato incorrecto.</p>
+    </div>
+  </section>
+
+  <section id="ruta">
+    <h2><span class="num">08</span> Hoja de ruta de robustez</h2>
+    <p>Para que agregar reglas dependa cada vez menos de que un cliente real encuentre el error primero:</p>
+    <ol>
+      <li><strong>Suite de conversaciones de regresión</strong> — grabar las conversaciones reales que ya fallaron (como las 4 de hoy) como casos fijos, y correrlas contra <code>generateReply</code> en cada cambio de prompt. Si algo que ya funcionaba deja de funcionar, se ve antes de deployar, no a la noche siguiente.</li>
+      <li><strong>Mover a la capa 3 lo que toca plata o dato real</strong> — el patrón que ya existe para pagos (<code>guardAgainstPaymentHallucination</code>) es el molde: cualquier regla nueva que hable de dinero o de un dato que no se puede corregir después debería tener, además del texto en el prompt, un chequeo de código que no dependa de que el modelo se acuerde.</li>
+      <li><strong>Cerrar los huecos ya encontrados</strong> — el seguimiento de 5 minutos y la validación de tarifas de envío son los dos con mayor exposición real hoy.</li>
+      <li><strong>Dato en vez de texto libre donde se pueda</strong> — las tarifas por ciudad hoy son prosa dentro de <code>customInstructions</code>; si se mueven a una tabla real (ciudad → tarifa), se convierten en capa 1 y dejan de depender de que el modelo clasifique bien una ciudad de memoria.</li>
+    </ol>
+  </section>
+
+  <footer>Generado a partir de <code>src/ai/agent.ts</code>, <code>src/ai/tools.ts</code>, <code>src/jobs/escalationReminder.ts</code> y la configuración real de negocios en producción — 2026-09-12.</footer>
+
+</div>

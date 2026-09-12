@@ -55,6 +55,7 @@
     ],
     "paymentMethods": [],
     "shippingRates": [],
+    "shippingCityRules": [],
     "faqEntries": []
   },
   {
@@ -287,6 +288,10 @@
         "cost": "88900",
         "sortOrder": 7
       }
+    ],
+    "shippingCityRules": [
+      { "city": "Bogotá", "label": "Bogotá" },
+      { "city": "Soacha", "label": "Soacha" }
     ],
     "faqEntries": [
       {

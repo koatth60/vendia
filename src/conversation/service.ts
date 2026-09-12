@@ -30,6 +30,24 @@ export async function getOrCreateOpenConversation(businessId: string, customerId
   return conversation;
 }
 
+// "Previous conversation" for the continue-or-restart prompt some businesses' own scripts ask for (e.g.
+// MAGByLizN's Etapa 1.3) = this customer's most recent CLOSED (SOLD/LOST) conversation, excluding
+// whichever conversation is currently open. getOrCreateOpenConversation already guarantees the open one
+// is never SOLD/LOST, so the status filter alone would already exclude it - the id exclusion is a
+// harmless defensive belt-and-suspenders in case that invariant ever changes, not load-bearing today.
+export async function getPreviousClosedConversation(businessId: string, customerId: string, excludeConversationId: string) {
+  return prisma.conversation.findFirst({
+    where: {
+      customerId,
+      customer: { businessId },
+      id: { not: excludeConversationId },
+      status: { in: ["SOLD", "LOST"] },
+    },
+    include: { order: true },
+    orderBy: { updatedAt: "desc" },
+  });
+}
+
 export async function recordMessage(
   businessId: string,
   conversationId: string,
@@ -170,7 +188,9 @@ export async function setHumanControl(businessId: string, conversationId: string
   if (!existing) return null;
   const conversation = await prisma.conversation.update({
     where: { id: conversationId },
-    data: { humanControl: active },
+    // Reset the one-time ack flag whenever a pause starts, so the next takeover gets its own single
+    // heads-up instead of inheriting "already acked" from a previous pause period.
+    data: { humanControl: active, humanControlAckSent: false },
     include: { customer: true },
   });
   emitConversationUpdated(businessId, formatConversationRow(conversation));
@@ -233,6 +253,17 @@ export async function clearPendingOwnerQuestion(questionId: string) {
   await prisma.pendingOwnerQuestion.delete({ where: { id: questionId } });
 }
 
+// Only the WhatsApp-reply path (quoting the alert, or the single-pending fallback) ever cleared a
+// PendingOwnerQuestion - an owner who instead resolves it by typing directly into the admin panel's
+// conversation view left the row open indefinitely, remindedAt still null. Harmless while the reminder
+// job's own bug meant it almost never fired (see findPendingOwnerQuestionsDueForReminder) - once that got
+// fixed (2026-09-12) this orphaned row was exactly what let a real, already-resolved conversation get a
+// confusing "seguimos revisando" follow-up hours later. Called wherever the owner addresses a conversation
+// through the admin panel instead of WhatsApp.
+export async function clearPendingOwnerQuestionsForConversation(conversationId: string) {
+  await prisma.pendingOwnerQuestion.deleteMany({ where: { conversationId } });
+}
+
 // Used when the owner replies WITHOUT quoting a specific message (common on mobile, where long-pressing
 // to reply is easy to skip) - lets the webhook auto-resolve the reply only when there's exactly one
 // thing open for that business, instead of always demanding a quote even when there's nothing to
@@ -265,12 +296,16 @@ export async function findOpenPendingConfirmationsForBusiness(businessId: string
 export async function findPendingOwnerQuestionsDueForReminder(businessId: string, olderThan: Date) {
   const pending = await prisma.pendingOwnerQuestion.findMany({
     where: {
-      // Must still be muted - a conversation can move on (owner resolves it some other way, a new sale
-      // closes, etc) without ever clearing this row. A real orphaned row from a 2026-09-11 migration
-      // backfill (see that migration's SQL) triggered a false reminder in production for a conversation
-      // that had already closed a sale hours earlier - reminding about a question that isn't actually
-      // blocking anything anymore.
-      conversation: { customer: { businessId }, humanControl: true },
+      // Must still be an open conversation - a real orphaned row from a 2026-09-11 migration backfill
+      // (see that migration's SQL) triggered a false reminder in production for a conversation that had
+      // already closed a sale hours earlier, reminding about a question that isn't actually blocking
+      // anything anymore. This used to be gated on humanControl:true instead, but that's wrong for the
+      // majority of pending questions: plain ask_owner deliberately leaves humanControl false (the bot
+      // keeps chatting about everything else while that one question is escalated, see tools.ts), so the
+      // humanControl gate silently excluded almost every ask_owner reminder and only ever fired for
+      // ask_owner_about_photo (the one case that does set humanControl). status is the real "still open"
+      // signal regardless of which escalation path set it.
+      conversation: { customer: { businessId }, status: { notIn: ["SOLD", "LOST"] } },
       remindedAt: null,
       createdAt: { lte: olderThan },
     },

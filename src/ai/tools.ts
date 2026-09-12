@@ -1,6 +1,7 @@
 import type OpenAI from "openai";
 import { getProductById, listActiveProducts, searchProducts, findConfidentProductMatch } from "../catalog/products";
 import { listActivePaymentMethods } from "../catalog/paymentMethods";
+import { listShippingRates, resolveShippingRateForCity } from "../catalog/shippingRates";
 import { listActiveFaqEntries } from "../catalog/faq";
 import {
   updateConversationStatus,
@@ -10,12 +11,14 @@ import {
   saveCustomerContactInfo,
   recordMessage,
   createPendingOwnerQuestion,
+  getPreviousClosedConversation,
 } from "../conversation/service";
 import {
   resolveOrderItems,
   createOrder,
   askForCsat,
   getLatestOrderForCustomer,
+  getOrderByConversationId,
   markOrderCanceled,
   type ResolvedOrderItem,
 } from "../orders/service";
@@ -91,7 +94,11 @@ export const catalogTools: OpenAI.Chat.ChatCompletionTool[] = [
       parameters: {
         type: "object",
         properties: {
-          query: { type: "string", description: "Palabra o frase para buscar" },
+          query: {
+            type: "string",
+            description:
+              "Palabra o frase para buscar. Si el cliente respondio solo con un numero eligiendo una opcion de una lista que VOS mostraste antes, no busques ese numero - usa el nombre real del producto en esa posicion de tu propia lista.",
+          },
         },
         required: ["query"],
       },
@@ -171,6 +178,36 @@ export const catalogTools: OpenAI.Chat.ChatCompletionTool[] = [
       parameters: {
         type: "object",
         properties: {},
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_shipping_rates",
+      description:
+        "Obtiene las tarifas de envio reales configuradas por este negocio. Usar SIEMPRE antes de decirle un costo de envio al cliente cuando las instrucciones del negocio describen tarifas por ciudad/categoria - nunca copies el numero de esa prosa de memoria, confirmalo aca.",
+      parameters: {
+        type: "object",
+        properties: {},
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_shipping_rate_for_city",
+      description:
+        "Busca si esta ciudad especifica tiene una tarifa de envio EXACTA configurada por el negocio (coincidencia literal de nombre, ej. 'Bogota'). Usala apenas el cliente te de una ciudad puntual, antes de clasificarla vos de memoria en una categoria. Si no hay coincidencia exacta, NO es un error: segui las instrucciones propias del negocio para ubicarla en su categoria/tarifa general (usa get_shipping_rates para los montos), tal como lo venias haciendo.",
+      parameters: {
+        type: "object",
+        properties: {
+          city: {
+            type: "string",
+            description: "La ciudad tal como la escribio el cliente (con o sin tildes), sin el barrio ni otros datos.",
+          },
+        },
+        required: ["city"],
       },
     },
   },
@@ -330,6 +367,19 @@ export const catalogTools: OpenAI.Chat.ChatCompletionTool[] = [
       name: "cancel_order",
       description:
         "Cancela el pedido mas reciente de este cliente. USA ESTA HERRAMIENTA SOLO despues de que el cliente ya confirmo explicitamente que si quiere cancelar: primero preguntale en texto plano '¿confirmas que queres cancelar tu pedido?' y esperá su respuesta en un mensaje aparte - nunca la llames en el mismo turno en el que recien pide cancelar. Si el pedido ya fue enviado, esta herramienta lo va a rechazar; en ese caso no insistas, escala con ask_owner.",
+      parameters: {
+        type: "object",
+        properties: {},
+        required: [],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_previous_conversation",
+      description:
+        "Busca si este cliente tiene una conversacion anterior con este negocio que ya haya sido cerrada (vendida o perdida). Usa esto SOLO si las instrucciones de este negocio piden preguntar si el cliente quiere continuar una conversacion anterior o empezar una nueva - no la llames si el negocio no lo pide.",
       parameters: {
         type: "object",
         properties: {},
@@ -567,6 +617,29 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
         methods: methods.map((m) => ({ type: m.type, label: m.label, details: m.details })),
       };
     }
+    case "get_shipping_rates": {
+      const rates = await listShippingRates(businessId);
+      if (rates.length === 0) {
+        return {
+          rates: [],
+          note: "Este negocio no tiene tarifas de envio estructuradas todavia. Segui las instrucciones especificas del negocio tal como estan escritas para esto.",
+        };
+      }
+      return { rates: rates.map((r) => ({ label: r.label, cost: r.cost.toString() })) };
+    }
+    case "get_shipping_rate_for_city": {
+      const city = String(input.city ?? "").trim();
+      if (!city) return { matched: false, note: "Falta la ciudad." };
+
+      const resolved = await resolveShippingRateForCity(businessId, city);
+      if (!resolved) {
+        return {
+          matched: false,
+          note: "Esta ciudad no tiene una regla exacta configurada. No inventes su categoria: segui las instrucciones propias del negocio para clasificarla, y usa get_shipping_rates para confirmar el monto de la categoria que corresponda.",
+        };
+      }
+      return { matched: true, label: resolved.label, cost: resolved.cost.toString() };
+    }
     case "save_customer_name": {
       const name = String(input.name ?? "").trim();
       if (!name) return { error: "Falta el nombre" };
@@ -796,6 +869,14 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
           }
         }
 
+        const existingOrder = await getOrderByConversationId(context.conversationId);
+        if (existingOrder) {
+          return {
+            closed: false,
+            note: "Esta conversacion ya tiene un pedido registrado - no se puede cerrar una venta nueva sobre la misma. Si el cliente quiere comprar algo mas, decile que un asesor lo va a confirmar directamente.",
+          };
+        }
+
         const pending = await requestSaleConfirmation(context, summary, { items, shippingAddress, paymentMethodLabel, shippingCost });
         if (pending) {
           return {
@@ -878,6 +959,21 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
       }
 
       return { canceled: true };
+    }
+    case "get_previous_conversation": {
+      const previous = await getPreviousClosedConversation(businessId, context.customerId, context.conversationId);
+      if (!previous) {
+        return {
+          found: false,
+          note: "Este cliente no tiene ninguna conversacion anterior cerrada. Tratalo como una conversacion nueva sin preguntar nada al respecto.",
+        };
+      }
+      return {
+        found: true,
+        outcome: previous.status,
+        summary: previous.contextSummary || previous.pendingOrderSummary || previous.order?.summary || "No hay un resumen guardado de esa conversacion.",
+        updatedAt: previous.updatedAt,
+      };
     }
     default:
       return { error: `Unknown tool: ${name}` };

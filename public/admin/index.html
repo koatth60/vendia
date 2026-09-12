@@ -263,6 +263,16 @@
   .status-LOST { background: var(--danger-light); color: var(--danger); }
 
   /* Orders */
+  .order-subtabs { display: flex; gap: 8px; margin: 4px 0 16px; flex-wrap: wrap; }
+  .order-subtab-btn {
+    display: flex; align-items: center; gap: 7px; padding: 8px 14px; font-size: 13px; font-weight: 650;
+    color: var(--muted); background: var(--card); border: 1px solid var(--border-soft); border-radius: 100px;
+    cursor: pointer; font-family: inherit; transition: color .15s, border-color .15s, background .15s;
+  }
+  .order-subtab-btn:hover { color: var(--ink-soft); }
+  .order-subtab-btn.active { color: var(--brand-dark); background: var(--brand-light); border-color: var(--brand-light); }
+  .order-subtab-btn .status-badge { pointer-events: none; }
+  .order-list-footer { display: flex; align-items: center; justify-content: center; padding: 14px; }
   .order-section-head { display: flex; align-items: center; gap: 10px; margin: 30px 0 10px; }
   .order-section-head:first-of-type { margin-top: 4px; }
   .order-section-title { font-family: var(--display); font-weight: 700; font-size: 15px; color: var(--ink); }
@@ -813,29 +823,22 @@
         <div class="realtime-indicator" id="realtime-indicator-orders"><span class="realtime-dot"></span><span class="realtime-indicator-text">Conectando…</span></div>
       </div>
 
-      <div class="order-section-head">
-        <div class="order-section-title">Pendientes de envío</div>
-        <span class="status-badge" id="orders-pending-count" style="background:var(--warn-light); color:var(--warn);">0</span>
+      <div class="order-subtabs">
+        <button class="order-subtab-btn active" data-order-status="PENDING" onclick="switchOrdersTab('PENDING')">
+          Pendientes de envío <span class="status-badge" id="orders-pending-count" style="background:var(--warn-light); color:var(--warn);">0</span>
+        </button>
+        <button class="order-subtab-btn" data-order-status="SHIPPED" onclick="switchOrdersTab('SHIPPED')">
+          Enviados <span class="status-badge" id="orders-shipped-count" style="background:var(--brand-light); color:var(--brand-dark);">0</span>
+        </button>
+        <button class="order-subtab-btn" data-order-status="CANCELED" onclick="switchOrdersTab('CANCELED')">
+          Cancelados <span class="status-badge" id="orders-canceled-count" style="background:var(--danger-light); color:var(--danger);">0</span>
+        </button>
       </div>
       <div class="card" style="padding:0; overflow:hidden;">
-        <div id="orders-pending-list"></div>
-      </div>
-
-      <div class="order-section-head">
-        <div class="order-section-title">Enviados</div>
-        <span class="status-badge" id="orders-shipped-count" style="background:var(--brand-light); color:var(--brand-dark);">0</span>
-      </div>
-      <div class="card" style="padding:0; overflow:hidden;">
-        <div id="orders-shipped-list"></div>
-      </div>
-
-      <div class="order-section-head">
-        <div class="order-section-title">Cancelados</div>
-        <span class="status-badge" id="orders-canceled-count" style="background:var(--danger-light); color:var(--danger);">0</span>
-        <span class="order-section-note">historial</span>
-      </div>
-      <div class="card" style="padding:0; overflow:hidden;">
-        <div id="orders-canceled-list"></div>
+        <div id="orders-list"></div>
+        <div class="order-list-footer" id="orders-load-more-wrap" hidden>
+          <button class="btn-ghost" id="orders-load-more" onclick="loadMoreOrders()">Cargar más</button>
+        </div>
       </div>
     </div>
 
@@ -2536,7 +2539,8 @@ async function confirmShipOrder(id) {
     } else {
       setStatus('Pedido marcado como enviado ✓');
     }
-    loadOrders();
+    loadOrderCounts();
+    loadOrders(true);
   } catch (err) {
     setStatus(`No se pudo marcar el envío: ${err.message}`, true);
   }
@@ -2546,40 +2550,72 @@ async function cancelOrder(id) {
   if (!confirm('¿Cancelar este pedido? El cliente no recibe ningún mensaje automático.')) return;
   try {
     await apiFetch(`/admin/api/orders/${id}/cancel`, { method: 'PUT' });
-    loadOrders();
+    loadOrderCounts();
+    loadOrders(true);
   } catch (err) {
     setStatus(`No se pudo cancelar: ${err.message}`, true);
   }
 }
 
-async function loadOrders() {
-  const pendingEl = document.getElementById('orders-pending-list');
-  const shippedEl = document.getElementById('orders-shipped-list');
-  const canceledEl = document.getElementById('orders-canceled-list');
+// Pendientes/Enviados/Cancelados used to be one unbounded list each, all three always fetched in full
+// (with a presigned S3 URL per order with shipment media) on every 30s poll and socket reconnect - as
+// order history grows over months that payload and S3-call count only ever grows. Now: one paged request
+// for whichever sub-tab is open, counts kept separate and cheap (see loadOrderCounts).
+const ORDERS_PAGE_SIZE = 20;
+let ordersActiveStatus = 'PENDING';
+let ordersLoadedCount = 0;
+let ordersTotalForStatus = 0;
+
+const ORDER_CARD_RENDERERS = { PENDING: pendingOrderCard, SHIPPED: shippedOrderCard, CANCELED: canceledOrderCard };
+const ORDERS_EMPTY_TEXT = {
+  PENDING: '<div class="empty-state"><div class="big">📦</div>No hay pedidos pendientes de envío.</div>',
+  SHIPPED: '<div class="empty-state" style="padding:24px;">Todavía no hay pedidos enviados.</div>',
+  CANCELED: '<div class="empty-state" style="padding:24px;">Sin pedidos cancelados.</div>',
+};
+
+function switchOrdersTab(status) {
+  ordersActiveStatus = status;
+  document.querySelectorAll('.order-subtab-btn').forEach(b => b.classList.toggle('active', b.dataset.orderStatus === status));
+  loadOrders(true);
+}
+
+async function loadOrderCounts() {
   try {
-    const res = await apiFetch('/admin/api/orders');
-    const orders = await res.json();
+    const res = await apiFetch('/admin/api/orders/counts');
+    const counts = await res.json();
+    document.getElementById('orders-pending-count').textContent = counts.PENDING || 0;
+    document.getElementById('orders-shipped-count').textContent = counts.SHIPPED || 0;
+    document.getElementById('orders-canceled-count').textContent = counts.CANCELED || 0;
+  } catch {}
+}
 
-    const pending = orders.filter((o) => o.fulfillmentStatus === 'PENDING');
-    const shipped = orders.filter((o) => o.fulfillmentStatus === 'SHIPPED');
-    const canceled = orders.filter((o) => o.fulfillmentStatus === 'CANCELED');
+async function loadOrders(reset) {
+  const listEl = document.getElementById('orders-list');
+  const status = ordersActiveStatus;
+  const skip = reset ? 0 : ordersLoadedCount;
+  try {
+    const res = await apiFetch(`/admin/api/orders?status=${status}&skip=${skip}&take=${ORDERS_PAGE_SIZE}`);
+    const { orders, total } = await res.json();
+    if (status !== ordersActiveStatus) return; // user switched tabs while this was in flight
 
-    document.getElementById('orders-pending-count').textContent = pending.length;
-    document.getElementById('orders-shipped-count').textContent = shipped.length;
-    document.getElementById('orders-canceled-count').textContent = canceled.length;
-
-    pendingEl.innerHTML = pending.length
-      ? pending.map(pendingOrderCard).join('')
-      : '<div class="empty-state"><div class="big">📦</div>No hay pedidos pendientes de envío.</div>';
-    shippedEl.innerHTML = shipped.length
-      ? shipped.map(shippedOrderCard).join('')
-      : '<div class="empty-state" style="padding:24px;">Todavía no hay pedidos enviados.</div>';
-    canceledEl.innerHTML = canceled.length
-      ? canceled.map(canceledOrderCard).join('')
-      : '<div class="empty-state" style="padding:24px;">Sin pedidos cancelados.</div>';
+    const render = ORDER_CARD_RENDERERS[status];
+    const html = orders.map(render).join('');
+    if (reset) {
+      listEl.innerHTML = orders.length ? html : ORDERS_EMPTY_TEXT[status];
+      ordersLoadedCount = orders.length;
+    } else {
+      listEl.insertAdjacentHTML('beforeend', html);
+      ordersLoadedCount += orders.length;
+    }
+    ordersTotalForStatus = total;
+    document.getElementById('orders-load-more-wrap').hidden = ordersLoadedCount >= total;
   } catch (err) {
-    pendingEl.innerHTML = `<div class="empty-state" style="color:var(--danger);">No se pudieron cargar los pedidos: ${escapeHtml(err.message)}</div>`;
+    listEl.innerHTML = `<div class="empty-state" style="color:var(--danger);">No se pudieron cargar los pedidos: ${escapeHtml(err.message)}</div>`;
   }
+}
+
+function loadMoreOrders() {
+  loadOrders(false);
 }
 
 async function loadAnalytics() {
@@ -2952,7 +2988,8 @@ function initRealtime() {
   socket.on('connect', () => {
     setRealtimeStatus(true);
     loadConversations();
-    loadOrders();
+    loadOrderCounts();
+    loadOrders(true);
   });
   socket.on('disconnect', () => setRealtimeStatus(false));
 
@@ -2965,7 +3002,8 @@ function initRealtime() {
   // etc.) there was no self-healing, the stale badge would just sit there until a manual reload.
   setInterval(() => {
     loadConversations();
-    loadOrders();
+    loadOrderCounts();
+    loadOrders(true);
   }, 30000);
 
   socket.on('message:new', ({ conversationId, message, unreadCount }) => {
@@ -3015,8 +3053,8 @@ function initRealtime() {
     }
   });
 
-  socket.on('order:new', loadOrders);
-  socket.on('order:updated', loadOrders);
+  socket.on('order:new', () => { loadOrderCounts(); loadOrders(true); });
+  socket.on('order:updated', () => { loadOrderCounts(); loadOrders(true); });
 }
 
 async function boot() {
@@ -3035,7 +3073,8 @@ async function boot() {
   loadConversations();
   loadFaqEntries();
   loadFaqCandidates();
-  loadOrders();
+  loadOrderCounts();
+  loadOrders(true);
   loadAnalytics();
   loadAiUsage();
   if (isOwner) loadTeamMembers();

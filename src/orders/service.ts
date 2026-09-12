@@ -1,4 +1,5 @@
 import { prisma } from "../db/client";
+import type { OrderFulfillmentStatus } from "@prisma/client";
 import { findConfidentProductMatch } from "../catalog/products";
 import { sendInteractiveButtonsMessage, type WhatsappCredentials } from "../whatsapp/client";
 import { getPresignedMediaUrl } from "../media/s3";
@@ -183,13 +184,27 @@ function formatOrder<T extends { totalAmount: unknown; shippingCost: unknown; it
   };
 }
 
-export async function listOrdersForBusiness(businessId: string) {
-  const orders = await prisma.order.findMany({
-    where: { businessId },
-    include: { items: true, customer: true },
-    orderBy: { createdAt: "desc" },
-  });
-  return Promise.all(
+// Scoped to one status + a bounded page, not "every order this business ever had" - that used to be
+// refetched in full (with a presigned S3 URL generated per order with shipment media) on a 30s poll AND
+// every socket reconnect, forever, so the payload and the S3 API calls only ever grew as order history
+// piled up. Pendientes/Enviados/Cancelados are now separate paged requests instead of one unbounded list.
+export async function listOrdersForBusiness(
+  businessId: string,
+  status: OrderFulfillmentStatus,
+  skip: number,
+  take: number
+) {
+  const [orders, total] = await Promise.all([
+    prisma.order.findMany({
+      where: { businessId, fulfillmentStatus: status },
+      include: { items: true, customer: true },
+      orderBy: { createdAt: "desc" },
+      skip,
+      take,
+    }),
+    prisma.order.count({ where: { businessId, fulfillmentStatus: status } }),
+  ]);
+  const formatted = await Promise.all(
     orders.map(async (order) => ({
       ...formatOrder(order),
       customer: {
@@ -201,6 +216,16 @@ export async function listOrdersForBusiness(businessId: string) {
       shipmentMediaUrl: order.shipmentMediaS3Key ? await getPresignedMediaUrl(order.shipmentMediaS3Key) : null,
     }))
   );
+  return { orders: formatted, total };
+}
+
+// Cheap enough to poll on the same interval as before: no order rows, no presigned URLs, just 3 counts -
+// used for the Pendientes/Enviados/Cancelados badge numbers regardless of which one is currently open.
+export async function countOrdersByStatus(businessId: string): Promise<Record<OrderFulfillmentStatus, number>> {
+  const rows = await prisma.order.groupBy({ by: ["fulfillmentStatus"], where: { businessId }, _count: true });
+  const counts: Record<OrderFulfillmentStatus, number> = { PENDING: 0, SHIPPED: 0, CANCELED: 0 };
+  for (const row of rows) counts[row.fulfillmentStatus] = row._count;
+  return counts;
 }
 
 export async function getOrderForBusiness(businessId: string, orderId: string) {
@@ -208,6 +233,15 @@ export async function getOrderForBusiness(businessId: string, orderId: string) {
     where: { id: orderId, businessId },
     include: { customer: true },
   });
+}
+
+// Order.conversationId is 1:1 (unique) - a second close_conversation(SOLD) call on a conversation that
+// already has one used to hit that unique constraint as a raw, uncaught Prisma error, which propagated
+// all the way out of generateReply's try/catch and got mislabeled "Fallo la llamada a DeepSeek" - found by
+// replaying real historical conversations through the regression suite (2026-09-12). Checked here so
+// close_conversation can degrade gracefully instead of crashing the whole turn.
+export async function getOrderByConversationId(conversationId: string) {
+  return prisma.order.findUnique({ where: { conversationId } });
 }
 
 // Looks up by customerId, not the current conversationId - Order.conversationId is 1:1 with the
