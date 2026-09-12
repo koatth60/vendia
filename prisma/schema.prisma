@@ -19,7 +19,7 @@ enum OrderFulfillmentStatus {
 }
 
 model Business {
-  id                        String                @id @default(cuid())
+  id                        String                    @id @default(cuid())
   name                      String
   description               String?
   customInstructions        String?
@@ -28,26 +28,38 @@ model Business {
   botDialect                String?
   botGreeting               String?
   botNeverSay               String?
-  autoSendPhotoOnQuote      Boolean               @default(true)
-  requirePaymentProof       Boolean               @default(true)
+  autoSendPhotoOnQuote      Boolean                   @default(true)
+  requirePaymentProof       Boolean                   @default(true)
   businessCategory          String?
-  email                     String                @unique
+  email                     String                    @unique
   passwordHash              String
-  planTier                  PlanTier              @default(BASICO)
-  active                    Boolean               @default(false)
+  planTier                  PlanTier                  @default(BASICO)
+  active                    Boolean                   @default(false)
   contactPhone              String?
   contactName               String?
   passwordResetCode         String?
   passwordResetExpiresAt    DateTime?
   capNotifiedAt             DateTime?
-  whatsappPhoneNumberId     String?               @unique
+  whatsappPhoneNumberId     String?                   @unique
   whatsappBusinessAccountId String?
   whatsappPhoneNumber       String?
   whatsappAccessToken       String?
   followUpTemplateName      String?
-  followUpTemplateLanguage  String                @default("es")
-  followUpDelayHours        Int                   @default(24)
-  ownerReminderMinutes      Int                   @default(180)
+  followUpTemplateLanguage  String                    @default("es")
+  followUpDelayHours        Int                       @default(24)
+  ownerReminderMinutes      Int                       @default(180)
+  // Gendered address tone (ej: alternar el nombre con "linda"/"bella" para mujeres, "Sr."/"Señor" para
+  // hombres) - encontrado en el prompt de MAGByLizN, promovido a mecanismo core (detectar genero,
+  // corregir si el cliente se queja) pero las palabras exactas quedan opt-in por negocio: off por
+  // defecto, otro negocio puede no querer ese trato.
+  genderedAddressEnabled    Boolean                   @default(false)
+  femaleAddressTerm         String?
+  maleAddressTerm           String?
+  // Que modalidades de pago de ENVIO ofrece este negocio (distinto del canal de pago - Nequi/tarjeta/etc,
+  // ver PaymentMethod arriba). Vacio = el negocio no usa este concepto, el flujo de pago generico sigue
+  // igual que siempre. Encontrado en el prompt de MAGByLizN (pagar todo anticipado / solo producto
+  // anticipado+envio contraentrega / todo contraentrega), promovido a mecanismo core reusable.
+  shippingPaymentModalities ShippingPaymentModality[] @default([])
   products                  Product[]
   customers                 Customer[]
   paymentMethods            PaymentMethod[]
@@ -60,14 +72,23 @@ model Business {
   ownerMessageLogs          OwnerMessageLog[]
   orders                    Order[]
   teamMembers               TeamMember[]
-  createdAt                 DateTime              @default(now())
-  updatedAt                 DateTime              @updatedAt
+  createdAt                 DateTime                  @default(now())
+  updatedAt                 DateTime                  @updatedAt
 }
 
 enum PaymentMethodType {
   TRANSFERENCIA
   TARJETA
   EFECTIVO
+}
+
+// Who pays for shipping and when - a different axis than PaymentMethodType (which channel: Nequi, card,
+// cash). A business can offer any subset (see Business.shippingPaymentModalities); most businesses won't
+// use this concept at all and leave it empty.
+enum ShippingPaymentModality {
+  PREPAID_ALL // paga producto + envio, todo por adelantado
+  PREPAID_PRODUCT_COD_SHIPPING // paga el producto por adelantado, el envio se paga contraentrega
+  COD_ALL // paga todo (producto + envio) contraentrega
 }
 
 model PaymentMethod {

@@ -520,6 +520,34 @@
           <input type="checkbox" id="bot-require-proof" checked />
           <span>Exigir foto del comprobante de pago antes de cerrar un pedido (recomendado)</span>
         </label>
+        <label class="checkbox-label">
+          <input type="checkbox" id="bot-gendered-address" onchange="toggleGenderedAddressFields()" />
+          <span>Tratar al cliente distinto según su género (ej: "linda" para mujeres, "Sr." para hombres)</span>
+        </label>
+        <div id="gendered-address-fields" class="grid-2" hidden>
+          <div>
+            <label>Palabra para mujeres (opcional)</label>
+            <input id="bot-female-term" placeholder="Ej: linda" />
+          </div>
+          <div>
+            <label>Palabra para hombres (opcional)</label>
+            <input id="bot-male-term" placeholder="Ej: Sr." />
+          </div>
+        </div>
+        <label>Modalidades de pago del envío que ofreces (opcional)</label>
+        <div class="hint">Distinto del método de pago (Nequi, tarjeta, etc) - esto es sobre CUÁNDO se paga el envío. Deja todo sin marcar si no usas este concepto.</div>
+        <label class="checkbox-label">
+          <input type="checkbox" id="ship-modality-prepaid-all" />
+          <span>Pagar producto + envío, todo por adelantado</span>
+        </label>
+        <label class="checkbox-label">
+          <input type="checkbox" id="ship-modality-prepaid-product-cod-shipping" />
+          <span>Pagar el producto por adelantado, el envío se paga contraentrega</span>
+        </label>
+        <label class="checkbox-label">
+          <input type="checkbox" id="ship-modality-cod-all" />
+          <span>Pagar todo (producto + envío) contraentrega</span>
+        </label>
         <label>Estilo de español</label>
         <select id="bot-dialect">
           <option value="neutro">Neutro latinoamericano</option>
@@ -1032,6 +1060,14 @@ async function loadBusiness() {
     document.getElementById('bot-auto-photo').checked = business.autoSendPhotoOnQuote !== false;
     document.getElementById('bot-require-proof').checked = business.requirePaymentProof !== false;
     document.getElementById('bot-category').value = business.businessCategory || '';
+    document.getElementById('bot-gendered-address').checked = Boolean(business.genderedAddressEnabled);
+    document.getElementById('bot-female-term').value = business.femaleAddressTerm || '';
+    document.getElementById('bot-male-term').value = business.maleAddressTerm || '';
+    toggleGenderedAddressFields();
+    const modalities = business.shippingPaymentModalities || [];
+    document.getElementById('ship-modality-prepaid-all').checked = modalities.includes('PREPAID_ALL');
+    document.getElementById('ship-modality-prepaid-product-cod-shipping').checked = modalities.includes('PREPAID_PRODUCT_COD_SHIPPING');
+    document.getElementById('ship-modality-cod-all').checked = modalities.includes('COD_ALL');
     renderInstructionChips();
     updateTallaFieldVisibility();
     document.getElementById('business-contact-name').value = business.contactName || '';
@@ -1274,6 +1310,14 @@ async function saveBusiness() {
   const followUpTemplateName = document.getElementById('business-followup-template').value.trim();
   const followUpTemplateLanguage = document.getElementById('business-followup-language').value.trim() || 'es';
   const followUpDelayHours = Number(document.getElementById('business-followup-hours').value) || 24;
+  const genderedAddressEnabled = document.getElementById('bot-gendered-address').checked;
+  const femaleAddressTerm = document.getElementById('bot-female-term').value.trim();
+  const maleAddressTerm = document.getElementById('bot-male-term').value.trim();
+  const shippingPaymentModalities = [
+    document.getElementById('ship-modality-prepaid-all').checked ? 'PREPAID_ALL' : null,
+    document.getElementById('ship-modality-prepaid-product-cod-shipping').checked ? 'PREPAID_PRODUCT_COD_SHIPPING' : null,
+    document.getElementById('ship-modality-cod-all').checked ? 'COD_ALL' : null,
+  ].filter(Boolean);
   if (!name) { setStatus('El nombre es obligatorio', true); return; }
   try {
     await apiFetch('/admin/api/business', {
@@ -1283,6 +1327,7 @@ async function saveBusiness() {
         name, description, customInstructions, assistantName, botTone, botDialect, botGreeting, botNeverSay,
         autoSendPhotoOnQuote, requirePaymentProof, businessCategory, contactName, contactPhone,
         followUpTemplateName, followUpTemplateLanguage, followUpDelayHours,
+        genderedAddressEnabled, femaleAddressTerm, maleAddressTerm, shippingPaymentModalities,
       }),
     });
     setStatus('Negocio guardado ✓');
@@ -1336,6 +1381,11 @@ function updateTallaFieldVisibility() {
   const editWrapper = document.getElementById('edit-size-wrapper');
   if (addWrapper) addWrapper.hidden = !isRopa;
   if (editWrapper) editWrapper.hidden = !isRopa;
+}
+
+function toggleGenderedAddressFields() {
+  const fields = document.getElementById('gendered-address-fields');
+  if (fields) fields.hidden = !document.getElementById('bot-gendered-address').checked;
 }
 
 function renderCard(p) {

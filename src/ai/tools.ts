@@ -8,6 +8,15 @@ import {
 } from "../catalog/products";
 import { listActivePaymentMethods } from "../catalog/paymentMethods";
 import { listShippingRates, resolveShippingRateForCity } from "../catalog/shippingRates";
+
+// Shared with agent.ts (both the tool result here and the system-prompt directive there need the same
+// Spanish wording for each modality) - defined once here since agent.ts already imports from this file,
+// not the other way around.
+export const SHIPPING_MODALITY_LABELS: Record<string, string> = {
+  PREPAID_ALL: "pagar producto + envio, todo por adelantado",
+  PREPAID_PRODUCT_COD_SHIPPING: "pagar el producto por adelantado, el envio se paga contraentrega",
+  COD_ALL: "pagar todo (producto + envio) contraentrega",
+};
 import { listActiveFaqEntries } from "../catalog/faq";
 import {
   updateConversationStatus,
@@ -244,6 +253,18 @@ export const catalogTools: OpenAI.Chat.ChatCompletionTool[] = [
           },
         },
         required: ["city"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_shipping_payment_modalities",
+      description:
+        "Obtiene las modalidades reales de pago del ENVIO que ofrece este negocio (ej: todo anticipado, producto anticipado + envio contraentrega, todo contraentrega) - distinto del canal de pago (Nequi/tarjeta/etc, ver get_payment_methods). Usar cuando el cliente este por confirmar una compra y el negocio tiene esto configurado.",
+      parameters: {
+        type: "object",
+        properties: {},
       },
     },
   },
@@ -731,6 +752,14 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
         };
       }
       return { matched: true, label: resolved.label, cost: resolved.cost.toString() };
+    }
+    case "get_shipping_payment_modalities": {
+      const business = await prisma.business.findUnique({ where: { id: businessId }, select: { shippingPaymentModalities: true } });
+      const modalities = business?.shippingPaymentModalities ?? [];
+      if (modalities.length === 0) {
+        return { modalities: [], note: "Este negocio no configuro modalidades de pago de envio. Segui el flujo generico de pago." };
+      }
+      return { modalities: modalities.map((m) => ({ code: m, label: SHIPPING_MODALITY_LABELS[m] })) };
     }
     case "save_customer_name": {
       const name = String(input.name ?? "").trim();

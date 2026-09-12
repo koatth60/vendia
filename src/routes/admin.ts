@@ -111,6 +111,10 @@ adminRouter.put("/api/business", requireOwner, async (req, res) => {
     followUpTemplateName,
     followUpTemplateLanguage,
     followUpDelayHours,
+    genderedAddressEnabled,
+    femaleAddressTerm,
+    maleAddressTerm,
+    shippingPaymentModalities,
   } = req.body;
   const business = await prisma.business.update({
     where: { id: businessIdOf(req) },
@@ -131,6 +135,10 @@ adminRouter.put("/api/business", requireOwner, async (req, res) => {
       followUpTemplateName: followUpTemplateName || null,
       followUpTemplateLanguage: followUpTemplateLanguage || undefined,
       followUpDelayHours: followUpDelayHours !== undefined ? Number(followUpDelayHours) : undefined,
+      genderedAddressEnabled: genderedAddressEnabled !== undefined ? Boolean(genderedAddressEnabled) : undefined,
+      femaleAddressTerm: femaleAddressTerm === "" ? null : femaleAddressTerm,
+      maleAddressTerm: maleAddressTerm === "" ? null : maleAddressTerm,
+      shippingPaymentModalities: Array.isArray(shippingPaymentModalities) ? shippingPaymentModalities : undefined,
     },
   });
   const { passwordHash: _hash, whatsappAccessToken: _token, ...safe } = business;

@@ -8,6 +8,7 @@ import {
   ESCALATION_CLAIM_PATTERN,
   PAYMENT_OPTIONS_CLAIM_PATTERN,
   CATALOG_CHECK_CLAIM_PATTERN,
+  SHIPPING_MODALITY_CLAIM_PATTERN,
 } from "./agent";
 
 // Regression for a bug class found 2026-09-12 (see agent.photoBackstop.test.ts for the original photo
@@ -80,4 +81,20 @@ test("catalog: offering to check the catalog does not fire search_products", () 
 test("catalog: a genuine dropped-promise claim still fires search_products", () => {
   assert.equal(fires(CATALOG_CHECK_CLAIM_PATTERN, "dejame revisar el catalogo para confirmarte bien"), true);
   assert.equal(fires(CATALOG_CHECK_CLAIM_PATTERN, "Perfecto, reviso el catalogo y te cuento"), true);
+});
+
+// Fase 4 (2026-09-12): shipping-payment-modality is a new core mechanism, same dropped-promise family.
+test("shipping modality: a genuine dropped-promise claim fires get_shipping_payment_modalities", () => {
+  assert.equal(
+    fires(SHIPPING_MODALITY_CLAIM_PATTERN, "Te comparto las modalidades de envio: anticipado o contraentrega"),
+    true
+  );
+  assert.equal(
+    fires(SHIPPING_MODALITY_CLAIM_PATTERN, "Podes pagar contraentrega o anticipado, cual prefieres?"),
+    true
+  );
+});
+
+test("shipping modality: an unrelated mention of 'anticipado'/'contraentrega' with no options language does not fire", () => {
+  assert.equal(fires(SHIPPING_MODALITY_CLAIM_PATTERN, "El envio contraentrega llega en 2 a 3 dias habiles"), false);
 });

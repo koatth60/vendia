@@ -1,6 +1,6 @@
 import type OpenAI from "openai";
 import { deepseek, DEEPSEEK_MODEL } from "./client";
-import { catalogTools, runCatalogTool, type ToolContext } from "./tools";
+import { catalogTools, runCatalogTool, SHIPPING_MODALITY_LABELS, type ToolContext } from "./tools";
 import { getRecentHistory } from "../conversation/service";
 import { logAiUsage } from "./usage";
 import { prisma } from "../db/client";
@@ -337,9 +337,17 @@ export interface BotPersonality {
   autoSendPhotoOnQuote?: boolean;
   requirePaymentProof?: boolean;
   category?: string | null;
+  // Opt-in, off by default - see Business.genderedAddressEnabled in schema.prisma for why this stays
+  // per-business config instead of a hardcoded core behavior.
+  genderedAddressEnabled?: boolean;
+  femaleAddressTerm?: string | null;
+  maleAddressTerm?: string | null;
+  // Empty/undefined = this business doesn't use the concept, generic payment flow unaffected. See
+  // ShippingPaymentModality in schema.prisma.
+  shippingPaymentModalities?: ("PREPAID_ALL" | "PREPAID_PRODUCT_COD_SHIPPING" | "COD_ALL")[];
 }
 
-function buildSystemPrompt(personality?: BotPersonality | null): string {
+export function buildSystemPrompt(personality?: BotPersonality | null): string {
   const languageDirective =
     (personality?.dialect && LANGUAGE_DIRECTIVES[personality.dialect]) || LANGUAGE_DIRECTIVES.neutro;
   const photoDirective = personality?.autoSendPhotoOnQuote === false ? PHOTO_DIRECTIVE_REACTIVE : PHOTO_DIRECTIVE_AUTO;
@@ -376,6 +384,31 @@ function buildSystemPrompt(personality?: BotPersonality | null): string {
 
   if (personality?.neverSay?.trim()) {
     parts.push(`NUNCA digas ni hagas esto: ${personality.neverSay.trim()}`);
+  }
+
+  if (personality?.genderedAddressEnabled && (personality.femaleAddressTerm?.trim() || personality.maleAddressTerm?.trim())) {
+    const femaleTerm = personality.femaleAddressTerm?.trim();
+    const maleTerm = personality.maleAddressTerm?.trim();
+    parts.push(
+      `TRATO SEGUN GENERO: este negocio pidio un trato personalizado. Identifica el genero del cliente por su
+nombre.${femaleTerm ? ` Si es mujer, alterna su nombre con "${femaleTerm}" a lo largo de la conversacion.` : ""}${
+        maleTerm ? ` Si es hombre, alterna su nombre con "${maleTerm}".` : ""
+      } Si el cliente corrige tu suposicion de genero, pide disculpas breve y amablemente, ajusta el trato de
+inmediato al genero indicado y segui asi el resto de la conversacion.`
+    );
+  }
+
+  if (personality?.shippingPaymentModalities && personality.shippingPaymentModalities.length > 0) {
+    const options = personality.shippingPaymentModalities
+      .map((m) => SHIPPING_MODALITY_LABELS[m])
+      .filter(Boolean)
+      .join("; ");
+    parts.push(
+      `MODALIDAD DE PAGO DEL ENVIO: este negocio ofrece estas modalidades reales: ${options}. Cuando el
+cliente este por confirmar una compra, usa get_shipping_payment_modalities para mostrarle EXACTAMENTE esas
+opciones (nunca inventes ni asumas cual eligio) y espera su respuesta explicita antes de seguir. Esto es
+distinto del canal de pago (Nequi, tarjeta, etc, ver get_payment_methods) - son dos preguntas separadas.`
+    );
   }
 
   if (personality?.customInstructions?.trim()) {
@@ -543,6 +576,13 @@ export const ESCALATION_CLAIM_PATTERN =
 // that nothing real was attached (a message that actually lists payment methods always has numbers in
 // it).
 export const PAYMENT_OPTIONS_CLAIM_PATTERN = /\b(te comparto|te paso|aqu[ií] (est[aá]n|tenes)|estas son)\b.{0,20}\bopciones\b/i;
+
+// Same dropped-promise family, for shipping-PAYMENT-MODALITY (who pays shipping and when - see
+// Business.shippingPaymentModalities in schema.prisma) - a different axis from PAYMENT_OPTIONS_CLAIM_PATTERN
+// above (which channel: Nequi/tarjeta/etc). Only relevant for businesses that configured this concept at
+// all - gated separately in finalizeTurn, not by this pattern alone.
+export const SHIPPING_MODALITY_CLAIM_PATTERN =
+  /\b(anticipado|contraentrega|contra entrega)\b.{0,25}\b(opciones|modalidad(es)?|prefer[ií]s?|prefier(es|e)?|elegir)\b|\b(opciones|modalidad(es)?)\b.{0,25}\b(anticipado|contraentrega|contra entrega)\b/i;
 
 // Same failure mode once more, this time for the catalog: the bot says "dejame revisar el catalogo para
 // confirmarte bien" (or similar) and stops there without ever calling search_products/list_all_products -
@@ -848,6 +888,7 @@ export async function generateReply(
   // this already-scoped result set over guessing from prose whenever it's available, instead of
   // re-deriving "which products" by scanning text for any name overlap (blind to color/category).
   let attributeMatchThisTurn: { productId: string; productName: string; variantId: string | null }[] | null = null;
+  let shippingModalitiesThisTurn: { code: string; label: string }[] | null = null;
 
   async function finalizeTurn(text: string): Promise<string> {
     text = guardAgainstPaymentHallucination(text, paymentMethodsThisTurn);
@@ -874,6 +915,23 @@ export async function generateReply(
       };
       if (result?.methods?.length) {
         text = `${text}\n\n${result.methods.map((m) => `*${m.label}*\n${m.details}`).join("\n\n")}`;
+      }
+    }
+
+    // Same dropped-promise family, for shipping-payment-modality - only fires for a business that
+    // actually configured this concept (empty for most businesses, see Business.shippingPaymentModalities).
+    if (
+      !shippingModalitiesThisTurn &&
+      personality?.shippingPaymentModalities &&
+      personality.shippingPaymentModalities.length > 0 &&
+      SHIPPING_MODALITY_CLAIM_PATTERN.test(text) &&
+      !OFFER_OR_PENDING_CONFIRMATION_PATTERN.test(text)
+    ) {
+      const result = (await runCatalogTool(context, "get_shipping_payment_modalities", {})) as {
+        modalities?: { code: string; label: string }[];
+      };
+      if (result?.modalities?.length) {
+        text = `${text}\n\n${result.modalities.map((m, i) => `${i + 1}. ${m.label}`).join("\n")}`;
       }
     }
 
@@ -1060,6 +1118,7 @@ export async function generateReply(
           cost?: string;
           matches?: { productId: string; productName: string; variantId: string | null }[];
           ambiguousAcrossCategories?: boolean;
+          modalities?: { code: string; label: string }[];
         };
         if (result?.mediaJustSent || result?.sent) mediaSentThisTurn++;
         if (call.function.name === "ask_owner") ownerAskedThisTurn++;
@@ -1085,6 +1144,9 @@ export async function generateReply(
           result.matches.length > 0
         ) {
           attributeMatchThisTurn = result.matches;
+        }
+        if (call.function.name === "get_shipping_payment_modalities" && Array.isArray(result?.modalities) && result.modalities.length > 0) {
+          shippingModalitiesThisTurn = result.modalities;
         }
         messages.push({
           role: "tool",

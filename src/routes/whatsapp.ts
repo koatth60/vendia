@@ -463,6 +463,10 @@ whatsappRouter.post("/webhook", async (req, res) => {
         autoSendPhotoOnQuote: business.autoSendPhotoOnQuote,
         requirePaymentProof: business.requirePaymentProof,
         category: business.businessCategory,
+        genderedAddressEnabled: business.genderedAddressEnabled,
+        femaleAddressTerm: business.femaleAddressTerm,
+        maleAddressTerm: business.maleAddressTerm,
+        shippingPaymentModalities: business.shippingPaymentModalities,
       },
       rawText
     );
