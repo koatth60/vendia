@@ -754,6 +754,25 @@ function looksLikeIdOrPhone(text: string): boolean {
   return /\d{6,}/.test(trimmed.replace(/\D/g, ""));
 }
 
+// Token-overlap match (not exact substring - the model paraphrases names constantly, e.g. "Boombox 4
+// LED" for "Parlante Bluetooth Portatil Boombox 4 LED") against a haystack that should already include
+// the customer's message, the bot's current reply, AND the bot's prior turn (see the photo-claim
+// backstop in finalizeTurn for why the prior turn matters). Exported as a pure function for a cheap
+// regression test - no DB/LLM needed to verify the matching decision itself.
+export function findMentionedProductsForMediaBackstop<T extends { name: string; media: unknown[] }>(
+  products: T[],
+  haystack: string
+): T[] {
+  const haystackTokens = new Set(tokenize(haystack));
+  return products.filter((p) => {
+    if (p.media.length === 0) return false;
+    const nameTokens = tokenize(p.name);
+    if (nameTokens.length === 0) return false;
+    const hits = nameTokens.filter((t) => haystackTokens.has(t)).length;
+    return hits / nameTokens.length >= 0.6;
+  });
+}
+
 function lastAssistantText(history: { role: string; content: string }[]): string {
   for (let i = history.length - 2; i >= 0; i--) {
     if (history[i].role === "ASSISTANT") return history[i].content;
@@ -877,25 +896,29 @@ export async function generateReply(
       text = text.replace(/\[(?:foto|video)s? de [^\]]*\]/gi, "").trim();
     }
 
-    // Figure out WHICH product(s) by scanning both the customer's message and the model's own reply
-    // for product-name mentions (token-overlap, not exact substring - the model paraphrases names
-    // constantly, e.g. "Boombox 4 LED" for "Parlante Bluetooth Portatil Boombox 4 LED"). This catches
-    // vague follow-ups like "y los otros productos?" where the model resolved which ones but never
-    // actually called send_product_media for them.
+    // Figure out WHICH product(s) by scanning the customer's message, the model's own reply, AND the
+    // bot's own PRIOR turn (token-overlap, not exact substring - the model paraphrases names constantly,
+    // e.g. "Boombox 4 LED" for "Parlante Bluetooth Portatil Boombox 4 LED"). This catches vague
+    // follow-ups like "y los otros productos?" where the model resolved which ones but never actually
+    // called send_product_media for them.
+    //
+    // The prior-turn scan matters for a real, reported failure: bot lists 4 numbered smartwatch options
+    // ("1. Serie 11 Mini... 2. Serie 12 Ultra 3...") and asks which one; customer replies "Muestrame
+    // fotos" with no name at all, since they haven't seen any yet and can't name one sight-unseen - the
+    // reasonable read of that is "show me all 4 you just listed", not "pick one for me" or a clarifying
+    // question that would just repeat the same dead end. The specific names only live in the bot's PRIOR
+    // message, never in this turn's customerText/text, so without this the code below found zero matches
+    // and fell back to calling send_product_media with the raw customer text ("Muestrame fotos") as if it
+    // were a product name - never matches anything, so the bot's false "aqui van las fotos" claim went
+    // out with nothing actually sent.
     //
     // Must compare whole tokens, not substrings: haystack.includes(t) on the raw normalized string used
     // to match "pro" (from "AirPods Pro 2") against the "pro" inside "producto", and single-digit tokens
     // like "2"/"3" against any stray digit in a price - false-positiving completely unrelated products
     // into a customer message that never mentioned them.
     const products = await listActiveProducts(context.businessId);
-    const haystackTokens = new Set(tokenize(`${customerText ?? ""} ${text}`));
-    const matched = products.filter((p) => {
-      if (p.media.length === 0) return false;
-      const nameTokens = tokenize(p.name);
-      if (nameTokens.length === 0) return false;
-      const hits = nameTokens.filter((t) => haystackTokens.has(t)).length;
-      return hits / nameTokens.length >= 0.6;
-    });
+    const haystack = `${customerText ?? ""} ${text} ${lastAssistantText(history)}`;
+    const matched = findMentionedProductsForMediaBackstop(products, haystack);
 
     // A generic "muestrame el catalogo" also matches PHOTO_REQUEST_PATTERN (it contains "muestrame"),
     // and if the model answers by listing the whole catalog by name, every product matches the
@@ -910,10 +933,6 @@ export async function generateReply(
     for (let i = 0; i < matched.length; i++) {
       if (i > 0) await new Promise((resolve) => setTimeout(resolve, 1200));
       await runCatalogTool(context, "send_product_media", { productName: matched[i].name });
-    }
-
-    if (matched.length === 0 && customerText) {
-      await runCatalogTool(context, "send_product_media", { productName: customerText });
     }
 
     return text;
