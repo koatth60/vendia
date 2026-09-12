@@ -41,6 +41,7 @@ import {
   type WhatsappCredentials,
 } from "../whatsapp/client";
 import { getAiUsageSummary, getPlanUsage, logAiUsage } from "../ai/usage";
+import { detectProductColors } from "../ai/colorDetection";
 import { generateClosingMessage } from "../ai/agent";
 import { extractSaleDetails } from "../ai/extractSale";
 import { deepseek, DEEPSEEK_MODEL } from "../ai/client";
@@ -375,6 +376,18 @@ adminRouter.put("/api/variants/:id", async (req, res) => {
 adminRouter.delete("/api/variants/:id", async (req, res) => {
   await deleteProductVariant(businessIdOf(req), String(req.params.id));
   res.status(204).send();
+});
+
+// Lets the admin panel suggest variant colors from a catalog photo instead of typing each one by
+// hand - the owner still confirms/edits before anything is saved, this only pre-fills.
+adminRouter.post("/api/products/:id/detect-colors", async (req, res) => {
+  const imageUrl = req.body.imageUrl ? String(req.body.imageUrl) : "";
+  if (!imageUrl) {
+    res.status(400).json({ error: "imageUrl requerido" });
+    return;
+  }
+  const colors = await detectProductColors(businessIdOf(req), imageUrl);
+  res.json({ colors });
 });
 
 adminRouter.post("/api/products/:id/media", upload.single("file"), async (req, res) => {
