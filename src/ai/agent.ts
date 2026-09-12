@@ -352,9 +352,17 @@ function buildSystemPrompt(personality?: BotPersonality | null): string {
 datos, calcular tarifas de envio, o confirmar un pago. Si el negocio ya definio aca su propio flujo paso a
 paso para algo (validar ciudad, calcular costo de envio, pedir datos de entrega, confirmar el pago antes
 de cerrar, etc), seguí ESE flujo tal cual esta escrito aca, en su propio orden y con sus propias palabras -
-no lo reemplaces por las secciones genericas de mas arriba de este prompt ni lo mezcles con ellas. Las
-reglas de arriba sobre precios, stock, metodos de pago y fotos reales siguen aplicando siempre (nunca
-inventes esos datos), pero para todo lo demas, si esta definido aca abajo, esto manda:
+no lo reemplaces por las secciones genericas de mas arriba de este prompt ni lo mezcles con ellas.
+
+Esto es SOLO sobre el guion/orden de la conversacion (que preguntar, en que orden, como redactarlo) - NUNCA
+reemplaza la obligacion de conseguir datos reales con las herramientas. Aunque el texto de aca abajo diga
+en prosa "muestra las opciones de pago" o "confirma el precio" sin mencionar ninguna herramienta (el
+negocio lo escribio como guion humano, no como instruccion tecnica), vos igual tenes que llamar
+get_payment_methods, search_products, get_faq, etc, CADA VEZ que el flujo de este negocio te lleve a
+mostrar ese dato - la herramienta no es parte de "las secciones genericas que no seguís", es como conseguís
+la info real para poder seguir este flujo sin inventar nada. Las reglas de arriba sobre precios, stock,
+metodos de pago y fotos reales siguen aplicando siempre exactamente igual, herramienta incluida. Para todo
+lo demas, si esta definido aca abajo, esto manda:
 ${personality.customInstructions.trim()}`
     );
   }
