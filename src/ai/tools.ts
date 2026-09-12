@@ -665,12 +665,11 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
         };
       }
 
-      await setHumanControl(businessId, context.conversationId, true);
       await createPendingOwnerQuestion(context.conversationId, wamid, question);
 
       return {
         asked: true,
-        note: "La pregunta quedo escalada al dueno del negocio. No sigas intentando responderla vos mismo ni inventes nada: decile al cliente que estas confirmando esa info con el equipo y le respondes en breve.",
+        note: "La pregunta quedo escalada al dueno del negocio - vos segui atendiendo al cliente con normalidad mientras tanto (otras preguntas, catalogo, lo que necesite). No inventes la respuesta a ESTA pregunta puntual ni digas que ya la tenes: decile que estas confirmando esa info con el equipo y le respondes en breve. Si el cliente insiste en la misma pregunta antes de que el dueno responda, no llames ask_owner de nuevo para lo mismo - decile que segues esperando la respuesta.",
       };
     }
     case "ask_owner_about_photo": {
@@ -821,7 +820,13 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
       }
 
       await updateConversationStatus(businessId, context.conversationId, outcome);
-      return { closed: true, outcome };
+      return outcome === "SOLD"
+        ? {
+            closed: true,
+            outcome,
+            note: "El pedido quedo cerrado de una. Confirmaselo al cliente con calidez, agradecele la compra, y despedite - no dejes la conversacion en un simple 'listo' seco.",
+          }
+        : { closed: true, outcome };
     }
     case "get_order_status": {
       const order = await getLatestOrderForCustomer(businessId, context.customerId);

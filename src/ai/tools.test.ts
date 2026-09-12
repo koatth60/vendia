@@ -194,11 +194,13 @@ test("close_conversation with outcome SOLD creates a real order when no owner co
       recipientPhone: "573009998877",
     };
 
-    const result = await runCatalogTool(context, "close_conversation", {
+    const result = (await runCatalogTool(context, "close_conversation", {
       outcome: "SOLD",
       summary: "Compra sin productos del catalogo",
-    });
-    assert.deepEqual(result, { closed: true, outcome: "SOLD" });
+    })) as { closed: boolean; outcome: string; note?: string };
+    assert.equal(result.closed, true);
+    assert.equal(result.outcome, "SOLD");
+    assert.ok(result.note, "a direct close (no owner confirmation needed) should still nudge the model to close warmly");
 
     const order = await prisma.order.findUniqueOrThrow({ where: { conversationId: conversation2.id } });
     assert.equal(order.summary, "Compra sin productos del catalogo");

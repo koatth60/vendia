@@ -18,7 +18,7 @@ import {
   updateConversationStatus,
   getRelatedProductNameForMessage,
 } from "../conversation/service";
-import { generateReply } from "../ai/agent";
+import { generateReply, buildOrderClosedMessage } from "../ai/agent";
 import { analyzeCustomerImage } from "../ai/vision";
 import { transcribeAudio } from "../ai/transcription";
 import { checkPlanCap } from "../ai/usage";
@@ -175,7 +175,11 @@ export async function handleOwnerReply(
     });
     await updateConversationStatus(businessId, conversation.id, "SOLD");
     await clearPendingConfirmation(conversation.id);
-    const customerText = "¡Listo! Tu pago quedo confirmado y tu pedido esta cerrado. Gracias por tu compra 🎉";
+    const business = await prisma.business.findUnique({
+      where: { id: businessId },
+      select: { botTone: true, assistantName: true },
+    });
+    const customerText = buildOrderClosedMessage(business ?? {});
     await sendTextMessage(credentials, customerPhone, customerText);
     await recordMessage(businessId, conversation.id, "ASSISTANT", customerText);
     await askForCsat(credentials, order.id, customerPhone);
@@ -389,6 +393,24 @@ whatsappRouter.post("/webhook", async (req, res) => {
 
     if (conversation.humanControl) {
       console.log("Conversacion en control humano, el bot no responde:", conversation.id);
+      // Silence with zero acknowledgment reads as the bot being broken to the customer, and the owner
+      // ends up having to jump in just to say "we got your message". Send one heads-up per pause period
+      // (checked against the last ASSISTANT message so it doesn't repeat on every follow-up message from
+      // the same customer while still paused), then stay quiet until the owner/admin actually resumes it.
+      const HUMAN_CONTROL_ACK = "Ya te leimos, en un momento te contesta el equipo directamente 🙏";
+      const lastAssistantMessage = await prisma.message.findFirst({
+        where: { conversationId: conversation.id, role: "ASSISTANT" },
+        orderBy: { createdAt: "desc" },
+        select: { content: true },
+      });
+      if (lastAssistantMessage?.content !== HUMAN_CONTROL_ACK) {
+        try {
+          const wamid = await sendTextMessage(credentials, from, HUMAN_CONTROL_ACK);
+          await recordMessage(business.id, conversation.id, "ASSISTANT", HUMAN_CONTROL_ACK, wamid || undefined);
+        } catch (error) {
+          console.error("No se pudo mandar el acuse de recibo durante control humano:", error);
+        }
+      }
       return;
     }
 

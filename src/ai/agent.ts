@@ -56,14 +56,19 @@ de charla comun - un saludo, una disculpa por tardar en responder, un "gracias",
 ocupado/dormido, despedirse - NO es una pregunta y NUNCA amerita ask_owner: respondele vos mismo, breve y
 natural, como responderia cualquier persona ("no hay problema, cuando quieras seguimos" o similar), sin
 llamar ninguna herramienta para eso. Recien cuando SI hay una pregunta real y, despues de revisar
-catalogo, get_faq y formas de pago segun corresponda, no tenes una respuesta que confirme explicitamente
-lo que el cliente pregunto, usa ask_owner con la pregunta exacta en vez de inventar, adivinar, o negar
-algo que no esta explicitamente en la informacion que tenes. Frases como "no tengo registro de eso", "no
-contamos con eso", "por ahora no hay" tambien cuentan como inventar si no salen textualmente de una
-herramienta - esta prohibido decirlas por tu cuenta, escala con ask_owner en vez de eso. No uses ask_owner
-para preguntas de catalogo, FAQ o pagos que si podes responder con lo que ya te devolvieron las otras
-herramientas - solo cuando de verdad no tenes esa
-informacion.
+catalogo, get_faq, formas de pago Y las instrucciones especificas de este negocio (mas abajo en este
+mismo prompt - muchas veces ahi esta la respuesta, por ejemplo politicas de envio, tiempos de entrega o
+tarifas por zona) segun corresponda, no tenes una respuesta que confirme explicitamente lo que el cliente
+pregunto, usa ask_owner con la pregunta exacta en vez de inventar, adivinar, o negar algo que no esta
+explicitamente en la informacion que tenes. Si las instrucciones del negocio SI tienen la respuesta pero
+dependen de un dato que todavia no sabes (por ejemplo la ciudad de envio), pedile ese dato al cliente
+primero - eso no es "no saber", es simplemente que falta preguntar, no amerita ask_owner. Frases como "no
+tengo registro de eso", "no contamos con eso", "por ahora no hay" tambien cuentan como inventar si no
+salen textualmente de una herramienta o de las instrucciones del negocio - esta prohibido decirlas por tu
+cuenta, escala con ask_owner en vez de eso. No uses ask_owner para preguntas de catalogo, FAQ, pagos o
+politicas del negocio que si podes responder con lo que ya te devolvieron las otras herramientas o con las
+instrucciones especificas de este negocio - solo cuando de verdad no tenes esa informacion en ningun
+lado.
 
 CRITICO en general: decir "dejame consultarlo", "un momento que pregunto", "voy a confirmar con el
 equipo", "dame un momento que reviso con el equipo" o cualquier frase similar NO ES hacer nada - es solo
@@ -473,6 +478,18 @@ const HUMAN_REQUEST_PATTERN =
 
 export function customerRequestsHuman(text: string): boolean {
   return HUMAN_REQUEST_PATTERN.test(text);
+}
+
+// Used for the deterministic order-closed confirmation sent once the owner confirms payment (bypasses
+// the LLM entirely, so it has to bake the business's configured personality in by hand instead of
+// relying on the system prompt) - dialect doesn't change this particular sentence (no "tenés"/"tienes"
+// style conjugation in it), only tone (formality/emoji) and an optional sign-off actually vary it.
+export function buildOrderClosedMessage(business: { botTone?: string | null; assistantName?: string | null }): string {
+  const formal = business.botTone === "formal" || business.botTone === "profesional";
+  const signOff = business.assistantName?.trim() ? ` - ${business.assistantName.trim()}` : "";
+  return formal
+    ? `Tu pago quedo confirmado y tu pedido esta cerrado. Gracias por tu compra.${signOff}`
+    : `¡Listo! Tu pago quedo confirmado y tu pedido esta cerrado. Gracias por tu compra 🎉${signOff}`;
 }
 
 function looksLikePersonName(text: string): boolean {

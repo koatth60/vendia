@@ -115,7 +115,9 @@ test("bot escalates via ask_owner when the FAQ doesn't confirm the specific ques
       pending,
       "ask_owner should have fired and created a PendingOwnerQuestion row - a text reply alone (e.g. 'voy a preguntar') is not enough"
     );
-    assert.equal(conversation.humanControl, true);
+    // ask_owner escalates the specific question but no longer pauses the whole conversation - the bot
+    // keeps helping the customer with anything else while the owner's answer is pending.
+    assert.equal(conversation.humanControl, false);
     assert.ok(sentToOwner, "expected a WhatsApp message to actually be sent to the owner");
     assert.match(sentToOwner!.body, /gratis/i);
   } finally {
@@ -157,7 +159,7 @@ test("bot still escalates a real question even when it's wrapped in an apology -
     );
     const pending = await prisma.pendingOwnerQuestion.findFirst({ where: { conversationId: conversation.id } });
     assert.ok(pending, "a real question mixed into an apology must still escalate, not get ignored along with the small talk");
-    assert.equal(conversation.humanControl, true);
+    assert.equal(conversation.humanControl, false);
     assert.ok(sentToOwner, "the owner must actually receive the real question");
     assert.match(sentToOwner!.body, /panam[áa]/i);
   } finally {
