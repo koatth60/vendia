@@ -71,18 +71,23 @@ instrucciones especificas de este negocio - solo cuando de verdad no tenes esa i
 lado.
 
 CRITICO en general: decir "dejame consultarlo", "un momento que pregunto", "voy a confirmar con el
-equipo", "dame un momento que reviso con el equipo" o cualquier frase similar NO ES hacer nada - es solo
-texto, el cliente no se entera de nada real. Cada vez que digas una frase asi, tiene que ser porque en
-ESE MISMO turno ya llamaste a la herramienta que corresponde (ask_owner para preguntas sin respuesta,
-close_conversation para pedidos). Si escribis esa frase sin haber llamado la herramienta, el cliente se
-queda esperando para siempre y nadie se entera de nada. Nunca escribas ese tipo de frases sin haber
-hecho la llamada primero.
+equipo", "dame un momento que reviso con el equipo", "te comparto las opciones", "te paso los datos", "aca
+tenes" o cualquier frase similar que promete mostrar o mandar algo NO ES hacer nada por si sola - es solo
+texto, el cliente no se entera de nada real. Cada vez que digas una frase asi, en ESE MISMO turno tiene
+que estar el resultado real: o ya llamaste la herramienta que corresponde (ask_owner para preguntas sin
+respuesta, close_conversation para pedidos, get_payment_methods para formas de pago, get_faq, etc) Y
+pegaste su resultado en tu respuesta, o directamente no digas la frase. Prohibido anunciar que vas a
+mostrar algo y despues no mostrarlo en ese mismo mensaje - eso deja al cliente sin nada y tenes que
+esperar a que insista para recien ahi mandarlo.
 
 {{FOTOS}}
 
 PAGOS: cuando el cliente quiera confirmar una compra, pregunte como pagar, o pregunte el costo del envio
 (el valor del envio contraentrega suele estar en los detalles del metodo de pago correspondiente), usa
-get_payment_methods para saber las formas de pago reales de este negocio y ofrecele esas opciones. Volvé a
+get_payment_methods para saber las formas de pago reales de este negocio y listale esas opciones EN ESE
+MISMO MENSAJE - nunca digas "te comparto las opciones" o "estas son las opciones disponibles" y despues no
+las listes, aunque sea la primera vez que preguntas cual prefiere: el listado y la pregunta van juntos en
+un solo mensaje, no en dos. Volvé a
 llamar get_payment_methods cada vez que necesites repetir o confirmar un numero/llave/cuenta de pago,
 aunque ya lo hayas visto antes en esta misma conversacion - copia el numero, la llave y el nombre del
 titular EXACTAMENTE como los devuelve la herramienta en ESE momento, nunca de memoria ni parafraseando lo
@@ -469,6 +474,14 @@ const FAKE_MEDIA_TAG_PATTERN = /\[(?:foto|video)s? de /i;
 const ESCALATION_CLAIM_PATTERN =
   /\b(equipo|due[ñn][oa]s?)\b.{0,25}\b(consult|confirm|pregunt|revis)|\b(consult|confirm|pregunt|revis)\w*\b.{0,25}\b(equipo|due[ñn][oa]s?)\b/i;
 
+// Same failure mode once more, this time for get_payment_methods: the bot asks "que medio prefieres
+// usar? te comparto las opciones disponibles" and ends the turn right there without ever calling the
+// tool or listing anything - confirmed against a real conversation where the customer had to ask
+// "opciones de pago" again before getting an actual answer. No digit run at all in the text is the tell
+// that nothing real was attached (a message that actually lists payment methods always has numbers in
+// it).
+const PAYMENT_OPTIONS_CLAIM_PATTERN = /\b(te comparto|te paso|aqu[ií] (est[aá]n|tenes)|estas son)\b.{0,20}\bopciones\b/i;
+
 // Same failure mode again, this time for save_customer_name: the bot asks "a nombre de quien hago el
 // pedido?", the customer answers with just their name, and the bot's next reply acknowledges it
 // ("Perfecto, David!") without ever having called save_customer_name - confirmed against a real
@@ -663,6 +676,15 @@ export async function generateReply(
 
   async function finalizeTurn(text: string): Promise<string> {
     text = guardAgainstPaymentHallucination(text, paymentMethodsThisTurn);
+
+    if (!paymentMethodsThisTurn && !/\d{6,}/.test(text) && PAYMENT_OPTIONS_CLAIM_PATTERN.test(text)) {
+      const result = (await runCatalogTool(context, "get_payment_methods", {})) as {
+        methods?: { label: string; details: string }[];
+      };
+      if (result?.methods?.length) {
+        text = `${text}\n\n${result.methods.map((m) => `*${m.label}*\n${m.details}`).join("\n\n")}`;
+      }
+    }
 
     if (ownerAskedThisTurn === 0 && ESCALATION_CLAIM_PATTERN.test(text) && customerText) {
       await runCatalogTool(context, "ask_owner", { question: customerText });
