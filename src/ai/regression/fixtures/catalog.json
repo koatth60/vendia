@@ -1,0 +1,330 @@
+[
+  {
+    "id": "cmtp39dvv00006c2k2hmlcmkz",
+    "name": "Aurora Joyas",
+    "customInstructions": null,
+    "assistantName": null,
+    "botTone": null,
+    "botDialect": null,
+    "botGreeting": null,
+    "botNeverSay": null,
+    "autoSendPhotoOnQuote": true,
+    "requirePaymentProof": true,
+    "businessCategory": null,
+    "products": [
+      {
+        "name": "Anillo Aurora en plata 925 con circonia",
+        "description": "Anillo de plata 925 con piedra de circonia central, banio de rodio para evitar que se opaque. Ideal para uso diario o regalo.",
+        "price": "45000",
+        "currency": "COP",
+        "stock": 12,
+        "category": "Anillos",
+        "active": true,
+        "mediaCount": 0
+      },
+      {
+        "name": "Collar Luna en oro laminado 18k",
+        "description": "Collar delicado con dije de luna, oro laminado 18k de alta durabilidad, cadena de 45cm ajustable.",
+        "price": "68000",
+        "currency": "COP",
+        "stock": 8,
+        "category": "Collares",
+        "active": true,
+        "mediaCount": 0
+      },
+      {
+        "name": "Aretes de perla cultivada",
+        "description": "Aretes clasicos con perla cultivada natural y base de plata 925. Elegantes para uso diario o eventos.",
+        "price": "39000",
+        "currency": "COP",
+        "stock": 15,
+        "category": "Aretes",
+        "active": true,
+        "mediaCount": 0
+      },
+      {
+        "name": "Pulsera cadena cubana en acero quirurgico",
+        "description": "Pulsera estilo cadena cubana en acero quirurgico dorado, no se opaca ni oxida, resistente al agua.",
+        "price": "32000",
+        "currency": "COP",
+        "stock": 20,
+        "category": "Pulseras",
+        "active": true,
+        "mediaCount": 0
+      }
+    ],
+    "paymentMethods": [],
+    "shippingRates": [],
+    "faqEntries": []
+  },
+  {
+    "id": "cmtp5jf4c0004jr2knlwrkccf",
+    "name": "MAGByLizN",
+    "customInstructions": "[PROMPT DE SISTEMA - MAGByLizN]\n\nRol y Tono:\n- Eres el asistente virtual de MAGByLizN. Tu tono es amable, servicial y profesional.\n- Usa emojis de manera moderada en tus conversaciones (de manera cercana y profesional) 🤖✨.\n\nREGLAS OBLIGATORIAS DE INTERACCIÓN (GUARDRAILS):\n- JAMÁS asumas, selecciones o infieras el método de pago o el método de envío por el cliente.\n- SIEMPRE debes presentar explícitamente las opciones disponibles y esperar a que el cliente elija activamente cada una de ellas mediante su respuesta.\n- Si el cliente no especifica su elección de forma clara, debes preguntarle nuevamente antes de avanzar a la siguiente etapa.\n- CUMPLIMIENTO STRICTO DE PLANTILLAS DE CIERRE: En la Etapa 4 es OBLIGATORIO emitir textualmente las frases indicadas según el caso. Queda estrictamente prohibido generar mensajes de cierre genéricos o improvisados.\n\nEtapa 1: Inicio de la Conversación y Trato Personalizado\n1. Saluda y pregunta inmediatamente con quién tienes el gusto de hablar.\n2. Identificación y Trato Personalizado:\n   - Identifica el género del cliente según su nombre.\n   - Si es mujer: Alterna el uso de su nombre con adjetivos cariñosos/amables como \"linda\" o \"bella\" a lo largo de la conversación.\n   - Si es hombre: Alterna el uso de su nombre con trato formal/respetuoso utilizando \"Sr.\" o \"Señor\".\n   - CORRECCIÓN DE GÉNERO: Si el cliente corrige tu asunción de género durante el chat, pide disculpas de forma breve y amable (ej. \"¡Mil disculpas por la confusión! Con mucho gusto\"), ajusta inmediatamente el trato al género indicado y continúa con la conversación aplicando las reglas de ese género.\n3. Pregunta si desea continuar con la conversación anterior o empezar una nueva.\n4. Si inicia una nueva conversación, consulta en qué producto está interesado o si desea ver el catálogo. Si solicita el catálogo completo, divídelo por categorías; si conoce el nombre del producto, atiéndelo directamente.\n\nEtapa 2: Datos de Envío, Selección de Ciudad y Tarifario\n1. Una vez confirmado(s) el producto(s) y la cantidad, pregunta por la ciudad y barrio de destino.\n2. Validación Geográfica:\n   - Comprueba que la ciudad indicada pertenezca a Colombia.\n   - Comprueba que el barrio ingresado corresponda a la ciudad mencionada.\n   - Si los datos no coinciden o la ciudad está fuera de Colombia, pide amablemente al cliente que verifique su dirección antes de proceder.\n3. Cálculo Automático de la Tarifa de Envío (Valor Kilo Inicial):\n   Determina e informa automáticamente al cliente el costo del envío según las siguientes reglas tarifarias:\n   • Bogotá: $9.000 COP\n   • Soacha: $10.000 COP\n   • Regional (Otros municipios de Cundinamarca): $12.500 COP\n   • Nacional (Principales ciudades de Colombia): $18.500 COP\n   • Municipal (Otros municipios de Colombia): $20.900 COP\n   • Difícil Acceso: $31.900 COP\n   • Vereda / Zona Rural: $88.900 COP\n\n4. Selección OBLIGATORIA del Método de Pago del Envío:\n   - Presenta las opciones al cliente, indicando la tarifa correspondiente calculada en el paso anterior, y PREGUNTA directamente cuál opción prefiere:\n     a) Pagar solo el producto por anticipado y cancelar el envío al recibir (flete contra entrega).\n     b) Pagar la totalidad (producto + envío) por anticipado.\n   - Si la ciudad es Bogotá o Soacha, ofrece adicionalmente la opción c) Pago Contra Entrega Total (paga producto + envío al recibir).\n   - ESPERA obligatoriamente la respuesta del cliente para registrar su elección.\n\n5. Tiempos de Entrega e Información Adicional:\n   - Bogotá / Soacha: Informa que si compra antes de las 11:00 AM puede llegar el mismo día; si es después, llegará al día siguiente (11:00 AM - 9:00 PM). Si requiere un horario específico, debe indicarlo.\n   - Otras ciudades (Interrapidísimo): Informa que toma de 2 a 3 días hábiles y que se le enviará foto de la guía tan pronto se realice el despacho.\n\n6. Solicita los datos de entrega exactos según la ubicación:\n\n   - Para Bogotá y Soacha:\n     • Nombre\n     • Celular\n     • Ciudad\n     • Barrio\n     • Dirección\n     • Casa o Apartamento y piso\n\n   - Para Fuera de Bogotá (Otras ciudades de Colombia):\n     • Nombre\n     • Número de Identificación\n     • Celular\n     • Ciudad\n     • Barrio\n     • Dirección\n     • Casa o Apartamento y piso\n\nEtapa 3: Selección de Método de Pago, Resumen y Confirmación\n1. Selección OBLIGATORIA del Método de Pago del Producto:\n   - Muestra las opciones financieras disponibles para realizar la transferencia/pago y pregunta explícitamente cuál canal prefiere usar el cliente.\n2. Resumen de Pedido y Desglose Financiero: Antes de cerrar, solicita la confirmación explícita del cliente sobre todos los datos otorgados (producto, cantidad, dirección completa, método de envío seleccionado y método de pago seleccionado) y preséntale el desglose total (costo del producto y del envío).\n3. Entrega los detalles e instrucciones de pago según la opción que el cliente haya elegido.\n4. Tras ofrecer las instrucciones, pregunta al cliente: \"¿Confirmas que has realizado el pago?\"\n5. Espera la respuesta del cliente, la cual puede ser:\n   - Texto explícito (ej. \"Sí\", \"Listo\", \"Ya pagué\").\n   - Imagen/Comprobante de pago: Si envía un archivo o foto de comprobante, analízalo y valida que corresponda a la transacción.\n6. Una vez confirmada la respuesta (texto o comprobante visual), envía los detalles de la orden al número de Contacto (Dueño) mediante el template interno y consulta si ve el pago en la cuenta.\n\nEtapa 4: Cierre Oficial tras Confirmación del Pago (REGLA MANDATORIA)\nUna vez que TANTO el cliente COMO el número de Contacto (Dueño) hayan confirmado el pago, debes cerrar la conversación enviando ÚNICAMENTE el mensaje exacto según la plantilla correspondiente. NO agregues ni modifiques texto ni envíes mensajes genéricos de confirmación:\n\n- Para envíos en Bogotá o Soacha:\n  • Si la modalidad fue Pago Contra Entrega Total (paga todo al recibir):\n    \"Listo [Nombre del cliente] en total serían [Precio total (Productos + envio)] pesos a pagar contra entrega. Por favor estar pendiente del cel que el mensajero se comunica contigo antes de la entrega, gracias por tu compra.\"\n  • Si ya pagó el producto por anticipado (o la totalidad por anticipado):\n    \"Listo [Nombre del cliente] en total fueron [Precio del monto cancelado] pesos. Por favor estar pendiente del cel que el mensajero se comunica contigo antes de la entrega [Si el envío quedó pendiente agregar: ', recuerda que el valor del envío está pendiente y es de (Precio del envío) pesos'], gracias por tu compra.\"\n\n- Para envíos en el país diferentes de Bogotá o Soacha:\n  • Si pagó la totalidad por anticipado (Producto + Envío):\n    \"Listo [Nombre del cliente] en total fueron [Precio total pagado (Productos + envio)] pesos, muchas gracias por tu compra, tan pronto realice el envio te paso la foto de la guia.\"\n  • Si pagó solo el producto por anticipado y el envío es Flete Contra Entrega:\n    \"Listo [Nombre del cliente] el valor cancelado del producto fue de [Precio del producto] pesos, muchas gracias por tu compra, tan pronto realice el envio te paso la foto de la guia. Por favor recuerda que el valor del envio esta pendiente y es de [Precio del envio] pesos.\"\n\n- Para consultas generales sin venta o al finalizar cualquier interacción previa, despídete con: \n  \"Gracias por comunicarte con MAGByLizN, no dudes en contactarnos ante cualquier duda.\"\n\nReglas de Manejo de Excepciones y Consultas:\n- Nunca uses frases como \"eso no está en mi sistema\", \"no tengo esa información en la base de datos\" o \"no lo sé\".\n- Si no sabes responder una pregunta o no tienes la información disponible:\n  1. Responde al cliente: \"Disculpa, esa información no está disponible por el momento. Voy a consultar con el equipo y en un momento te respondo.\"\n  2. Envía un mensaje interno al número de Contacto (Dueño) estipulado especificando la pregunta del cliente.\n  3. Si transcurren 5 minutos sin respuesta de la contraparte interna:\n     - Envía al cliente el mensaje: \"Seguimos revisando tu consulta con el equipo, tan pronto me confirmen te escribo por aquí.\"\n     - Envía un mensaje interno de recordatorio/insistencia al número de Contacto (Dueño) con la consulta pendiente.\n  4. Una vez el número de Contacto (Dueño) te responda, retoma la charla con el cliente y bríndale la respuesta indicada.",
+    "assistantName": "Anita",
+    "botTone": "cercano",
+    "botDialect": "neutro",
+    "botGreeting": "Hola!, Bienvenido/a a MAG.IMP, en que te puedo ayudar?.",
+    "botNeverSay": null,
+    "autoSendPhotoOnQuote": true,
+    "requirePaymentProof": true,
+    "businessCategory": "electronica",
+    "products": [
+      {
+        "name": "COMBO SMARTWATCH T2000 ULTRA",
+        "description": "T2000 ultra Max \nTamaño 49mm\nNotificaciones, lector de mensajes de redes\nCargador les (WhatsApp,\n Isla de notificaciones \n Facebook, Instagram, etc.)\n* Recibe y realiza llamada\n\n* Resiste salpicaduras de agua, no sumergible\n* Carga totalmente inalámbrica \n* Múltiples fondos de pantalla y fondo personalizable\n* Guarda contactos del celular\n* Compatible para Android y iOS (iPhone)\n* Modo deporte: Caminando, corriendo, ciclismo, Montañismo, etc.\n* Control remoto del reproductor de música\n* Pulso removible\n* 2 botones funcionales\n* Giro Perilla funcional\n* Accesos directos y despegables\n* Monitor de ritmo cardiaco\n* Oxígeno en la sangre\n* Presión Arterial\n* Sensor de movimiento\n* Contador de pasos\n* Calorías quemadas\n* Cronometro\n* Registro de llamadas\n* Puedes buscar el reloj desde la app y viceversa\n* Calculadora\n* Sensor de movimiento (girando la mano se enciende la pantalla)\n* Hora y fecha\n* Micrófono y altavoces",
+        "price": "80000",
+        "currency": "COP",
+        "stock": 14,
+        "category": "Tecnologia (Smartwatch)",
+        "active": true,
+        "mediaCount": 2
+      },
+      {
+        "name": "Smartwatch V20 Caballero",
+        "description": "Smartwatch redondo con dos pulsos y cargador \nSiri \nNotificaciones, lector de mensajes de redes\nCargador les (WhatsApp,\n Isla de notificaciones \n Facebook, Instagram, etc.)\n• Recibe y realiza llamada\n\n• Resiste salpicaduras de agua, no sumergible\n• Carga totalmente inalámbrica \n• Múltiples fondos de pantalla y fondo personalizable\n• Guarda contactos del celular\n• Compatible para Android y iOS (iPhone)\n• Modo deporte: Caminando, corriendo, ciclismo, Montañismo, etc.\n• Control remoto del reproductor de música\n• Pulso removible\n• 2 botones funcionales\n• Giro Perilla funcional\n• Accesos directos y despegables\n• Monitor de ritmo cardiaco\n• Oxígeno en la sangre\n• Presión Arterial\n• Sensor de movimiento\n• Contador de pasos\n• Calorías quemadas\n• Cronometro\n• Registro de llamadas\n• Puedes buscar el reloj desde la app y viceversa\n• Calculadora\n• Sensor de movimiento (girando la mano se enciende la pantalla)\n• Hora y fecha\n• Micrófono y altavoces",
+        "price": "140000",
+        "currency": "COP",
+        "stock": 5,
+        "category": "Tecnología (smartwatch)",
+        "active": true,
+        "mediaCount": 1
+      },
+      {
+        "name": "Reloj Inteligente Smartwatch Serie 12 Ultra 3 (Edición Deportiva / Robusta)",
+        "description": "Lleva el control total de tus llamadas, salud y deportes en tu muñeca con una pantalla grande de 49 mm e integración avanzada de inteligencia artificial.\n• Pantalla Ultra de 49 mm con isla de notificaciones y fondos personalizables\n• Realiza y recibe llamadas directamente gracias a sus micrófonos y altavoces integrados\n• Asistente inteligente con soporte para Siri y ChatGPT para resolver tus dudas al instante\n• Memoria interna de 1 GB, NFC y conexión de datos/notificaciones para tus aplicaciones favoritas\n• Monitoreo de salud completo: ritmo cardíaco, oxígeno en sangre, presión arterial y modos deportivos\n• Carga 100% inalámbrica y resistencia a salpicaduras de agua\nColor: Titanio Plateado / Negro Matte\nIncluye: Smartwatch Ultra 49mm, pulso removible intercambiable, cargador inalámbrico, manual\nGarantía: 3 meses por defectos de fábrica",
+        "price": "140000",
+        "currency": "COP",
+        "stock": 15,
+        "category": "Tecnología / Relojes Inteligentes (Smartwatches)",
+        "active": true,
+        "mediaCount": 3
+      },
+      {
+        "name": "AIRPODS PRO 2",
+        "description": "* 📱 Compatibles con iPhone y Android\n*      Aislacion de sonido \n* 🔗 Conexión automática al abrir el estuche en iPhone\n* 📍 Función de localización desde iPhone\n* 🔊 Sonido de buena calidad\n* 🔋 3–5 horas de reproducción y hasta 30 horas con el estuche\n* 📦 Parlante integrado en el estuche para avisos de conexión\n* 🔋 Visualización del nivel de batería en iPhone\n* ⚡ Carga inalámbrica\n* 👆 Control táctil para volumen y reproducción\n* 📶 Bluetooth hasta 10 metros\n* 🎙️ Micrófono integrado\n* ✏️ Personalización del nombre de los audífonos",
+        "price": "55000",
+        "currency": "COP",
+        "stock": 10,
+        "category": "Tecnologia (Audifonos)",
+        "active": true,
+        "mediaCount": 1
+      },
+      {
+        "name": "PARLANTE TIPO ALEXA",
+        "description": "Combina la funcionalidad de un reloj despertador digital LED con un parlante inalámbrico en un diseño moderno de formato circular, ideal para organizar tu espacio mientras disfrutas de tu música favorita.\n\nPuntos Clave / Beneficios:\n\nPantalla digital LED: Muestra la hora y la temperatura ambiente con claridad en el frontal.\n\nConexión inalámbrica: Permite reproducir audio sin cables desde teléfonos, tabletas o computadoras vía Bluetooth, Comando por voz.\n\nFunción de reloj/alarma: Práctico para usar como despertador en la mesa de noche o el escritorio.\n\nDiseño compacto: Formato circular semiesférico con rejilla de tela acústica en la parte inferior.\n\nColor: Blanco / Negro / Azul\n\nTamaño y Peso: Aproximadamente 11,3 x 10,3 x 11,1 cm y un peso de 350 g - 400 g.\n\n¿Qué incluye la caja?\n\n1x Parlante Altavoz Bluetooth ECHQ Spot.\n\n1x Cable de carga USB.\n\n1x Manual de usuario.\n\nCompatibilidad: Compatible con Android, iOS (iPhone/iPad), computadoras y cualquier otro dispositivo habilitado con tecnología Bluetooth.",
+        "price": "70000",
+        "currency": "COP",
+        "stock": 20,
+        "category": "Tecnologia (Audifonos)",
+        "active": true,
+        "mediaCount": 2
+      },
+      {
+        "name": "Bombox 4",
+        "description": "Audio Portátil para Fiestas y Exteriores. Diseñado para entregar sonido de alta potencia (60W) con anillos de luces LED RGB y función de vinculación múltiple (Modo Fiesta / TWS) para conectar dos parlantes al mismo tiempo.\n\nPuntos Clave / Beneficios:\n\nPotencia de Salida (60 W RMS / PMPO): Desarrolla un sonido con graves reforzados e intensidad suficiente para reuniones al aire libre o espacios amplios.\n\nModo Fiesta (TWS / Party Mode): Permite sincronizarlo de forma inalámbrica con otro parlante compatible para reproducir el mismo sonido o crear un sistema de audio en estéreo.\n\nIluminación LED Dinámica: Anillos de luces RGB en los extremos laterales que cambian y se sincronizan con la música.\n\nMúltiples Fuentes de Audio: Bluetooth, lector de memoria USB, ranura MicroSD, radio FM y entrada de audio auxiliar (3.5 mm).\n\nBatería Recargable: Ofrece una autonomía estimada de 4 a 8 horas de reproducción continua (varía según el volumen y si las luces están encendidas).\n\nColor: Negro, además de versiones en Azul, Rojo y Verde Camuflado.\n\nTamaño y Peso: Dimensiones compactas: 17 cm de alto x 32 cm de ancho con un peso estimado de 1,5 kg a 1,8 kg.\n\n¿Qué incluye la caja?\n\n1x Parlante Boombox 4 LED (60W).\n\n1x Cable de carga USB.\n\n1x Cable auxiliar de audio 3.5 mm.\n\n1x Manual de usuario.\n\nCompatibilidad: Universal con Android, iOS, Windows y cualquier dispositivo con conectividad Bluetooth o salida auxiliar.",
+        "price": "125000",
+        "currency": "COP",
+        "stock": 20,
+        "category": "Tecnologia (parlanteria)",
+        "active": true,
+        "mediaCount": 2
+      },
+      {
+        "name": "Audifonos Q70 Earcuff",
+        "description": "Descripción:\nDisfruta tu música con total comodidad gracias a su diseño Open-Ear tipo joya, sin aislarte de tu entorno y con un acabado cromado de máxima elegancia.\n• Conectividad Bluetooth 5.4 para una sincronización estable de baja latencia y alcance de hasta 10 metros\n• Diseño ergonómico tipo \"Ear-Cuff\" que no entra en el canal auditivo, evitando fatigas e infecciones\n• Micrófono con Cancelación de Ruido Ambiental (ENC) para llamadas nítidas en exteriores\n• Autonomía de 6 a 8 horas continuas por carga y hasta 20 horas acumuladas con su estuche esférico\nColor: Morado Lavanda / Negro / Blanco Beige\nIncluye: Audífonos Q70 CYXG, estuche de carga esférico, cable USB Tipo-C, manual de usuario\nGarantía: 3 meses por defectos de fábrica",
+        "price": "46000",
+        "currency": "COP",
+        "stock": 9,
+        "category": "Tecnologia (Audifonos)",
+        "active": true,
+        "mediaCount": 2
+      },
+      {
+        "name": "AIRPODS SERIE 4",
+        "description": "* 📱 Compatibles con iPhone y Android\n* 🔗 Conexión automática al abrir el estuche en iPhone\n* 📍 Función de localización desde iPhone\n* 🔊 Sonido de buena calidad\n* 🔋 3–5 horas de reproducción y hasta 30 horas con el estuche\n* 📦 Parlante integrado en el estuche para avisos de conexión\n* 🔋 Visualización del nivel de batería en iPhone\n* ⚡ Carga inalámbrica\n* 👆 Control táctil para volumen y reproducción\n* 📶 Bluetooth hasta 10 metros\n* 🎙️ Micrófono integrado\n* ✏️ Personalización del nombre de los audífonos",
+        "price": "65000",
+        "currency": "COP",
+        "stock": 11,
+        "category": "Tecnologia (Audifonos)",
+        "active": true,
+        "mediaCount": 1
+      },
+      {
+        "name": "Reloj Inteligente Smartwatch Serie 11 Mini (Edición Compacta y Elegante)",
+        "description": "Serie 11 mini \nTamaño 41 mm \nMemoria  interna de 1 Gb \nConexión datos móviles \nChat gpt \nTraductor \nSiri \nNotificaciones, lector de mensajes de redes\nCargador les (WhatsApp,\n Isla de notificaciones \n Facebook, Instagram, etc.)\n* Recibe y realiza llamada\n\n* Resiste salpicaduras de agua, no sumergible\n* Carga totalmente inalámbrica \n* Múltiples fondos de pantalla y fondo personalizable\n* Guarda contactos del celular\n* Compatible para Android y iOS (iPhone)\n* Modo deporte: Caminando, corriendo, ciclismo, Montañismo, etc.\n* Control remoto del reproductor de música\n* Pulso removible\n* 2 botones funcionales\n* Giro Perilla funcional\n* Accesos directos y despegables\n* Monitor de ritmo cardiaco\n* Oxígeno en la sangre\n* Presión Arterial\n* Sensor de movimiento\n* Contador de pasos\n* Calorías quemadas\n* Cronometro\n* Registro de llamadas\n* Puedes buscar el reloj desde la app y viceversa\n* Calculadora\n* Sensor de movimiento (girando la mano se enciende la pantalla)\n* Hora y fecha\n* Micrófono y altavoces",
+        "price": "145000",
+        "currency": "COP",
+        "stock": 8,
+        "category": "Tecnología / Relojes Inteligentes (Smartwatches)",
+        "active": true,
+        "mediaCount": 3
+      },
+      {
+        "name": "AIRPODS PRO 3",
+        "description": "* 📱 Compatibles con iPhone y Android\n* 🔗 Conexión automática al abrir el estuche en iPhone\n        Aislacion de sonido \n        Traduccion en vivo \n* 📍 Función de localización desde iPhone\n* 🔊 Sonido de buena calidad\n* 🔋 3–5 horas de reproducción y hasta 30 horas con el estuche\n* 📦 Parlante integrado en el estuche para avisos de conexión\n* 🔋 Visualización del nivel de batería en iPhone\n* ⚡ Carga inalámbrica\n* 👆 Control táctil para volumen y reproducción\n* 📶 Bluetooth hasta 10 metros\n* 🎙️ Micrófono integrado\n* ✏️ Personalización del nombre de los audífonos",
+        "price": "75000",
+        "currency": "COP",
+        "stock": 10,
+        "category": "Tecnologia (Audifonos)",
+        "active": true,
+        "mediaCount": 1
+      },
+      {
+        "name": "Combo k11 Mini",
+        "description": "El combo tecnologico mini incluye \n1 smartwatch mini \n1 par de Audifinos mini \n7 pulsos \ny cargadores \n\nFunciones \nSiri \nNotificaciones, lector de mensajes de redes\nCargador les (WhatsApp,\n Isla de notificaciones \n Facebook, Instagram, etc.)\n* Recibe y realiza llamada\n\n* Resiste salpicaduras de agua, no sumergible\n* Carga totalmente inalámbrica \n* Múltiples fondos de pantalla y fondo personalizable\n* Guarda contactos del celular\n* Compatible para Android y iOS (iPhone)\n* Modo deporte: Caminando, corriendo, ciclismo, Montañismo, etc.\n* Control remoto del reproductor de música\n* Pulso removible\n* 2 botones funcionales\n* Giro Perilla funcional\n* Accesos directos y despegables\n* Monitor de ritmo cardiaco\n* Oxígeno en la sangre\n* Presión Arterial\n* Sensor de movimiento\n* Contador de pasos\n* Calorías quemadas\n* Cronometro\n* Registro de llamadas\n* Puedes buscar el reloj desde la app y viceversa\n* Calculadora\n* Sensor de movimiento (girando la mano se enciende la pantalla)\n* Hora y fecha\n* Micrófono y altavoces",
+        "price": "98000",
+        "currency": "COP",
+        "stock": 10,
+        "category": "Tecnologia (Audifonos)",
+        "active": true,
+        "mediaCount": 3
+      },
+      {
+        "name": "AIRPODS MAX",
+        "description": "• Excelente calidad de sonido: Experimenta una claridad y fidelidad excepcionales en cada nota y cada llamada. Ideal para amantes de la música y profesionales del audio.• Bluetooth 5.1: Conéctate de manera rápida y estable con la última tecnología Bluetooth 5.1, que ofrece un mayor alcance, menor consumo de energía y una conexión más fiable.\n• Conexión con animación en iPhone: Disfruta de una conexión rápida y visualmente atractiva con animaciones exclusivas al emparejar tus audífonos con dispositivos iPhone.\n• Aislamiento pasivo de ruido exterior: Sumérgete en tu música o llamadas sin distracciones, gracias a la tecnología avanzada de aislamiento que bloquea el ruido ambiente.\n• Tiempo de reproducción: Aprox 7 horas (de acuerdo al volumen): Disfruta de largas sesiones de música, llamadas o entretenimiento con una batería que dura hasta 7 horas.\n• Distancia de transmisión: promedió 6-7 metros: Mantén una conexión estable y sin interrupciones hasta a 7 metros de distancia de tu dispositivo.\n• Almohadillas cómodas y desmontables: Las almohadillas suaves proporcionan comodidad durante horas y son fáciles de quitar para limpieza o reemplazo.\n• Compatible con teléfonos móviles iPhone y Android: Funciona a la perfección con ambos sistemas operativos, asegurando una experiencia versátil y accesible.\n• Incluye mandos (subir, bajar volumen, pasa música): Controla tu música y llamadas fácilmente con botones integrados para un manejo intuitivo.\n• Tamaño ajustable: La diadema se ajusta para adaptarse a cualquier tamaño de cabeza, ofreciendo un ajuste seguro y cómodo.\n• Entrada Micro SD: Reproduce tu música favorita directamente desde una tarjeta Micro SD, sin necesidad de conexión a otros dispositivos.\n• Entrada auxiliar: Conéctate a cualquier dispositivo con un cable auxiliar para una experiencia de sonido sin interrupciones.\n• Incluye funda para guardar la diadema: Protege y transporta tus audífonos con estilo y seguridad gracias a la funda incluida.\n• Caja contramarcada con el logo de Apple: Presentación elegante y profesional en una caja de alta calidad que lleva el icónico logo de Apple.\n• Imitación calidad 1.1: Disfruta de la estética y funcionalidad de productos de alta gama a un precio accesible con esta imitación de calidad superior.\nColor: Negro / Gris / Blanco / Azul / Morado / Verde / Rosado",
+        "price": "95000",
+        "currency": "COP",
+        "stock": 11,
+        "category": "Tecnologia (Audifonos)",
+        "active": true,
+        "mediaCount": 3
+      },
+      {
+        "name": "Smartwatch gen 9",
+        "description": "Combina la elegancia de una joya con el control total de tu día a día desde tu muñeca. Un smartwatch diseñado para destacar, realizar llamadas y monitorear tu bienestar en todo momento.\n• Realiza y recibe llamadas directamente desde el reloj con su micrófono y altavoz de alta claridad\n• Mantente al tanto de todo con la isla de notificaciones en pantalla y lectura de mensajes de WhatsApp, Facebook e Instagram\n• Cuidado integral de tu salud con monitoreo de ritmo cardíaco, nivel de oxígeno en sangre y presión arterial\n• Asistente de voz Siri y control gestual con sensor de movimiento para encender la pantalla al girar la muñeca\n• Carga 100% inalámbrica y resistencia a salpicaduras para un uso diario sin complicaciones\nColor: Dorado\nIncluye: Smartwatch Elegance Gold, correa removible, cargador inalámbrico, manual de usuario\nGarantía: 3 meses por defectos de fábrica",
+        "price": "85000",
+        "currency": "COP",
+        "stock": 10,
+        "category": "Tecnología (smartwatch)",
+        "active": true,
+        "mediaCount": 2
+      },
+      {
+        "name": "Audífonos Bluetooth con parlante integrado",
+        "description": "¡Lleva tu música a todos lados sin límites! Este innovador dispositivo combina la intimidad de unos audífonos True Wireless con la potencia de un mini parlante externo en un solo estuche compacto.\n\nPuntos Clave / Beneficios\n\nDoble función 2 en 1: Alterna fácilmente entre escuchar de forma privada con los audífonos in-ear o compartir tu música con el altavoz integrado en la carcasa.\n\nDiseño plegable estilo mecha/gaming: Estuche protector con tapa tipo bisagra, luces LED decorativas e indicadores de batería.\n\nSonido estéreo Hi-Fi: Disfruta de graves profundos y agudos nítidos tanto en llamadas como en música.\n\nManos libres: Incluye micrófono integrado en los audífonos para atender llamadas de forma inalámbrica.\n\nColor\nDisponible en tres variantes de color con acabado mate y luces LED:\n\nRosa / Purpúreo (el modelo del frente en la foto)\n\nNegro Mate (con luces azulosas)\n\nGris Azulado / Celeste (con luces verdes)\n\nTamaño y Peso\n\nTamaño: Compacto de bolsillo (aprox. 7 cm x 5.5 cm x 3 cm).\n\nPeso: Ligero y portátil (aprox. 80 - 100 g conjunto completo).\n\n¿Qué incluye la caja?\n\n1 Estuche de carga con parlante integrado\n\n2 Audífonos inalámbricos Bluetooth (izquierdo y derecho)\n\n1 Cable de carga USB\n\n1 Manual de usuario\n\nCompatibilidad\nUniversalmente compatible vía Bluetooth con dispositivos iOS (iPhone, iPad), Android (Smartphones y Tablets), laptops y cualquier equipo reproductor de audio con conexión Bluetooth estándar.",
+        "price": "70000",
+        "currency": "COP",
+        "stock": 5,
+        "category": "Tecnologia",
+        "active": true,
+        "mediaCount": 1
+      },
+      {
+        "name": "Batería portátil power bank 12000 mah",
+        "description": "🔋 ¿Tu celular siempre se queda sin batería cuando más lo necesitas? 😩\nConoce la Power Bank POW149 de 12.000 mAh 🔋✨, compacta, práctica y perfecta para llevar contigo a cualquier lugar.\nColor Negro o blanco \n* 12.000 mAh de capacidad\n* Carga rápida\n* Carga magnética\n* Carga inalámbrica\n* Soporta 2 líneas de carga\n * Cumple con criterios para transporte aéreo\n* Diseño compacto y fácil de llevar",
+        "price": "70000",
+        "currency": "COP",
+        "stock": 5,
+        "category": "Tecnología (cargadores)",
+        "active": true,
+        "mediaCount": 4
+      },
+      {
+        "name": "Combo Pareja",
+        "description": "Combo ideal para 2 personas: \nEl paquete tecnológico definitivo para compartir en pareja: manténganse conectados, monitoreen su salud y disfruten de su música favorita con estilo total.\n\nPuntos Clave / Beneficios:\n\n• Kit completo en pareja: Incluye 2 Smartwatches, 2 pares de audífonos inalámbricos y 7 pulsos intercambiables para combinar con cualquier ocasión.\n\n• Llamadas y notificaciones al instante: Vincula tu celular para responder llamadas, ver mensajes y alertas de redes sociales (WhatsApp, Facebook, Instagram).\n\n• Salud y deporte en tu muñeca: Monitoreo continuo de ritmo cardíaco, oxígeno en sangre, presión arterial, contador de pasos y modos multideporte.\n\n• Carga inalámbrica y batería práctica: Olvídate de los cables molestos con su base de carga inalámbrica rápida y botones/perilla 100% funcionales.\n\n• Entretenimiento y control total: Controla la música de tu celular, consulta la calculadora, el clima y activa la pantalla solo con girar tu muñeca.\n\nColor: Multicolor / Variados (Incluye pulsos en acabado Metálico Plateado, Cuero Marrón, Silicona Azul/Negra/Morada/Gris/Blanca y Nylon)\n\nTamaño y Peso: 46 mm y 49 mm\n¿Qué incluye la caja?:\n*2 Smartwatches (Ultra 3 / Watch 10 Extreme Suit)\n\n*2 Pares de audífonos inalámbricos tipo in-ear con su respectivo estuche de carga\n\n7 Pulsos intercambiables de diversos materiales y colores\n\nCargadores inalámbricos\n\nManual de usuario\n\nCompatibilidad: Android, iOS (iPhone)",
+        "price": "115000",
+        "currency": "COP",
+        "stock": 20,
+        "category": "Tecnologia (Smartwatch)",
+        "active": true,
+        "mediaCount": 2
+      }
+    ],
+    "paymentMethods": [
+      {
+        "type": "EFECTIVO",
+        "label": "Contraentrega",
+        "details": "Solo para Bogotá y Soacha.\nEl costo de envio es de 9,000 Bogotá, Soacha 10,000.\nSi vas a pagar por transferencia, el mensajero te indica el número de cuenta.",
+        "active": true
+      },
+      {
+        "type": "TRANSFERENCIA",
+        "label": "Nequi, Llave o Daviplata",
+        "details": "Número 3022168936 (Nequi, Daviplata o Llave).\nA nombre de : Liseth Herrera.\nPara compras Nacionales",
+        "active": true
+      },
+      {
+        "type": "TRANSFERENCIA",
+        "label": "Bancolombia",
+        "details": "Cuenta Bancolombia, Cuenta de ahorros\nNúmero:  67300055475\nAnombre de : Liseth herrera Narváez",
+        "active": true
+      }
+    ],
+    "shippingRates": [
+      {
+        "label": "Bogotá",
+        "cost": "9000",
+        "sortOrder": 1
+      },
+      {
+        "label": "Soacha",
+        "cost": "10000",
+        "sortOrder": 2
+      },
+      {
+        "label": "Regional (otros municipios de Cundinamarca)",
+        "cost": "12500",
+        "sortOrder": 3
+      },
+      {
+        "label": "Nacional (principales ciudades de Colombia)",
+        "cost": "18500",
+        "sortOrder": 4
+      },
+      {
+        "label": "Municipal (otros municipios de Colombia)",
+        "cost": "20900",
+        "sortOrder": 5
+      },
+      {
+        "label": "Difícil acceso",
+        "cost": "31900",
+        "sortOrder": 6
+      },
+      {
+        "label": "Vereda / zona rural",
+        "cost": "88900",
+        "sortOrder": 7
+      }
+    ],
+    "faqEntries": [
+      {
+        "question": "Hay descuento por comprar en cantidad?",
+        "answer": "Si, si comprar 3 unidas del mismo producto, la tercera tiene un 20% de descuento."
+      },
+      {
+        "question": "Tienen punto fisico",
+        "answer": "No , somos tienda 100% virtual ubicados en bogota con envios a nivel nacional"
+      },
+      {
+        "question": "Hacen Envios Nacionales?",
+        "answer": "Si, claro hacemos envios nacionales por interrapidismo y el valor del envio es adicional , se demora en llegar 1-3 dias habiles dependiendo la ciudad."
+      },
+      {
+        "question": "Tienen garantia?",
+        "answer": "si claro todo producto tiene garantia de 3 meses por defectos de fabrica"
+      },
+      {
+        "question": "Se pueden cambiar o escoger los pulsos ?",
+        "answer": "No, sr los pulsos te llegan tal cual la imagen"
+      },
+      {
+        "question": "Tienen sistema de apartado?",
+        "answer": "Si claro puedes separar tu compra con el 50% del total de la compra te damos 8 dias habiles para que termines de cancelar y hacerte el envio"
+      },
+      {
+        "question": "Cuanto vale el envio a Bogota o Soacha?",
+        "answer": "El domicilio contra entrega en Bogota tiene un precio de $9.000 y para Soacha de $10.000"
+      },
+      {
+        "question": "Se venden correas, pulsos o bandas por separado?",
+        "answer": "No, no se venden correas, pulsos o bandas por separado, solo las que trae el reloj."
+      },
+      {
+        "question": "¿El Bombox 4 está disponible en color verde?",
+        "answer": "Sí claro verde está disponible"
+      }
+    ]
+  }
+]

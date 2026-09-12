@@ -14,3 +14,19 @@ response prose. Follow these to keep sessions cheap:
 6. Run `npx tsc --noEmit` once after a batch of related edits, not after every individual edit.
 7. For broad/unfamiliar-code exploration, delegate to an Explore subagent instead of reading many
    files directly into the main context - it returns a summary, not the raw contents.
+
+# Onix prompt/tool changes (the bot's own token cost, not this session's)
+
+Onix (the WhatsApp bot in `src/ai/agent.ts` + `src/ai/tools.ts`) sends a large fixed prompt+tools
+payload to DeepSeek on every customer message. Keep this lean going forward:
+
+- On every change to `BASE_SYSTEM_PROMPT`, `catalogTools` descriptions, or the backstop-guard
+  regexes in `agent.ts`, look for a token-saving opportunity first (duplicate phrasing, prose that
+  could be conditional per business, wording that's already stated elsewhere the model sees on every
+  real call) before just appending more text.
+- Validate any such change with `npm run regression` (replays real anonymized production
+  conversations against the live `generateReply` + real DeepSeek API - real cost, run once, not in a
+  loop) before merging: zero net new backstop interventions vs. the pre-change baseline. Follow with
+  one run of `node --import tsx --test src/ai/agent.escalation.test.ts` (also real DeepSeek calls).
+- Neither of the above is part of `npm test` or CI - they cost real money per run, so run them
+  deliberately, not while iterating.

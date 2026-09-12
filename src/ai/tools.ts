@@ -132,19 +132,19 @@ export const catalogTools: OpenAI.Chat.ChatCompletionTool[] = [
     function: {
       name: "send_product_media",
       description:
-        "Envia por WhatsApp las fotos y/o videos reales de un producto especifico. Usar SIEMPRE que el cliente pida ver fotos, imagenes o video de un producto. Esto manda los archivos de verdad, no hace falta describir la imagen en texto aparte. Si ya sabes el ID exacto del producto (porque lo acabas de obtener con search_products o get_product_details en este mismo turno), pasalo en productId - es mas confiable que buscar de nuevo por nombre y evita mandar la foto de un producto distinto al que se esta hablando. Si solo tenes el nombre (el cliente lo escribio en el chat), usa productName.",
+        "Envia por WhatsApp las fotos/videos reales de un producto. Usar SIEMPRE que el cliente pida verlas - manda el archivo real, no hace falta describirlo en texto. Preferi productId (mas confiable) si lo obtuviste este turno con search_products o get_product_details; si no, usa productName.",
       parameters: {
         type: "object",
         properties: {
           productId: {
             type: "string",
             description:
-              "El campo 'id' exacto del producto, si ya lo obtuviste en este turno con search_products o get_product_details. Preferi este sobre productName siempre que lo tengas.",
+              "El 'id' exacto del producto, si ya lo tenes de search_products o get_product_details en este turno. Preferilo sobre productName.",
           },
           productName: {
             type: "string",
             description:
-              "El nombre (o parte del nombre) del producto tal como lo menciono el cliente en ESTE mensaje, por ejemplo 'smartwatch serie 11 mini' o 'boombox'. Usa siempre el producto del que se esta hablando ahora mismo en la conversacion, no uno mencionado antes. Solo hace falta si no tenes productId.",
+              "El nombre del producto que el cliente menciono en ESTE mensaje (el que se esta hablando ahora, no uno anterior). Solo si no tenes productId. Si el cliente respondio con un numero de una lista tuya, resolvelo al nombre real antes de pasarlo aca (ver SELECCION POR NUMERO).",
           },
         },
       },
@@ -155,7 +155,7 @@ export const catalogTools: OpenAI.Chat.ChatCompletionTool[] = [
     function: {
       name: "get_faq",
       description:
-        "Trae TODAS las preguntas frecuentes configuradas por el negocio (politicas de envio, garantia, horarios, cambios, etc). Usar cuando el cliente pregunte algo que no es sobre un producto especifico ni sobre formas de pago, antes de responder de memoria o decir que no sabes. Revisa vos mismo la lista completa por significado, no solo por si aparecen las mismas palabras - el cliente puede preguntar lo mismo con otras palabras.",
+        "Trae las preguntas frecuentes configuradas por el negocio (envios, garantia, horarios, cambios, etc). Usar cuando el cliente pregunte algo asi que no sea de un producto especifico ni forma de pago, antes de responder de memoria o decir que no sabes.",
       parameters: {
         type: "object",
         properties: {},
@@ -224,7 +224,7 @@ export const catalogTools: OpenAI.Chat.ChatCompletionTool[] = [
     function: {
       name: "flag_conversation_intent",
       description:
-        "Usa esta herramienta UNA SOLA VEZ cuando detectes que el cliente no esta haciendo una consulta de venta normal, sino que trae: una PQR (peticion, queja o reclamo sobre el servicio/producto), una solicitud de DEVOLUCION, un reclamo de que su pedido NO_RECIBIDO (no le llego), o SOLICITA_AGENTE cuando el cliente pide explicitamente hablar con una persona real, un asesor, un agente o un humano (no con vos). NO la uses para preguntas normales de catalogo, precio o para cerrar una venta. Esto escala la conversacion a un humano del negocio automaticamente.",
+        "Usa UNA SOLA VEZ cuando el cliente trae, no una consulta de venta normal: PQR (queja/reclamo), DEVOLUCION, NO_RECIBIDO (dice que no le llego el pedido), o SOLICITA_AGENTE (pide explicitamente hablar con una persona/asesor/humano, no con vos). No la uses para catalogo, precio o cerrar venta. Escala automaticamente a un humano del negocio.",
       parameters: {
         type: "object",
         properties: {
@@ -239,7 +239,7 @@ export const catalogTools: OpenAI.Chat.ChatCompletionTool[] = [
     function: {
       name: "ask_owner",
       description:
-        "Usa esta herramienta SOLO cuando el cliente hace una pregunta real que necesita un dato concreto del negocio, y no podes responderla con las demas herramientas (catalogo, get_faq, formas de pago). Le manda la pregunta EXACTA del cliente al dueno del negocio por WhatsApp para que la responda el mismo. Cuando el dueno responda, esa respuesta se le reenvia al cliente tal cual, sin que vos intervengas. Mientras tanto el bot deja de responderle a este cliente - por eso NUNCA la uses para un mensaje social o de charla (saludo, disculpa por tardar, agradecimiento, despedida): eso respondelo vos mismo directo, no es una pregunta que requiera al dueno. NO inventes ni adivines la respuesta a una pregunta real - preferi escalar. No la uses para PQR, devoluciones o pedidos no recibidos, para eso usa flag_conversation_intent.",
+        "Usa SOLO cuando el cliente hace una pregunta real que necesita un dato concreto del negocio y no la podes responder con catalogo/get_faq/pagos. Manda la pregunta EXACTA al dueno por WhatsApp; su respuesta se reenvia tal cual al cliente, y mientras tanto el bot deja de responderle - por eso NUNCA para saludo, disculpas, agradecimiento o despedida (respondelo vos). No inventes ni adivines: preferi escalar. No la uses para PQR/devolucion/no_recibido, para eso usa flag_conversation_intent.",
       parameters: {
         type: "object",
         properties: {
@@ -257,7 +257,7 @@ export const catalogTools: OpenAI.Chat.ChatCompletionTool[] = [
     function: {
       name: "ask_owner_about_photo",
       description:
-        "Usa esta herramienta SOLO como ultimo recurso, despues de agotar todo lo demas: el cliente mando una foto o video de un producto, el analisis de imagen no logro identificarlo con confianza (ni siquiera despues de la segunda opinion), YA le pediste una foto mas clara o el nombre y el cliente insiste sin poder darlo, Y search_products no encontro ningun candidato remotamente relacionado para ofrecer. Le reenvia la foto/video REAL del cliente al dueno del negocio por WhatsApp para que diga que producto es - un humano suele reconocer en una foto borrosa algo que la IA no puede. Cuando el dueno responda, se le confirma al cliente automaticamente (con la foto real del catalogo si el dueno nombro un producto que existe ahi). Mientras tanto el bot deja de responderle a este cliente. NO la uses de entrada ni para ahorrarte el paso de buscar en el catalogo primero - es cara en tiempo del dueno, se usa poco.",
+        "Ultimo recurso, solo si TODO esto se cumplio: el cliente mando foto/video de un producto; el analisis de imagen no lo identifico con confianza (ni con segunda opinion); ya le pediste foto mas clara o el nombre y no pudo darlo; y search_products no encontro ningun candidato relacionado. Reenvia la foto/video real al dueno para que diga que producto es (un humano reconoce lo que la IA no pudo); su respuesta se confirma sola al cliente (con la foto real del catalogo si aplica). El bot deja de responderle mientras tanto. NO la uses de entrada ni para saltar el paso de buscar en catalogo - es cara en tiempo del dueno.",
       parameters: {
         type: "object",
         properties: {},
@@ -304,7 +304,7 @@ export const catalogTools: OpenAI.Chat.ChatCompletionTool[] = [
           shippingCost: {
             type: "number",
             description:
-              "SOLO para outcome=SOLD: el costo del envio que le confirmaste al cliente (0 si el envio es gratis o no aplica). El total del pedido se calcula como precio del/los producto(s) mas este valor - siempre que hayas cobrado o mencionado un costo de envio, incluilo aca para que el pedido registrado refleje el total real que pago el cliente, no solo el producto.",
+              "SOLO para outcome=SOLD: costo de envio confirmado al cliente (0 si gratis/no aplica). El total del pedido = precio(s) + este valor, asi que si cobraste o mencionaste envio, incluilo para que el total registrado sea el real.",
           },
         },
         required: ["outcome"],
@@ -316,7 +316,7 @@ export const catalogTools: OpenAI.Chat.ChatCompletionTool[] = [
     function: {
       name: "get_order_status",
       description:
-        "Consulta el estado real del pedido mas reciente de este cliente: si sigue pendiente, ya fue enviado o fue cancelado, ademas del resumen, nota de envio y total. Usa esta herramienta SIEMPRE que el cliente pregunte como va su pedido, si ya se lo enviaron, pida la factura o el numero de guia, o pregunte por algo que ya compro antes. Nunca respondas de memoria del historial del chat ni inventes un estado - esta herramienta es la unica fuente real.",
+        "Consulta el estado real del pedido mas reciente del cliente (pendiente, enviado o cancelado), con resumen, nota de envio y total. Usa SIEMPRE que pregunte como va su pedido, si se lo enviaron, pida factura/guia, o algo que compro antes.",
       parameters: {
         type: "object",
         properties: {},
