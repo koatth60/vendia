@@ -821,23 +821,51 @@ function looksLikeIdOrPhone(text: string): boolean {
   return /\d{6,}/.test(trimmed.replace(/\D/g, ""));
 }
 
+// Strips numbered-list markers ("1. ", "2) ", "3- ") at the start of a line before tokenizing - a real
+// production bug (2026-09-12): the bot's own numbered option list ("1. Serie 11 Mini... 4. Smartwatch
+// V20 Caballero") left a bare "4" token in the haystack, which then coincidentally matched the literal
+// "4" in an unrelated product's actual name ("AIRPODS SERIE 4") - combined with "Serie" being a shared
+// brand word across both categories in this catalog, that unrelated product crossed the 0.6 overlap
+// threshold and got its photo sent alongside the real watches. List numbering was never meant to carry
+// matching evidence; the product's real name text (what follows the marker) still does.
+const LIST_MARKER_PATTERN = /^\s*\d+[.):]\s*/gm;
+
 // Token-overlap match (not exact substring - the model paraphrases names constantly, e.g. "Boombox 4
 // LED" for "Parlante Bluetooth Portatil Boombox 4 LED") against a haystack that should already include
 // the customer's message, the bot's current reply, AND the bot's prior turn (see the photo-claim
 // backstop in finalizeTurn for why the prior turn matters). Exported as a pure function for a cheap
 // regression test - no DB/LLM needed to verify the matching decision itself.
-export function findMentionedProductsForMediaBackstop<T extends { name: string; media: unknown[] }>(
+export function findMentionedProductsForMediaBackstop<T extends { name: string; media: unknown[]; category?: string | null }>(
   products: T[],
   haystack: string
 ): T[] {
-  const haystackTokens = new Set(tokenize(haystack));
-  return products.filter((p) => {
+  const haystackTokens = new Set(tokenize(haystack.replace(LIST_MARKER_PATTERN, " ")));
+  const matched = products.filter((p) => {
     if (p.media.length === 0) return false;
     const nameTokens = tokenize(p.name);
     if (nameTokens.length === 0) return false;
     const hits = nameTokens.filter((t) => haystackTokens.has(t)).length;
     return hits / nameTokens.length >= 0.6;
   });
+
+  // Defense in depth beyond the list-marker fix above: once the matches clearly settle on ONE dominant
+  // category, drop any minority-category outlier - a shared generic word or any other future token
+  // collision can drag in a product from a totally different category, and the real intent behind "show
+  // me photos of the ones you just listed" is always "more of the same kind of thing", never a silent
+  // category switch. Only acts on a clear majority (strictly more matches in one category than any
+  // other) - on a tie, stay silent rather than guess which category the customer actually meant.
+  const categoryCounts = new Map<string, number>();
+  for (const p of matched) {
+    if (p.category) categoryCounts.set(p.category, (categoryCounts.get(p.category) ?? 0) + 1);
+  }
+  const sortedCategories = [...categoryCounts.entries()].sort((a, b) => b[1] - a[1]);
+  if (sortedCategories.length < 2 || sortedCategories[0][1] > sortedCategories[1][1]) {
+    const dominantCategory = sortedCategories[0]?.[0];
+    if (dominantCategory) {
+      return matched.filter((p) => !p.category || p.category === dominantCategory);
+    }
+  }
+  return matched;
 }
 
 function lastAssistantText(history: { role: string; content: string }[]): string {

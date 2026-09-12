@@ -49,3 +49,71 @@ test("skips a product with no media even if its name matches", () => {
   const matched = findMentionedProductsForMediaBackstop(noMedia, "quiero fotos del Smartwatch Gen 9");
   assert.equal(matched.length, 0);
 });
+
+// Real production bug, second occurrence (2026-09-12, confirmed from prod logs after the first fix
+// deployed): the bot's own numbered list ("1. Serie 11 Mini... 4. Smartwatch V20 Caballero") left a bare
+// "4" token in the haystack from the list marker itself, not from any real product name. This
+// coincidentally matched the literal "4" in an unrelated real catalog product's actual name ("AIRPODS
+// SERIE 4") - combined with "Serie" being a shared brand word this business also uses for its
+// smartwatches, that unrelated product crossed the 0.6 token-overlap threshold and its photo got sent to
+// a real customer alongside the real watches. Uses the exact real product names/catalog shape involved.
+const REAL_CATALOG_PRODUCTS = [
+  { name: "Reloj Inteligente Smartwatch Serie 11 Mini (Edición Compacta y Elegante)", media: ["x"] },
+  { name: "Reloj Inteligente Smartwatch Serie 12 Ultra 3 (Edición Deportiva / Robusta)", media: ["x"] },
+  { name: "Smartwatch Gen 9", media: ["x"] },
+  { name: "Smartwatch V20 Caballero", media: ["x"] },
+  { name: "AIRPODS SERIE 4", media: ["x"] },
+];
+
+test("does not match an unrelated product whose name ends in the same digit as a list marker", () => {
+  const priorAssistantTurn =
+    "Tenemos estos modelos disponibles en negro:\n\n1. Serie 11 Mini — $145.000\n2. Serie 12 Ultra 3 — $140.000\n3. Smartwatch Gen 9 — $85.000\n4. Smartwatch V20 Caballero — $140.000";
+  const currentReply =
+    "¡Claro que sí! 😊 ¿De cuál de los cuatro quieres ver las fotos?\n\n1. Serie 11 Mini — $145.000\n2. Serie 12 Ultra 3 — $140.000\n3. Smartwatch Gen 9 — $85.000\n4. Smartwatch V20 Caballero — $140.000\n\nDime el numero o el nombre";
+  const haystack = `Muestrame fotos ${currentReply} ${priorAssistantTurn}`;
+
+  const matched = findMentionedProductsForMediaBackstop(REAL_CATALOG_PRODUCTS, haystack);
+
+  assert.ok(!matched.some((p) => p.name === "AIRPODS SERIE 4"), "must not match airpods from a stray list-numbering digit");
+  assert.ok(matched.length > 0, "must still match the real watches that were actually listed");
+});
+
+// Defense in depth, independent of the list-marker fix above: even if some OTHER future token collision
+// drags an unrelated-category product into the token-overlap match, a clear category majority among the
+// matches should exclude it - the customer's intent is "more of the same kind of thing", never a silent
+// category switch buried in an otherwise single-category list.
+test("category dominance: excludes a minority-category match even when token-overlap alone would include it", () => {
+  const products = [
+    { name: "Reloj Serie X Negro", media: ["x"], category: "reloj" },
+    { name: "Reloj Serie Y Negro", media: ["x"], category: "reloj" },
+    { name: "Reloj Serie Z Negro", media: ["x"], category: "reloj" },
+    { name: "Diadema Serie Bluetooth", media: ["x"], category: "audifonos" },
+  ];
+  // "serie" and "negro" both appear in the haystack from the real reloj context - enough for the
+  // diadema (a totally different category) to also cross the 0.6 threshold on shared generic words.
+  const haystack = "Muestrame fotos de los relojes negro serie que tenemos disponibles bluetooth";
+  const matched = findMentionedProductsForMediaBackstop(products, haystack);
+
+  assert.ok(!matched.some((p) => p.category === "audifonos"), "must exclude the minority-category diadema");
+  assert.ok(matched.some((p) => p.category === "reloj"), "must keep the dominant-category matches");
+});
+
+test("category dominance: does nothing when there is no clear majority (an exact tie)", () => {
+  const products = [
+    { name: "Reloj Serie X", media: ["x"], category: "reloj" },
+    { name: "Diadema Serie X", media: ["x"], category: "audifonos" },
+  ];
+  const haystack = "Reloj Serie X Diadema Serie X";
+  const matched = findMentionedProductsForMediaBackstop(products, haystack);
+
+  assert.equal(matched.length, 2, "an exact tie must not guess which category to drop");
+});
+
+test("category dominance: does not affect products with no category set (backward compatible)", () => {
+  const products = [
+    { name: "Producto Uno", media: ["x"] },
+    { name: "Producto Dos", media: ["x"] },
+  ];
+  const matched = findMentionedProductsForMediaBackstop(products, "Producto Uno Producto Dos");
+  assert.equal(matched.length, 2);
+});
