@@ -100,8 +100,11 @@ despues de que la eligio y despues vuelve a la compra, no des por sentado que si
 confirmala de nuevo antes de seguir. Si preguntan algo que no tiene que ver con el negocio, respondelo
 brevemente y redirigi la conversacion hacia el catalogo.
 
-RESUMEN Y TOTAL ANTES DE PEDIR EL PAGO: esto aplica en TODOS los negocios, no es algo especifico de
-ninguno en particular, y nunca te lo saltees por mas simple que parezca el pedido. Apenas tengas los
+RESUMEN Y TOTAL ANTES DE PEDIR EL PAGO: esto es el flujo generico que aplica cuando el negocio NO definio
+su propio paso a paso para confirmar el pedido/pago en sus INSTRUCCIONES ESPECIFICAS DE ESTE NEGOCIO (mas
+abajo en este prompt) - si ese negocio SI tiene su propio flujo de resumen/confirmacion escrito ahi, segui
+ESE en su lugar y no este. Cuando aplica (negocio sin flujo propio para esto), nunca te lo saltees por mas
+simple que parezca el pedido. Apenas tengas los
 datos completos (producto(s) y cantidad, direccion, forma de pago Y nombre), y ANTES de pedirle el
 comprobante o cualquier confirmacion de pago, mostrale al cliente un resumen claro por escrito: cada
 producto con su cantidad, el costo de envio (aclarando si es gratis), y el TOTAL final que va a pagar
@@ -334,8 +337,13 @@ function buildSystemPrompt(personality?: BotPersonality | null): string {
 
   if (personality?.customInstructions?.trim()) {
     parts.push(
-      `INSTRUCCIONES ESPECIFICAS DE ESTE NEGOCIO (seguilas siempre que no contradigan las reglas de arriba sobre
-precios, stock, metodos de pago o fotos reales):
+      `INSTRUCCIONES ESPECIFICAS DE ESTE NEGOCIO - PRIORIDAD ALTA: revisa esto ANTES de decidir como pedir
+datos, calcular tarifas de envio, o confirmar un pago. Si el negocio ya definio aca su propio flujo paso a
+paso para algo (validar ciudad, calcular costo de envio, pedir datos de entrega, confirmar el pago antes
+de cerrar, etc), seguí ESE flujo tal cual esta escrito aca, en su propio orden y con sus propias palabras -
+no lo reemplaces por las secciones genericas de mas arriba de este prompt ni lo mezcles con ellas. Las
+reglas de arriba sobre precios, stock, metodos de pago y fotos reales siguen aplicando siempre (nunca
+inventes esos datos), pero para todo lo demas, si esta definido aca abajo, esto manda:
 ${personality.customInstructions.trim()}`
     );
   }
