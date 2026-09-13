@@ -200,7 +200,7 @@
   #status.is-error { background: var(--danger); }
   #status .status-icon { display: flex; flex-shrink: 0; }
 
-  .product-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; margin-top: 14px; }
+  .product-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 14px; margin-top: 14px; }
   .empty-state { text-align: center; padding: 44px 20px; color: var(--muted); font-size: 13.5px; }
   .empty-state .big { font-size: 32px; margin-bottom: 10px; }
 
@@ -1444,6 +1444,10 @@ function renderCard(p) {
 // products never use this; it only renders rows when they exist, plus a small always-available form to
 // add the first one.
 function renderVariantSection(productId, variants) {
+  // Only "ropa" businesses use talla at all (see updateTallaFieldVisibility) - showing an always-empty
+  // Talla input on every variant card for every other vertical (tecnologia, joyeria, etc) was pure
+  // clutter and made each card wider/taller than it needed to be for the common case (color-only).
+  const showTalla = document.getElementById('bot-category')?.value === 'ropa';
   const cards = variants.map(v => {
     const vMedia = v.media || [];
     const vThumbs = vMedia.map(m => `
@@ -1455,10 +1459,10 @@ function renderVariantSection(productId, variants) {
       </span>
     `).join('');
     return `
-      <div class="variant-card" style="border:1px solid var(--border); border-radius:8px; padding:8px; min-width:140px;">
+      <div class="variant-card" style="border:1px solid var(--border); border-radius:8px; padding:8px; min-width:150px; flex:1 1 150px;">
         <div style="display:flex; gap:6px; align-items:center; margin-bottom:6px;">
-          <input placeholder="Color" value="${escapeHtml(v.color || '')}" style="width:90px;" onchange="updateVariant('${v.id}', 'color', this.value)" />
-          <input placeholder="Talla" value="${escapeHtml(v.size || '')}" style="width:60px;" onchange="updateVariant('${v.id}', 'size', this.value)" />
+          <input placeholder="Color" value="${escapeHtml(v.color || '')}" style="flex:1; min-width:0;" onchange="updateVariant('${v.id}', 'color', this.value)" />
+          ${showTalla ? `<input placeholder="Talla" value="${escapeHtml(v.size || '')}" style="width:60px;" onchange="updateVariant('${v.id}', 'size', this.value)" />` : ''}
         </div>
         <div style="display:flex; gap:6px; align-items:center;">
           <label style="font-size:11px; color:var(--muted);">Stock:</label>
@@ -1478,11 +1482,11 @@ function renderVariantSection(productId, variants) {
 
   return `
     <div class="variant-section" style="margin-top:10px;">
-      <div style="font-size:11.5px; font-weight:600; color:var(--muted);">Colores/tallas con stock propio (sin foto propia usan la foto del producto)</div>
+      <div style="font-size:11.5px; font-weight:600; color:var(--muted);">${showTalla ? 'Colores/tallas' : 'Colores'} con stock propio (sin foto propia usan la foto del producto)</div>
       <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:6px;">${cards}</div>
       <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin-top:8px;">
         <input id="new-variant-color-${productId}" placeholder="Color" style="width:100px;" />
-        <input id="new-variant-size-${productId}" placeholder="Talla" style="width:80px;" />
+        <input id="new-variant-size-${productId}" placeholder="Talla" style="width:80px;" ${showTalla ? '' : 'hidden'} />
         <input id="new-variant-stock-${productId}" type="number" placeholder="Stock" value="0" style="width:80px;" />
         <button class="btn-secondary" style="padding:4px 8px;" onclick="addVariant('${productId}')">+ Variante</button>
       </div>
