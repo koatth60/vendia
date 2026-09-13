@@ -276,9 +276,22 @@ export async function createProduct(
     category?: string;
     color?: string;
     size?: string;
+    // Lets the admin panel build a product's color/size variants in the same form before the product
+    // exists yet, instead of forcing a save-then-edit-the-card round trip just because a
+    // ProductVariant row needs a real productId to attach to (Prisma's nested create handles that in
+    // one insert - the owner never has to see or wait for two separate steps).
+    variants?: { color?: string; size?: string; stock: number }[];
   }
 ) {
-  return prisma.product.create({ data: { ...data, businessId } });
+  const { variants, ...productData } = data;
+  return prisma.product.create({
+    data: {
+      ...productData,
+      businessId,
+      ...(variants && variants.length > 0 ? { variants: { create: variants } } : {}),
+    },
+    include: { media: true, variants: { include: { media: true } } },
+  });
 }
 
 export async function updateProduct(

@@ -315,7 +315,7 @@ adminRouter.get("/api/products", async (req, res) => {
 });
 
 adminRouter.post("/api/products", async (req, res) => {
-  const { name, description, price, currency, stock, category, color, size } = req.body;
+  const { name, description, price, currency, stock, category, color, size, variants } = req.body;
   const product = await createProduct(businessIdOf(req), {
     name,
     description,
@@ -325,6 +325,13 @@ adminRouter.post("/api/products", async (req, res) => {
     category: category || undefined,
     color: color || undefined,
     size: size || undefined,
+    variants: Array.isArray(variants)
+      ? variants.map((v: { color?: string; size?: string; stock?: number }) => ({
+          color: v.color || undefined,
+          size: v.size || undefined,
+          stock: Number(v.stock ?? 0),
+        }))
+      : undefined,
   });
   res.status(201).json(product);
 });

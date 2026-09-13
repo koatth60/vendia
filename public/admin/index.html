@@ -679,7 +679,18 @@
             <input id="p-size" placeholder="Ej: M" />
           </div>
         </div>
-        <div class="hint">¿Este producto viene en varios colores o tallas, cada uno con su propio stock y fotos? Guárdalo primero y agrega las variantes desde su tarjeta abajo.</div>
+        <div class="hint">¿Este producto viene en varios colores o tallas, cada uno con su propio stock? Agregalos abajo antes de guardar - las fotos propias de cada variante sí se suben después, ya con el producto creado.</div>
+        <div class="variant-section" style="border-top:none; padding-top:0; margin-top:10px;">
+          <div class="variant-section-title">Colores/tallas (opcional)</div>
+          <div id="p-draft-variant-list" class="variant-list"></div>
+          <div class="variant-add-row">
+            <span id="p-draft-variant-swatch-wrap"><span class="variant-swatch is-unknown"></span></span>
+            <input id="p-draft-variant-color" type="text" placeholder="Color nuevo" style="flex:1; min-width:0;" oninput="updateDraftVariantSwatch()" />
+            <input id="p-draft-variant-size" type="text" placeholder="Talla" style="width:60px;" hidden />
+            <input id="p-draft-variant-stock" type="number" placeholder="Stock" value="0" style="width:60px;" />
+            <button class="btn-secondary" style="padding:6px 12px; flex-shrink:0;" onclick="addDraftVariant()">Agregar</button>
+          </div>
+        </div>
         <div class="actions-row">
           <button class="btn-primary" onclick="addProduct()">+ Agregar producto</button>
         </div>
@@ -1411,8 +1422,10 @@ function updateTallaFieldVisibility() {
   const isRopa = document.getElementById('bot-category').value === 'ropa';
   const addWrapper = document.getElementById('p-size-wrapper');
   const editWrapper = document.getElementById('edit-size-wrapper');
+  const draftSize = document.getElementById('p-draft-variant-size');
   if (addWrapper) addWrapper.hidden = !isRopa;
   if (editWrapper) editWrapper.hidden = !isRopa;
+  if (draftSize) draftSize.hidden = !isRopa;
 }
 
 function toggleGenderedAddressFields() {
@@ -1792,6 +1805,49 @@ async function saveEdit() {
   }
 }
 
+// Variants typed into the "Agregar producto" form before the product itself exists yet - held here
+// (no id, nothing saved) until the product is created, then sent along in the same POST so
+// createProduct can insert product+variants together (see products.ts). Removes the earlier
+// save-the-product-first-then-add-variants-to-its-card friction entirely.
+let draftVariants = [];
+
+function updateDraftVariantSwatch() {
+  document.getElementById('p-draft-variant-swatch-wrap').innerHTML = colorSwatchHtml(document.getElementById('p-draft-variant-color').value);
+}
+
+function renderDraftVariants() {
+  document.getElementById('p-draft-variant-list').innerHTML = draftVariants.map((v, i) => `
+    <div class="variant-row">
+      ${colorSwatchHtml(v.color)}
+      <span class="variant-name-input" style="padding:4px 2px;">${escapeHtml(v.color || '(sin color)')}</span>
+      ${v.size ? `<span class="variant-size-input">${escapeHtml(v.size)}</span>` : ''}
+      <div class="variant-stock-wrap"><label>Stock</label><span class="variant-stock-input" style="cursor:default;">${v.stock}</span></div>
+      <button class="variant-delete-btn" title="Quitar" onclick="removeDraftVariant(${i})">×</button>
+    </div>
+  `).join('');
+}
+
+function addDraftVariant() {
+  const color = document.getElementById('p-draft-variant-color').value.trim();
+  const size = document.getElementById('p-draft-variant-size').value.trim();
+  const stock = Number(document.getElementById('p-draft-variant-stock').value || 0);
+  if (!color && !size) {
+    setStatus('La variante necesita al menos un color o una talla', true);
+    return;
+  }
+  draftVariants.push({ color, size, stock });
+  document.getElementById('p-draft-variant-color').value = '';
+  document.getElementById('p-draft-variant-size').value = '';
+  document.getElementById('p-draft-variant-stock').value = '0';
+  updateDraftVariantSwatch();
+  renderDraftVariants();
+}
+
+function removeDraftVariant(i) {
+  draftVariants.splice(i, 1);
+  renderDraftVariants();
+}
+
 async function addProduct() {
   const name = document.getElementById('p-name').value.trim();
   const description = document.getElementById('p-description').value.trim();
@@ -1812,7 +1868,7 @@ async function addProduct() {
     const res = await apiFetch('/admin/api/products', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, description, price, currency, stock, category, color, size }),
+      body: JSON.stringify({ name, description, price, currency, stock, category, color, size, variants: draftVariants }),
     });
     created = await res.json();
   } catch (err) {
@@ -1827,11 +1883,13 @@ async function addProduct() {
   document.getElementById('p-category').value = '';
   document.getElementById('p-color').value = '';
   document.getElementById('p-size').value = '';
+  draftVariants = [];
+  renderDraftVariants();
 
-  setStatus('Producto agregado ✓');
+  setStatus(`Producto agregado ✓${created?.variants?.length ? ` con ${created.variants.length} variante(s)` : ''}`);
   await loadProducts();
-  // Jump straight to the new card instead of leaving the owner to scroll and hunt for it - the natural
-  // next step after creating a product is almost always adding its color/talla variants right there.
+  // Jump straight to the new card - if it still needs variant photos, or more variants, they're right
+  // there instead of making the owner scroll down to find it.
   scrollToAndHighlightProduct(created?.id);
 }
 
