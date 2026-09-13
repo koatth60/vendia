@@ -29,7 +29,15 @@ async function withFreshVariantMediaUrls<T extends { variants: { media: { s3Key:
   return products;
 }
 
-const PRODUCT_INCLUDE = { media: true, variants: { include: { media: true } } } as const;
+// `media: true` here would relate purely on productId and return EVERY photo the product has,
+// including ones that belong to a specific variant (ProductMedia.variantId is just an extra column,
+// not part of the relation match) - every caller of product.media (send_product_media's fallback,
+// formatProduct, the admin panel's gallery, detect-colors) treats it as "the general/fallback photos
+// only", so it has to actually be scoped that way, or a variant's own photo silently gets treated as
+// general too (double-counted in the admin gallery, and worse, offered as the fallback for an
+// UNRELATED color that has no photo of its own - reported directly as duplicated photos in the admin
+// panel, 2026-09-13).
+const PRODUCT_INCLUDE = { media: { where: { variantId: null } }, variants: { include: { media: true } } } as const;
 
 export async function listActiveProducts(businessId: string) {
   const products = await prisma.product.findMany({
@@ -290,7 +298,7 @@ export async function createProduct(
       businessId,
       ...(variants && variants.length > 0 ? { variants: { create: variants } } : {}),
     },
-    include: { media: true, variants: { include: { media: true } } },
+    include: PRODUCT_INCLUDE,
   });
 }
 
@@ -317,7 +325,7 @@ export async function updateProduct(
 export async function deleteProduct(businessId: string, id: string) {
   const product = await prisma.product.findFirst({
     where: { id, businessId },
-    include: { media: true, variants: { include: { media: true } } },
+    include: PRODUCT_INCLUDE,
   });
   if (!product) throw new Error("Producto no encontrado");
   const variantMediaKeys = product.variants.flatMap((v) => v.media.map((m) => m.s3Key));
