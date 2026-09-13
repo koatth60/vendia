@@ -148,7 +148,7 @@ export const OFFER_OR_PENDING_CONFIRMATION_PATTERN =
 // equipo" / "dejame confirmar con el equipo" without actually calling ask_owner - confirmed against a
 // real conversation where a customer's shipping-cost question got this exact non-answer and the owner
 // never received anything, because no tool call ever fired. The system prompt already tells it not to
-// do this (see CRITICO en general) - this is the code-level backstop for when that's not enough.
+// do this (see PROMETER NO ES HACER) - this is the code-level backstop for when that's not enough.
 export const ESCALATION_CLAIM_PATTERN =
   /\b(equipo|due[ñn][oa]s?)\b.{0,25}\b(consult|confirm|pregunt|revis)|\b(consult|confirm|pregunt|revis)\w*\b.{0,25}\b(equipo|due[ñn][oa]s?)\b/i;
 
