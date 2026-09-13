@@ -5,7 +5,7 @@ import { prisma } from "../db/client";
 import { runCatalogTool, type ToolContext } from "./tools";
 
 // Direct tool-function tests - no DeepSeek calls, so these stay fast and cheap even as the suite
-// grows. Reserve real-model calls (see agent.escalation.test.ts) for testing whether the model
+// grows. Reserve real-model calls (see agent.escalationPaid.ts, `npm run test:paid`) for testing whether the model
 // actually chooses to call a tool, not for exercising the tool implementations themselves.
 
 let businessId: string;

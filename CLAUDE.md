@@ -26,7 +26,12 @@ payload to DeepSeek on every customer message. Keep this lean going forward:
   real call) before just appending more text.
 - Validate any such change with `npm run regression` (replays real anonymized production
   conversations against the live `generateReply` + real DeepSeek API - real cost, run once, not in a
-  loop) before merging: zero net new backstop interventions vs. the pre-change baseline. Follow with
-  one run of `node --import tsx --test src/ai/agent.escalation.test.ts` (also real DeepSeek calls).
+  loop; `REGRESSION_IDS=id1,id2 npm run regression` replays only specific conversations, cheaper while
+  iterating on a fix for one known case) before merging: zero net new backstop interventions vs. the
+  pre-change baseline. Follow with one run of `npm run test:paid` (runs
+  `src/ai/agent.escalationPaid.ts`, also real DeepSeek calls).
 - Neither of the above is part of `npm test` or CI - they cost real money per run, so run them
-  deliberately, not while iterating.
+  deliberately, not while iterating. `agent.escalationPaid.ts` is deliberately named without `.test.`
+  so Node's default test-file discovery (`npm test`) skips it - only `npm run test:paid` runs it
+  (confirmed 2026-09-13: it used to be `agent.escalation.test.ts` and silently ran, and cost money, on
+  every plain `npm test`).

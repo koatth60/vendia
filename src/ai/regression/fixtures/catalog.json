@@ -89,7 +89,8 @@
         "stock": 5,
         "category": "Tecnología (smartwatch)",
         "active": true,
-        "mediaCount": 1
+        "mediaCount": 1,
+        "color": "Negro/oscuro"
       },
       {
         "name": "Reloj Inteligente Smartwatch Serie 12 Ultra 3 (Edición Deportiva / Robusta)",
@@ -99,7 +100,21 @@
         "stock": 15,
         "category": "Tecnología / Relojes Inteligentes (Smartwatches)",
         "active": true,
-        "mediaCount": 3
+        "mediaCount": 3,
+        "variants": [
+          {
+            "color": "negro",
+            "size": null,
+            "stock": 7,
+            "active": true
+          },
+          {
+            "color": "gris",
+            "size": null,
+            "stock": 8,
+            "active": true
+          }
+        ]
       },
       {
         "name": "AIRPODS PRO 2",
@@ -159,7 +174,27 @@
         "stock": 8,
         "category": "Tecnología / Relojes Inteligentes (Smartwatches)",
         "active": true,
-        "mediaCount": 3
+        "mediaCount": 3,
+        "variants": [
+          {
+            "color": "rosa",
+            "size": null,
+            "stock": 2,
+            "active": true
+          },
+          {
+            "color": "Plateado",
+            "size": null,
+            "stock": 3,
+            "active": true
+          },
+          {
+            "color": "Negro",
+            "size": null,
+            "stock": 3,
+            "active": true
+          }
+        ]
       },
       {
         "name": "AIRPODS PRO 3",
@@ -199,7 +234,8 @@
         "stock": 10,
         "category": "Tecnología (smartwatch)",
         "active": true,
-        "mediaCount": 2
+        "mediaCount": 2,
+        "color": "Dorado"
       },
       {
         "name": "Audífonos Bluetooth con parlante integrado",

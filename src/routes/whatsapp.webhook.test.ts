@@ -8,7 +8,7 @@ import { whatsappRouter } from "./whatsapp";
 
 // Regression coverage for previously-silent message types (location/sticker/document/contacts) being
 // dropped with zero trace. Runs the real webhook route end to end (including a real DeepSeek call for
-// the bot's reply, same tradeoff as agent.escalation.test.ts) - only the outgoing WhatsApp Graph API
+// the bot's reply, same tradeoff as agent.escalationPaid.ts) - only the outgoing WhatsApp Graph API
 // calls are stubbed.
 
 let server: Server;

@@ -31,7 +31,18 @@ interface CatalogBusiness {
   autoSendPhotoOnQuote: boolean;
   requirePaymentProof: boolean;
   businessCategory: string | null;
-  products: { name: string; description: string; price: string; currency: string; stock: number; category: string | null; active: boolean }[];
+  products: {
+    name: string;
+    description: string;
+    price: string;
+    currency: string;
+    stock: number;
+    category: string | null;
+    active: boolean;
+    color?: string | null;
+    size?: string | null;
+    variants?: { color: string | null; size: string | null; stock: number; active: boolean }[];
+  }[];
   paymentMethods: { type: "TRANSFERENCIA" | "TARJETA" | "EFECTIVO"; label: string; details: string; active: boolean }[];
   shippingRates: { label: string; cost: string; sortOrder: number }[];
   shippingCityRules: { city: string; label: string }[];
@@ -87,6 +98,9 @@ async function seedBusiness(fixture: CatalogBusiness) {
           stock: p.stock,
           category: p.category,
           active: p.active,
+          color: p.color ?? null,
+          size: p.size ?? null,
+          variants: p.variants ? { create: p.variants } : undefined,
         })),
       },
       paymentMethods: { create: fixture.paymentMethods },
@@ -154,6 +168,7 @@ async function replayConversation(businessId: string, fixture: FixtureConversati
     let threw: unknown = null;
     try {
       reply = await generateReply(conversation.id, context, personality, m.content);
+      if (process.env.DEBUG_TOOLCALLS) console.log("[reply]", JSON.stringify(reply));
     } catch (error) {
       threw = error;
     } finally {
@@ -186,9 +201,17 @@ async function replayConversation(businessId: string, fixture: FixtureConversati
 
 async function main() {
   const limitArg = process.argv[2] ? parseInt(process.argv[2], 10) : undefined;
+  // REGRESSION_IDS=conv-12,conv-34 npm run regression - reruns only those conversationIds while iterating
+  // on a fix, instead of the full fixture. Run the full, unfiltered suite once before merging/deploying.
+  const idFilter = process.env.REGRESSION_IDS?.split(",").map((s) => s.trim()).filter(Boolean);
 
   const catalogs = catalogFixture as CatalogBusiness[];
-  const conversations = (conversationsFixture as FixtureConversation[]).slice(0, limitArg);
+  let conversations = conversationsFixture as FixtureConversation[];
+  if (idFilter && idFilter.length > 0) {
+    conversations = conversations.filter((c) => idFilter.includes(c.conversationId));
+  } else {
+    conversations = conversations.slice(0, limitArg);
+  }
 
   const businessByName = new Map<string, string>();
   for (const c of catalogs) {

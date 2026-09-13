@@ -210,8 +210,14 @@ export async function findProductsByAttributes(
 
   for (const product of products) {
     if (targetCategory) {
-      const productCategory = product.category ? canonicalizeCategoryWord(product.category) : null;
-      if (productCategory !== targetCategory) continue;
+      // A business's real category is free text, often compound ("Tecnología / Relojes Inteligentes
+      // (Smartwatches)") - comparing the whole string against a single target word ("reloj") after
+      // singularizing never matched anything real (confirmed 2026-09-13: this silently returned zero
+      // matches for every category-scoped color search on this exact shape, which is why "reloj negro"
+      // kept falling back to search_products' full-catalog dump instead of the real filtered list).
+      // Match if the target word is one of the category string's own words instead.
+      const categoryWords = product.category ? tokenize(product.category).map(canonicalizeCategoryWord) : [];
+      if (!categoryWords.includes(targetCategory)) continue;
     }
 
     if (product.variants.length > 0) {

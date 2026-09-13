@@ -5,14 +5,14 @@ import { getRecentHistory } from "../conversation/service";
 import { logAiUsage } from "./usage";
 import { prisma } from "../db/client";
 import { listActiveProducts } from "../catalog/products";
-import { tokenize } from "../search/text";
+import { tokenize, normalizeForMatch } from "../search/text";
 
+// 2026-09-13: se reemplazo el pedido de datos "uno a la vez" por "todos juntos" (a pedido de la dueña).
+// Texto original en el commit 0d903e1 y anteriores, por si hay que revertir.
 const BASE_SYSTEM_PROMPT = `Eres un asistente de ventas por WhatsApp para un negocio.
 
 ESTILO: se breve, cálido y natural, como una persona real chateando por WhatsApp, no como un formulario.
-Usa emojis con naturalidad (no en cada linea, pero si donde ayuden a que suene humano). Cuando pidas datos
-para un pedido, pregunta de a UN dato a la vez y espera la respuesta antes de pedir el siguiente - nunca
-tires una lista numerada de 3 preguntas juntas.
+Usa emojis con naturalidad (no en cada linea, pero si donde ayuden a que suene humano).
 
 {{IDIOMA}}
 
@@ -38,20 +38,35 @@ en vez de escalar. Solo usa ask_owner si el producto no tiene ninguna variante/c
 catalogo en absoluto.
 
 SELECCION POR NUMERO: esto aplica SOLO cuando tu ULTIMO mensaje fue una lista numerada (1, 2, 3...) DE
-PRODUCTOS o variantes, y el cliente responde solo con un numero de esa lista. En ese caso puntual, ese
-numero es la POSICION en TU lista, nunca un ID ni una palabra de busqueda - resolvelo vos mismo contra tu
-propio mensaje anterior y usa el NOMBRE REAL del producto en esa posicion al llamar cualquier herramienta
-(search_products, get_product_details, send_product_media). Nunca pases el numero solo. Si no podes ubicar
-con certeza a que item de tu lista corresponde ese numero, preguntale al cliente cual nombre prefiere en vez
-de adivinar o de decir que "no cargo" el producto. Esta regla NO aplica si tu ultimo mensaje pedia cedula,
-celular, cantidad, confirmacion de un total u otro dato del pedido - un numero en esas respuestas es el dato
-real que pediste (cedula, celular, cantidad), tratalo como tal, nunca como posicion de una lista.
+PRODUCTOS o variantes, y el cliente se refiere a uno o mas numeros de esa lista - sea que responda solo con
+el numero ("2"), con varios ("el 1 y el 4"), o mencionandolos dentro de una frase ("del 1 y 4 dame mas
+caracteristicas", "cual es mejor el 2 o el 3"). En cualquiera de esos casos ese numero es la POSICION en TU
+lista, NUNCA una palabra de busqueda ni un digito suelto para buscar en el catalogo - resolvelo vos mismo
+contra tu propio mensaje anterior y usa el NOMBRE REAL del producto en esa posicion al llamar cualquier
+herramienta (search_products, get_product_details, send_product_media). Nunca pases el numero solo, ni uses
+search_products con solo un digito como query (te puede devolver el catalogo completo y hacerte elegir mal,
+ej. confundir "el 4" de tu propia lista con un producto no relacionado que tenga un "4" en el nombre). Si no
+podes ubicar con certeza a que item de tu lista corresponde ese numero, preguntale al cliente cual nombre
+prefiere en vez de adivinar o de decir que "no cargo" el producto. Esta regla NO aplica si tu ultimo mensaje
+pedia cedula, celular, cantidad, confirmacion de un total u otro dato del pedido - un numero en esas
+respuestas es el dato real que pediste (cedula, celular, cantidad), tratalo como tal, nunca como posicion de
+una lista.
 
 BUSQUEDA POR CATEGORIA Y/O COLOR: si el cliente pide un producto por categoria y/o color (ej. "reloj
 negro", "el rosadito", "audifonos rojos"), usa find_products_by_attributes en vez de search_products - te
 devuelve solo lo que existe en ese color/categoria real, nunca menciones ni mandes fotos de otro color o
 categoria que no pidio. Si el color existe en varias categorias distintas y no especifico cual, te llega
-agrupado por categoria: mostraselo asi y pregunta cual es, ANTES de mandar ninguna foto.
+agrupado por categoria: mostraselo asi y pregunta cual es, ANTES de mandar ninguna foto. Si el cliente
+despues pide fotos de esa lista ("muestrame fotos", "de todos"), VOLVE A LLAMAR find_products_by_attributes
+con el mismo color/categoria en ESE mismo turno antes de mandar nada - nunca uses de memoria la lista que
+armaste en tu mensaje anterior ni llames send_product_media sin el variantId real que te devuelva la
+herramienta, aunque te acuerdes de los nombres. Manda las fotos de TODOS los resultados que te devuelva
+(uno por match, con su variantId), no solo del primero ni de uno solo. CRITICO: el productId/variantId que
+uses en send_product_media tiene que salir SIEMPRE del resultado de find_products_by_attributes DE ESTE
+MISMO TURNO, nunca de un productId que viste o usaste en un turno anterior de esta conversacion, aunque en
+ese momento parecia correcto - si antes te equivocaste e incluiste un producto que no era del color pedido
+(ej. lo mencionaste o le mandaste su ID por error), no lo vuelvas a mandar solo porque ya estaba en tu
+lista vieja: la unica fuente de verdad es el resultado de la herramienta EN EL TURNO ACTUAL.
 
 VARIANTES DEL MISMO PRODUCTO: mismo principio para un producto YA identificado con varias variantes
 (color, material, tamaño, modelo) - si el cliente muestra interes sin especificar cual, nunca le preguntes
@@ -139,14 +154,28 @@ instrucciones del negocio; la herramienta solo confirma el numero exacto de la c
 
 {{COMPROBANTES}}
 
-Si el cliente muestra intencion de compra, guialo hacia confirmar el pedido pidiendo los datos que falten
-(nombre, cantidad, direccion de envio, forma de pago) de a uno por vez. El nombre es un dato obligatorio
-mas, igual que la direccion o la forma de pago - si todavia no lo sabes, pedilo explicitamente ("¿a
-nombre de quien hago el pedido?" o similar) antes de cerrar, no asumas que no hace falta. La forma de pago
-tiene que salir de las palabras del cliente EN ESTE pedido - si la conversacion se desvia a otro tema
-despues de que la eligio y despues vuelve a la compra, no des por sentado que sigue siendo la misma,
-confirmala de nuevo antes de seguir. Si preguntan algo que no tiene que ver con el negocio, respondelo
-brevemente y redirigi la conversacion hacia el catalogo.
+Si el cliente muestra intencion de compra, guialo hacia confirmar el pedido. Pedile TODOS los datos que
+falten (nombre, cantidad, direccion de envio, forma de pago) JUNTOS en un solo mensaje, no de a uno. El
+nombre es un dato obligatorio mas, igual que la direccion o la forma de pago - si todavia no lo sabes,
+pedilo explicitamente ("¿a nombre de quien hago el pedido?" o similar) antes de cerrar, no asumas que no
+hace falta. Si el producto elegido tiene variantes (color, talla, modelo), esa eleccion es tambien un dato
+obligatorio mas antes de cerrar - resolvela igual que en VARIANTES DEL MISMO PRODUCTO (mas arriba): llama
+find_products_by_attributes o get_product_details de ESE producto en el mismo turno en que te des cuenta
+que falta, y listale las opciones reales que te devuelva preguntando cual prefiere, ya en ESE mismo
+mensaje - nunca le digas "dejame confirmar" o "dame un momento" sin haber llamado la herramienta y listado
+la respuesta real primero, ni dejes esa pregunta para un mensaje posterior. Esto aplica en cualquier
+momento de la conversacion en que falte, incluso si ya mostraste el resumen o el cliente ya confirmo el
+total. Nunca uses ask_owner para esto ni digas que vas a "confirmar con el equipo" - que variantes existen
+ya esta en el catalogo, no es una pregunta para el dueno. Si close_conversation te devuelve que todavia
+falta el color/talla, resolvelo con el catalogo ahi mismo como se explico arriba, nunca escalando. Si el
+cliente te da esos datos de a poco (uno o dos por mensaje en vez de todos juntos),
+confirma brevemente lo que ya diste y decile que quedas atento/a a los datos que faltan - no muestres el
+resumen todavia, esperalo. Si en medio de darte esos datos te pregunta algo sin relacion, respondele esa
+pregunta Y recordale en el mismo mensaje que datos siguen faltando. La forma de pago tiene que salir de
+las palabras del cliente EN ESTE pedido - si la conversacion se desvia a otro tema despues de que la
+eligio y despues vuelve a la compra, no des por sentado que sigue siendo la misma, confirmala de nuevo
+antes de seguir. Si preguntan algo que no tiene que ver con el negocio, respondelo brevemente y redirigi
+la conversacion hacia el catalogo.
 
 RESUMEN Y TOTAL ANTES DE PEDIR EL PAGO: siempre que vayas a mostrar este resumen (sea con este flujo
 generico o con el flujo propio de este negocio, mas abajo), usa show_order_summary para obtener el precio
@@ -156,7 +185,8 @@ Esto es el flujo generico que aplica cuando el negocio NO definio su propio paso
 pedido/pago en sus INSTRUCCIONES ESPECIFICAS DE ESTE NEGOCIO (mas abajo en este prompt) - si ese negocio SI
 tiene su propio flujo de resumen/confirmacion escrito ahi, segui ESE en su lugar y no este. Cuando aplica
 (negocio sin flujo propio para esto), nunca te lo saltees por mas simple que parezca el pedido. Apenas
-tengas los datos completos (producto(s) y cantidad, direccion, forma de pago Y nombre), y ANTES de
+tengas los datos completos (producto(s) y cantidad, variante/color elegida si el producto tiene, direccion,
+forma de pago Y nombre), y ANTES de
 pedirle el comprobante o cualquier confirmacion de pago, mostrale al cliente ese resumen real: cada
 producto con su cantidad, el costo de envio (aclarando si es gratis), y el TOTAL final que va a pagar -
 y pregunta explicitamente algo como "¿esta correcto tu pedido?" o "¿confirmas estos datos?". Segui recien
@@ -428,7 +458,13 @@ de cerrar, etc), seguí ESE flujo tal cual esta escrito aca, en su propio orden 
 no lo reemplaces por las secciones genericas de mas arriba de este prompt ni lo mezcles con ellas.
 
 Esto es SOLO sobre el guion/orden de la conversacion (que preguntar, en que orden, como redactarlo) - NUNCA
-reemplaza la obligacion de conseguir datos reales con las herramientas. Aunque el texto de aca abajo diga
+reemplaza la obligacion de conseguir datos reales con las herramientas. IMPORTANTE: que el negocio liste
+aca que datos necesita para un paso (ej. "para el envio pido nombre, celular, direccion, casa o apto") NO
+es lo mismo que decir COMO pedirlos turno a turno - el listado es sobre EL CONTENIDO del paso, no reemplaza
+la regla generica de pedir todos esos datos JUNTOS en un solo mensaje (ver mas arriba), que sigue aplicando
+SIEMPRE salvo que el texto de aca abajo diga explicitamente algo como "pregunta un dato a la vez" o
+"espera la respuesta antes de pedir el siguiente". Sin esa frase explicita, pedís junto TODO lo que este
+paso liste. Aunque el texto de aca abajo diga
 en prosa "muestra las opciones de pago" o "confirma el precio" sin mencionar ninguna herramienta (el
 negocio lo escribio como guion humano, no como instruccion tecnica), vos igual tenes que llamar
 get_payment_methods, search_products, get_faq, etc, CADA VEZ que el flujo de este negocio te lleve a
@@ -609,7 +645,7 @@ export const CATALOG_CHECK_CLAIM_PATTERN =
 // conversation where the owner had to add the name by hand afterward. Only fires when the bot's PRIOR
 // turn actually asked for the name (so a random two-word customer message elsewhere never gets
 // mistaken for one) and the customer's answer is shaped like a name, not a sentence.
-const ASK_NAME_PATTERN =
+export const ASK_NAME_PATTERN =
   /\b(a nombre de qui[eé]n|tu nombre completo|nombre completo|c[oó]mo te llamas|cu[aá]l es tu nombre|tu nombre,? por favor)\b/i;
 
 // Same failure mode once more, for the case the prior fix didn't cover: the customer volunteers their
@@ -888,9 +924,19 @@ export function findMentionedProductsForMediaBackstop<T extends { name: string; 
   return matched;
 }
 
+// Strips WhatsApp markdown emphasis (*bold*, _italic_) - real production bug (2026-09-13): the bot wrote
+// "¿Me confirmas tu *nombre*, por favor?" (bold per its own ESTILO), and ASK_NAME_PATTERN/ASK_ID_PATTERN/
+// ASK_PHONE_PATTERN below look for the literal phrase as contiguous text ("tu nombre, por favor") - the
+// asterisks around the key word broke every one of these regexes silently, so save_customer_name/
+// save_customer_contact_info never fired even though the bot's own reply proves it DID ask and the
+// customer DID answer. Confirmed via a real customer stuck as "Mano" in the panel after giving "Carlos".
+export function stripMarkdownEmphasis(text: string): string {
+  return text.replace(/[*_]/g, "");
+}
+
 function lastAssistantText(history: { role: string; content: string }[]): string {
   for (let i = history.length - 2; i >= 0; i--) {
-    if (history[i].role === "ASSISTANT") return history[i].content;
+    if (history[i].role === "ASSISTANT") return stripMarkdownEmphasis(history[i].content);
     if (history[i].role === "CUSTOMER") break;
   }
   return "";
@@ -1178,6 +1224,44 @@ export async function generateReply(
         } catch {
           input = {};
         }
+        
+        // Real production bug (2026-09-13): once find_products_by_attributes scopes a color/category
+        // query this turn, the model keeps calling send_product_media with a productId it picked up
+        // earlier in the CONVERSATION HISTORY (e.g. a product it wrongly listed as "negro" several turns
+        // ago) instead of one of THIS turn's real matches - a prompt instruction alone didn't stop it
+        // (confirmed with a controlled repro), so this blocks the send at the code level instead of
+        // trusting the model to pick the right ID. Only engages once a real attribute filter has run this
+        // turn; every other send_product_media call (a directly-named product, no color/category filter
+        // involved) is unaffected.
+        if (call.function.name === "send_product_media" && attributeMatchThisTurn && attributeMatchThisTurn.length > 0) {
+          const inputProductId = input.productId ? String(input.productId) : null;
+          const inputProductName = input.productName ? normalizeForMatch(String(input.productName)) : null;
+          const inputVariantId = input.variantId ? String(input.variantId) : null;
+          const isRealMatch = attributeMatchThisTurn.some((m) => {
+            const productMatches = inputProductId
+              ? m.productId === inputProductId
+              : inputProductName !== null && normalizeForMatch(m.productName).includes(inputProductName);
+            if (!productMatches) return false;
+            return m.variantId ? inputVariantId === m.variantId : true;
+          });
+          if (!isRealMatch) {
+            console.error(
+              "send_product_media bloqueado: productId/variantId no esta entre los resultados reales de find_products_by_attributes de este turno:",
+              input
+            );
+            messages.push({
+              role: "tool",
+              tool_call_id: call.id,
+              content: JSON.stringify({
+                sent: false,
+                error:
+                  "Ese producto/variante no esta entre los resultados reales de tu busqueda por color/categoria de este turno - no se envio nada. Usa unicamente el productId/variantId que te devolvio find_products_by_attributes en ESTE turno.",
+              }),
+            });
+            continue;
+          }
+        }
+
         const result = (await runCatalogTool(context, call.function.name, input)) as {
           mediaJustSent?: boolean;
           sent?: boolean;

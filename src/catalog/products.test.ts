@@ -240,6 +240,60 @@ test("findProductsByAttributes: category+color only returns products that actual
   }
 });
 
+test("findProductsByAttributes: matches a compound real-world category string, not just an exact single-word category", async () => {
+  // Real production bug (2026-09-13): a business's actual Product.category is free text and often
+  // compound ("Tecnología / Relojes Inteligentes (Smartwatches)"), never just "reloj" - comparing the
+  // whole string against the target word after singularizing silently returned zero matches for every
+  // category-scoped color search, which pushed the model to a full-catalog fallback where it then
+  // sent/listed products of the wrong color (a gold watch, a pair of airpods) as if they were black.
+  const business = await prisma.business.create({
+    data: { name: `Test ${randomUUID()}`, email: `test-${randomUUID()}@example.com`, passwordHash: "x" },
+  });
+  try {
+    await prisma.product.createMany({
+      data: [
+        {
+          businessId: business.id,
+          name: "Smartwatch Serie 11",
+          description: "Reloj negro elegante",
+          price: 100000,
+          currency: "COP",
+          stock: 5,
+          category: "Tecnología / Relojes Inteligentes (Smartwatches)",
+          color: "Negro",
+        },
+        {
+          businessId: business.id,
+          name: "Smartwatch Gen 9",
+          description: "Reloj elegante",
+          price: 80000,
+          currency: "COP",
+          stock: 5,
+          category: "Tecnología (smartwatch)",
+          color: "Dorado",
+        },
+        {
+          businessId: business.id,
+          name: "Airpods Serie 4",
+          description: "Audifonos negros",
+          price: 60000,
+          currency: "COP",
+          stock: 5,
+          category: "Tecnologia (Audifonos)",
+          color: "Negro",
+        },
+      ],
+    });
+
+    const result = await findProductsByAttributes(business.id, { category: "reloj", color: "negro" });
+    assert.equal(result.matches.length, 1, "must match only the black watch, not the gold watch or the black headphones");
+    assert.equal(result.matches[0].productName, "Smartwatch Serie 11");
+  } finally {
+    await prisma.product.deleteMany({ where: { businessId: business.id } });
+    await prisma.business.delete({ where: { id: business.id } });
+  }
+});
+
 test("findProductsByAttributes: a variant-level match returns only that variant, not the whole product's other colors", async () => {
   const business = await prisma.business.create({
     data: { name: `Test ${randomUUID()}`, email: `test-${randomUUID()}@example.com`, passwordHash: "x" },
