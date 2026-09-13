@@ -417,9 +417,7 @@ fase real:
    importan de `agent.ts`). Refactor puro, sin cambio de comportamiento — deja Fase 6.2 más segura de
    encarar. `npx tsc --noEmit` limpio; suite completa corrida archivo por archivo (202/202 verde, ya que
    `npm test` sin filtro está bloqueado para esta sesión por política del proyecto — se confirmó primero que
-   ningún `*.test.ts` hace una llamada real a DeepSeek). **Commiteado, no desplegado todavía** — cambio de
-   forma únicamente, pero toca `agent.ts` real, así que igual amerita su propio deploy antes de seguir a la
-   próxima fase.
+   ningún `*.test.ts` hace una llamada real a DeepSeek). **Commiteado (`39311dd`) y desplegado a producción 2026-09-13**.
 2. **Terminar de migrar los guards standalone al registry.** Fase 1 dejó `intentFlagged`/`nameSaved`/
    `contactSaved` y el guard de media como `if`s sueltos "porque tenían forma distinta" — si esa forma se
    puede generalizar un poco, sumarlos al `ClaimBackstopGuard` registry deja un solo lugar para razonar sobre
