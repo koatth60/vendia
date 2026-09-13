@@ -383,27 +383,26 @@ se corrió ningún paid test para esta fase. **Commiteado (`ff14102`) y desplega
 
 ### Track B — feature nueva: optimizador de `customInstructions` con IA
 
-Distinto del Track A: esto NO corre en cada mensaje del bot, corre UNA VEZ cuando el dueño lo pide desde el
-panel admin. El dueño escribe su texto libre en la sección "Tu negocio" (`customInstructions`); un botón
-"Optimizar con IA" llama al LLM una sola vez para reescribirlo más corto, misma lógica y contenido, sin
-agregar reglas nuevas. Es CORE (toda la plataforma), no específico de MAG.IMP — cualquier negocio con
-`customInstructions` largo se beneficia, aunque MAG.IMP es el caso real más largo para probarlo primero.
+**Fase 7.1+7.2 DONE 2026-09-13, replanteado.** Al empezar a construir el endpoint nuevo se encontró que ya
+existía "Mejorar redacción" (`business-instructions` textarea, panel "Tu negocio") — un botón que ya
+llamaba a DeepSeek de verdad (`POST /api/improve-instructions`, `admin.ts`), solo que apuntado a gramática/
+organización, no a acortar, y reemplazando el textarea de una sin aprobación. Consultado con el usuario:
+eligió extender ese feature existente en vez de duplicar un segundo botón similar.
 
-**Fase 7.1 — backend.** Endpoint nuevo en `admin.ts`, ej. `POST /api/business/custom-instructions/optimize`:
-toma el texto actual, llama a DeepSeek con un prompt separado (no el de ventas) tipo "reescribe este texto
-en español más corto, sin perder ningún dato ni regla, sin agregar nada nuevo, devolvé solo el texto
-reescrito". Costo real pero puntual (una llamada por click, no recurrente). Test: mockear la llamada al
-cliente DeepSeek, no usar la real en `*.test.ts` (misma regla de CLAUDE.md sobre `*Paid.ts`).
+Implementado (`ba43ec6`): prompt (`src/ai/prompts/improveInstructions.ts`) ahora también apunta a acortar
+cuando puede, con la misma garantía de no perder datos/reglas ni agregar nuevas; `max_tokens` pasó de fijo
+600 a escalar con el largo del input (600 truncaba a mitad de camino un `customInstructions` real largo -
+visto hasta ~8.3k caracteres/~2.7k tokens en producción); el botón ya NO reemplaza el textarea directo -
+ahora muestra la propuesta en un panel de preview que el dueño tiene que aprobar ("Usar este texto") o
+descartar explícitamente (Fase 7.2 del plan original). 4 tests nuevos (llamada a DeepSeek mockeada, nunca
+real en `*.test.ts`). Verificado en vivo contra el dev server con un negocio de prueba local (creado y
+borrado dentro de la misma sesión, no un cliente real): preview muestra el texto reescrito, el textarea
+original queda intacto hasta apretar "Usar este texto", "Descartar" no cambia nada. `npx tsc --noEmit`
+limpio, suite completa 213/213. Commiteado, no desplegado todavía.
 
-**Fase 7.2 — frontend (`admin/index.html`).** Botón "Optimizar con IA" junto al textarea de
-`customInstructions`, con vista antes/después — el dueño aprueba o descarta, NUNCA se reemplaza el texto
-solo porque se generó (es su texto de negocio, puede tener matices que el LLM interprete distinto). Guardar
-solo si el dueño aprieta algo como "usar este texto". Ships con su UI en la misma fase, por la regla ya
-existente de este plan sobre toggles/features nuevas.
-
-**Fase 7.3 — validación real.** Probar con el `customInstructions` real de MAG.IMP (el más largo hoy):
-comparar tokens antes/después del texto optimizado, y correr `npm run regression` (con aprobación del
-usuario) para confirmar que el bot sigue el mismo flujo con el texto reescrito.
+**Fase 7.3 — validación real (pendiente).** Probar con el `customInstructions` real de MAG.IMP (el más
+largo hoy): comparar tokens antes/después del texto optimizado, y correr `npm run regression` (con
+aprobación del usuario) para confirmar que el bot sigue el mismo flujo con el texto reescrito.
 
 ### Track C — buenas prácticas de código (propuesta 2026-09-13, no fases todavía, priorizar con el usuario)
 
