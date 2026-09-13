@@ -631,25 +631,6 @@
         </div>
       </div>
 
-      <div class="section-title">Sinónimos de categoría</div>
-      <div class="card">
-        <p style="font-size:13px; color:var(--muted); margin-top:0;">Si un cliente pide una categoría con una palabra distinta a la que usas en tu catálogo (ej. pide "reloj" pero tus productos dicen "smartwatch"; o pide "guineo" y tus productos dicen "banano"), agrega el sinónimo acá para que el bot los relacione. No hace falta para colores, esos ya los reconoce el bot solo.</p>
-        <div class="grid-2">
-          <div>
-            <label>Palabra que usas en tu catálogo</label>
-            <input id="ca-canonical" placeholder="Ej: smartwatch" />
-          </div>
-          <div>
-            <label>Palabra que puede usar el cliente</label>
-            <input id="ca-synonym" placeholder="Ej: reloj" />
-          </div>
-        </div>
-        <div class="actions-row">
-          <button class="btn-primary owner-only" onclick="addCategoryAlias()">+ Agregar sinónimo</button>
-        </div>
-        <div id="category-aliases-list" style="margin-top:16px; display:flex; flex-direction:column; gap:8px;"></div>
-      </div>
-
       <div class="section-title">Agregar producto</div>
       <div class="card">
         <div class="grid-2">
@@ -711,6 +692,25 @@
         <div class="actions-row">
           <button class="btn-primary" onclick="addProduct()">+ Agregar producto</button>
         </div>
+      </div>
+
+      <div class="section-title">Sinónimos de categoría</div>
+      <div class="card">
+        <p style="font-size:13px; color:var(--muted); margin-top:0;">Si un cliente pide una categoría con una palabra distinta a la que usas en tu catálogo (ej. pide "reloj" pero tus productos dicen "smartwatch"; o pide "guineo" y tus productos dicen "banano"), agrega el sinónimo acá para que el bot los relacione. No hace falta para colores, esos ya los reconoce el bot solo.</p>
+        <div class="grid-2">
+          <div>
+            <label>Palabra que usas en tu catálogo</label>
+            <input id="ca-canonical" placeholder="Ej: smartwatch" />
+          </div>
+          <div>
+            <label>Palabra que puede usar el cliente</label>
+            <input id="ca-synonym" placeholder="Ej: reloj" />
+          </div>
+        </div>
+        <div class="actions-row">
+          <button class="btn-primary owner-only" onclick="addCategoryAlias()">+ Agregar sinónimo</button>
+        </div>
+        <div id="category-aliases-list" style="margin-top:16px; display:flex; flex-direction:column; gap:8px;"></div>
       </div>
 
       <div class="section-title">Productos cargados</div>
