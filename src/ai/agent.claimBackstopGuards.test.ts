@@ -43,6 +43,13 @@ test("photo: a genuine completed claim still fires", () => {
   assert.equal(modelClaimsSent, true);
 });
 
+// H10, 2026-09-13: enclitic-pronoun phrasing ("mandarte", "enviarte" - "te" attached AFTER the verb) was
+// not covered by any existing alternative, all of which only match "te" appearing BEFORE the verb stem.
+test("photo: enclitic pronoun phrasing ('mandarte la foto') fires as a real claim", () => {
+  assert.equal(PHOTO_CLAIM_PATTERN.test("Déjame mandarte la foto 👇"), true);
+  assert.equal(PHOTO_CLAIM_PATTERN.test("voy a enviarte las fotos ahora"), true);
+});
+
 test("escalation: offering to ask the owner does not fire ask_owner", () => {
   assert.equal(fires(ESCALATION_CLAIM_PATTERN, "¿Quieres que consulte con el equipo sobre este descuento?"), false);
   assert.equal(

@@ -32,44 +32,37 @@ function messageText(m: { content: string; imageAnalysis: string | null }): stri
 
 // recordMessage writes one ASSISTANT row PER media item sent (sendMediaWithSpacing, tools.ts), each with
 // content exactly "[Foto de X]"/"[Video de X]" - a real backstop blast of 8-9 photos filled 8-9 of the 20
-// history slots with that literal string. Real production incident (2026-09-13): the model, seeing its own
-// recent turns dominated by that exact bracket format, started FABRICATING it in its own reply text without
-// ever calling send_product_media - FAKE_MEDIA_TAG_PATTERN caught the fabrication and re-triggered the
-// photo backstop, which wrote more "[Foto de X]" rows into history, reinforcing the same pattern for the
-// next turn. Collapses each consecutive run of these into one compact summary line before the history goes
-// to the model - it still knows photos went out (so it doesn't re-offer them), but never sees enough of the
-// literal format to imitate it, and the collapse is a net token REDUCTION. Exported as a pure function for
-// a cheap test - no DB/LLM needed. Deliberately NOT applied to `history` itself (used elsewhere for
-// lastAssistantText, which needs the real prior text, e.g. to detect the bot's own name-asking phrasing).
+// history slots with that literal string. Real production incident (2026-09-13, first occurrence): the
+// model, seeing its own recent turns dominated by that exact bracket format, started FABRICATING it in its
+// own reply text without ever calling send_product_media.
+//
+// First fix attempt (same day) collapsed consecutive runs into one ASSISTANT-role summary line
+// ("[Se envio 1 foto/video: X]") - REGRESSION found the same day in a follow-up test conversation: the
+// model just imitated THAT new bracket format instead, since it was still an ASSISTANT-role message shaped
+// like something it had just said. Real fix: stop putting ANY bracket-shaped media confirmation into a
+// turn the model could mistake for its own prior utterance. Media rows are removed from the conversational
+// history entirely; the fact that photos already went out is told to the model as a `system` note instead
+// (same channel as RESUMEN DE LO HABLADO ANTES below) - system content isn't something a model echoes back
+// as its own reply. Exported as a pure function for a cheap test - no DB/LLM needed. Deliberately NOT
+// applied to `history` itself (used elsewhere for lastAssistantText, which needs the real prior text, e.g.
+// to detect the bot's own name-asking phrasing).
 const MEDIA_CAPTION_PATTERN = /^\[(?:Foto|Video) de (.+)\]$/;
 
-export function collapseMediaCaptions<T extends { role: string; content: string; imageAnalysis: string | null }>(
+export function extractMediaHistory<T extends { role: string; content: string; imageAnalysis: string | null }>(
   history: T[]
-): T[] {
-  const result: T[] = [];
-  let mediaRun: string[] = [];
-
-  const flush = () => {
-    if (mediaRun.length === 0) return;
-    const summary =
-      mediaRun.length === 1
-        ? `[Se envio 1 foto/video: ${mediaRun[0]}]`
-        : `[Se enviaron ${mediaRun.length} fotos/videos: ${mediaRun.join(", ")}]`;
-    result.push({ role: "ASSISTANT", content: summary, imageAnalysis: null } as T);
-    mediaRun = [];
-  };
+): { history: T[]; photosSent: string[] } {
+  const filtered: T[] = [];
+  const photosSent: string[] = [];
 
   for (const m of history) {
     const match = m.role === "ASSISTANT" ? m.content.match(MEDIA_CAPTION_PATTERN) : null;
     if (match) {
-      mediaRun.push(match[1]);
+      if (!photosSent.includes(match[1])) photosSent.push(match[1]);
       continue;
     }
-    flush();
-    result.push(m);
+    filtered.push(m);
   }
-  flush();
-  return result;
+  return { history: filtered, photosSent };
 }
 
 // getRecentHistory only sends the last RECENT_WINDOW messages to the model - a long conversation would
@@ -169,8 +162,13 @@ export const CUSTOMER_PHOTO_REQUEST_PATTERN =
 export const CUSTOMER_PHOTO_NEGATION_PATTERN = /\bno me (muestra|ense[nñ]a)\b/i;
 // Broadened beyond "te mand.." to also catch phrasings without "te" ("ya la mande", "ahi la envio") and
 // "aca"/"aqui esta(n)" - a real conversation slipped through the narrower pattern with "ya se la mande".
+// H10 (2026-09-13 incident): "(mand|envi|pas|mostr)ar(te|le)" catches the enclitic-pronoun phrasing
+// ("Déjame mandarte la foto", "voy a enviarte las fotos") that none of the other alternatives cover -
+// "te (mand|envi|pas)" only matches when "te" comes BEFORE the verb, not attached after it as a suffix.
+// A real production case ("Déjame mandarte la foto 👇... ¿Te lo llevas?") fell through every existing
+// alternative, so the promise was never backed by a real send_product_media call.
 export const PHOTO_CLAIM_PATTERN =
-  /\b(te (mand|envi|pas)|ya (te |se la |la |lo )?(mand|envi|pas)\w*|aqu[ií] (te|va|van|est[aá])|ac[aá] (te|va|van|est[aá])|ah[ií] (te|va|van))/i;
+  /\b(te (mand|envi|pas)|ya (te |se la |la |lo )?(mand|envi|pas)\w*|aqu[ií] (te|va|van|est[aá])|ac[aá] (te|va|van|est[aá])|ah[ií] (te|va|van)|(mand|envi|pas|mostr)ar(te|le)\b)/i;
 // "te (mand|envi|pas)" above also matches a conditional offer inside a still-open clarifying question
 // ("Dime el número o el nombre y te paso fotos y detalles, ¿cuál prefieres?") - that's a promise
 // contingent on the customer's answer, not a claim that photos already went out. Real production bug
@@ -180,11 +178,17 @@ export const PHOTO_CLAIM_PATTERN =
 // what the customer asked for, before the customer had picked one.
 export const OPEN_CLARIFYING_QUESTION_PATTERN =
   /\bcu[aá]l\b.{0,30}\b(prefer|interes|te (gust|llam))|\bdime\b.{0,20}\b(n[uú]mero|nombre)\b/i;
-// The model sometimes fabricates the exact "[Foto de X]"/"[Video de X]" caption that recordMessage
-// writes for a REAL send, without ever calling send_product_media - a copy-the-pattern hallucination,
-// not a natural-language claim, so it doesn't match PHOTO_CLAIM_PATTERN above. Catch it directly.
-const FAKE_MEDIA_TAG_PATTERN = /\[(?:foto|video)s? de /i;
-const MEDIA_TAG_STRIP_PATTERN = /\[(?:foto|video)s? de [^\]]*\]/gi;
+// The model sometimes fabricates a bracket-shaped media-confirmation caption without ever calling
+// send_product_media - a copy-the-pattern hallucination, not a natural-language claim, so it doesn't
+// match PHOTO_CLAIM_PATTERN above. Catch it directly. Broadened 2026-09-13 (second occurrence of the same
+// incident class): the original pattern only caught the exact "[Foto de X]" shape recordMessage writes -
+// a same-day fix that summarized several sends as "[Se envio 1 foto/video: X]" got imitated by the model
+// in its OWN reply text, and that different bracket shape slipped past this pattern uncaught. Broadened to
+// match ANY bracketed text mentioning foto(s)/video(s), regardless of the exact wording around it - the
+// model has no real caption format worth preserving here, only real sends do, and those never appear
+// inside the model's own generated `text`.
+export const FAKE_MEDIA_TAG_PATTERN = /\[[^\]]{0,60}\b(?:fotos?|videos?)\b[^\]]{0,60}\]/i;
+export const MEDIA_TAG_STRIP_PATTERN = /\[[^\]]{0,60}\b(?:fotos?|videos?)\b[^\]]{0,60}\]/gi;
 
 // Shared guard for the three claim-patterns below: each was built to catch a dropped-promise bug (model
 // says it'll do something, never calls the real tool), but the same claim wording also shows up inside a
@@ -709,14 +713,15 @@ export async function generateReply(
   personality?: BotPersonality | null,
   customerText?: string
 ): Promise<string> {
-  // Fetch a bigger window than the model actually sees: collapseMediaCaptions can shrink several rows
-  // (one per photo/video sent) down to a single summary line, so 30 raw rows reliably leaves ~20
-  // meaningful entries after collapsing. `history` itself (raw, uncollapsed) is still used below for
-  // lastAssistantText, which needs the real prior text - growing its window from 20 to 30 doesn't change
-  // that function's result (it scans backward and stops at the first CUSTOMER row either way).
+  // Fetch a bigger window than the model actually sees: extractMediaHistory removes several rows (one
+  // per photo/video sent) entirely, so 30 raw rows reliably leaves ~20 meaningful entries after that.
+  // `history` itself (raw, unfiltered) is still used below for lastAssistantText, which needs the real
+  // prior text - growing its window from 20 to 30 doesn't change that function's result (it scans
+  // backward and stops at the first CUSTOMER row either way).
   const history = await getRecentHistory(conversationId, 30);
   const contextSummary = await getOrRefreshContextSummary(conversationId, context.businessId);
-  const modelFacingHistory = collapseMediaCaptions(history).slice(-20);
+  const { history: mediaFreeHistory, photosSent } = extractMediaHistory(history);
+  const modelFacingHistory = mediaFreeHistory.slice(-20);
 
   const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
     { role: "system", content: buildSystemPrompt(personality) },
@@ -725,6 +730,14 @@ export async function generateReply(
           {
             role: "system" as const,
             content: `RESUMEN DE LO HABLADO ANTES (mensajes mas viejos que ya no ves completos): ${contextSummary}`,
+          },
+        ]
+      : []),
+    ...(photosSent.length > 0
+      ? [
+          {
+            role: "system" as const,
+            content: `FOTOS/VIDEOS YA ENVIADOS en esta conversacion (no los vuelvas a ofrecer ni a decir que los mandaste de nuevo, salvo que el cliente los pida explicitamente): ${photosSent.join(", ")}`,
           },
         ]
       : []),
