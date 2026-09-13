@@ -675,12 +675,17 @@
         <div class="hint">¿Este producto viene en varios colores o tallas, cada uno con su propio stock? Agregalos abajo antes de guardar - las fotos propias de cada variante sí se suben después, ya con el producto creado.</div>
         <div class="variant-section" style="border-top:none; padding-top:0; margin-top:10px;">
           <div class="variant-section-title">Colores/tallas (opcional)</div>
+          <div class="hint" style="margin-top:0; margin-bottom:6px;">Si tenés una foto propia de este color, adjuntala acá - queda ligada a esa variante desde el momento en que se crea. Una foto donde se ven varios colores juntos va aparte, subida a la tarjeta después de guardar (sirve como respaldo para cualquier color sin foto propia).</div>
           <div id="p-draft-variant-list" class="variant-list"></div>
           <div class="variant-add-row">
             <span id="p-draft-variant-swatch-wrap"><span class="variant-swatch is-unknown"></span></span>
             <input id="p-draft-variant-color" type="text" placeholder="Color nuevo" style="flex:1; min-width:0;" oninput="updateDraftVariantSwatch()" />
             <input id="p-draft-variant-size" type="text" placeholder="Talla" style="width:60px;" hidden />
             <input id="p-draft-variant-stock" type="number" placeholder="Stock" value="0" style="width:60px;" />
+            <label class="variant-photo-btn" id="p-draft-variant-photo-btn" title="Foto propia de este color (opcional)">
+              <span id="p-draft-variant-photo-preview">+</span>
+              <input type="file" id="p-draft-variant-photo" accept="image/jpeg,image/png,video/*" onchange="previewDraftVariantPhoto()" />
+            </label>
             <button class="btn-secondary" style="padding:6px 12px; flex-shrink:0;" onclick="addDraftVariant()">Agregar</button>
           </div>
         </div>
@@ -1864,27 +1869,49 @@ function updateDraftVariantSwatch() {
 function renderDraftVariants() {
   document.getElementById('p-draft-variant-list').innerHTML = draftVariants.map((v, i) => `
     <div class="variant-row">
-      ${colorSwatchHtml(v.color)}
+      ${v.photoPreviewUrl ? `<img src="${v.photoPreviewUrl}" style="width:18px; height:18px; border-radius:50%; object-fit:cover; flex-shrink:0;" />` : colorSwatchHtml(v.color)}
       <span class="variant-name-input" style="padding:4px 2px;">${escapeHtml(v.color || '(sin color)')}</span>
       ${v.size ? `<span class="variant-size-input">${escapeHtml(v.size)}</span>` : ''}
       <div class="variant-stock-wrap"><label>Stock</label><span class="variant-stock-input" style="cursor:default;">${v.stock}</span></div>
+      ${v.file ? `<span class="hint" style="margin:0; flex-shrink:0;" title="${escapeHtml(v.file.name)}">📎 con foto</span>` : ''}
       <button class="variant-delete-btn" title="Quitar" onclick="removeDraftVariant(${i})">×</button>
     </div>
   `).join('');
+}
+
+// Only ever touches the preview span, never the <input> itself - replacing the input via innerHTML
+// would create a brand new element with an empty FileList, silently losing the file the user just
+// picked right before addDraftVariant() reads it.
+function previewDraftVariantPhoto() {
+  const file = document.getElementById('p-draft-variant-photo').files[0];
+  const btn = document.getElementById('p-draft-variant-photo-btn');
+  const preview = document.getElementById('p-draft-variant-photo-preview');
+  if (!file) {
+    btn.classList.remove('has-photo');
+    preview.innerHTML = '+';
+    return;
+  }
+  btn.classList.add('has-photo');
+  const url = URL.createObjectURL(file);
+  preview.innerHTML = file.type.startsWith('video') ? `<video src="${url}"></video>` : `<img src="${url}" />`;
 }
 
 function addDraftVariant() {
   const color = document.getElementById('p-draft-variant-color').value.trim();
   const size = document.getElementById('p-draft-variant-size').value.trim();
   const stock = Number(document.getElementById('p-draft-variant-stock').value || 0);
+  const file = document.getElementById('p-draft-variant-photo').files[0] || null;
   if (!color && !size) {
     setStatus('La variante necesita al menos un color o una talla', true);
     return;
   }
-  draftVariants.push({ color, size, stock });
+  draftVariants.push({ color, size, stock, file, photoPreviewUrl: file ? URL.createObjectURL(file) : null });
   document.getElementById('p-draft-variant-color').value = '';
   document.getElementById('p-draft-variant-size').value = '';
   document.getElementById('p-draft-variant-stock').value = '0';
+  document.getElementById('p-draft-variant-photo').value = '';
+  document.getElementById('p-draft-variant-photo-btn').classList.remove('has-photo');
+  document.getElementById('p-draft-variant-photo-preview').innerHTML = '+';
   updateDraftVariantSwatch();
   renderDraftVariants();
 }
@@ -1914,12 +1941,43 @@ async function addProduct() {
     const res = await apiFetch('/admin/api/products', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, description, price, currency, stock, category, color, size, variants: draftVariants }),
+      // .file/.photoPreviewUrl are local-only (a File object, a blob: URL) - the server never sees
+      // them, only the plain fields it stores on ProductVariant.
+      body: JSON.stringify({
+        name, description, price, currency, stock, category, color, size,
+        variants: draftVariants.map(({ color, size, stock }) => ({ color, size, stock })),
+      }),
     });
     created = await res.json();
   } catch (err) {
     setStatus(`No se pudo agregar: ${err.message}`, true);
     return;
+  }
+
+  // Now that real variant ids exist, upload each queued photo straight to its own variant - matched by
+  // color+size since nested-create's returned order isn't guaranteed to match the input array.
+  const queuedPhotos = draftVariants.filter((v) => v.file);
+  if (queuedPhotos.length > 0 && created?.variants?.length) {
+    setStatus(`Subiendo ${queuedPhotos.length} foto(s) de variante...`);
+    const usedIds = new Set();
+    for (const draft of queuedPhotos) {
+      const match = created.variants.find(
+        (v) => !usedIds.has(v.id) && (v.color || '') === (draft.color || '') && (v.size || '') === (draft.size || '')
+      );
+      if (!match) continue;
+      usedIds.add(match.id);
+      const formData = new FormData();
+      formData.append('file', draft.file);
+      formData.append('variantId', match.id);
+      try {
+        await apiFetch(`/admin/api/products/${created.id}/media`, { method: 'POST', body: formData });
+      } catch (err) {
+        setStatus(`No se pudo subir la foto de "${draft.color || draft.size}": ${err.message}`, true);
+      }
+    }
+  }
+  for (const draft of draftVariants) {
+    if (draft.photoPreviewUrl) URL.revokeObjectURL(draft.photoPreviewUrl);
   }
 
   document.getElementById('p-name').value = '';
