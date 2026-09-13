@@ -440,6 +440,41 @@ test("findProductsByAttributes: a color with no category, present in several cat
   }
 });
 
+// Real production incident, MAG.IMP, 2026-09-13: a customer asked for "relojes grises" and the bot
+// listed "Combo Pareja" as one of the gray options - it has no color field and no variants, and its
+// description is marketing prose listing 7 interchangeable pulsera colors as bundle CONTENTS ("incluye
+// pulsos en Metalico Plateado, Cuero Marron, Silicona Azul/Negra/Morada/Gris/Blanca"), not the product's
+// own color. Scanning that description made it match almost any color query. It must only match a color
+// query via its dedicated color field or its name, never free-form description prose.
+test("findProductsByAttributes: a bundle product whose description lists many colors as CONTENTS does not match every color query", async () => {
+  const business = await prisma.business.create({
+    data: { name: `Test ${randomUUID()}`, email: `test-${randomUUID()}@example.com`, passwordHash: "x" },
+  });
+  try {
+    await prisma.product.create({
+      data: {
+        businessId: business.id,
+        name: "Combo Pareja",
+        description:
+          "Incluye pulsos en acabado Metalico Plateado, Cuero Marron, Silicona Azul/Negra/Morada/Gris/Blanca y Nylon.",
+        price: 250000,
+        currency: "COP",
+        stock: 3,
+        category: "combos",
+      },
+    });
+
+    const grisResult = await findProductsByAttributes(business.id, { color: "gris" });
+    assert.equal(grisResult.matches.length, 0, "must not match 'gris' just because the description lists it as a bundled strap color");
+
+    const rojoResult = await findProductsByAttributes(business.id, { color: "rojo" });
+    assert.equal(rojoResult.matches.length, 0, "must not match every other color mentioned in the description either");
+  } finally {
+    await prisma.product.deleteMany({ where: { businessId: business.id } });
+    await prisma.business.delete({ where: { id: business.id } });
+  }
+});
+
 test("findProductsByAttributes: refuses to dump the whole catalog when neither color nor category is given", async () => {
   const result = await findProductsByAttributes(businessId, {});
   assert.deepEqual(result, { matches: [], categoriesFound: [] });

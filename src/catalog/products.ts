@@ -294,7 +294,15 @@ export async function findProductsByAttributes(
     }
 
     if (targetColors.size > 0) {
-      const productColors = canonicalColors(`${product.color ?? ""} ${product.name} ${product.description}`);
+      // NOT product.description here (real production bug, 2026-09-13): a bundle/combo product's
+      // description is marketing prose that can legitimately list several colors as bundle CONTENTS
+      // ("incluye pulsos en Metalico Plateado, Cuero Marron, Silicona Azul/Negra/Morada/Gris/Blanca") -
+      // scanning it as "the product's color" made that one product match almost any color query. The
+      // dedicated color field and the product's own name are both something a business sets deliberately
+      // as ITS color, never free-form bundle-contents prose - this tool's own description already says
+      // "colores reales del catalogo (no por texto libre)", so scanning the description contradicted its
+      // own contract.
+      const productColors = canonicalColors(`${product.color ?? ""} ${product.name}`);
       if (!productColors.some((c) => targetColors.has(c))) continue;
     }
     matches.push({
