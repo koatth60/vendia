@@ -4,6 +4,7 @@ import {
   createProduct,
   deleteProduct,
   deleteProductMedia,
+  assignProductMedia,
   listAllProducts,
   updateProduct,
   addProductMedia,
@@ -420,6 +421,12 @@ adminRouter.post("/api/products/:id/media", upload.single("file"), async (req, r
 adminRouter.delete("/api/media/:id", async (req, res) => {
   await deleteProductMedia(businessIdOf(req), String(req.params.id));
   res.status(204).send();
+});
+
+adminRouter.put("/api/media/:id/assign", async (req, res) => {
+  const variantId = req.body.variantId ? String(req.body.variantId) : null;
+  const media = await assignProductMedia(businessIdOf(req), String(req.params.id), variantId);
+  res.json(media);
 });
 
 adminRouter.get("/api/payment-methods", async (req, res) => {

@@ -352,6 +352,23 @@ export async function deleteProductMedia(businessId: string, mediaId: string) {
   return media;
 }
 
+// Moves an ALREADY-UPLOADED photo/video between "general" (variantId null, the fallback every
+// variant without its own media uses) and one specific variant, or between two variants - a re-point
+// of the existing S3 object's owner row, never a re-upload. Added because the admin panel used to force
+// re-uploading the same file into a variant's own slot even when the exact photo already existed as a
+// general product photo, duplicating both the upload effort and the S3 storage for zero reason.
+export async function assignProductMedia(businessId: string, mediaId: string, variantId: string | null) {
+  const media = await prisma.productMedia.findFirst({
+    where: { id: mediaId, product: { businessId } },
+  });
+  if (!media) throw new Error("Media no encontrada");
+  if (variantId) {
+    const variant = await prisma.productVariant.findFirst({ where: { id: variantId, productId: media.productId } });
+    if (!variant) throw new Error("Variante no encontrada");
+  }
+  return prisma.productMedia.update({ where: { id: mediaId }, data: { variantId } });
+}
+
 // Variants are the opt-in layer for a product sold in several colors/sizes under one name (see
 // ProductVariant in schema.prisma) - a product with none behaves exactly as it did before this existed.
 export async function createProductVariant(
