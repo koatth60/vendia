@@ -337,7 +337,36 @@ original Y, si no matchea, si todas las palabras del label del modelo aparecen e
 ya no aparecen flageadas** (baseline de este bug: 6/470, esperado después del fix: 0/470 por este motivo
 puntual — otros nuevos hallazgos son otro tema).
 
-**Fase 6.2 — `BASE_SYSTEM_PROMPT`: consolidar por significado (riesgo medio-alto — la fase que se pausó).**
+**Fase 6.2 — DONE 2026-09-13 (código), PENDIENTE el regression batcheado antes de desplegar.**
+Hecha con Opus (decisión del usuario: fase de juicio ambiguo, no mecánica). Se siguió el proceso escrito
+abajo tal cual: se extrajeron las **101 reglas distintas** del prompt con su sección de origen, se agruparon
+por tema real (no por texto repetido), se escribió un bloque consolidado por tema y se verificó cada regla
+original una por una contra el texto nuevo.
+
+Dos bloques nuevos de "regla madre" absorben lo que antes se repetía en 5-6 secciones cada uno:
+- **DATOS REALES**: cada sección re-explicaba por su cuenta "nunca de memoria, siempre de la herramienta"
+  para su propio objeto (precios, llave/titular de pago, total del pedido, estado del pedido, productId de
+  fotos) más la regla de "negar también cuenta como inventar". Ahora se dice una vez con su razón y después
+  una lista corta de a qué aplica.
+- **PROMETER NO ES HACER**: el viejo bloque "CRITICO en general", ahora absorbiendo también el dato de "no
+  podés mandar un segundo mensaje en este turno" que vivía en PAGOS, y las repeticiones de esa misma regla
+  en PAGOS y en el flujo de datos del pedido.
+
+También se unificaron en un bloque **ESCALACION** las reglas de "cuándo NO escalar" (estaban partidas entre
+CATALOGO, CUANDO NO SABES y el flujo de datos), y se cortó de CIERRE la enumeración campo por campo de
+`close_conversation` — el schema de la herramienta ya declara cada campo con su descripción, incluida la
+semántica de `shippingCost` 0 y cómo se calcula el total (verificado leyendo el schema antes de cortar).
+
+**19,478 → 16,204 caracteres, -16.8%**, dentro de la meta realista 15-25% del plan. Verificación de que no
+se perdió ninguna regla: 41 marcadores críticos (nombres de herramientas, valores de enum, frases
+prohibidas literales, los placeholders `{{IDIOMA}}`/`{{FOTOS}}`/`{{COMPROBANTES}}`/`{{TARIFAS_ENVIO}}`)
+siguen presentes; cláusula de override de `customInstructions` re-verificada como todavía acotada a
+guion/orden y no a contenido técnico. `npx tsc --noEmit` limpio, suite completa 213/213.
+**Commiteado (`d12af7f`), NO desplegado**: a diferencia de las fases anteriores, esta cambia comportamiento
+que el modelo ve directamente. Su gate es el `npm run regression` batcheado (esta fase + el rewrite de
+customInstructions de Track B) — todavía sin correr.
+
+Texto original de la fase, por si hace falta revisar el criterio:
 Mismo hallazgo que la vez pasada sigue siendo cierto: las 42 apariciones de "nunca" NO son una frase
 repetida, son 42 reglas distintas, cada una atada a un incidente real de producción. Proceso concreto para
 no perder ninguna sin darse cuenta (lo que frenó el intento anterior):
