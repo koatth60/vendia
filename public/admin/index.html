@@ -254,15 +254,6 @@
   .variant-delete-btn:hover { background: var(--danger-light); color: var(--danger); }
   .variant-add-row { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
   .variant-add-row input[type="text"], .variant-add-row input[type="number"] { padding: 7px 10px; font-size: 12.5px; }
-  .variant-color-suggestions { margin-top: 6px; }
-  .variant-suggestions-label { font-size: 11.5px; color: var(--muted-soft); margin-bottom: 5px; }
-  .color-chip {
-    display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px 4px 6px; border-radius: 999px;
-    border: 1.5px dashed var(--border); background: transparent; color: var(--ink-soft); font-size: 12px; font-weight: 600;
-  }
-  .color-chip:hover { border-color: var(--brand); background: var(--brand-light); color: var(--brand-dark); }
-  .color-chip .variant-swatch { width: 12px; height: 12px; }
-
   .edit-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 12px 14px; background: var(--bg); border-top: 1px solid var(--border); }
   .edit-grid label { margin-top: 6px; font-size: 11px; }
   .edit-grid .full { grid-column: 1 / -1; }
@@ -1562,40 +1553,14 @@ function renderVariantSection(productId, variants) {
   `;
 }
 
-// Suggests variant colors from the product's first photo (see /api/products/:id/detect-colors) so the
-// owner doesn't have to type each color by hand when one photo shows several product colors at once -
-// still requires the owner to click "+color" per color, nothing is saved automatically. Detected colors
-// are cached here (not just left in the DOM) because loadProducts() re-renders every card from scratch
-// on each add (see addVariantWithColor below) - without this cache, adding the first suggested color
-// wiped out the sibling suggestions that hadn't been clicked yet.
-const colorSuggestionsCache = {};
-
-function renderColorSuggestions(productId) {
-  const box = document.getElementById(`color-suggestions-${productId}`);
-  if (!box) return;
-  const colors = colorSuggestionsCache[productId];
-  if (!colors || colors.length === 0) return;
-
-  const product = productsCache.find(p => p.id === productId);
-  const existing = new Set((product?.variants || []).map(v => (v.color || '').trim().toLowerCase()).filter(Boolean));
-  const remaining = colors.filter(c => !existing.has(c.toLowerCase()));
-  if (remaining.length === 0) {
-    delete colorSuggestionsCache[productId];
-    box.innerHTML = '';
-    return;
-  }
-
-  const chips = remaining.map(c => `
-    <button class="color-chip" onclick="addVariantWithColor('${productId}', '${escapeHtml(c).replace(/'/g, "\\'")}')">
-      ${colorSwatchHtml(c)}${escapeHtml(c)}
-    </button>
-  `).join('');
-  box.innerHTML = `
-    <div class="variant-suggestions-label">Colores detectados en la foto - click para agregar (stock 1, editalo después):</div>
-    <div style="display:flex; gap:6px; flex-wrap:wrap;">${chips}</div>
-  `;
-}
-
+// Detects variant colors from the product's first photo (see /api/products/:id/detect-colors) and
+// creates a real variant row per color directly - no separate "click to add" chip step. A chip-based
+// confirm step made the admin identify each color by name text alone before they could act on it,
+// which is exactly the extra friction a colorblind admin (reported directly) doesn't need when the
+// real variant row already has everything required to fix a bad guess: an editable color name, a
+// stock field, and a delete button (see renderVariantSection above) - land there straight away instead
+// of a second, weaker UI in front of it. Stock starts at 0 (not a guessed 1) since only the admin
+// actually knows the real count.
 async function detectColorsForProduct(productId) {
   const product = productsCache.find(p => p.id === productId);
   const imageUrl = product && product.media && product.media[0] && product.media[0].url;
@@ -1613,25 +1578,27 @@ async function detectColorsForProduct(productId) {
       box.innerHTML = `<div class="hint">No se distinguieron colores de producto en la foto.</div>`;
       return;
     }
-    colorSuggestionsCache[productId] = colors;
-    renderColorSuggestions(productId);
+
+    const existing = new Set((product.variants || []).map(v => (v.color || '').trim().toLowerCase()).filter(Boolean));
+    const newColors = colors.filter(c => !existing.has(c.toLowerCase()));
+    if (newColors.length === 0) {
+      box.innerHTML = `<div class="hint">Los colores detectados ya están agregados.</div>`;
+      return;
+    }
+
+    box.innerHTML = `<div class="hint">Creando ${newColors.length} variante(s) de color...</div>`;
+    for (const color of newColors) {
+      await apiFetch(`/admin/api/products/${productId}/variants`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ color, size: '', stock: 0 }),
+      });
+    }
+    box.innerHTML = '';
+    setStatus(`${newColors.length} variante(s) creadas - completá el stock de cada una ✓`);
+    await loadProducts();
   } catch (err) {
     box.innerHTML = `<div style="font-size:11px; color:var(--danger); margin-top:4px;">No se pudo analizar la foto: ${escapeHtml(err.message)}</div>`;
-  }
-}
-
-async function addVariantWithColor(productId, color) {
-  try {
-    await apiFetch(`/admin/api/products/${productId}/variants`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ color, size: '', stock: 1 }),
-    });
-    setStatus(`Variante "${color}" agregada ✓ (ajustá el stock)`);
-    await loadProducts();
-    renderColorSuggestions(productId);
-  } catch (err) {
-    setStatus(`No se pudo agregar la variante: ${err.message}`, true);
   }
 }
 
