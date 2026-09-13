@@ -1,0 +1,265 @@
+# Onix reliability plan
+
+Written 2026-09-13, end of a session that found and fixed several real production bugs (color/category
+escalation, markdown breaking name-save, one-by-one data collection, hardcoded category vocabulary). This
+file exists so that work can resume after a context compact without re-deriving the diagnosis. If you are
+an agent picking this up fresh: **read this whole file before touching code**, then start at the first
+phase not marked DONE, in order — each phase is scoped to be independently shippable (its own
+commit/deploy), and later phases assume earlier ones landed.
+
+Standing rules that apply to every phase below (already in memory, repeating here so they survive
+compaction too):
+- Do NOT run `npm run regression` or `npm run test:paid` on your own initiative — only if the user asks
+  for that specific run. Cheap single-turn synthetic repros (seed a business + a few messages, one real
+  `generateReply` call) are the preferred way to validate a fix.
+- Run `npx tsc --noEmit` after a batch of related edits, run only the affected test file(s) while
+  iterating, run full `npm test` once before committing.
+- Any change to `BASE_SYSTEM_PROMPT`, `catalogTools` descriptions, or backstop regexes in `agent.ts`:
+  look for a token-saving opportunity first (see CLAUDE.md).
+- A new per-business toggle/config ships its admin-panel UI in the same phase, not later.
+- Always tell the user explicitly when a feature is business-specific (MAG.IMP-only) vs core/standard.
+- Never hardcode vertical-specific vocabulary (product categories, unit names, etc) in code - see the
+  CategoryAlias precedent in Phase 0. Colors are the one exception (closed, universal Spanish vocabulary).
+- Commit message convention this session: descriptive body explaining the real bug + why, ending with
+  `Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>`. Deploy flow: `git archive HEAD | ssh -i
+  ~/.ssh/vendia_droplet root@64.227.8.255 "tar -x -C /opt/vendia"`, then over SSH `npx prisma migrate
+  deploy && npx prisma generate` (skip migrate if no schema change), then `pm2 restart vendia
+  --update-env`. Confirm with the user before each deploy.
+
+## Root cause (why this plan exists)
+
+One gap explains most of the bugs found this session: **the LLM is the only thing binding customer intent
+to tool arguments, and nothing in code validates that binding before or after the call.** Tools take loose
+free-form strings (few enums, few `required` fields), `tool_choice` is never forced, and correctness is
+delegated almost entirely to a ~10k-token system prompt. Every failure discovered gets patched afterward by
+a new regex in `finalizeTurn` (18 `*_PATTERN` constants as of this session, and counting) instead of fixing
+the binding problem at its source. A secondary, related gap: free-text business data (category, size, city,
+payment label) is matched via ad hoc string logic whose failure mode is *silently zero matches*, which the
+prompt then converts into the model guessing.
+
+## Phase 0 — DONE this session (context only, nothing to do)
+
+- `findProductsByAttributes` category matching (whole-string vs single-word bug) — fixed, `products.ts`.
+- Code-level guard rejecting `send_product_media` calls with a stale/unmatched productId — `agent.ts`.
+- `ASK_NAME_PATTERN`/`ASK_ID_PATTERN`/`ASK_PHONE_PATTERN` breaking on the bot's own bold markdown in
+  **history** — fixed via `stripMarkdownEmphasis` in `lastAssistantText`. **NOT fixed for the CURRENT
+  turn's own reply text** — see Phase 1, item 2, this is a known gap already found by the audit.
+- "Ask all order data together" as the default, including when a business's own `customInstructions`
+  lists required fields without dictating one-at-a-time style.
+- `SELECCION POR NUMERO` widened to cover a number embedded in a sentence, not just a bare reply.
+- Hardcoded `CATEGORY_SYNONYMS` replaced with a per-business `CategoryAlias` table + admin UI
+  (Catálogo tab, between "Agregar producto" and "Productos cargados").
+- Regression harness: added `ProductVariant`/`color`/`size` seeding (was completely missing before, so no
+  variant/color bug could ever be caught by `npm run regression`), `REGRESSION_IDS` env filter, real
+  anonymized repro conversations, moved the paid DeepSeek test out of the default `npm test` glob
+  (`agent.escalation.test.ts` → `agent.escalationPaid.ts`, run via `npm run test:paid`).
+
+## Phase 1 — DONE 2026-09-13: guard registry + finish the markdown fix
+
+**Goal**: stop the `*_PATTERN` pile from being 18 independent hand-rolled `if`s in `finalizeTurn`
+(`agent.ts:987-1181` as of this session), and close the markdown gap Phase 0 left open.
+
+1. Extract a small internal registry: each guard is `{ name, pattern, suppressor?, toolRanKey, repair
+   }`. `toolRanKey` points at the existing per-turn counters (`ownerAskedThisTurn`, `catalogCheckedThisTurn`,
+   etc — already computed at `agent.ts:971-976`, just not organized as a shared shape). Loop over the
+   registry once instead of ~15 sequential `if` blocks. This is a refactor, not a behavior change — write
+   the loop, port each existing guard into it one at a time, run `agent.claimBackstopGuards.test.ts` and
+   `agent.corePersonality.test.ts` after each port to confirm no behavior drift before moving to the next.
+2. Apply `stripMarkdownEmphasis` (already exported from `agent.ts`) to the CURRENT turn's `text` before
+   testing it against `PAYMENT_OPTIONS_CLAIM_PATTERN`, `CATALOG_CHECK_CLAIM_PATTERN`,
+   `ESCALATION_CLAIM_PATTERN`, `FAKE_MEDIA_TAG_PATTERN` — right now stripping only happens on
+   `lastAssistantText` (history), not on this turn's own reply, so a bolded "*te comparto* las opciones"
+   the model just wrote still silently disarms that backstop. Small, safe fix — do it before or during the
+   registry extraction, either order works.
+3. Acceptance test: add a test mirroring `agent.customerName.test.ts`'s markdown regression test, but for
+   `ESCALATION_CLAIM_PATTERN` (or whichever is easiest to unit test without a real DeepSeek call) proving
+   the CURRENT-turn text also gets stripped.
+
+**Done**: registry lives as `ClaimBackstopGuard`/`applyClaimBackstops` in `agent.ts`, wraps the 4 guards
+that shared the exact `!alreadyHandled && extraCondition && CLAIM_PATTERN.test && !SUPPRESSOR.test` shape
+(payment_options, shipping_modality, catalog_check, escalation). `intentFlagged`/`nameSaved`/`contactSaved`
+and the media backstop were left as standalone `if`s on purpose — different shape (no shared suppressor),
+folding them in would've been architecture for its own sake. Item 2: added `matchAgainstStrippedText` flag
+per-guard, set on payment_options/catalog_check/escalation (matches the 3 CLAIM patterns named in item 2
+plus `FAKE_MEDIA_TAG_PATTERN` fixed separately in the media-backstop block); `shipping_modality` left
+unstripped since it wasn't in the plan's named list and no real repro was found for it. Item 3: the actual
+markdown-breaks-a-pattern repro didn't reproduce on `ESCALATION_CLAIM_PATTERN` (its `\b word \b .{0,25}
+\b word \b` shape tolerates markdown in the gap) — verified in a scratch probe against real regexes before
+writing the test, used `PAYMENT_OPTIONS_CLAIM_PATTERN` instead (literal 2-word phrase "te comparto" split
+by a bold tag is a genuine raw=false/stripped=true flip). Test added to
+`agent.claimBackstopGuards.test.ts`. `npx tsc --noEmit` clean, full `npm test` 193/193 green. No
+`agent.ts` behavior change intended or observed outside the markdown-stripping fix itself; not yet
+deployed/committed.
+
+## Phase 2 — items 1+3 DONE 2026-09-13, item 2 deliberately skipped
+
+**Goal**: generalize the `send_product_media` guard (Phase 0) instead of it being a one-off. Reuse the
+Phase 1 registry shape if that's done first, otherwise standalone `if`s are fine — this phase is about
+coverage, not architecture purity.
+
+Concrete validators to add (each: reject the call, return a typed error tool-message telling the model
+what real value to use instead, same shape as the existing send_product_media guard):
+1. `paymentMethodLabel` passed to `close_conversation`/`show_order_summary` must match one of
+   `listActivePaymentMethods(businessId)` — right now it's persisted onto the real `Order` with no check
+   (`tools.ts` around `close_conversation`, `orders/service.ts:160`). A hallucinated label currently
+   reaches a real order record.
+2. `variantLabel` passed anywhere must resolve via `matchVariant` against a REAL variant of the named
+   product — surface the ambiguous/no-match case as a rejected call instead of silently falling into
+   `needsAttribute` after the fact (it already gets caught eventually via `resolveOrderItems`, but earlier
+   rejection means fewer wasted turns and clearer model feedback).
+3. `send_product_media`'s existing guard: extend it to also fire when `attributeMatchThisTurn` is null but
+   a DIFFERENT tool ran this turn that also scoped a product set (e.g. `search_products` returning a
+   single confident match) — right now the guard only engages when `find_products_by_attributes` ran.
+
+**Done**: (1) added a pre-execute guard in `agent.ts`'s tool-call loop (same shape/location as the
+existing `send_product_media` guard) that rejects `close_conversation` with outcome≠LOST when
+`paymentMethodLabel` doesn't normalize-match one of `listActivePaymentMethods(businessId)` — only checked
+`close_conversation` since `show_order_summary`'s actual schema has no `paymentMethodLabel` parameter at
+all (checked the live schema before implementing; the plan's wording assumed it did). Skips the check
+entirely when the business has zero configured methods (nothing real to validate against). (2) **skipped
+on purpose**: `resolveOrderItems`'s `needsAttribute` block already blocks an unresolved/ambiguous
+`variantLabel` from ever reaching a real order (confirmed working, see
+[[onix-color-escalation-close-fix]] memory) — pre-call rejection would only save a wasted turn, not close
+a real gap, and would require duplicating `matchVariant`'s resolution logic ahead of the tool call. Judged
+not worth the duplication risk; revisit only if the "one extra turn" cost turns out to matter in practice.
+(3) added `searchScopedThisTurn` (mirrors `attributeMatchThisTurn`, set when `search_products` resolves to
+exactly one product this turn) and widened the `send_product_media` guard to accept either scope.
+`npx tsc --noEmit` clean; ran `agent.categoryColorScopePaid.ts` (renamed, see below), `agent.paymentGuard`,
+`agent.photoBackstop`, `tools.test.ts` (62/62) plus a full `npm test` (192/192) — all green.
+
+**Side-effect found while verifying this phase**: confirmed 3 more test files were making real paid
+DeepSeek calls under plain `npm test` despite the project's own cost rule (same bug class as
+`agent.escalation.test.ts` → `agent.escalationPaid.ts` earlier this session) — renamed
+`agent.categoryColorScope.test.ts`/`agent.ambiguousRequests.test.ts`/`contextSummary.test.ts` to
+`*Paid.ts`, wired into `npm run test:paid`, updated CLAUDE.md's rule to be file-suffix-general instead of
+naming one file. See [[onix-color-escalation-close-fix]] for the full incident note.
+
+## Phase 3 — DONE 2026-09-13: fixed the other "zero-match-then-guess" sites
+
+Found by this session's audit, not yet fixed:
+1. `matchVariant` (`orders/service.ts:55`) — `canonicalColors(v.color)[0]` only takes the FIRST canonical
+   color of a variant labeled e.g. "negro/dorado", so a customer asking for "dorado" on that variant never
+   matches. Take the full set, not `[0]`.
+2. Same function, size matching (`orders/service.ts:56`) — `labelNorm.includes(size)` is a raw substring
+   check, so a variant of size "M" matches any customer text containing an "m" (e.g. "morado"). Needs a
+   word-boundary/token check, not substring.
+3. `resolveShippingRateForCity` (`shippingRates.ts:28-42`) — exact normalized-city lookup only; "Bogotá
+   D.C." or "Medellín centro" resolves to nothing even when "Bogotá"/"Medellín" is configured. Needs at
+   least a prefix/contains fallback before giving up and pushing the decision to model prose.
+4. `relevanceScore` in `search_products` (`products.ts` — check current line, moved since the audit) uses
+   substring `includes`, not tokens, and has no access to the same `CategoryAlias` map
+   `findProductsByAttributes` now uses — same "reloj"/"smartwatch" gap could still bite a customer who
+   triggers the `search_products` path instead of `find_products_by_attributes`. Thread the alias map
+   through here too, or make `search_products` call `findProductsByAttributes` internally when the query
+   looks category-shaped.
+
+**Done**: (1) `matchVariant` color scoring now uses `canonicalColors(v.color).some(...)` against the full
+set. (2) size scoring replaced with a word-boundary regex (`escapeForRegExp`, now shared from
+`search/text.ts`, used by both `orders/service.ts` and `catalog/shippingRates.ts`). (3)
+`resolveShippingRateForCity` falls back to the longest configured city name that appears as a whole word
+in the customer's text when the exact-match lookup misses; new test file `catalog/shippingRates.test.ts`
+(this function had no tests before). (4) took the "thread the alias map through" option (not the
+search_products-calls-findProductsByAttributes option) — extracted `loadCategoryAliasMap` in
+`products.ts`, reused by `findProductsByAttributes` (no behavior change there) and now also by
+`searchProducts`/`findConfidentProductMatch`; `relevanceScore` now scores whole tokens (`Set.has`) instead
+of `.includes()` substrings. 6 new regression tests total across `orders/service.test.ts`,
+`catalog/shippingRates.test.ts`, `catalog/products.test.ts`. `npx tsc --noEmit` clean; each affected test
+file green individually. Not yet run as a full `npm test` pass or committed.
+
+## Phase 4 — DONE 2026-09-13 (code), NEEDS REAL-CONVERSATION VALIDATION BEFORE DEPLOY
+
+**Goal**: stop depending on the model to voluntarily call `find_products_by_attributes`. Two options, pick
+one after re-reading how `search_products`'s full-catalog fallback behaves in practice:
+- (a) A cheap deterministic classifier (or just a regex over the customer's message, since the domain is
+  narrow — color words via `canonicalColors`, category words via existing catalog categories) that, when
+  it fires, calls `find_products_by_attributes` in CODE and injects its result as a tool message before
+  the model's first completion this turn. The model never gets a turn where it could skip the tool.
+- (b) Force `tool_choice: {type:"function", name:"find_products_by_attributes"}` on the completion call
+  when that same classifier fires, letting the model still control the exact arguments.
+(a) is stronger (guarantees the call happens) but couples `agent.ts` to catalog-specific detection logic
+earlier than today; (b) is a smaller diff. Recommend starting with (b), only move to (a) if (b) still
+shows misses in a real conversation.
+
+**Done**: took option (b) as recommended. New exported `textMentionsConfiguredCategory(businessId, text)`
+in `products.ts` (business's real category words + its own `CategoryAlias` synonyms, never hardcoded
+vocabulary — reuses `loadCategoryAliasMap` from Phase 3). `agent.ts` computes
+`shouldForceAttributeFilter` once per turn (`canonicalColors(customerText).length > 0 &&
+textMentionsConfiguredCategory(...)`) and passes `tool_choice: {type:"function", function:
+{name:"find_products_by_attributes"}}` ONLY on `iteration === 0` of the completion loop — every later
+iteration this turn, and every turn where the classifier doesn't fire, is unaffected (defaults to the
+existing `tools: catalogTools` with implicit `auto` choice). `npx tsc --noEmit` clean; added 3 new unit
+tests for the classifier itself (`products.test.ts`, DB-only, no DeepSeek cost).
+
+**NOT validated against a real conversation** — this is the first phase in this plan that changes actual
+model-facing runtime behavior (every prior phase was a backend safety net; a bug in the classifier here
+means the bot could force an irrelevant tool call on a real customer message that coincidentally contains
+a color word AND this business's category word without being a product query, e.g. a complaint mentioning
+"la caja negra llegó rota" on a business that sells "cajas"). `agent.categoryColorScopePaid.ts` (renamed
+this session, see Phase 2) is the existing real-DeepSeek test that covers exactly this reloj-negro
+scenario and is the natural check for this change, plus `npm run regression` for broader real-conversation
+coverage — **do not run either without the user's explicit go-ahead first**, both cost real money. Treat
+this phase as implemented-but-unproven until one of those runs clean.
+
+## Phase 5 — item 1+2(a) DONE 2026-09-13, item 2(b) skipped
+
+Once Phase 4 reduces reliance on the model choosing to call the tool at all, tighten what it can pass when
+it does:
+1. `find_products_by_attributes` (`tools.ts:128-144`): add `anyOf`/`required` so a call with neither
+   category nor color is invalid per-schema, not just handled at runtime as an empty-array refusal.
+2. `send_product_media` (`tools.ts:183-204`): `oneOf` on `productId`/`productName` (not both optional with
+   no relation), and where feasible a dynamic enum of the current turn's candidate IDs (built per-request
+   from whatever `find_products_by_attributes`/`search_products` just returned) so an out-of-scope ID is
+   rejected by the API itself, not by the Phase 0/2 code guard. This can shrink some of the corresponding
+   prose in `BASE_SYSTEM_PROMPT` too (a secondary win toward Phase 6).
+
+**Done**: added `anyOf: [{required:["category"]}, {required:["color"]}, {required:["freeText"]}]` to
+`find_products_by_attributes` and `oneOf: [{required:["productId"]}, {required:["productName"]}]` to
+`send_product_media` (`freeText` included in the `anyOf` since the runtime genuinely treats it as valid
+standalone evidence — see its own description re: diminutives like "rosadito"). Neither tool definition
+uses OpenAI/DeepSeek "strict" schema mode here, so these are hints to the model, not server-enforced
+constraints — real safety still comes from the existing runtime checks (empty-call refusal, Phase 0/2's
+send_product_media code guard), this just makes the invariant visible in the schema itself instead of only
+discoverable by calling it. `npx tsc --noEmit` clean, `tools.test.ts` 44/44 (no test asserts on the raw
+schema shape, so this is a low-risk hint-only change confirmed via runtime behavior, not schema
+introspection).
+
+**Skipped**: the dynamic per-turn productId enum. The Phase 0/2 code guard (`agent.ts`, extended in Phase
+2 item 3 this session to also cover `search_products`-scoped results) already fully closes this gap at
+runtime with a clear rejection message — the dynamic enum would be defense-in-depth, not a new safety
+property, and requires turning the static `catalogTools` array into a per-request-rebuilt structure
+(coupling tool-schema construction to this turn's accumulated scan state). Judged not worth that
+structural change for a gap that's already closed; revisit only if the code guard itself proves
+insufficient in practice.
+
+## Phase 6 — PAUSED 2026-09-13, not started, needs a decision when resumed
+
+Measured this session: ~28k chars / ~9-11k tokens assembled (`BASE_SYSTEM_PROMPT` + photo/comprobante
+sections + `PRODUCT_IMAGE_DIRECTIVE` + a typical `customInstructions` block), with "nunca/NUNCA" appearing
+42 times and several sections independently repeating anti-hallucination/anti-escalation guidance. Do this
+LAST, after Phases 1-5 have moved some of that enforcement into code/schema (schema and code guards need
+less prose backup once they're the actual enforcement mechanism, not the prompt alone). Consolidate the
+repeated "nunca" directives into one rules section; re-verify the `customInstructions` override clause
+(`agent.ts:454-475` as of this session) stays narrowly scoped to content vs interaction style after any
+trimming, since that exact clause caused Phase-0's one-by-one bug once already. Validate token savings with
+`npm run regression` — this is one of the cases where that real-cost run is worth asking the user to
+approve, since prompt-size changes are exactly what it exists to catch regressions in.
+
+**Paused, not attempted**: read the full `BASE_SYSTEM_PROMPT` (agent.ts:14-251, 240 lines) before touching
+anything. Finding: the 42 "nunca" occurrences are NOT a repeated phrase - they're 42 distinct rules, each
+tied to a specific real production incident referenced nearby in the surrounding prose/comments (payment
+digit accuracy, shipping cost accuracy, escalation timing, name/variant checkout gating, etc). A real
+consolidation here means judging which rules overlap in MEANING (not matching the word "nunca"), then
+rewriting prose by hand, then validating with a real conversation - qualitatively different from Phases
+1-5's mechanical code fixes, and the highest-risk phase for silently degrading response quality precisely
+because cut prose can remove reinforcement that was keeping some edge case correct even when it reads as
+redundant to a human. Given the user's explicit priority for this whole plan ("no quiero que esto dañe,
+solo refuerce" - don't want this to cause harm, only reinforce what already works), asked the user how to
+proceed before writing anything; they chose to pause Phase 6 rather than attempt it now. **Resume only when
+the user explicitly asks** - re-read this note and the file's own Phase 6 description first, don't assume
+the token-count/nunca-count above are still accurate (re-measure).
+
+## Suggested order for a fresh session
+
+Phase 1 → Phase 3 (quick, independent, high-value bug fixes, no architecture risk) → Phase 2 → Phase 4 →
+Phase 5 → Phase 6. Confirm scope with the user before starting each phase — they may want to reprioritize
+based on what's actually breaking in production between sessions.
