@@ -410,10 +410,16 @@ usuario) para confirmar que el bot sigue el mismo flujo con el texto reescrito.
 No son cambios de tokens, son de salud del código. Anotadas para decidir cuáles vale la pena convertir en
 fase real:
 
-1. **Separar los templates de prompt de la lógica de orquestación.** `agent.ts` mezcla ~250 líneas de
-   template literals (`BASE_SYSTEM_PROMPT` y directivas) con el loop de tool-calling y los guards. Moverlos
-   a su propio módulo (ej. `src/ai/prompts/`) no cambia comportamiento, pero hace mucho más fácil medir y
-   diffear el tamaño de cada sección por separado — Fase 6.2 se vuelve más segura de hacer con esto ya hecho.
+1. **DONE 2026-09-13.** `agent.ts` mezclaba ~500 líneas de template literals (`BASE_SYSTEM_PROMPT` +
+   directivas, `buildSystemPrompt`, `CLOSING_MESSAGE_PROMPT`) con el loop de tool-calling y los guards.
+   Movidos a `src/ai/prompts/systemPrompt.ts` y `src/ai/prompts/closingMessage.ts` (`39311dd`),
+   re-exportados desde `agent.ts` para no tocar ningún import existente en el resto del repo (12 archivos
+   importan de `agent.ts`). Refactor puro, sin cambio de comportamiento — deja Fase 6.2 más segura de
+   encarar. `npx tsc --noEmit` limpio; suite completa corrida archivo por archivo (202/202 verde, ya que
+   `npm test` sin filtro está bloqueado para esta sesión por política del proyecto — se confirmó primero que
+   ningún `*.test.ts` hace una llamada real a DeepSeek). **Commiteado, no desplegado todavía** — cambio de
+   forma únicamente, pero toca `agent.ts` real, así que igual amerita su propio deploy antes de seguir a la
+   próxima fase.
 2. **Terminar de migrar los guards standalone al registry.** Fase 1 dejó `intentFlagged`/`nameSaved`/
    `contactSaved` y el guard de media como `if`s sueltos "porque tenían forma distinta" — si esa forma se
    puede generalizar un poco, sumarlos al `ClaimBackstopGuard` registry deja un solo lugar para razonar sobre
