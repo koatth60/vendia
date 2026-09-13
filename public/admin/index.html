@@ -696,6 +696,25 @@
 
       <div class="section-title">Productos cargados</div>
       <div id="products-container"></div>
+
+      <div class="section-title">Sinónimos de categoría</div>
+      <div class="card">
+        <p style="font-size:13px; color:var(--muted); margin-top:0;">Si un cliente pide una categoría con una palabra distinta a la que usas en tu catálogo (ej. pide "reloj" pero tus productos dicen "smartwatch"; o pide "guineo" y tus productos dicen "banano"), agrega el sinónimo acá para que el bot los relacione. No hace falta para colores, esos ya los reconoce el bot solo.</p>
+        <div class="grid-2">
+          <div>
+            <label>Palabra que usas en tu catálogo</label>
+            <input id="ca-canonical" placeholder="Ej: smartwatch" />
+          </div>
+          <div>
+            <label>Palabra que puede usar el cliente</label>
+            <input id="ca-synonym" placeholder="Ej: reloj" />
+          </div>
+        </div>
+        <div class="actions-row">
+          <button class="btn-primary owner-only" onclick="addCategoryAlias()">+ Agregar sinónimo</button>
+        </div>
+        <div id="category-aliases-list" style="margin-top:16px; display:flex; flex-direction:column; gap:8px;"></div>
+      </div>
     </div>
 
     <div class="tab-panel" data-tab-panel="payments">
@@ -2872,6 +2891,63 @@ async function deleteFaqEntry(id) {
   }
 }
 
+async function loadCategoryAliases() {
+  const container = document.getElementById('category-aliases-list');
+  try {
+    const res = await apiFetch('/admin/api/category-aliases');
+    const aliases = await res.json();
+    const list = Array.isArray(aliases) ? aliases : [];
+
+    if (list.length === 0) {
+      container.innerHTML = '<div style="font-size:13px; color:var(--muted);">Todavía no agregaste ningún sinónimo de categoría.</div>';
+      return;
+    }
+
+    container.innerHTML = list.map((a) => `
+      <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px 12px; border:1px solid var(--border); border-radius:var(--radius-md);">
+        <div style="font-size:13.5px;"><strong>${escapeHtml(a.synonym)}</strong> significa lo mismo que <strong>${escapeHtml(a.canonical)}</strong></div>
+        <button class="btn-danger" onclick="deleteCategoryAlias('${a.id}')">Eliminar</button>
+      </div>
+    `).join('');
+  } catch (err) {
+    container.innerHTML = `<div style="font-size:13px; color:var(--danger);">No se pudieron cargar: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+async function addCategoryAlias() {
+  const canonical = document.getElementById('ca-canonical').value.trim();
+  const synonym = document.getElementById('ca-synonym').value.trim();
+
+  if (!canonical || !synonym) {
+    setStatus('Completá las dos palabras', true);
+    return;
+  }
+
+  try {
+    await apiFetch('/admin/api/category-aliases', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ canonical, synonym }),
+    });
+    document.getElementById('ca-canonical').value = '';
+    document.getElementById('ca-synonym').value = '';
+    setStatus('Sinónimo agregado ✓');
+    loadCategoryAliases();
+  } catch (err) {
+    setStatus(`No se pudo agregar: ${err.message}`, true);
+  }
+}
+
+async function deleteCategoryAlias(id) {
+  if (!confirm('¿Eliminar este sinónimo?')) return;
+  try {
+    await apiFetch(`/admin/api/category-aliases/${id}`, { method: 'DELETE' });
+    loadCategoryAliases();
+  } catch (err) {
+    setStatus(`No se pudo eliminar: ${err.message}`, true);
+  }
+}
+
 // Sugerencias aprendidas: cada fila trae sus propios campos editables (no reutiliza el formulario de
 // arriba) para que "aprobar" sea una sola acción autocontenida, sin tener que rastrear "cuál sugerencia
 // estoy editando ahora" en estado compartido.
@@ -3590,6 +3666,7 @@ async function boot() {
   loadConversations();
   loadFaqEntries();
   loadFaqCandidates();
+  loadCategoryAliases();
   loadOrderCounts();
   loadOrders(true);
   loadAnalytics();

@@ -39,11 +39,19 @@ test("canonicalizeCategoryWord: leaves an already-singular short word alone", ()
   assert.equal(canonicalizeCategoryWord("reloj"), "reloj");
 });
 
+test("canonicalizeCategoryWord: with no aliasMap, an unconfigured word just matches itself (no hardcoded vertical vocabulary)", () => {
+  assert.equal(canonicalizeCategoryWord("smartwatch"), "smartwatch");
+  assert.notEqual(canonicalizeCategoryWord("smartwatch"), canonicalizeCategoryWord("reloj"));
+});
+
 // Real production bug (2026-09-13): a business categorized some watches "Relojes Inteligentes
 // (Smartwatches)" and others just "smartwatch" - a customer's "reloj negro" silently excluded the second
-// group even though both are the same real category, because "smartwatch" and "reloj" folded to different
-// words with no synonym link.
-test("canonicalizeCategoryWord: reloj and smartwatch (singular or plural) fold to the same bucket", () => {
-  assert.equal(canonicalizeCategoryWord("smartwatch"), canonicalizeCategoryWord("reloj"));
-  assert.equal(canonicalizeCategoryWord("smartwatches"), canonicalizeCategoryWord("relojes"));
+// group even though both are the same real category. Fixed via a per-business CategoryAlias table (see
+// findProductsByAttributes in products.ts), never a hardcoded list here - that would only ever help one
+// vertical (electronics) and silently do nothing for e.g. a fruit stand's "guineo"/"banano".
+test("canonicalizeCategoryWord: an aliasMap folds a business's own configured synonym to its canonical word", () => {
+  const aliasMap = new Map([["smartwatch", "reloj"]]);
+  assert.equal(canonicalizeCategoryWord("smartwatch", aliasMap), "reloj");
+  assert.equal(canonicalizeCategoryWord("smartwatches", aliasMap), "reloj");
+  assert.equal(canonicalizeCategoryWord("reloj", aliasMap), "reloj");
 });

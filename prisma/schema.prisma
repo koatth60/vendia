@@ -65,6 +65,7 @@ model Business {
   paymentMethods            PaymentMethod[]
   shippingRates             ShippingRate[]
   shippingCityRules         ShippingCityRule[]
+  categoryAliases           CategoryAlias[]
   aiUsageLogs               AiUsageLog[]
   faqEntries                FaqEntry[]
   learnedFaqCandidates      LearnedFaqCandidate[]
@@ -137,6 +138,25 @@ model ShippingCityRule {
   createdAt      DateTime @default(now())
 
   @@unique([businessId, normalizedCity])
+  @@index([businessId])
+}
+
+// Per-business category-word synonyms (e.g. "reloj" = "smartwatch" for a tech reseller, "guineo" =
+// "banano" for a fruit stand) - deliberately NOT a fixed dictionary in code (see attributeTaxonomy.ts):
+// which words mean the same product type is entirely vertical-specific, so each business configures its
+// own. `synonym` is the word that gets folded INTO `canonical` when matching (e.g. synonym="smartwatch",
+// canonical="reloj") - a customer/catalog word with no configured alias just matches itself, unchanged
+// from before this table existed. `normalizedSynonym` (via normalizeForMatch) is the actual match key.
+model CategoryAlias {
+  id                String   @id @default(cuid())
+  business          Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  businessId        String
+  canonical         String
+  synonym           String
+  normalizedSynonym String
+  createdAt         DateTime @default(now())
+
+  @@unique([businessId, normalizedSynonym])
   @@index([businessId])
 }
 

@@ -48,6 +48,7 @@ import { extractSaleDetails } from "../ai/extractSale";
 import { deepseek, DEEPSEEK_MODEL } from "../ai/client";
 import { getAnalyticsSummary } from "../analytics/service";
 import { listFaqEntries, createFaqEntry, updateFaqEntry, deleteFaqEntry } from "../catalog/faq";
+import { listCategoryAliases, createCategoryAlias, deleteCategoryAlias } from "../catalog/categoryAliases";
 import { listPendingCandidates, approveCandidate, discardCandidate } from "../catalog/learnedFaq";
 import {
   listOrdersForBusiness,
@@ -483,6 +484,26 @@ adminRouter.put("/api/faq/:id", requireOwner, async (req, res) => {
 
 adminRouter.delete("/api/faq/:id", requireOwner, async (req, res) => {
   await deleteFaqEntry(businessIdOf(req), String(req.params.id));
+  res.status(204).send();
+});
+
+adminRouter.get("/api/category-aliases", async (req, res) => {
+  const aliases = await listCategoryAliases(businessIdOf(req));
+  res.json(aliases);
+});
+
+adminRouter.post("/api/category-aliases", requireOwner, async (req, res) => {
+  const { canonical, synonym } = req.body;
+  if (!canonical || !synonym) {
+    res.status(400).json({ error: "Faltan la palabra principal o el sinonimo" });
+    return;
+  }
+  const alias = await createCategoryAlias(businessIdOf(req), { canonical, synonym });
+  res.status(201).json(alias);
+});
+
+adminRouter.delete("/api/category-aliases/:id", requireOwner, async (req, res) => {
+  await deleteCategoryAlias(businessIdOf(req), String(req.params.id));
   res.status(204).send();
 });
 

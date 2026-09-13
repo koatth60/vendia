@@ -192,7 +192,15 @@ export async function findProductsByAttributes(
   attrs: { category?: string; color?: string; freeText?: string }
 ): Promise<{ matches: AttributeMatch[]; categoriesFound: string[] }> {
   const targetColors = new Set([...canonicalColors(attrs.color ?? ""), ...canonicalColors(attrs.freeText ?? "")]);
-  const targetCategory = attrs.category ? canonicalizeCategoryWord(attrs.category) : null;
+
+  // This business's own category-word synonyms (e.g. "reloj"="smartwatch", "guineo"="banano") - see
+  // CategoryAlias in schema.prisma and attributeTaxonomy.ts for why this is per-business data, never a
+  // hardcoded list here (a fixed dictionary would only ever help one vertical). Canonical values get
+  // folded through the plain (no-alias) form too, so an admin typing "Relojes" as the canonical still
+  // lands in the same bucket as the plural/accent-folded product-category words below.
+  const aliasRows = attrs.category ? await prisma.categoryAlias.findMany({ where: { businessId } }) : [];
+  const categoryAliasMap = new Map(aliasRows.map((a) => [a.normalizedSynonym, canonicalizeCategoryWord(a.canonical)]));
+  const targetCategory = attrs.category ? canonicalizeCategoryWord(attrs.category, categoryAliasMap) : null;
 
   // Neither a real color nor a real category to filter by - falling through would return the entire
   // catalog, which is just listActiveProducts under a different name and invites the same "blast
@@ -216,7 +224,7 @@ export async function findProductsByAttributes(
       // matches for every category-scoped color search on this exact shape, which is why "reloj negro"
       // kept falling back to search_products' full-catalog dump instead of the real filtered list).
       // Match if the target word is one of the category string's own words instead.
-      const categoryWords = product.category ? tokenize(product.category).map(canonicalizeCategoryWord) : [];
+      const categoryWords = product.category ? tokenize(product.category).map((w) => canonicalizeCategoryWord(w, categoryAliasMap)) : [];
       if (!categoryWords.includes(targetCategory)) continue;
     }
 

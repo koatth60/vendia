@@ -294,6 +294,34 @@ test("findProductsByAttributes: matches a compound real-world category string, n
   }
 });
 
+test("findProductsByAttributes: a business's own CategoryAlias links a vertical-specific synonym to its real category word", async () => {
+  // Confirms the actual fix for the compound-category gap above is per-business configured data, never a
+  // hardcoded vertical vocabulary - the same mechanism has to work for ANY business's own words (a fruit
+  // stand's "guineo"/"banano" is used here specifically to prove this isn't secretly electronics-only).
+  const business = await prisma.business.create({
+    data: { name: `Test ${randomUUID()}`, email: `test-${randomUUID()}@example.com`, passwordHash: "x" },
+  });
+  try {
+    await prisma.categoryAlias.create({
+      data: { businessId: business.id, canonical: "banano", synonym: "guineo", normalizedSynonym: "guineo" },
+    });
+    await prisma.product.createMany({
+      data: [
+        { businessId: business.id, name: "Guineo criollo", description: "Fruta fresca", price: 2000, currency: "COP", stock: 50, category: "Bananos" },
+        { businessId: business.id, name: "Manzana roja", description: "Fruta fresca", price: 3000, currency: "COP", stock: 20, category: "Manzanas" },
+      ],
+    });
+
+    const result = await findProductsByAttributes(business.id, { category: "guineo" });
+    assert.equal(result.matches.length, 1, "the alias should resolve 'guineo' to the product categorized as 'Bananos'");
+    assert.equal(result.matches[0].productName, "Guineo criollo");
+  } finally {
+    await prisma.categoryAlias.deleteMany({ where: { businessId: business.id } });
+    await prisma.product.deleteMany({ where: { businessId: business.id } });
+    await prisma.business.delete({ where: { id: business.id } });
+  }
+});
+
 test("findProductsByAttributes: a variant-level match returns only that variant, not the whole product's other colors", async () => {
   const business = await prisma.business.create({
     data: { name: `Test ${randomUUID()}`, email: `test-${randomUUID()}@example.com`, passwordHash: "x" },

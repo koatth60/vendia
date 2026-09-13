@@ -39,33 +39,20 @@ export function canonicalColors(text: string): string[] {
   return [...found];
 }
 
-// Full category taxonomy is NOT hardcoded here on purpose: "reloj" vs "camisa" vs "torta" varies
-// completely per business/vertical, so there's no fixed dictionary that would generalize across "muchos
-// tipos de negocios" - the real vocabulary always comes from that business's own catalog data. This
-// small map is different: it's the handful of near-universal Spanish-electronics synonym pairs a single
-// business uses INTERCHANGEABLY for its own products (same shape as COLOR_SYNONYMS above, not a business
-// taxonomy) - real bug (2026-09-13): one business categorized some watches "Relojes Inteligentes
-// (Smartwatches)" and others "smartwatch" with no "reloj" word at all, so a customer's "reloj negro"
-// silently excluded the second group even after the plural/accent folding below already worked correctly.
-const CATEGORY_SYNONYMS: Record<string, string[]> = {
-  reloj: ["reloj", "smartwatch", "smartwatches"],
-  audifono: ["audifono", "auricular", "auriculares", "airpod", "airpods", "earbud", "earbuds"],
-  parlante: ["parlante", "bocina", "altavoz", "altavoces", "speaker", "speakers"],
-  celular: ["celular", "telefono", "movil", "phone", "smartphone"],
-};
-const CATEGORY_SYNONYM_LOOKUP = new Map<string, string>();
-for (const [canonical, synonyms] of Object.entries(CATEGORY_SYNONYMS)) {
-  for (const synonym of synonyms) CATEGORY_SYNONYM_LOOKUP.set(synonym, canonical);
-}
-
-// Folds simple singular/plural + accent variance ("relojes" -> "reloj", "camisetas" -> "camiseta") so a
-// business's own Product.category values match regardless of how the customer pluralizes or accents it,
-// THEN folds the handful of synonym pairs above so equivalent words used inconsistently across a
-// business's own catalog land in the same bucket.
-export function canonicalizeCategoryWord(word: string): string {
+// Category taxonomy is NOT hardcoded here on purpose: "reloj" vs "smartwatch" (tech reseller) or "guineo"
+// vs "banano" (fruit stand) means the same product type only WITHIN one vertical - there's no fixed
+// dictionary that would generalize across every business Onix serves. That vocabulary lives per-business
+// instead, in the CategoryAlias table (see prisma/schema.prisma), configured by each business in its own
+// admin panel - `aliasMap` here is that business's own synonym->canonical lookup (normalizeForMatch'd
+// keys), built by the caller (see findProductsByAttributes in products.ts) and passed in. With no
+// aliasMap (or a word not in it), a word just matches itself, exactly as before this table existed - real
+// bug this replaces (2026-09-13): a first attempt hardcoded "reloj"/"smartwatch" etc as a global synonym
+// list here, which only ever helps electronics resellers and would need editing in code for every new
+// vertical Onix sells into.
+export function canonicalizeCategoryWord(word: string, aliasMap?: ReadonlyMap<string, string>): string {
   const normalized = normalizeForMatch(word).trim();
   let singular = normalized;
   if (singular.endsWith("es") && singular.length > 4) singular = singular.slice(0, -2);
   else if (singular.endsWith("s") && singular.length > 3) singular = singular.slice(0, -1);
-  return CATEGORY_SYNONYM_LOOKUP.get(singular) ?? singular;
+  return aliasMap?.get(singular) ?? singular;
 }
