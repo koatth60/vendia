@@ -695,7 +695,11 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
 
       // A variantId (from find_products_by_attributes) scopes the send to just that color/size's own
       // photos - falls back to the product's general media only if that variant has none of its own,
-      // never to a DIFFERENT variant's photos (would send the wrong color).
+      // never to a DIFFERENT variant's photos (would send the wrong color). With NO variantId (the
+      // customer never named a color), send everything the product has - general photos AND every
+      // variant's own - instead of only the general ones: "muestrame fotos" with no color mentioned
+      // means "show me what you've got", which for a multi-color product includes each color's photo,
+      // not just whatever happened to be uploaded as unassigned/general.
       const variantId = input.variantId ? String(input.variantId).trim() : "";
       let media = product.media;
       let variantLabel: string | null = null;
@@ -704,6 +708,8 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
         if (!variant) return { error: `No se encontro la variante "${variantId}" de este producto.` };
         variantLabel = [variant.color, variant.size].filter(Boolean).join(" / ") || null;
         media = variant.media.length > 0 ? variant.media : product.media;
+      } else if (product.variants.length > 0) {
+        media = [...product.media, ...product.variants.flatMap((v) => v.media)];
       }
 
       if (media.length === 0) {
