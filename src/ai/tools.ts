@@ -1,4 +1,5 @@
 import type OpenAI from "openai";
+import { z } from "zod";
 import {
   getProductById,
   listActiveProducts,
@@ -633,8 +634,69 @@ export interface ToolContext {
   recipientPhone: string;
 }
 
+// Track C item 3 (ONIX-RELIABILITY-PLAN.md): a validation gate ahead of the switch below, catching a
+// malformed shape (an object/array where a scalar was expected, a badly-shaped items entry) with a clear
+// rejection instead of runCatalogTool's per-case `String(input.x)` silently turning garbage into
+// "[object Object]" or an unresolvable order item. Deliberately does NOT touch every field: enum fields
+// with their own existing fallback logic (outcome, status, intent) already degrade gracefully on purpose
+// and are left out here so this doesn't change that established tolerant behavior. Only tools with at
+// least one field worth validating get an entry - a tool with no schema here skips this gate entirely,
+// same as before this change.
+const SCALAR_INPUT = z.union([z.string(), z.number()]);
+const ORDER_ITEM_INPUT = z.object({
+  productName: SCALAR_INPUT,
+  quantity: SCALAR_INPUT,
+  variantLabel: SCALAR_INPUT.optional(),
+});
+
+const TOOL_INPUT_SCHEMAS: Record<string, z.ZodTypeAny> = {
+  find_products_by_attributes: z.object({
+    category: SCALAR_INPUT.optional(),
+    color: SCALAR_INPUT.optional(),
+    freeText: SCALAR_INPUT.optional(),
+  }),
+  search_products: z.object({ query: SCALAR_INPUT.optional() }),
+  get_product_details: z.object({ productId: SCALAR_INPUT.optional() }),
+  send_product_media: z.object({
+    productId: SCALAR_INPUT.optional(),
+    productName: SCALAR_INPUT.optional(),
+    variantId: SCALAR_INPUT.optional(),
+  }),
+  get_shipping_rate_for_city: z.object({ city: SCALAR_INPUT.optional() }),
+  save_customer_name: z.object({ name: SCALAR_INPUT.optional() }),
+  save_customer_contact_info: z.object({
+    idNumber: SCALAR_INPUT.optional(),
+    deliveryPhone: SCALAR_INPUT.optional(),
+  }),
+  ask_owner: z.object({ question: SCALAR_INPUT.optional() }),
+  show_order_summary: z.object({
+    shippingCost: SCALAR_INPUT.optional(),
+    items: z.array(ORDER_ITEM_INPUT).optional(),
+  }),
+  close_conversation: z.object({
+    summary: SCALAR_INPUT.optional(),
+    shippingAddress: SCALAR_INPUT.optional(),
+    paymentMethodLabel: SCALAR_INPUT.optional(),
+    shippingCost: SCALAR_INPUT.optional(),
+    items: z.array(ORDER_ITEM_INPUT).optional(),
+  }),
+};
+
+function describeZodIssues(error: z.ZodError): string {
+  return error.issues.map((i) => `${i.path.length > 0 ? i.path.join(".") : "(raiz)"}: ${i.message}`).join("; ");
+}
+
 export async function runCatalogTool(context: ToolContext, name: string, input: Record<string, unknown>) {
   const { businessId } = context;
+
+  const schema = TOOL_INPUT_SCHEMAS[name];
+  if (schema) {
+    const parsed = schema.safeParse(input);
+    if (!parsed.success) {
+      return { error: `Input invalido para ${name}: ${describeZodIssues(parsed.error)}. Corrige el formato y volve a intentar.` };
+    }
+  }
+
   switch (name) {
     case "find_products_by_attributes": {
       const category = input.category ? String(input.category).trim() : undefined;

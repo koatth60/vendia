@@ -1127,3 +1127,49 @@ test("get_shipping_rate_for_city resolves a department capital to the Nacional t
     await prisma.shippingRate.deleteMany({ where: { businessId } });
   }
 });
+
+// Track C item 3 (ONIX-RELIABILITY-PLAN.md): the input-validation gate in runCatalogTool. Regression for
+// a malformed call being silently coerced (an array/object stringified to "[object Object]", a bad
+// `items` entry treated as if it just wasn't there) instead of rejected with a clear, actionable error.
+
+test("find_products_by_attributes rejects an object passed where category should be a string", async () => {
+  const context = await freshContext();
+  const result = (await runCatalogTool(context, "find_products_by_attributes", { category: { foo: "bar" } })) as {
+    error: string;
+  };
+  assert.match(result.error, /Input invalido para find_products_by_attributes/);
+  assert.match(result.error, /category/);
+});
+
+test("close_conversation rejects an items entry missing productName instead of silently dropping it", async () => {
+  const context = await freshContext();
+  const result = (await runCatalogTool(context, "close_conversation", {
+    outcome: "SOLD",
+    summary: "Pedido de prueba",
+    items: [{ quantity: 1 }],
+  })) as { error: string };
+  assert.match(result.error, /Input invalido para close_conversation/);
+  assert.match(result.error, /productName/);
+});
+
+test("close_conversation still accepts a well-formed call with no items field at all", async () => {
+  const context = await freshContext();
+  const result = (await runCatalogTool(context, "close_conversation", { outcome: "LOST" })) as {
+    closed: boolean;
+    outcome: string;
+  };
+  assert.equal(result.closed, true);
+  assert.equal(result.outcome, "LOST");
+});
+
+test("show_order_summary rejects items given as a non-array instead of silently treating it as empty", async () => {
+  const context = await freshContext();
+  const result = (await runCatalogTool(context, "show_order_summary", { items: "1x Smartwatch" })) as { error: string };
+  assert.match(result.error, /Input invalido para show_order_summary/);
+});
+
+test("a tool with no declared schema is unaffected by the validation gate", async () => {
+  const context = await freshContext();
+  const result = await runCatalogTool(context, "get_faq", {});
+  assert.ok(result && typeof result === "object" && "results" in result);
+});
