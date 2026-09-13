@@ -593,17 +593,35 @@ function totalStock(product: { stock: number; variants: { stock: number; active:
   return product.variants.filter((v) => v.active).reduce((sum, v) => sum + v.stock, 0);
 }
 
-function formatProduct(product: Awaited<ReturnType<typeof getProductById>>) {
+// LIST_DESCRIPTION_MAX_CHARS: solo para vistas de LISTA (varios productos en un mismo tool result) - el
+// modelo ahi solo necesita reconocer de cual producto se trata para decidir relevancia o pedir el detalle
+// completo con get_product_details, no la ficha entera. Medido en catalogo real de produccion (16
+// productos, ~1000 chars de descripcion promedio): el fallback de search_products sin truncar pesaba
+// ~18.8k chars (~4.7k tokens) en un solo tool result, mas grande que BASE_SYSTEM_PROMPT completo, y
+// siempre a precio cache-miss (contenido nuevo cada vez que se genera). Ver ONIX-RELIABILITY-PLAN.md Fase
+// 6.0b.
+const LIST_DESCRIPTION_MAX_CHARS = 150;
+
+function truncateForList(description: string): string {
+  return description.length > LIST_DESCRIPTION_MAX_CHARS
+    ? `${description.slice(0, LIST_DESCRIPTION_MAX_CHARS)}…`
+    : description;
+}
+
+function formatProduct(product: Awaited<ReturnType<typeof getProductById>>, opts?: { forList?: boolean }) {
   if (!product) return null;
   return {
     id: product.id,
     name: product.name,
-    description: product.description,
+    description: opts?.forList ? truncateForList(product.description) : product.description,
     price: product.price.toString(),
     currency: product.currency,
     stock: totalStock(product),
     category: product.category,
-    media: product.media.map((m) => ({ type: m.type, url: m.url })),
+    // No mandamos la URL de media aca - el modelo nunca la usa (send_product_media la resuelve
+    // internamente y las reglas del prompt prohiben escribir la URL en el mensaje), mismo patron que ya
+    // usa find_products_by_attributes con "hasMedia".
+    hasMedia: product.media.length > 0,
   };
 }
 
@@ -657,14 +675,14 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
     }
     case "search_products": {
       const results = await searchProducts(businessId, String(input.query ?? ""));
-      if (results.length > 0) return results.map(formatProduct);
+      if (results.length > 0) return results.map((p) => formatProduct(p, { forList: true }));
 
       // No hubo coincidencia por palabra clave - el catalogo suele ser chico por negocio, asi que en
       // vez de decir "no existe" le mostramos todo lo activo para que lo revise por significado (el
       // cliente puede estar describiendo el producto con otras palabras que las del catalogo).
       const all = await listActiveProducts(businessId);
       return {
-        results: all.map(formatProduct),
+        results: all.map((p) => formatProduct(p, { forList: true })),
         note:
           all.length > 0
             ? "No hubo coincidencia exacta por palabra clave. Revisa este catalogo completo por significado antes de decir que no tenes el producto."
@@ -710,7 +728,7 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
     }
     case "list_all_products": {
       const results = await listActiveProducts(businessId);
-      return results.map(formatProduct);
+      return results.map((p) => formatProduct(p, { forList: true }));
     }
     case "send_product_media": {
       const productId = input.productId ? String(input.productId).trim() : "";

@@ -231,35 +231,185 @@ property, and requires turning the static `catalogTools` array into a per-reques
 structural change for a gap that's already closed; revisit only if the code guard itself proves
 insufficient in practice.
 
-## Phase 6 — PAUSED 2026-09-13, not started, needs a decision when resumed
+## Phase 6 — RESUMED 2026-09-13 as a detailed sub-plan (nothing executed yet, needs per-sub-phase go-ahead)
 
-Measured this session: ~28k chars / ~9-11k tokens assembled (`BASE_SYSTEM_PROMPT` + photo/comprobante
-sections + `PRODUCT_IMAGE_DIRECTIVE` + a typical `customInstructions` block), with "nunca/NUNCA" appearing
-42 times and several sections independently repeating anti-hallucination/anti-escalation guidance. Do this
-LAST, after Phases 1-5 have moved some of that enforcement into code/schema (schema and code guards need
-less prose backup once they're the actual enforcement mechanism, not the prompt alone). Consolidate the
-repeated "nunca" directives into one rules section; re-verify the `customInstructions` override clause
-(`agent.ts:454-475` as of this session) stays narrowly scoped to content vs interaction style after any
-trimming, since that exact clause caused Phase-0's one-by-one bug once already. Validate token savings with
-`npm run regression` — this is one of the cases where that real-cost run is worth asking the user to
-approve, since prompt-size changes are exactly what it exists to catch regressions in.
+Original pause note (2026-09-13, first attempt) kept below for history. User asked to resume with a
+concrete phased plan, split into two tracks: **Track A** shrinks the fixed prompt+tools payload sent on
+every message (core, all businesses); **Track B** is a new admin-panel feature that lets an owner ask the
+AI to rewrite their own `customInstructions` text more concisely, on demand, not on every message.
 
-**Paused, not attempted**: read the full `BASE_SYSTEM_PROMPT` (agent.ts:14-251, 240 lines) before touching
-anything. Finding: the 42 "nunca" occurrences are NOT a repeated phrase - they're 42 distinct rules, each
-tied to a specific real production incident referenced nearby in the surrounding prose/comments (payment
-digit accuracy, shipping cost accuracy, escalation timing, name/variant checkout gating, etc). A real
-consolidation here means judging which rules overlap in MEANING (not matching the word "nunca"), then
-rewriting prose by hand, then validating with a real conversation - qualitatively different from Phases
-1-5's mechanical code fixes, and the highest-risk phase for silently degrading response quality precisely
-because cut prose can remove reinforcement that was keeping some edge case correct even when it reads as
-redundant to a human. Given the user's explicit priority for this whole plan ("no quiero que esto dañe,
-solo refuerce" - don't want this to cause harm, only reinforce what already works), asked the user how to
-proceed before writing anything; they chose to pause Phase 6 rather than attempt it now. **Resume only when
-the user explicitly asks** - re-read this note and the file's own Phase 6 description first, don't assume
-the token-count/nunca-count above are still accurate (re-measure).
+Re-measured 2026-09-13 (char-based, `/4` approximation — Phase 6.0 below gets the real tokenizer number
+from production logs before anything is cut): `BASE_SYSTEM_PROMPT` alone 20,301 chars (~5.1k tokens);
+`PHOTO_DIRECTIVE_AUTO`/`_REACTIVE` + `COMPROBANTE_DIRECTIVE_REQUIRED`/`_OPTIONAL` + `PRODUCT_IMAGE_DIRECTIVE`
+combined ~6.2k chars (~1.6k tokens, only one photo/comprobante variant applies per business at a time); the
+`catalogTools` schema array in `tools.ts` (sent as the `tools` param on every completion call, separate
+from the system-prompt string) ~23.6k chars (~5.9k tokens). Fixed floor before any `customInstructions` is
+roughly 9-13k tokens by this rough estimate — consistent with last session's "9-11k" figure, but treat both
+as approximate until Phase 6.0 pulls the real number.
+
+**Important cost nuance found this session**: DeepSeek pricing (`src/ai/usage.ts:49`) already bills
+`prompt_cache_hit_tokens` at ~50x cheaper than `prompt_cache_miss_tokens` for the flash model ($0.003/1M vs
+$0.15/1M). If the fixed prompt+tools prefix is already hitting DeepSeek's cache well turn-to-turn, the real
+dollar lever may be cache-hit RATE, not raw token count — shrinking the prompt still helps (smaller ceiling,
+less latency, more context-window headroom for conversation history) but the cost framing changes. Phase
+6.0 checks this before the rest of the track proceeds.
+
+### Track A — shrink the fixed prompt + tools payload
+
+**Fase 6.0 — DONE 2026-09-13 (medición real, sin código nuevo).**
+Query directa a `AiUsageLog`, últimos 7 días, 107 llamadas: promedio cache-hit 13,217 tokens, promedio
+cache-miss 1,019 tokens, promedio output 104 tokens, **hit ratio 92.8%**, costo total 7 días **$0.0273
+USD** (~$0.00025/mensaje). Conclusión: el cache YA funciona muy bien. Desglose de costo por llamada (precios
+`usage.ts:49`): cache-miss ≈60% del costo, output ≈24%, cache-hit ≈16% — aunque el miss es solo ~7% de los
+tokens totales, al ser 50x más caro domina el gasto. Esto cambia la prioridad: recortar `BASE_SYSTEM_PROMPT`
+(ya mayormente cache-hit, barato) ahorra poco en dólares HOY; lo que sí pesa es el contenido que se genera
+DE NUEVO cada turno (nunca puede cachear) — eso es lo que mide 6.0b.
+
+**Fase 6.0b — DONE 2026-09-13 (medición real de qué hay dentro del cache-miss).**
+Hipótesis: el cache-miss de 1,019 tokens/turno promedio no es el prompt fijo, es el resultado de las
+herramientas de catálogo, generado nuevo cada vez. Confirmado con datos reales del catálogo de producción:
+
+- `formatProduct` (`tools.ts:596-608`, usado por `search_products`, `list_all_products`,
+  `get_product_details`) devuelve `media: [{type, url}]` completo — URL larga de S3 por cada producto. El
+  modelo nunca usa esa URL (la manda `send_product_media` internamente, y las reglas del prompt prohíben
+  escribir la URL en el mensaje). `find_products_by_attributes` YA resuelve esto bien: devuelve
+  `hasMedia: boolean` en vez del array — confirmado con grep que nada en `agent.ts` lee `.media` de un
+  resultado de herramienta. Aplicar el mismo patrón a `formatProduct` es una reducción segura, cero
+  pérdida funcional.
+- Más grande: `search_products` cuando no hay match por palabra clave devuelve el CATÁLOGO COMPLETO como
+  fallback (`tools.ts:664-671`), con la `description` completa de cada producto. Medido en el catálogo real
+  de producción (negocio "MAGByLizN", 16 productos activos, descripción promedio 1,001 caracteres/producto):
+  ese único resultado de herramienta pesa **18,812 caracteres (~4,700 tokens)** — más grande que el
+  `BASE_SYSTEM_PROMPT` ENTERO (20,301 caracteres) metido en un solo tool-result, generado de nuevo cada vez
+  que se dispara el fallback, siempre a precio cache-miss caro. Mismo problema en `list_all_products`.
+  Fix propuesto: en la vista de LISTA (fallback de `search_products`, `list_all_products`), truncar
+  `description` a ~150 caracteres (con "…") — el modelo solo necesita reconocer de qué producto se trata
+  para decidir cuál es relevante o pedir `get_product_details`, que sigue devolviendo la descripción
+  completa para EL producto puntual que el cliente eligió. Estimado con los mismos datos reales: bajaría
+  ese fallback de ~18.8k a ~4-5k caracteres, ~75% de corte en el ítem de mayor costo recurrente encontrado
+  hoy — mucho más impacto en dólares reales que recortar prosa del prompt fijo (Fase 6.1/6.2).
+
+**Implementado 2026-09-13**: ambos fixes aplicados en `tools.ts`. `formatProduct` ahora acepta
+`opts?: { forList?: boolean }` — `hasMedia: boolean` siempre en vez del array `media` completo (los 4 call
+sites: `search_products` x2, `get_product_details`, `list_all_products`); `forList: true` trunca
+`description` a 150 chars en las 3 vistas de LISTA (`search_products` match + fallback, `list_all_products`),
+`get_product_details` sigue devolviendo la descripción completa (single-product detail). Verificado contra
+el catálogo real de producción (negocio MAGByLizN, 16 productos): **19,264 → 5,457 caracteres, -72%** en el
+peor caso (`list_all_products`/fallback completo). `npx tsc --noEmit` limpio; `tools.test.ts` 44/44 y
+`whatsapp.webhook.test.ts` 9/9 verdes, sin tocar ningún assert existente (ninguno dependía de la forma vieja
+de `media`). No commiteado todavía — pendiente confirmación del usuario antes de commit/deploy.
+
+**Fase 6.1 — `tools.ts`: cortar duplicación herramienta/prompt (bajo riesgo).**
+`catalogTools` se manda en CADA llamada igual que el system prompt (~5.9k tokens estimados). Varias
+`description` de parámetros repiten reglas de COMPORTAMIENTO que ya están en `BASE_SYSTEM_PROMPT` (ej.
+partes de `send_product_media`/`find_products_by_attributes` que reexplican cuándo no inventar una foto o
+cómo filtrar por color — eso ya vive en el prompt). Regla a aplicar: la description de una herramienta
+explica SOLO lo técnico (qué es y cómo se arma el parámetro), el prompt explica CUÁNDO/POR QUÉ usarla.
+Recortar lo puramente comportamental de cada description. Validar: `tools.test.ts` (comportamiento en
+runtime, no shape) + `agent.categoryColorScopePaid.ts` — pedir aprobación al usuario antes de correrlo, es
+real-cost — para confirmar que el modelo sigue llamando bien las herramientas sin la prosa recortada.
+
+**Fase 6.2 — `BASE_SYSTEM_PROMPT`: consolidar por significado (riesgo medio-alto — la fase que se pausó).**
+Mismo hallazgo que la vez pasada sigue siendo cierto: las 42 apariciones de "nunca" NO son una frase
+repetida, son 42 reglas distintas, cada una atada a un incidente real de producción. Proceso concreto para
+no perder ninguna sin darse cuenta (lo que frenó el intento anterior):
+1. Extraer cada regla real (no cada "nunca") en una lista aparte, con su sección de origen.
+2. Agrupar por TEMA real, no por texto: exactitud de datos (precio/stock/pago/envío — "nunca de memoria"),
+   disciplina de foto/media, gating de cierre (nombre/variante/resumen obligatorios antes de cerrar), timing
+   de escalación (`ask_owner` vs `flag_conversation_intent`), formato/idioma/tono.
+3. Por tema, escribir UN bloque consolidado que cubra todas las sub-reglas — comparar 1 a 1 contra la lista
+   original antes de reemplazar el texto viejo.
+4. Diff de caracteres antes/después. Meta realista: 15-25% de reducción del `BASE_SYSTEM_PROMPT`, no más —
+   son reglas reales, no relleno, así lo confirmó el intento anterior.
+Re-verificar que la cláusula de override de `customInstructions` (`agent.ts:454-477` a la fecha de esta
+sesión) siga acotada a guion/orden de conversación y no a contenido técnico — esa cláusula ya causó el bug
+de "uno a la vez" una vez (Phase 0). Validar: `agent.claimBackstopGuards.test.ts`, `agent.corePersonality.test.ts`,
+`npm test` completo y — con aprobación explícita del usuario — `agent.categoryColorScopePaid.ts` +
+`agent.ambiguousRequestsPaid.ts` + `contextSummaryPaid.ts` + `npm run regression`, comparando intervenciones
+de backstop contra baseline (cero intervenciones nuevas netas, misma barra que ya está en CLAUDE.md). Commit
+y deploy propio, no mezclar con 6.1/6.3.
+
+**Fase 6.3 — mover más secciones a condicional-por-feature (riesgo bajo-medio).**
+Patrón ya existente y probado: `MODALIDAD DE PAGO DEL ENVIO` y `TRATO SEGUN GENERO` solo se agregan al
+prompt si el negocio configuró esa feature (`agent.ts:429-452`). `TARIFAS DE ENVIO POR CATEGORIA`
+(`agent.ts:148-155`) en cambio es un párrafo fijo que se manda SIEMPRE aunque el negocio no tenga ninguna
+`ShippingRate` cargada. Pasar un `shippingRatesConfigured: boolean` a `buildSystemPrompt` (calculado donde
+ya se arma `BotPersonality` para esa conversación) y mover ese párrafo a condicional igual que los otros
+dos. Revisar el resto del prompt buscando más párrafos atados a una feature opt-in — reglas de seguridad
+core (foto, pago, escalación) se quedan siempre, no son candidatas.
+
+### Track B — feature nueva: optimizador de `customInstructions` con IA
+
+Distinto del Track A: esto NO corre en cada mensaje del bot, corre UNA VEZ cuando el dueño lo pide desde el
+panel admin. El dueño escribe su texto libre en la sección "Tu negocio" (`customInstructions`); un botón
+"Optimizar con IA" llama al LLM una sola vez para reescribirlo más corto, misma lógica y contenido, sin
+agregar reglas nuevas. Es CORE (toda la plataforma), no específico de MAG.IMP — cualquier negocio con
+`customInstructions` largo se beneficia, aunque MAG.IMP es el caso real más largo para probarlo primero.
+
+**Fase 7.1 — backend.** Endpoint nuevo en `admin.ts`, ej. `POST /api/business/custom-instructions/optimize`:
+toma el texto actual, llama a DeepSeek con un prompt separado (no el de ventas) tipo "reescribe este texto
+en español más corto, sin perder ningún dato ni regla, sin agregar nada nuevo, devolvé solo el texto
+reescrito". Costo real pero puntual (una llamada por click, no recurrente). Test: mockear la llamada al
+cliente DeepSeek, no usar la real en `*.test.ts` (misma regla de CLAUDE.md sobre `*Paid.ts`).
+
+**Fase 7.2 — frontend (`admin/index.html`).** Botón "Optimizar con IA" junto al textarea de
+`customInstructions`, con vista antes/después — el dueño aprueba o descarta, NUNCA se reemplaza el texto
+solo porque se generó (es su texto de negocio, puede tener matices que el LLM interprete distinto). Guardar
+solo si el dueño aprieta algo como "usar este texto". Ships con su UI en la misma fase, por la regla ya
+existente de este plan sobre toggles/features nuevas.
+
+**Fase 7.3 — validación real.** Probar con el `customInstructions` real de MAG.IMP (el más largo hoy):
+comparar tokens antes/después del texto optimizado, y correr `npm run regression` (con aprobación del
+usuario) para confirmar que el bot sigue el mismo flujo con el texto reescrito.
+
+### Track C — buenas prácticas de código (propuesta 2026-09-13, no fases todavía, priorizar con el usuario)
+
+No son cambios de tokens, son de salud del código. Anotadas para decidir cuáles vale la pena convertir en
+fase real:
+
+1. **Separar los templates de prompt de la lógica de orquestación.** `agent.ts` mezcla ~250 líneas de
+   template literals (`BASE_SYSTEM_PROMPT` y directivas) con el loop de tool-calling y los guards. Moverlos
+   a su propio módulo (ej. `src/ai/prompts/`) no cambia comportamiento, pero hace mucho más fácil medir y
+   diffear el tamaño de cada sección por separado — Fase 6.2 se vuelve más segura de hacer con esto ya hecho.
+2. **Terminar de migrar los guards standalone al registry.** Fase 1 dejó `intentFlagged`/`nameSaved`/
+   `contactSaved` y el guard de media como `if`s sueltos "porque tenían forma distinta" — si esa forma se
+   puede generalizar un poco, sumarlos al `ClaimBackstopGuard` registry deja un solo lugar para razonar sobre
+   todos los guards en vez de dos.
+3. **Tipar los inputs de herramientas en vez de castear a mano.** `runCatalogTool` hace `String(input.x)`
+   caso por caso — un schema de validación por herramienta (zod, si ya está en el proyecto) rechazaría un
+   input malformado ANTES de ejecutar, en vez de silenciosamente convertir cualquier cosa a string.
+4. **Un chequeo/test que alarme si un tool-result es gigante.** Nada hoy te avisa si el catálogo de un
+   negocio nuevo hace que `search_products`/`list_all_products` devuelvan un payload enorme — se encontró
+   por auditoría manual (este mismo mensaje). Un test simple que falle si un tool result supera cierto
+   tamaño de caracteres detectaría este tipo de problema en CI, no en producción.
+5. **Exponer cache-hit-ratio y tamaño de tool-results por negocio en `/api/ai-usage`.** El endpoint ya
+   existe (`admin.ts:591`) pero hoy solo se ve el total agregado — desglosar por negocio hace visible un
+   catálogo/instructions pesado sin tener que correr una query manual como se hizo hoy para encontrar el
+   caso de MAGByLizN.
+
+## Orden sugerido para retomar
+
+Fase 6.0/6.0b (DONE, ya dieron los datos reales) → aplicar los 2 fixes concretos que salieron de 6.0b
+(`hasMedia` en vez de `media` completo en `formatProduct`; truncar `description` en la vista de lista de
+`search_products`/`list_all_products`) — mayor impacto real en dólares que el resto de la track, bajo
+riesgo, no tocan `BASE_SYSTEM_PROMPT` → Fase 6.1 (tools.ts, bajo riesgo) → Fase 6.3 (condicionales, bajo
+riesgo) → Track C, los ítems que el usuario priorice → Track B completo (feature aislada) → Fase 6.2 al
+final (la reescritura manual del prompt base, la más riesgosa). Confirmar con el usuario antes de arrancar
+cada sub-fase — no encadenar fases sin aprobación explícita.
+
+**Pause note from the first attempt, 2026-09-13 (kept for history)**: read the full `BASE_SYSTEM_PROMPT`
+(agent.ts:14-251 at the time) before touching anything. Finding: the 42 "nunca" occurrences are NOT a
+repeated phrase - they're 42 distinct rules, each tied to a specific real production incident referenced
+nearby in the surrounding prose/comments. A real consolidation means judging which rules overlap in MEANING
+(not matching the word "nunca"), then rewriting prose by hand, then validating with a real conversation -
+qualitatively different from Phases 1-5's mechanical code fixes, and the highest-risk phase for silently
+degrading response quality. Given the user's explicit priority for this whole plan ("no quiero que esto
+dañe, solo refuerce"), asked the user how to proceed before writing anything; they chose to pause rather
+than attempt it then. Superseded by the detailed sub-plan above — resume at Fase 6.0.
 
 ## Suggested order for a fresh session
 
 Phase 1 → Phase 3 (quick, independent, high-value bug fixes, no architecture risk) → Phase 2 → Phase 4 →
-Phase 5 → Phase 6. Confirm scope with the user before starting each phase — they may want to reprioritize
-based on what's actually breaking in production between sessions.
+Phase 5 → Phase 6 (see its own "Orden sugerido" above for the Track A/B breakdown). Confirm scope with the
+user before starting each phase — they may want to reprioritize based on what's actually breaking in
+production between sessions.
