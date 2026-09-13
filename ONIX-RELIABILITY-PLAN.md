@@ -400,9 +400,21 @@ borrado dentro de la misma sesión, no un cliente real): preview muestra el text
 original queda intacto hasta apretar "Usar este texto", "Descartar" no cambia nada. `npx tsc --noEmit`
 limpio, suite completa 213/213. **Commiteado (`ba43ec6`) y desplegado a producción 2026-09-13**.
 
-**Fase 7.3 — validación real (pendiente).** Probar con el `customInstructions` real de MAG.IMP (el más
-largo hoy): comparar tokens antes/después del texto optimizado, y correr `npm run regression` (con
-aprobación del usuario) para confirmar que el bot sigue el mismo flujo con el texto reescrito.
+**Fase 7.3 — pasos 1-3 DONE 2026-09-13, regression pendiente (batcheada con Fase 6.2).** MAG.IMP real en
+producción es el negocio "MAGByLizN" (id `cmtp5jf4c0004jr2knlwrkccf`, email del dueño). Corrido un script
+puntual en el droplet que replica exactamente la lógica de `POST /api/improve-instructions` (mismo prompt,
+misma fórmula de `max_tokens`) contra su `customInstructions` real, sin persistir nada en el negocio -
+**resultado real: 8017 → 7505 caracteres, -6.4%**. Reducción modesta, no espectacular - confirma el mismo
+patrón que Fase 6.2 ya anticipaba: el texto real son reglas reales, no relleno. Costo real de la corrida:
+~2466 tokens prompt (cache-miss, prompt distinto al de ventas) + 2143 completion ≈ US$0.0016, un solo
+llamado. Original y optimizado enviados al usuario como archivos para revisar antes de decidir aplicarlo al
+negocio real. Script y archivos temporales borrados del droplet después de usarlos.
+
+**Pendiente, decisión explícita del usuario (2026-09-13)**: en vez de correr `npm run regression` ahora
+para validar el texto reescrito contra el sandbox, se batchea con la validación de Fase 6.2 - un solo run
+de regression al final cubriendo ambos cambios, para gastar una sola corrida en vez de una por fase. Ver
+[[feedback-regression-cadence]] en memoria. Falta también: decidir si aplicar el texto optimizado al
+negocio MAG.IMP real (el usuario todavía no lo aprobó, solo lo está revisando).
 
 ### Track C — buenas prácticas de código (propuesta 2026-09-13, no fases todavía, priorizar con el usuario)
 
