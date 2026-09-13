@@ -297,15 +297,25 @@ sites: `search_products` x2, `get_product_details`, `list_all_products`); `forLi
 el catálogo real de producción (negocio MAGByLizN, 16 productos): **19,264 → 5,457 caracteres, -72%** en el
 peor caso (`list_all_products`/fallback completo). `npx tsc --noEmit` limpio; `tools.test.ts` 44/44 y
 `whatsapp.webhook.test.ts` 9/9 verdes, sin tocar ningún assert existente (ninguno dependía de la forma vieja
-de `media`). No commiteado todavía — pendiente confirmación del usuario antes de commit/deploy.
+de `media`). **Commiteado (`53d0241`) y desplegado a producción 2026-09-13** — CORE, aplica a todos los
+negocios, no solo MAG.IMP.
 
-**Fase 6.1 — `tools.ts`: cortar duplicación herramienta/prompt (bajo riesgo).**
-`catalogTools` se manda en CADA llamada igual que el system prompt (~5.9k tokens estimados). Varias
-`description` de parámetros repiten reglas de COMPORTAMIENTO que ya están en `BASE_SYSTEM_PROMPT` (ej.
-partes de `send_product_media`/`find_products_by_attributes` que reexplican cuándo no inventar una foto o
-cómo filtrar por color — eso ya vive en el prompt). Regla a aplicar: la description de una herramienta
-explica SOLO lo técnico (qué es y cómo se arma el parámetro), el prompt explica CUÁNDO/POR QUÉ usarla.
-Recortar lo puramente comportamental de cada description. Validar: `tools.test.ts` (comportamiento en
+**Fase 6.1 — implementado 2026-09-13, DESPLEGADO PERO SIN VALIDACIÓN REAL DE SELECCIÓN DE HERRAMIENTA.**
+`catalogTools` se manda en CADA llamada igual que el system prompt. Se recortó la prosa de CONSECUENCIA/
+comportamiento-posterior que ya está duplicada en `BASE_SYSTEM_PROMPT` o en el campo `note` que la propia
+herramienta devuelve en runtime (ej. `find_products_by_attributes` ya no repite en su description estática
+que agrupa por categoría cuando hay ambigüedad — eso ya lo dice su propio `note` cuando pasa, solo esa vez,
+no en cada turno). Se mantuvo intencionalmente el "cuándo llamarla" (trigger) de cada herramienta — es la
+señal que más pesa para que el modelo elija bien qué función llamar, no se tocó. 9 descriptions editadas:
+`find_products_by_attributes`, `send_product_media`, `ask_owner`, `ask_owner_about_photo`,
+`close_conversation`, `cancel_order`, `flag_conversation_intent`, `get_shipping_rate_for_city`,
+`get_shipping_rates`. Neto: **-1,347 caracteres** en el bloque `catalogTools` (diff real, no estimado).
+`npx tsc --noEmit` limpio, `tools.test.ts` 44/44 (ningún test depende del texto de `description`).
+**Riesgo real de esta fase, a diferencia de 6.0b**: esto SÍ puede afectar qué herramienta elige llamar el
+modelo o cuándo — no es un cambio de forma de dato, es texto que el modelo lee para decidir. La validación
+real (`agent.categoryColorScopePaid.ts`, que cubre justo el escenario de `find_products_by_attributes`) NO
+se corrió — es real-cost, pendiente de que el usuario confirme cuándo correrla. Hasta entonces, tratar como
+implementado-pero-no-probado, igual que Phase 4 en su momento. Validar: `tools.test.ts` (comportamiento en
 runtime, no shape) + `agent.categoryColorScopePaid.ts` — pedir aprobación al usuario antes de correrlo, es
 real-cost — para confirmar que el modelo sigue llamando bien las herramientas sin la prosa recortada.
 

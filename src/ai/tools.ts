@@ -124,7 +124,7 @@ export const catalogTools: OpenAI.Chat.ChatCompletionTool[] = [
     function: {
       name: "find_products_by_attributes",
       description:
-        "Busca productos por categoria y/o color reales del catalogo (no por texto libre) - usala SIEMPRE que el cliente pida un tipo de producto con un color o categoria especifica (ej: 'reloj negro', 'el rosadito', 'audifonos rojos') en vez de search_products, para no mezclar categorias o colores que no pidio. Si el color no aparece en ninguna categoria clara, te devuelve los resultados agrupados por categoria para que le preguntes al cliente cual - nunca asumas ni mandes fotos de todas mezcladas.",
+        "Busca productos por categoria y/o color reales del catalogo (no por texto libre) - usala SIEMPRE que el cliente pida un tipo de producto con un color o categoria especifica (ej: 'reloj negro', 'el rosadito', 'audifonos rojos') en vez de search_products, para no mezclar categorias o colores que no pidio.",
       parameters: {
         type: "object",
         properties: {
@@ -184,7 +184,7 @@ export const catalogTools: OpenAI.Chat.ChatCompletionTool[] = [
     function: {
       name: "send_product_media",
       description:
-        "Envia por WhatsApp las fotos/videos reales de un producto. Usar SIEMPRE que el cliente pida verlas - manda el archivo real, no hace falta describirlo en texto. Preferi productId (mas confiable) si lo obtuviste este turno con search_products o get_product_details; si no, usa productName.",
+        "Envia por WhatsApp las fotos/videos reales de un producto. Usar SIEMPRE que el cliente pida verlas. Preferi productId (mas confiable) si lo obtuviste este turno con search_products o get_product_details; si no, usa productName.",
       parameters: {
         type: "object",
         properties: {
@@ -240,7 +240,7 @@ export const catalogTools: OpenAI.Chat.ChatCompletionTool[] = [
     function: {
       name: "get_shipping_rates",
       description:
-        "Obtiene las tarifas de envio reales configuradas por este negocio. Usar SIEMPRE antes de decirle un costo de envio al cliente cuando las instrucciones del negocio describen tarifas por ciudad/categoria - nunca copies el numero de esa prosa de memoria, confirmalo aca.",
+        "Obtiene las tarifas de envio reales configuradas por este negocio. Usar SIEMPRE antes de decirle un costo de envio al cliente cuando las instrucciones del negocio describen tarifas por ciudad/categoria.",
       parameters: {
         type: "object",
         properties: {},
@@ -252,7 +252,7 @@ export const catalogTools: OpenAI.Chat.ChatCompletionTool[] = [
     function: {
       name: "get_shipping_rate_for_city",
       description:
-        "Busca si esta ciudad especifica tiene una tarifa de envio EXACTA configurada por el negocio (coincidencia literal de nombre, ej. 'Bogota'). Usala apenas el cliente te de una ciudad puntual, antes de clasificarla vos de memoria en una categoria. Si no hay coincidencia exacta, NO es un error: segui las instrucciones propias del negocio para ubicarla en su categoria/tarifa general (usa get_shipping_rates para los montos), tal como lo venias haciendo.",
+        "Busca si esta ciudad especifica tiene una tarifa de envio EXACTA configurada por el negocio (coincidencia literal de nombre, ej. 'Bogota'). Usala apenas el cliente te de una ciudad puntual, antes de clasificarla vos de memoria en una categoria. Si no hay coincidencia exacta, no es un error - segui las instrucciones del negocio para su categoria/tarifa general.",
       parameters: {
         type: "object",
         properties: {
@@ -327,7 +327,7 @@ export const catalogTools: OpenAI.Chat.ChatCompletionTool[] = [
     function: {
       name: "flag_conversation_intent",
       description:
-        "Usa UNA SOLA VEZ cuando el cliente trae, no una consulta de venta normal: PQR (queja/reclamo), DEVOLUCION, NO_RECIBIDO (dice que no le llego el pedido), o SOLICITA_AGENTE (pide explicitamente hablar con una persona/asesor/humano, no con vos). No la uses para catalogo, precio o cerrar venta. Escala automaticamente a un humano del negocio.",
+        "Usa UNA SOLA VEZ cuando el cliente trae PQR (queja/reclamo), DEVOLUCION, NO_RECIBIDO (no le llego el pedido), o SOLICITA_AGENTE (pide hablar con una persona/asesor/humano). Ver PQR/DEVOLUCIONES en tus instrucciones para el flujo completo.",
       parameters: {
         type: "object",
         properties: {
@@ -342,7 +342,7 @@ export const catalogTools: OpenAI.Chat.ChatCompletionTool[] = [
     function: {
       name: "ask_owner",
       description:
-        "Usa SOLO cuando el cliente hace una pregunta real que necesita un dato concreto del negocio y no la podes responder con catalogo/get_faq/pagos. Manda la pregunta EXACTA al dueno por WhatsApp; su respuesta se reenvia tal cual al cliente, y mientras tanto el bot deja de responderle - por eso NUNCA para saludo, disculpas, agradecimiento o despedida (respondelo vos). No inventes ni adivines: preferi escalar. No la uses para PQR/devolucion/no_recibido, para eso usa flag_conversation_intent.",
+        "Usa SOLO cuando el cliente hace una pregunta real que necesita un dato concreto del negocio y no la podes responder con catalogo/get_faq/pagos. Manda la pregunta EXACTA al dueno por WhatsApp; mientras tanto el bot deja de responderle. No la uses para PQR/devolucion/no_recibido/pedido de hablar con un humano, para eso usa flag_conversation_intent.",
       parameters: {
         type: "object",
         properties: {
@@ -360,7 +360,7 @@ export const catalogTools: OpenAI.Chat.ChatCompletionTool[] = [
     function: {
       name: "ask_owner_about_photo",
       description:
-        "Ultimo recurso, solo si TODO esto se cumplio: el cliente mando foto/video de un producto; el analisis de imagen no lo identifico con confianza (ni con segunda opinion); ya le pediste foto mas clara o el nombre y no pudo darlo; y search_products no encontro ningun candidato relacionado. Reenvia la foto/video real al dueno para que diga que producto es (un humano reconoce lo que la IA no pudo); su respuesta se confirma sola al cliente (con la foto real del catalogo si aplica). El bot deja de responderle mientras tanto. NO la uses de entrada ni para saltar el paso de buscar en catalogo - es cara en tiempo del dueno.",
+        "Ultimo recurso cuando el analisis de imagen no identifica el producto con confianza y el cliente tampoco pudo aclararlo con una foto mas clara o el nombre (ver IMAGEN DE PRODUCTO en tus instrucciones). Reenvia la foto/video real al dueno; el bot deja de responderle mientras tanto. NO la uses de entrada, es cara en tiempo del dueno.",
       parameters: {
         type: "object",
         properties: {},
@@ -407,7 +407,7 @@ export const catalogTools: OpenAI.Chat.ChatCompletionTool[] = [
     function: {
       name: "close_conversation",
       description:
-        "Usa outcome=SOLD cuando el cliente ya confirmo su pedido final (producto, cantidad, direccion y forma de pago) y mando comprobante de pago valido. Si el negocio tiene un numero de contacto configurado, esto NO cierra la venta de inmediato: le manda el resumen al dueno para que confirme el pago, y el resultado te va a decir si quedo pendiente - en ese caso NO le digas al cliente que su compra esta confirmada, decile que estas verificando el pago con el equipo. Usa outcome=LOST si el cliente dice explicitamente que no le interesa o no va a comprar. No la uses para nada mas.",
+        "Usa outcome=SOLD cuando el cliente ya confirmo su pedido final y mando comprobante de pago valido (ver CIERRE en tus instrucciones para el flujo completo, incluido el caso pending). Usa outcome=LOST si el cliente dice explicitamente que no le interesa o no va a comprar. No la uses para nada mas.",
       parameters: {
         type: "object",
         properties: {
@@ -471,7 +471,7 @@ export const catalogTools: OpenAI.Chat.ChatCompletionTool[] = [
     function: {
       name: "cancel_order",
       description:
-        "Cancela el pedido mas reciente de este cliente. USA ESTA HERRAMIENTA SOLO despues de que el cliente ya confirmo explicitamente que si quiere cancelar: primero preguntale en texto plano '¿confirmas que queres cancelar tu pedido?' y esperá su respuesta en un mensaje aparte - nunca la llames en el mismo turno en el que recien pide cancelar. Si el pedido ya fue enviado, esta herramienta lo va a rechazar; en ese caso no insistas, escala con ask_owner.",
+        "Cancela el pedido mas reciente de este cliente. USA ESTA HERRAMIENTA SOLO despues de que el cliente ya confirmo explicitamente que si quiere cancelar (ver CONSULTAR O CANCELAR UN PEDIDO en tus instrucciones) - nunca en el mismo turno en que recien lo pide. Si el pedido ya fue enviado, esta herramienta lo va a rechazar.",
       parameters: {
         type: "object",
         properties: {},
