@@ -429,10 +429,14 @@ fase real:
    de 5000 chars, assert de que cada item de `search_products` (fallback) y `list_all_products` no supera
    400 chars en JSON — falla rápido en CI si algún cambio futuro rompe el truncado de Fase 6.0b, en vez de
    descubrirse por auditoría manual de nuevo. Test-only, sin cambio de runtime, no requiere deploy.
-5. **Exponer cache-hit-ratio y tamaño de tool-results por negocio en `/api/ai-usage`.** El endpoint ya
-   existe (`admin.ts:591`) pero hoy solo se ve el total agregado — desglosar por negocio hace visible un
-   catálogo/instructions pesado sin tener que correr una query manual como se hizo hoy para encontrar el
-   caso de MAGByLizN.
+5. **Mitad DONE 2026-09-13 (cache-hit-ratio).** `admin.ts:591` (`GET /api/ai-usage`) ya estaba scoped por
+   negocio (usa `businessIdOf(req)`); lo que faltaba era desglosar cache-hit vs cache-miss, no solo el
+   total combinado. Agregado `totalCacheHitTokens`/`totalCacheMissTokens`/`cacheHitRatio` a
+   `getAiUsageSummary` (`usage.ts`, `da52e26`), mostrado en el panel admin (tab "Consumo de IA", card
+   Tokens). 2 tests nuevos en `usage.test.ts`, `npx tsc --noEmit` limpio. **Pendiente**: la mitad de
+   "tamaño de tool-results por negocio" — necesita instrumentación nueva (nada hoy mide el tamaño de un
+   tool-result en el momento de la llamada), es un cambio aparte, no se hizo hoy para no sobre-construir.
+   Commiteado, no desplegado todavía.
 
 ## Orden sugerido para retomar
 
