@@ -38,3 +38,12 @@ test("canonicalizeCategoryWord: strips accents so it matches regardless of typin
 test("canonicalizeCategoryWord: leaves an already-singular short word alone", () => {
   assert.equal(canonicalizeCategoryWord("reloj"), "reloj");
 });
+
+// Real production bug (2026-09-13): a business categorized some watches "Relojes Inteligentes
+// (Smartwatches)" and others just "smartwatch" - a customer's "reloj negro" silently excluded the second
+// group even though both are the same real category, because "smartwatch" and "reloj" folded to different
+// words with no synonym link.
+test("canonicalizeCategoryWord: reloj and smartwatch (singular or plural) fold to the same bucket", () => {
+  assert.equal(canonicalizeCategoryWord("smartwatch"), canonicalizeCategoryWord("reloj"));
+  assert.equal(canonicalizeCategoryWord("smartwatches"), canonicalizeCategoryWord("relojes"));
+});
