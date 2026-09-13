@@ -166,6 +166,56 @@ test("flag_conversation_intent escalates when the customer asks for a human agen
   }
 });
 
+test("show_order_summary computes the real subtotal/total from the catalog, never from the caller's own math", async () => {
+  const product = await prisma.product.create({
+    data: { businessId, name: `Producto Resumen ${randomUUID()}`, description: "x", price: 45000, currency: "COP", stock: 10 },
+  });
+  const context = await freshContext();
+  try {
+    const result = (await runCatalogTool(context, "show_order_summary", {
+      items: [{ productName: product.name, quantity: 2 }],
+      shippingCost: 9000,
+    })) as { ready: boolean; subtotal: number; shippingCost: number; total: number; items: { lineTotal: number }[] };
+
+    assert.equal(result.ready, true);
+    assert.equal(result.items[0].lineTotal, 90000, "2 units at 45000 must total 90000, not whatever the caller passed");
+    assert.equal(result.subtotal, 90000);
+    assert.equal(result.shippingCost, 9000);
+    assert.equal(result.total, 99000);
+  } finally {
+    await prisma.product.deleteMany({ where: { id: product.id } });
+  }
+});
+
+test("show_order_summary blocks (ready:false) instead of guessing when a variant color/talla is still needed", async () => {
+  const product = await prisma.product.create({
+    data: { businessId, name: `Producto Variante ${randomUUID()}`, description: "x", price: 20000, currency: "COP", stock: 5 },
+  });
+  await prisma.productVariant.create({ data: { productId: product.id, color: "Rojo", stock: 3 } });
+  await prisma.productVariant.create({ data: { productId: product.id, color: "Azul", stock: 2 } });
+  const context = await freshContext();
+  try {
+    const result = (await runCatalogTool(context, "show_order_summary", {
+      items: [{ productName: product.name, quantity: 1 }],
+    })) as { ready: boolean; note?: string };
+
+    assert.equal(result.ready, false);
+    assert.match(result.note ?? "", /color|talla/i);
+  } finally {
+    await prisma.product.deleteMany({ where: { id: product.id } });
+  }
+});
+
+test("show_order_summary blocks (ready:false) instead of silently dropping an unresolved item", async () => {
+  const context = await freshContext();
+  const result = (await runCatalogTool(context, "show_order_summary", {
+    items: [{ productName: "Producto que no existe en el catalogo", quantity: 1 }],
+  })) as { ready: boolean; note?: string };
+
+  assert.equal(result.ready, false);
+  assert.match(result.note ?? "", /no encontre/i);
+});
+
 test("close_conversation with outcome LOST updates status without creating an order", async () => {
   const context = await freshContext();
   const result = await runCatalogTool(context, "close_conversation", { outcome: "LOST" });

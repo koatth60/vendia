@@ -117,3 +117,25 @@ test("category dominance: does not affect products with no category set (backwar
   const matched = findMentionedProductsForMediaBackstop(products, "Producto Uno Producto Dos");
   assert.equal(matched.length, 2);
 });
+
+// Regression for a real production bug (2026-09-13): a business's own combo lineup spans categories on
+// purpose (2 smartwatch combos + 1 earbuds combo). The bot listed all 3 by their full real names in one
+// message and asked which one; the customer said "Muestrame fotos" with no name. The category-dominance
+// guard above (built for a DIFFERENT bug - a stray shared token dragging in an unrelated product) was
+// dropping the earbuds combo purely for being outnumbered 2-to-1 by category, even though it was named
+// in full, not through a coincidental word collision. Fix: never drop a near-exact name match (ratio
+// >= 0.9) regardless of category.
+test("category dominance: keeps a minority-category match that was named by its full real name", () => {
+  const products = [
+    { name: "Combo Smartwatch T2000 Ultra", media: ["x"], category: "Tecnologia (Smartwatch)" },
+    { name: "Combo Pareja", media: ["x"], category: "Tecnologia (Smartwatch)" },
+    { name: "Combo k11 Mini", media: ["x"], category: "Tecnologia (Audifonos)" },
+  ];
+  const priorAssistantTurn =
+    "Tenemos varios combos disponibles:\n\n1. Combo K11 Mini - $98.000\n2. Combo Pareja - $115.000\n3. Combo Smartwatch T2000 Ultra - $80.000\n\n¿Alguno te llama la atencion?";
+  const haystack = `Muestrame fotos ${priorAssistantTurn}`;
+  const matched = findMentionedProductsForMediaBackstop(products, haystack);
+
+  assert.equal(matched.length, 3, "must keep all 3 combos, not just the 2-vs-1 majority category");
+  assert.ok(matched.some((p) => p.name === "Combo k11 Mini"), "must keep the fully-named minority-category combo");
+});

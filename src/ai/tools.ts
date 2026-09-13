@@ -362,6 +362,40 @@ export const catalogTools: OpenAI.Chat.ChatCompletionTool[] = [
   {
     type: "function",
     function: {
+      name: "show_order_summary",
+      description:
+        "Usala ANTES de pedir el comprobante de pago, apenas tengas producto(s)+cantidad, direccion, forma de pago y nombre - calcula el precio y total REALES del catalogo (nunca los calcules de memoria) para que se los muestres al cliente y le pidas que confirme, antes de seguir. Mismo formato de items que close_conversation. No cierra ni guarda nada, solo calcula.",
+      parameters: {
+        type: "object",
+        properties: {
+          items: {
+            type: "array",
+            description: "Un item por cada producto distinto, con el nombre tal como aparece en el catalogo y la cantidad.",
+            items: {
+              type: "object",
+              properties: {
+                productName: { type: "string", description: "Nombre del producto, tal como aparece en el catalogo" },
+                quantity: { type: "number", description: "Cantidad comprada de ese producto" },
+                variantLabel: {
+                  type: "string",
+                  description: "SOLO si ese producto tiene varios colores/tallas: el color y/o talla que el cliente eligio.",
+                },
+              },
+              required: ["productName", "quantity"],
+            },
+          },
+          shippingCost: {
+            type: "number",
+            description: "Costo de envio ya confirmado al cliente (0 si gratis/no aplica).",
+          },
+        },
+        required: ["items"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "close_conversation",
       description:
         "Usa outcome=SOLD cuando el cliente ya confirmo su pedido final (producto, cantidad, direccion y forma de pago) y mando comprobante de pago valido. Si el negocio tiene un numero de contacto configurado, esto NO cierra la venta de inmediato: le manda el resumen al dueno para que confirme el pago, y el resultado te va a decir si quedo pendiente - en ese caso NO le digas al cliente que su compra esta confirmada, decile que estas verificando el pago con el equipo. Usa outcome=LOST si el cliente dice explicitamente que no le interesa o no va a comprar. No la uses para nada mas.",
@@ -969,6 +1003,52 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
       return {
         asked: true,
         note: "La foto/video quedo escalada al dueno para identificar el producto. No sigas adivinando: decile al cliente que estas confirmando con el equipo cual es ese producto exactamente y le respondes en breve.",
+      };
+    }
+    case "show_order_summary": {
+      const shippingCost = input.shippingCost !== undefined && input.shippingCost !== null ? Number(input.shippingCost) : 0;
+      const { items, unresolved, needsAttribute } = await resolveOrderItems(
+        businessId,
+        Array.isArray(input.items) ? (input.items as { productName: string; quantity: number; variantLabel?: string }[]) : []
+      );
+
+      // Same two blocking checks close_conversation uses, but stricter here on `unresolved` (a plain
+      // warn-and-continue there) - closing can fall back to alerting the owner about a mismatched name
+      // after the fact, but showing a customer a "total" that silently dropped an unmatched item would
+      // just be a wrong number presented with full confidence. Nothing has been saved yet at this point,
+      // so asking the customer to confirm the exact name first has no downside.
+      if (needsAttribute.length > 0) {
+        return {
+          ready: false,
+          note: `Todavia falta preguntar el color/talla de: ${needsAttribute.join(", ")}. Pregunta cual quiere y volve a llamar show_order_summary recien cuando lo tengas - no muestres el resumen sin eso.`,
+        };
+      }
+      if (unresolved.length > 0) {
+        return {
+          ready: false,
+          note: `No encontre en el catalogo: ${unresolved.join(", ")}. Confirma el nombre exacto con el cliente antes de mostrar el resumen.`,
+        };
+      }
+      if (items.length === 0) {
+        return { ready: false, note: "No se dio ningun item valido." };
+      }
+
+      const subtotal = items.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
+      const total = subtotal + shippingCost;
+      return {
+        ready: true,
+        items: items.map((item) => ({
+          productName: item.productName,
+          variantLabel: item.variantLabel ?? null,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+          lineTotal: item.unitPrice * item.quantity,
+        })),
+        subtotal,
+        shippingCost,
+        total,
+        currency: items[0].currency,
+        note: "Mostrale al cliente cada item con su precio, el envio (si aplica) y el TOTAL de aca tal cual - son los numeros reales del catalogo, no los redondees ni los cambies. Pedile que confirme antes de seguir.",
       };
     }
     case "close_conversation": {

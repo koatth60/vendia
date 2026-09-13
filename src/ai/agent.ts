@@ -31,9 +31,11 @@ catalogo completo igual - revisalo por significado antes de decidir, el cliente 
 producto con otras palabras que las del catalogo (ej. "algo para hacer ejercicio" por un smartwatch
 deportivo). Solo despues de revisar esa lista completa, si de verdad no hay nada que coincida, decile
 directamente que no lo manejan - la ausencia en el catalogo YA es la respuesta real, no hace falta
-escalar con ask_owner para eso. Si preguntan por una talla, color u otra variante especifica de un
-producto y no aparece mencionada en su descripcion, nunca inventes ni asumas que existe o que no existe -
-usa ask_owner para confirmarlo.
+escalar con ask_owner para eso. Mismo principio para una talla/color/variante especifica de un producto ya
+identificado: confirmalo con find_products_by_attributes o las variantes reales del producto (ver mas
+abajo) - si no existe ahi, esa ausencia tambien es la respuesta real, ofrecele las opciones que si tiene
+en vez de escalar. Solo usa ask_owner si el producto no tiene ninguna variante/color cargado en el
+catalogo en absoluto.
 
 SELECCION POR NUMERO: esto aplica SOLO cuando tu ULTIMO mensaje fue una lista numerada (1, 2, 3...) DE
 PRODUCTOS o variantes, y el cliente responde solo con un numero de esa lista. En ese caso puntual, ese
@@ -55,7 +57,10 @@ VARIANTES DEL MISMO PRODUCTO: mismo principio para un producto YA identificado c
 (color, material, tamaño, modelo) - si el cliente muestra interes sin especificar cual, nunca le preguntes
 "cual te interesa" o pidas mas datos a ciegas: consulta el catalogo real y mostrale las opciones que de
 verdad existen en ESE mismo mensaje, preguntando cual prefiere. Si el producto no tiene variantes, no
-preguntes nada, segui directo con el detalle.
+preguntes nada, segui directo con el detalle. Mismo criterio si lo que listaste fueron varios PRODUCTOS
+distintos (ej. varios combos) en vez de variantes de uno solo: si el cliente pide fotos sin decir cual,
+mandale las de TODOS los que listaste en ese mismo turno - nunca mandes solo algunos y preguntes si
+quiere ver "los demas tambien", eso repite la misma pregunta que ya le hiciste.
 
 COMPARACION DE PRODUCTOS: si el cliente pide comparar dos o mas productos ("cual es mejor", "cual me
 conviene", "diferencia entre X y Y"), compara solo con los datos reales que te devolvieron las
@@ -143,19 +148,22 @@ despues de que la eligio y despues vuelve a la compra, no des por sentado que si
 confirmala de nuevo antes de seguir. Si preguntan algo que no tiene que ver con el negocio, respondelo
 brevemente y redirigi la conversacion hacia el catalogo.
 
-RESUMEN Y TOTAL ANTES DE PEDIR EL PAGO: esto es el flujo generico que aplica cuando el negocio NO definio
-su propio paso a paso para confirmar el pedido/pago en sus INSTRUCCIONES ESPECIFICAS DE ESTE NEGOCIO (mas
-abajo en este prompt) - si ese negocio SI tiene su propio flujo de resumen/confirmacion escrito ahi, segui
-ESE en su lugar y no este. Cuando aplica (negocio sin flujo propio para esto), nunca te lo saltees por mas
-simple que parezca el pedido. Apenas tengas los
-datos completos (producto(s) y cantidad, direccion, forma de pago Y nombre), y ANTES de pedirle el
-comprobante o cualquier confirmacion de pago, mostrale al cliente un resumen claro por escrito: cada
-producto con su cantidad, el costo de envio (aclarando si es gratis), y el TOTAL final que va a pagar
-(la suma de todo) - y pregunta explicitamente algo como "¿esta correcto tu pedido?" o "¿confirmas estos
-datos?". Segui recien despues de que el cliente confirme ese resumen. Nunca le digas a un cliente que su
-pedido "quedo confirmado" sin haber mostrado ese resumen con el total y haber recibido una confirmacion
-explicita suya sobre el - si en algun momento no estas seguro de si ya se lo mostraste y confirmo en esta
-misma conversacion, mostraselo de nuevo antes de cerrar, no asumas.
+RESUMEN Y TOTAL ANTES DE PEDIR EL PAGO: siempre que vayas a mostrar este resumen (sea con este flujo
+generico o con el flujo propio de este negocio, mas abajo), usa show_order_summary para obtener el precio
+y el TOTAL reales - nunca los calcules ni los inventes de memoria, ni siquiera para un solo producto.
+
+Esto es el flujo generico que aplica cuando el negocio NO definio su propio paso a paso para confirmar el
+pedido/pago en sus INSTRUCCIONES ESPECIFICAS DE ESTE NEGOCIO (mas abajo en este prompt) - si ese negocio SI
+tiene su propio flujo de resumen/confirmacion escrito ahi, segui ESE en su lugar y no este. Cuando aplica
+(negocio sin flujo propio para esto), nunca te lo saltees por mas simple que parezca el pedido. Apenas
+tengas los datos completos (producto(s) y cantidad, direccion, forma de pago Y nombre), y ANTES de
+pedirle el comprobante o cualquier confirmacion de pago, mostrale al cliente ese resumen real: cada
+producto con su cantidad, el costo de envio (aclarando si es gratis), y el TOTAL final que va a pagar -
+y pregunta explicitamente algo como "¿esta correcto tu pedido?" o "¿confirmas estos datos?". Segui recien
+despues de que el cliente confirme ese resumen. Nunca le digas a un cliente que su pedido "quedo
+confirmado" sin haber mostrado ese resumen con el total y haber recibido una confirmacion explicita suya
+sobre el - si en algun momento no estas seguro de si ya se lo mostraste y confirmo en esta misma
+conversacion, mostraselo de nuevo antes de cerrar, no asumas.
 
 NOMBRE Y AVANCE: apenas sepas el nombre del cliente (porque se presento, lo diste vos al pedirlo, o lo dio
 para el envio), usa save_customer_name una vez.
@@ -841,20 +849,31 @@ export function findMentionedProductsForMediaBackstop<T extends { name: string; 
   haystack: string
 ): T[] {
   const haystackTokens = new Set(tokenize(haystack.replace(LIST_MARKER_PATTERN, " ")));
-  const matched = products.filter((p) => {
-    if (p.media.length === 0) return false;
-    const nameTokens = tokenize(p.name);
-    if (nameTokens.length === 0) return false;
-    const hits = nameTokens.filter((t) => haystackTokens.has(t)).length;
-    return hits / nameTokens.length >= 0.6;
-  });
+  const scored = products
+    .map((p) => {
+      if (p.media.length === 0) return null;
+      const nameTokens = tokenize(p.name);
+      if (nameTokens.length === 0) return null;
+      const hits = nameTokens.filter((t) => haystackTokens.has(t)).length;
+      const ratio = hits / nameTokens.length;
+      return ratio >= 0.6 ? { product: p, ratio } : null;
+    })
+    .filter((x): x is { product: T; ratio: number } => x !== null);
+  const matched = scored.map((s) => s.product);
 
   // Defense in depth beyond the list-marker fix above: once the matches clearly settle on ONE dominant
-  // category, drop any minority-category outlier - a shared generic word or any other future token
+  // category, drop any WEAK minority-category outlier - a shared generic word or any other future token
   // collision can drag in a product from a totally different category, and the real intent behind "show
-  // me photos of the ones you just listed" is always "more of the same kind of thing", never a silent
+  // me photos of the ones you just listed" is usually "more of the same kind of thing", never a silent
   // category switch. Only acts on a clear majority (strictly more matches in one category than any
   // other) - on a tie, stay silent rather than guess which category the customer actually meant.
+  //
+  // Never drops a NEAR-EXACT name match (ratio >= 0.9) regardless of category - a real production case
+  // (2026-09-13): a business's own "combo" lineup spans categories on purpose (a watch combo and an
+  // earbuds combo both fully named in the same list), and the customer/bot naming one by its complete
+  // real name is far stronger evidence of real intent than a same-category headcount. The original bug
+  // this guard fixed matched its outlier through a stray shared token (a brand word plus a coincidental
+  // list-number digit), never the product's full name - that distinction is exactly what ratio captures.
   const categoryCounts = new Map<string, number>();
   for (const p of matched) {
     if (p.category) categoryCounts.set(p.category, (categoryCounts.get(p.category) ?? 0) + 1);
@@ -863,7 +882,7 @@ export function findMentionedProductsForMediaBackstop<T extends { name: string; 
   if (sortedCategories.length < 2 || sortedCategories[0][1] > sortedCategories[1][1]) {
     const dominantCategory = sortedCategories[0]?.[0];
     if (dominantCategory) {
-      return matched.filter((p) => !p.category || p.category === dominantCategory);
+      return scored.filter((s) => !s.product.category || s.product.category === dominantCategory || s.ratio >= 0.9).map((s) => s.product);
     }
   }
   return matched;
@@ -1045,7 +1064,16 @@ export async function generateReply(
       for (let i = 0; i < attributeMatchThisTurn.length; i++) {
         if (i > 0) await new Promise((resolve) => setTimeout(resolve, 1200));
         const m = attributeMatchThisTurn[i];
-        await runCatalogTool(context, "send_product_media", { productId: m.productId, variantId: m.variantId ?? undefined });
+        // A real WhatsApp send failure here (expired token, transient 5xx) used to throw uncaught all
+        // the way out of generateReply - the text reply already generated for this turn never reached
+        // the customer at all, not even the fallback apology, since this runs in the return path outside
+        // generateReply's own try/catch. Degrade instead: log and keep going, so one failed photo never
+        // silences the whole turn or blocks the rest of the batch.
+        try {
+          await runCatalogTool(context, "send_product_media", { productId: m.productId, variantId: m.variantId ?? undefined });
+        } catch (error) {
+          console.error("Fallo el envio de una foto en el backstop de atributos:", error);
+        }
       }
       return text;
     }
@@ -1094,7 +1122,13 @@ export async function generateReply(
 
     for (let i = 0; i < matched.length; i++) {
       if (i > 0) await new Promise((resolve) => setTimeout(resolve, 1200));
-      await runCatalogTool(context, "send_product_media", { productName: matched[i].name });
+      // Same reasoning as the attribute-match loop above: never let one failed send take the whole
+      // turn's reply down with it.
+      try {
+        await runCatalogTool(context, "send_product_media", { productName: matched[i].name });
+      } catch (error) {
+        console.error("Fallo el envio de una foto en el backstop de nombres:", error);
+      }
     }
 
     return text;

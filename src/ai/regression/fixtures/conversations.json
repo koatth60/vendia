@@ -5478,5 +5478,39 @@
         "imageAnalysis": null
       }
     ]
+  },
+  {
+    "conversationId": "manual-mag-combo-multi-photo-1",
+    "businessId": "cmtp5jf4c0004jr2knlwrkccf",
+    "businessName": "MAGByLizN",
+    "status": "NEW",
+    "humanControl": false,
+    "messages": [
+      {
+        "role": "CUSTOMER",
+        "content": "Que Combos tienes?",
+        "imageAnalysis": null
+      },
+      {
+        "role": "ASSISTANT",
+        "content": "¡Claro que sí! 😊 Manejamos estos combos:\n\n1. **Combo Pareja** — $115.000\nIncluye 2 smartwatches + 2 pares de audífonos inalámbricos + 7 pulsos intercambiables. Ideal para compartir 💕\n\n2. **Combo K11 Mini** — $98.000\n1 smartwatch mini + 1 par de audífonos mini + 7 pulsos y cargadores.\n\n3. **Combo Smartwatch T2000 Ultra** — $80.000\nSmartwatch T2000 Ultra de 49 mm, con carga inalámbrica y todas las funciones de salud y deporte.\n\n¿Te muestro las fotos de alguno? Dime cuál te llama la atención ✨",
+        "imageAnalysis": null
+      },
+      {
+        "role": "CUSTOMER",
+        "content": "Muestrame fotos",
+        "imageAnalysis": null
+      },
+      {
+        "role": "ASSISTANT",
+        "content": "¿Quieres ver fotos de los otros combos también? 😊",
+        "imageAnalysis": null
+      },
+      {
+        "role": "CUSTOMER",
+        "content": "Si también",
+        "imageAnalysis": null
+      }
+    ]
   }
 ]
