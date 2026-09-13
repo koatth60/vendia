@@ -31,7 +31,12 @@ payload to DeepSeek on every customer message. Keep this lean going forward:
   pre-change baseline. Follow with one run of `npm run test:paid` (runs
   `src/ai/agent.escalationPaid.ts`, also real DeepSeek calls).
 - Neither of the above is part of `npm test` or CI - they cost real money per run, so run them
-  deliberately, not while iterating. `agent.escalationPaid.ts` is deliberately named without `.test.`
-  so Node's default test-file discovery (`npm test`) skips it - only `npm run test:paid` runs it
-  (confirmed 2026-09-13: it used to be `agent.escalation.test.ts` and silently ran, and cost money, on
-  every plain `npm test`).
+  deliberately, not while iterating. Any test file that calls the real DeepSeek API must be named
+  `*Paid.ts`, never `*.test.ts` — Node's default test-file discovery (`npm test`) picks up every
+  `*.test.ts` with no path filter, so a real-cost test left under that name runs (and bills) on every
+  plain `npm test`. Confirmed twice on 2026-09-13: first `agent.escalation.test.ts` (renamed to
+  `agent.escalationPaid.ts`), then three more files found doing the same thing
+  (`agent.categoryColorScope.test.ts`, `agent.ambiguousRequests.test.ts`, `contextSummary.test.ts` →
+  `agent.categoryColorScopePaid.ts`, `agent.ambiguousRequestsPaid.ts`, `contextSummaryPaid.ts`). All 4
+  `*Paid.ts` files are wired into `npm run test:paid`. Before adding any new test that calls
+  `generateReply`/DeepSeek for real, name it `*Paid.ts` from the start and add it to that script.
