@@ -410,11 +410,17 @@ patrón que Fase 6.2 ya anticipaba: el texto real son reglas reales, no relleno.
 llamado. Original y optimizado enviados al usuario como archivos para revisar antes de decidir aplicarlo al
 negocio real. Script y archivos temporales borrados del droplet después de usarlos.
 
-**Pendiente, decisión explícita del usuario (2026-09-13)**: en vez de correr `npm run regression` ahora
-para validar el texto reescrito contra el sandbox, se batchea con la validación de Fase 6.2 - un solo run
-de regression al final cubriendo ambos cambios, para gastar una sola corrida en vez de una por fase. Ver
-[[feedback-regression-cadence]] en memoria. Falta también: decidir si aplicar el texto optimizado al
-negocio MAG.IMP real (el usuario todavía no lo aprobó, solo lo está revisando).
+**Aplicado a producción 2026-09-13**: usuario revisó original/optimizado (enviados como archivos) y aprobó
+explícitamente aplicarlo al negocio real. `customInstructions` de MAGByLizN actualizado en la DB de
+producción (8017 → 7505 caracteres) vía script puntual, sin necesidad de reiniciar pm2 - se lee de la DB en
+cada mensaje, no en el arranque. Script y archivo temporal borrados del droplet después de usarlo.
+
+**Pendiente**: en vez de correr `npm run regression` ahora para validar el texto reescrito contra el
+sandbox, se batchea con la validación de Fase 6.2 - un solo run de regression al final cubriendo ambos
+cambios, para gastar una sola corrida en vez de una por fase. Ver [[feedback-regression-cadence]] en
+memoria. El texto real de MAG.IMP ya cambió en producción antes de esa validación batcheada - si el
+regression run encuentra un problema atribuible a este rewrite, el original queda en el archivo enviado al
+usuario para revertir manualmente.
 
 ### Track C — buenas prácticas de código (propuesta 2026-09-13, no fases todavía, priorizar con el usuario)
 
