@@ -204,8 +204,9 @@
   .empty-state { text-align: center; padding: 44px 20px; color: var(--muted); font-size: 13.5px; }
   .empty-state .big { font-size: 32px; margin-bottom: 10px; }
 
-  .product-card { border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; background: #fff; display: flex; flex-direction: column; box-shadow: var(--shadow-sm); }
+  .product-card { border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; background: #fff; display: flex; flex-direction: column; box-shadow: var(--shadow-sm); transition: box-shadow .3s ease, border-color .3s ease; }
   .product-card.inactive { opacity: 0.55; }
+  .product-card.is-new { border-color: var(--brand); box-shadow: 0 0 0 3px rgba(31,168,85,.22), var(--shadow-md); }
   .thumb-strip { display: flex; gap: 4px; padding: 10px 10px 0; overflow-x: auto; }
   .thumb { width: 60px; height: 60px; border-radius: 8px; object-fit: cover; flex-shrink: 0; border: 1px solid var(--border); cursor: zoom-in; }
   .thumb-wrap { position: relative; flex-shrink: 0; }
@@ -230,6 +231,37 @@
   .category-tag { font-size: 11px; color: var(--muted); background: var(--border-soft); padding: 2px 8px; border-radius: 6px; display: inline-block; width: fit-content; }
   .product-footer { display: flex; gap: 6px; padding: 10px 14px; border-top: 1px solid var(--border); }
   .product-footer button { flex: 1; padding: 7px; font-size: 12px; }
+
+  /* Variants (per-color/size stock) */
+  .variant-section { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border-soft); }
+  .variant-section-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; color: var(--muted-soft); margin-bottom: 8px; }
+  .variant-list { display: flex; flex-direction: column; gap: 4px; }
+  .variant-row { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: var(--radius-md); background: var(--border-soft); }
+  .variant-swatch { width: 18px; height: 18px; border-radius: 50%; flex-shrink: 0; border: 1px solid rgba(18,33,26,.12); box-shadow: inset 0 0 0 2px rgba(255,255,255,.5); }
+  .variant-swatch.is-unknown { background: repeating-conic-gradient(var(--border) 0% 25%, var(--card) 0% 50%) 0 0 / 8px 8px; }
+  .variant-name-input { flex: 1; min-width: 0; border: none; background: transparent; padding: 4px 2px; font-size: 13px; font-weight: 600; color: var(--ink); }
+  .variant-name-input:focus { background: #fff; box-shadow: 0 0 0 2px rgba(31,168,85,.18); border-radius: 6px; }
+  .variant-size-input { width: 44px; flex-shrink: 0; border: none; background: transparent; padding: 4px 2px; font-size: 12.5px; color: var(--muted); text-align: center; }
+  .variant-size-input:focus { background: #fff; box-shadow: 0 0 0 2px rgba(31,168,85,.18); border-radius: 6px; }
+  .variant-stock-wrap { display: flex; align-items: center; gap: 4px; flex-shrink: 0; background: #fff; border: 1px solid var(--border); border-radius: 999px; padding: 2px 3px 2px 10px; }
+  .variant-stock-wrap label { font-size: 10.5px; color: var(--muted-soft); font-weight: 700; text-transform: uppercase; letter-spacing: .02em; }
+  .variant-stock-input { width: 34px; border: none; padding: 2px; font-size: 12.5px; font-weight: 700; text-align: center; color: var(--brand-dark); }
+  .variant-photo-btn { flex-shrink: 0; width: 26px; height: 26px; border-radius: 50%; position: relative; display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 13px; cursor: pointer; border: 1.5px dashed var(--border); }
+  .variant-photo-btn.has-photo { border-style: solid; padding: 0; overflow: hidden; }
+  .variant-photo-btn.has-photo img, .variant-photo-btn.has-photo video { width: 100%; height: 100%; object-fit: cover; }
+  .variant-photo-btn input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+  .variant-delete-btn { flex-shrink: 0; width: 22px; height: 22px; border-radius: 50%; border: none; background: transparent; color: var(--muted-soft); font-size: 15px; line-height: 1; padding: 0; }
+  .variant-delete-btn:hover { background: var(--danger-light); color: var(--danger); }
+  .variant-add-row { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
+  .variant-add-row input[type="text"], .variant-add-row input[type="number"] { padding: 7px 10px; font-size: 12.5px; }
+  .variant-color-suggestions { margin-top: 6px; }
+  .variant-suggestions-label { font-size: 11.5px; color: var(--muted-soft); margin-bottom: 5px; }
+  .color-chip {
+    display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px 4px 6px; border-radius: 999px;
+    border: 1.5px dashed var(--border); background: transparent; color: var(--ink-soft); font-size: 12px; font-weight: 600;
+  }
+  .color-chip:hover { border-color: var(--brand); background: var(--brand-light); color: var(--brand-dark); }
+  .color-chip .variant-swatch { width: 12px; height: 12px; }
 
   .edit-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 12px 14px; background: var(--bg); border-top: 1px solid var(--border); }
   .edit-grid label { margin-top: 6px; font-size: 11px; }
@@ -1406,22 +1438,22 @@ function renderCard(p) {
   const totalStock = variants.length > 0 ? variants.filter(v => v.active).reduce((sum, v) => sum + v.stock, 0) : p.stock;
 
   return `
-    <div class="product-card ${p.active ? '' : 'inactive'}">
+    <div class="product-card ${p.active ? '' : 'inactive'}" data-product-id="${p.id}">
       <div class="thumb-strip">
         ${thumbs}
         <label class="thumb-add">
           +
           <input type="file" accept="image/jpeg,image/png,video/*" onchange="uploadMedia('${p.id}', this)" />
         </label>
-        ${media.length > 0 ? `<button class="btn-secondary" style="padding:4px 8px; font-size:11px;" onclick="detectColorsForProduct('${p.id}')">Detectar colores</button>` : ''}
       </div>
-      <div id="color-suggestions-${p.id}"></div>
       <div class="product-body">
+        ${media.length > 0 ? `<button class="btn-ghost" style="align-self:flex-start; padding:2px 0; font-size:11.5px; font-weight:600; color:var(--brand-dark);" onclick="detectColorsForProduct('${p.id}')">+ Detectar colores desde la foto</button>` : ''}
+        <div id="color-suggestions-${p.id}"></div>
         <div class="product-name">${escapeHtml(p.name)}</div>
         <div class="product-desc">${escapeHtml(p.description)}</div>
         <div class="product-meta">
           <span class="price-tag">${p.currency} ${formatPriceValue(p.price, p.currency)}</span>
-          <span class="stock-badge ${totalStock > 0 ? 'stock-ok' : 'stock-zero'}">${totalStock > 0 ? totalStock + ' en stock' + (variants.length > 0 ? ' (suma de variantes)' : '') : 'sin stock'}</span>
+          <span class="stock-badge ${totalStock > 0 ? 'stock-ok' : 'stock-zero'}" ${variants.length > 0 ? `title="Suma de ${variants.filter(v=>v.active).length} variante(s)"` : ''}>${totalStock > 0 ? totalStock + ' en stock' : 'sin stock'}</span>
         </div>
         <div class="product-meta">
           ${p.category ? `<span class="category-tag">${escapeHtml(p.category)}</span>` : ''}
@@ -1439,18 +1471,43 @@ function renderCard(p) {
   `;
 }
 
+// Common Spanish color names -> a real swatch color, so a variant row shows an actual dot instead of
+// making the admin read the word to know what they're looking at. Unmatched names (a brand name typed
+// into the color field, a typo) fall back to a dashed "unknown" swatch rather than guessing wrong.
+const COLOR_SWATCH_HEX = {
+  negro: '#1c1c1e', blanco: '#f5f5f5', gris: '#8e8e93', plateado: '#c7c9cc', plata: '#c7c9cc',
+  rojo: '#e5322d', rosa: '#f472b6', rosado: '#f472b6', fucsia: '#e6399b',
+  azul: '#2563eb', celeste: '#38bdf8', turquesa: '#14b8a6', verde: '#22c55e', menta: '#6ee7b7',
+  amarillo: '#eab308', dorado: '#d4a437', oro: '#d4a437', naranja: '#f97316',
+  morado: '#8b5cf6', violeta: '#8b5cf6', lila: '#c4b5fd', purpura: '#8b5cf6',
+  cafe: '#7c5842', marron: '#7c5842', chocolate: '#5c3a21', beige: '#e8dcc8', crema: '#f3e9d2',
+  transparente: '#dbe4de',
+};
+function colorSwatchHtml(colorName) {
+  const key = (colorName || '').trim().toLowerCase()
+    .normalize('NFD').replace(/[̀-ͯ]/g, ''); // strip accents: "café" -> "cafe", "marrón" -> "marron"
+  const hex = Object.keys(COLOR_SWATCH_HEX).find(k => key.includes(k));
+  return hex
+    ? `<span class="variant-swatch" style="background:${COLOR_SWATCH_HEX[hex]};"></span>`
+    : `<span class="variant-swatch is-unknown"></span>`;
+}
+
 // Variants are for a product sold in several colors/sizes under one name, each with its OWN stock and
 // OWN photos (e.g. one headband model in red/yellow/green) - see ProductVariant in schema.prisma. Most
 // products never use this; it only renders rows when they exist, plus a small always-available form to
 // add the first one.
 function renderVariantSection(productId, variants) {
   // Only "ropa" businesses use talla at all (see updateTallaFieldVisibility) - showing an always-empty
-  // Talla input on every variant card for every other vertical (tecnologia, joyeria, etc) was pure
-  // clutter and made each card wider/taller than it needed to be for the common case (color-only).
+  // Talla input on every variant row for every other vertical (tecnologia, joyeria, etc) was pure
+  // clutter.
   const showTalla = document.getElementById('bot-category')?.value === 'ropa';
-  const cards = variants.map(v => {
+  const rows = variants.map(v => {
     const vMedia = v.media || [];
-    const vThumbs = vMedia.map(m => `
+    const firstMedia = vMedia[0];
+    const photoPreview = firstMedia
+      ? (firstMedia.type === 'VIDEO' ? `<video src="${firstMedia.url}"></video>` : `<img src="${firstMedia.url}" />`)
+      : '+';
+    const vThumbsRest = vMedia.map(m => `
       <span class="thumb-wrap">
         ${m.type === 'VIDEO'
           ? `<video class="thumb" src="${m.url}" onclick="openVideoLightbox('${m.url}')"></video>`
@@ -1459,36 +1516,34 @@ function renderVariantSection(productId, variants) {
       </span>
     `).join('');
     return `
-      <div class="variant-card" style="border:1px solid var(--border); border-radius:8px; padding:8px; min-width:150px; flex:1 1 150px;">
-        <div style="display:flex; gap:6px; align-items:center; margin-bottom:6px;">
-          <input placeholder="Color" value="${escapeHtml(v.color || '')}" style="flex:1; min-width:0;" onchange="updateVariant('${v.id}', 'color', this.value)" />
-          ${showTalla ? `<input placeholder="Talla" value="${escapeHtml(v.size || '')}" style="width:60px;" onchange="updateVariant('${v.id}', 'size', this.value)" />` : ''}
+      <div class="variant-row">
+        ${colorSwatchHtml(v.color)}
+        <input class="variant-name-input" placeholder="Color" value="${escapeHtml(v.color || '')}" onchange="updateVariant('${v.id}', 'color', this.value)" />
+        ${showTalla ? `<input class="variant-size-input" placeholder="Talla" value="${escapeHtml(v.size || '')}" onchange="updateVariant('${v.id}', 'size', this.value)" />` : ''}
+        <div class="variant-stock-wrap">
+          <label>Stock</label>
+          <input class="variant-stock-input" type="number" value="${v.stock}" onchange="updateVariant('${v.id}', 'stock', this.value)" />
         </div>
-        <div style="display:flex; gap:6px; align-items:center;">
-          <label style="font-size:11px; color:var(--muted);">Stock:</label>
-          <input type="number" value="${v.stock}" style="width:60px; font-weight:600;" onchange="updateVariant('${v.id}', 'stock', this.value)" />
-          <button class="btn-danger" style="padding:4px 8px; margin-left:auto;" onclick="deleteVariant('${v.id}', '${productId}')">Eliminar</button>
-        </div>
-        <div class="thumb-strip" style="margin-top:6px;">
-          ${vThumbs}
-          <label class="thumb-add" title="Foto propia de este color (opcional, si no subís se usa la foto del producto)">
-            +
-            <input type="file" accept="image/jpeg,image/png,video/*" onchange="uploadVariantMedia('${productId}', '${v.id}', this)" />
-          </label>
-        </div>
+        <label class="variant-photo-btn ${firstMedia ? 'has-photo' : ''}" title="Foto propia de este color (opcional, si no subís se usa la foto del producto)">
+          ${photoPreview}
+          <input type="file" accept="image/jpeg,image/png,video/*" onchange="uploadVariantMedia('${productId}', '${v.id}', this)" />
+        </label>
+        <button class="variant-delete-btn" title="Eliminar variante" onclick="deleteVariant('${v.id}', '${productId}')">×</button>
       </div>
+      ${vMedia.length > 1 ? `<div class="thumb-strip" style="padding:4px 0 0 26px;">${vThumbsRest}</div>` : ''}
     `;
   }).join('');
 
   return `
-    <div class="variant-section" style="margin-top:10px;">
-      <div style="font-size:11.5px; font-weight:600; color:var(--muted);">${showTalla ? 'Colores/tallas' : 'Colores'} con stock propio (sin foto propia usan la foto del producto)</div>
-      <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:6px;">${cards}</div>
-      <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin-top:8px;">
-        <input id="new-variant-color-${productId}" placeholder="Color" style="width:100px;" />
-        <input id="new-variant-size-${productId}" placeholder="Talla" style="width:80px;" ${showTalla ? '' : 'hidden'} />
-        <input id="new-variant-stock-${productId}" type="number" placeholder="Stock" value="0" style="width:80px;" />
-        <button class="btn-secondary" style="padding:4px 8px;" onclick="addVariant('${productId}')">+ Variante</button>
+    <div class="variant-section">
+      <div class="variant-section-title">${showTalla ? 'Colores/tallas' : 'Colores'} (sin foto propia usan la foto del producto)</div>
+      <div class="variant-list">${rows}</div>
+      <div class="variant-add-row">
+        ${colorSwatchHtml('')}
+        <input id="new-variant-color-${productId}" type="text" placeholder="Color nuevo" style="flex:1; min-width:0;" />
+        <input id="new-variant-size-${productId}" type="text" placeholder="Talla" style="width:60px;" ${showTalla ? '' : 'hidden'} />
+        <input id="new-variant-stock-${productId}" type="number" placeholder="Stock" value="0" style="width:60px;" />
+        <button class="btn-secondary" style="padding:6px 12px; flex-shrink:0;" onclick="addVariant('${productId}')">Agregar</button>
       </div>
     </div>
   `;
@@ -1518,11 +1573,13 @@ function renderColorSuggestions(productId) {
   }
 
   const chips = remaining.map(c => `
-    <button class="btn-secondary" style="padding:3px 8px; font-size:11px;" onclick="addVariantWithColor('${productId}', '${escapeHtml(c).replace(/'/g, "\\'")}')">+ ${escapeHtml(c)}</button>
+    <button class="color-chip" onclick="addVariantWithColor('${productId}', '${escapeHtml(c).replace(/'/g, "\\'")}')">
+      ${colorSwatchHtml(c)}${escapeHtml(c)}
+    </button>
   `).join('');
   box.innerHTML = `
-    <div style="font-size:11px; color:var(--muted); margin-top:4px;">Colores detectados - click para agregar como variante (stock 1, editalo después):</div>
-    <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:4px;">${chips}</div>
+    <div class="variant-suggestions-label">Colores detectados en la foto - click para agregar (stock 1, editalo después):</div>
+    <div style="display:flex; gap:6px; flex-wrap:wrap;">${chips}</div>
   `;
 }
 
@@ -1531,7 +1588,7 @@ async function detectColorsForProduct(productId) {
   const imageUrl = product && product.media && product.media[0] && product.media[0].url;
   if (!imageUrl) return;
   const box = document.getElementById(`color-suggestions-${productId}`);
-  box.innerHTML = `<div style="font-size:11px; color:var(--muted); margin-top:4px;">Analizando foto...</div>`;
+  box.innerHTML = `<div class="hint">Analizando foto...</div>`;
   try {
     const res = await apiFetch(`/admin/api/products/${productId}/detect-colors`, {
       method: 'POST',
@@ -1540,7 +1597,7 @@ async function detectColorsForProduct(productId) {
     });
     const { colors } = await res.json();
     if (!colors || colors.length === 0) {
-      box.innerHTML = `<div style="font-size:11px; color:var(--muted); margin-top:4px;">No se distinguieron colores de producto en la foto.</div>`;
+      box.innerHTML = `<div class="hint">No se distinguieron colores de producto en la foto.</div>`;
       return;
     }
     colorSuggestionsCache[productId] = colors;
@@ -1750,12 +1807,14 @@ async function addProduct() {
     return;
   }
 
+  let created;
   try {
-    await apiFetch('/admin/api/products', {
+    const res = await apiFetch('/admin/api/products', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name, description, price, currency, stock, category, color, size }),
     });
+    created = await res.json();
   } catch (err) {
     setStatus(`No se pudo agregar: ${err.message}`, true);
     return;
@@ -1770,7 +1829,21 @@ async function addProduct() {
   document.getElementById('p-size').value = '';
 
   setStatus('Producto agregado ✓');
-  loadProducts();
+  await loadProducts();
+  // Jump straight to the new card instead of leaving the owner to scroll and hunt for it - the natural
+  // next step after creating a product is almost always adding its color/talla variants right there.
+  scrollToAndHighlightProduct(created?.id);
+}
+
+function scrollToAndHighlightProduct(productId) {
+  if (!productId) return;
+  const card = document.querySelector(`.product-card[data-product-id="${productId}"]`);
+  if (!card) return;
+  card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  card.classList.add('is-new');
+  setTimeout(() => card.classList.remove('is-new'), 2500);
+  const colorInput = document.getElementById(`new-variant-color-${productId}`);
+  if (colorInput) setTimeout(() => colorInput.focus(), 400);
 }
 
 async function toggleActive(id, active) {
