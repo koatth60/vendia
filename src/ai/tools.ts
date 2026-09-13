@@ -540,6 +540,16 @@ async function requestSaleConfirmation(context: ToolContext, summary: string, dr
   return true;
 }
 
+// For a product sold in several colors/sizes (see ProductVariant in schema.prisma), each sale
+// decrements only the specific variant's own stock (see orders/service.ts) - product.stock itself is
+// never touched and stays stale forever once variants exist. Report the real total (sum of active
+// variants) here instead, so a generic "cuantos tienen en total" question isn't answered with a frozen
+// number that never reflects what's actually sold.
+function totalStock(product: { stock: number; variants: { stock: number; active: boolean }[] }): number {
+  if (product.variants.length === 0) return product.stock;
+  return product.variants.filter((v) => v.active).reduce((sum, v) => sum + v.stock, 0);
+}
+
 function formatProduct(product: Awaited<ReturnType<typeof getProductById>>) {
   if (!product) return null;
   return {
@@ -548,7 +558,7 @@ function formatProduct(product: Awaited<ReturnType<typeof getProductById>>) {
     description: product.description,
     price: product.price.toString(),
     currency: product.currency,
-    stock: product.stock,
+    stock: totalStock(product),
     category: product.category,
     media: product.media.map((m) => ({ type: m.type, url: m.url })),
   };

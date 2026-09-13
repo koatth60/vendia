@@ -547,6 +547,7 @@ export const OPEN_CLARIFYING_QUESTION_PATTERN =
 // writes for a REAL send, without ever calling send_product_media - a copy-the-pattern hallucination,
 // not a natural-language claim, so it doesn't match PHOTO_CLAIM_PATTERN above. Catch it directly.
 const FAKE_MEDIA_TAG_PATTERN = /\[(?:foto|video)s? de /i;
+const MEDIA_TAG_STRIP_PATTERN = /\[(?:foto|video)s? de [^\]]*\]/gi;
 
 // Shared guard for the three claim-patterns below: each was built to catch a dropped-promise bug (model
 // says it'll do something, never calls the real tool), but the same claim wording also shows up inside a
@@ -1031,7 +1032,7 @@ export async function generateReply(
     // strip it so the customer doesn't see a broken "[Foto de X]" label alongside the real photos we're
     // about to send below.
     if (fakeMediaTag) {
-      text = text.replace(/\[(?:foto|video)s? de [^\]]*\]/gi, "").trim();
+      text = text.replace(MEDIA_TAG_STRIP_PATTERN, "").trim();
     }
 
     // Prefer this turn's ALREADY-SCOPED find_products_by_attributes result over re-deriving "which
@@ -1070,7 +1071,15 @@ export async function generateReply(
     // like "2"/"3" against any stray digit in a price - false-positiving completely unrelated products
     // into a customer message that never mentioned them.
     const products = await listActiveProducts(context.businessId);
-    const haystack = `${customerText ?? ""} ${text} ${lastAssistantText(history)}`;
+    // Strip bare media-tag captions ("[Foto de X]") from the PRIOR turn before folding it into the
+    // haystack - a real production bug (2026-09-12): the bot's prior reply was just such a tag (a
+    // hallucinated empty answer to an unrelated question), and its product name kept matching turn
+    // after turn even though the customer had moved on to asking about a completely different product
+    // ("Tienen airpods blancos?" got the earlier watch photo resent). This scan was only ever meant to
+    // catch a numbered PROSE list of options ("1. Serie 11 Mini... 2. ..."), never a photo caption -
+    // a caption carries no "here's what I just offered you" intent worth re-matching.
+    const priorAssistantText = lastAssistantText(history).replace(MEDIA_TAG_STRIP_PATTERN, "");
+    const haystack = `${customerText ?? ""} ${text} ${priorAssistantText}`;
     const matched = findMentionedProductsForMediaBackstop(products, haystack);
 
     // A generic "muestrame el catalogo" also matches PHOTO_REQUEST_PATTERN (it contains "muestrame"),
