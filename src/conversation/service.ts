@@ -189,8 +189,17 @@ export async function setHumanControl(businessId: string, conversationId: string
   const conversation = await prisma.conversation.update({
     where: { id: conversationId },
     // Reset the one-time ack flag whenever a pause starts, so the next takeover gets its own single
-    // heads-up instead of inheriting "already acked" from a previous pause period.
-    data: { humanControl: active, humanControlAckSent: false },
+    // heads-up instead of inheriting "already acked" from a previous pause period. Same idea for the
+    // stalled-conversation watchdog clock: every flip (bot pauses OR resumes) re-arms it from scratch -
+    // active:true marks "the clock starts now" (covers a fresh escalation AND an owner re-engaging after
+    // already having replied once), active:false marks "no longer stalled, nothing to watch".
+    data: {
+      humanControl: active,
+      humanControlAckSent: false,
+      humanControlSince: active ? new Date() : null,
+      stalledReminderStage: 0,
+      stalledReminderSentAt: null,
+    },
     include: { customer: true },
   });
   emitConversationUpdated(businessId, formatConversationRow(conversation));
@@ -324,6 +333,69 @@ export async function markPendingOwnerQuestionReminded(questionId: string) {
   await prisma.pendingOwnerQuestion.update({
     where: { id: questionId },
     data: { remindedAt: new Date() },
+  });
+}
+
+export type StalledConversation = {
+  conversationId: string;
+  customer: { id: string; name: string | null; phoneNumber: string };
+  intent: string | null;
+  nextStage: 1 | 2;
+  openQuestion: string | null;
+};
+
+// Generalizes escalation reminders beyond ask_owner/ask_owner_about_photo (the only two paths that create
+// a PendingOwnerQuestion): flag_conversation_intent and a manual panel takeover both set humanControl:true
+// with no question row at all, so findPendingOwnerQuestionsDueForReminder above never sees them - a
+// conversation escalated that way could go silent forever with nobody reminded. This watches
+// humanControlSince directly instead, and stages the escalation (fires once at stage1Before, once more at
+// stage2Before, then caps) so a still-unanswered conversation gets progressively louder instead of exactly
+// one reminder for its entire life.
+//
+// A conversation that DOES have a PendingOwnerQuestion is deliberately left to that dedicated mechanism for
+// its first reminder (same 3h-class threshold, already reminds with the actual question text) - only
+// picked up here for the second/final nudge at stage2Before, so the two mechanisms never both fire for the
+// same conversation in the same run.
+export async function findStalledConversationsDueForReminder(
+  businessId: string,
+  stage1Before: Date,
+  stage2Before: Date
+): Promise<StalledConversation[]> {
+  const candidates = await prisma.conversation.findMany({
+    where: {
+      customer: { businessId },
+      humanControl: true,
+      status: { notIn: ["SOLD", "LOST"] },
+      humanControlSince: { not: null },
+      OR: [
+        { stalledReminderStage: 0, humanControlSince: { lte: stage1Before } },
+        { stalledReminderStage: 1, stalledReminderSentAt: { lte: stage1Before } },
+      ],
+    },
+    include: { customer: true, pendingOwnerQuestions: true },
+  });
+
+  const result: StalledConversation[] = [];
+  for (const c of candidates) {
+    const hasQuestionThisEscalation = c.pendingOwnerQuestions.some((q) => q.createdAt >= c.humanControlSince!);
+    if (c.stalledReminderStage === 0) {
+      if (!hasQuestionThisEscalation && c.humanControlSince! <= stage1Before) {
+        result.push({ conversationId: c.id, customer: c.customer, intent: c.intent, nextStage: 1, openQuestion: null });
+      } else if (c.humanControlSince! <= stage2Before) {
+        const openQuestion = c.pendingOwnerQuestions.find((q) => !q.remindedAt)?.question ?? c.pendingOwnerQuestions[0]?.question ?? null;
+        result.push({ conversationId: c.id, customer: c.customer, intent: c.intent, nextStage: 2, openQuestion });
+      }
+    } else if (c.stalledReminderStage === 1 && c.stalledReminderSentAt! <= stage2Before) {
+      result.push({ conversationId: c.id, customer: c.customer, intent: c.intent, nextStage: 2, openQuestion: null });
+    }
+  }
+  return result;
+}
+
+export async function markStalledReminderSent(conversationId: string, stage: 1 | 2) {
+  await prisma.conversation.update({
+    where: { id: conversationId },
+    data: { stalledReminderStage: stage, stalledReminderSentAt: new Date() },
   });
 }
 

@@ -87,15 +87,32 @@ export async function textMentionsConfiguredCategory(businessId: string, text: s
   const tokens = tokenize(text);
   if (tokens.length === 0) return false;
 
-  const [categories, categoryAliasMap] = await Promise.all([
-    prisma.product.findMany({ where: { businessId, active: true }, select: { category: true }, distinct: ["category"] }),
+  const [products, categoryAliasMap] = await Promise.all([
+    prisma.product.findMany({ where: { businessId, active: true }, select: { category: true, name: true } }),
     loadCategoryAliasMap(businessId),
   ]);
-  const categoryTokens = new Set(
-    categories
-      .flatMap((c) => (c.category ? tokenize(c.category) : []))
+  let categoryTokens = new Set(
+    products
+      .flatMap((p) => (p.category ? tokenize(p.category) : []))
       .map((w) => canonicalizeCategoryWord(w, categoryAliasMap))
   );
+
+  // Fallback for a business that hasn't populated Product.category (the default for a brand-new
+  // business) - without this, the caller's category-only forcing branch (2026-09-13 audit, F7) is
+  // permanently dead for them, silently, with no error anywhere. Derive a rough vocabulary from product
+  // NAMES instead: a word shared by 2+ products' names is plausibly a repeated product-type word ("reloj",
+  // "camiseta"), not a one-off model name - a word appearing in only one product's name is excluded so a
+  // brand/model term doesn't get treated as a "category". Still never a hardcoded vertical vocabulary,
+  // same reasoning as findProductsByAttributes/relevanceScore above - purely derived from this business's
+  // own real catalog.
+  if (categoryTokens.size === 0) {
+    const nameWordProductCounts = new Map<string, number>();
+    for (const p of products) {
+      const wordsInThisProduct = new Set(tokenize(p.name).map((w) => canonicalizeCategoryWord(w, categoryAliasMap)));
+      for (const w of wordsInThisProduct) nameWordProductCounts.set(w, (nameWordProductCounts.get(w) ?? 0) + 1);
+    }
+    categoryTokens = new Set([...nameWordProductCounts].filter(([, count]) => count >= 2).map(([w]) => w));
+  }
   if (categoryTokens.size === 0) return false;
 
   return tokens.some((t) => categoryTokens.has(canonicalizeCategoryWord(t, categoryAliasMap)));

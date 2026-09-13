@@ -332,3 +332,75 @@ del pedido, sin agregar ni modificar nada mas:
     await prisma.business.deleteMany({ where: { id: business2.id } });
   }
 });
+
+// Fase B of the 2026-09-13 audit (F3): the customer-facing send at the old ":125" call site had no
+// try/catch, so a delivery failure (typically the customer's 24h service window closed while the owner
+// took a while to reply) threw mid-function - clearPendingOwnerQuestion/setHumanControl never ran (the
+// conversation got stuck forever) and the owner still got the false "Listo, le reenvie tu respuesta ✅".
+test("handleOwnerReply tells the owner the truth and nudges via template when the customer can't be reached directly", async () => {
+  const business3 = await prisma.business.create({
+    data: {
+      name: `Test ${randomUUID()}`,
+      email: `test-${randomUUID()}@example.com`,
+      passwordHash: "x",
+      contactPhone: "573000000003",
+      contactName: "Owner3",
+      followUpTemplateName: "reenganche_generico",
+      followUpTemplateLanguage: "es",
+    },
+  });
+  const customer = await prisma.customer.create({ data: { businessId: business3.id, phoneNumber: `57300${Date.now()}1` } });
+  const conversation = await prisma.conversation.create({ data: { customerId: customer.id, humanControl: true } });
+  const pending = await prisma.pendingOwnerQuestion.create({
+    data: { conversationId: conversation.id, wamid: `wamid.q-${randomUUID()}`, question: "Tienen talla M?" },
+  });
+
+  const sentTemplates: { to: string; name: string }[] = [];
+  globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body ?? "{}"));
+    const to = body.to ?? body.recipient;
+    if (body.type === "text" && to === customer.phoneNumber) {
+      return { ok: false, status: 470, text: async () => JSON.stringify({ error: { code: 131047, message: "Re-engagement message" } }) } as Response;
+    }
+    if (body.type === "text") sentMessages.push({ to, body: body.text?.body ?? "" });
+    if (body.type === "template") {
+      sentTemplates.push({ to, name: body.template?.name ?? "" });
+      return { ok: true, json: async () => ({ messages: [{ id: `wamid.tpl-${randomUUID()}` }] }) } as Response;
+    }
+    return { ok: true, json: async () => ({ messages: [{ id: `wamid.test-${randomUUID()}` }] }) } as Response;
+  }) as typeof fetch;
+
+  try {
+    await handleOwnerReply(business3.id, credentials, "573000000003", {
+      type: "text",
+      context: { id: pending.wamid },
+      text: { body: "si, tenemos talla M" },
+    });
+
+    assert.equal(sentTemplates.length, 1, "must nudge the customer via the business's follow-up template");
+    assert.equal(sentTemplates[0].to, customer.phoneNumber);
+    assert.equal(sentTemplates[0].name, "reenganche_generico");
+
+    const sentToOwner = sentMessages.find((m) => m.to === "573000000003");
+    assert.ok(sentToOwner, "owner must still get a confirmation message");
+    assert.doesNotMatch(sentToOwner!.body, /Listo, le reenvie tu respuesta/, "must not lie about delivery when it failed");
+    assert.match(sentToOwner!.body, /24h|aviso/i);
+
+    // Despite the delivery failure, the owner's side of the job is done - the question must not stay
+    // stuck open forever (that would just create ANOTHER permanently-muted conversation).
+    const stillPending = await prisma.pendingOwnerQuestion.findUnique({ where: { id: pending.id } });
+    assert.equal(stillPending, null);
+    const freshConversation = await prisma.conversation.findUniqueOrThrow({ where: { id: conversation.id } });
+    assert.equal(freshConversation.humanControl, false);
+
+    const failure = await prisma.deliveryFailure.findFirst({ where: { businessId: business3.id, recipientPhone: customer.phoneNumber } });
+    assert.ok(failure, "the failed delivery must be visible in the delivery-failures log");
+  } finally {
+    await prisma.deliveryFailure.deleteMany({ where: { businessId: business3.id } });
+    await prisma.pendingOwnerQuestion.deleteMany({ where: { conversationId: conversation.id } });
+    await prisma.message.deleteMany({ where: { conversationId: conversation.id } });
+    await prisma.conversation.deleteMany({ where: { id: conversation.id } });
+    await prisma.customer.deleteMany({ where: { id: customer.id } });
+    await prisma.business.deleteMany({ where: { id: business3.id } });
+  }
+});

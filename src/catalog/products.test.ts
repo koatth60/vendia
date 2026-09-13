@@ -569,3 +569,43 @@ test("textMentionsConfiguredCategory: false when the business has no products/ca
     await prisma.business.delete({ where: { id: business.id } });
   }
 });
+
+// Fase D of the 2026-09-13 audit (F7): a brand-new business's default state is Product.category empty on
+// every product - without a fallback, this classifier (and the category-only forcing branch it feeds in
+// agent.ts) is permanently dead for them, silently. Falls back to product-NAME words shared by 2+ products,
+// on the theory that a repeated word is plausibly the product type ("reloj"), not a one-off model name.
+test("textMentionsConfiguredCategory: falls back to product-name words when no product has a category set", async () => {
+  const business = await prisma.business.create({
+    data: { name: `Test ${randomUUID()}`, email: `test-${randomUUID()}@example.com`, passwordHash: "x" },
+  });
+  try {
+    await prisma.product.createMany({
+      data: [
+        { businessId: business.id, name: "Reloj Serie X", description: "d", price: 100000, currency: "COP", stock: 3 },
+        { businessId: business.id, name: "Reloj Serie Y", description: "d", price: 120000, currency: "COP", stock: 3 },
+      ],
+    });
+
+    assert.equal(await textMentionsConfiguredCategory(business.id, "tienen relojes negros?"), true);
+    assert.equal(await textMentionsConfiguredCategory(business.id, "tienen audifonos rojos?"), false);
+  } finally {
+    await prisma.product.deleteMany({ where: { businessId: business.id } });
+    await prisma.business.delete({ where: { id: business.id } });
+  }
+});
+
+test("textMentionsConfiguredCategory: a word from only ONE product's name does not count as a category (avoids treating a model/brand name as a category)", async () => {
+  const business = await prisma.business.create({
+    data: { name: `Test ${randomUUID()}`, email: `test-${randomUUID()}@example.com`, passwordHash: "x" },
+  });
+  try {
+    await prisma.product.create({
+      data: { businessId: business.id, name: "Boombox 4 LED", description: "d", price: 100000, currency: "COP", stock: 3 },
+    });
+
+    assert.equal(await textMentionsConfiguredCategory(business.id, "tienen el boombox negro?"), false);
+  } finally {
+    await prisma.product.deleteMany({ where: { businessId: business.id } });
+    await prisma.business.delete({ where: { id: business.id } });
+  }
+});

@@ -2,7 +2,7 @@ import { Router } from "express";
 import { Prisma } from "@prisma/client";
 import { env } from "../config/env";
 import { prisma } from "../db/client";
-import { sendTextMessage, sendImageMessage, sendOwnerAlert, downloadMedia, formatForWhatsapp, type WhatsappCredentials } from "../whatsapp/client";
+import { sendTextMessage, sendImageMessage, sendOwnerAlert, sendTemplateMessage, downloadMedia, formatForWhatsapp, type WhatsappCredentials } from "../whatsapp/client";
 import { uploadMedia } from "../media/s3";
 import {
   getOrCreateCustomer,
@@ -26,6 +26,16 @@ import { createOrder, askForCsat, recordCsatReply, type ResolvedOrderItem } from
 import { recordAskOwnerResolution } from "../catalog/learnedFaq";
 import { getCatalogHintText, findConfidentProductMatch } from "../catalog/products";
 import { recordDeliveryFailure } from "../delivery/failures";
+
+// The owner's answer is free-form text - unlike sendOwnerAlert (always the SAME fixed wrapper phrase to
+// the owner, so one approved template covers every call), an arbitrary customer-facing answer can't be
+// carried by a pre-approved template (Meta only allows the exact approved wording, no free-form body).
+// So on failure - most commonly the customer's 24h service window closed while the owner was slow to
+// reply - this can't "retry with the real content", only try to re-open the window: if the business
+// configured a follow-up template (Business.followUpTemplateName, same one runFollowUpJob uses), send that
+// as a plain nudge so the customer writes back, which re-opens the window for a real answer. Either way,
+// the caller decides what to actually tell the owner - it needs the true outcome, not an optimistic
+// assumption that a returned wamid meant the customer got it.
 import { recordOwnerMessage, trackOwnerSend } from "../delivery/ownerLog";
 import { extractFrame } from "../media/videoFrame";
 
@@ -39,6 +49,49 @@ interface OwnerReplyMessage {
   context?: { id?: string };
   text?: { body: string };
   interactive?: { type: string; button_reply?: { id: string; title: string } };
+}
+
+async function deliverOwnerAnswerToCustomer(
+  businessId: string,
+  credentials: WhatsappCredentials,
+  customerPhone: string,
+  text: string
+): Promise<{ delivered: boolean; nudged: boolean }> {
+  try {
+    await sendTextMessage(credentials, customerPhone, text);
+    return { delivered: true, nudged: false };
+  } catch (error) {
+    console.error("No se pudo entregar la respuesta del dueno al cliente (posible ventana de 24h cerrada):", error);
+    let nudged = false;
+    const business = await prisma.business.findUnique({
+      where: { id: businessId },
+      select: { followUpTemplateName: true, followUpTemplateLanguage: true },
+    });
+    if (business?.followUpTemplateName) {
+      try {
+        await sendTemplateMessage(credentials, customerPhone, business.followUpTemplateName, business.followUpTemplateLanguage);
+        nudged = true;
+      } catch (templateError) {
+        console.error("Tampoco se pudo mandar la plantilla de reenganche al cliente:", templateError);
+      }
+    }
+    await recordDeliveryFailure(businessId, {
+      wamid: "",
+      recipientPhone: customerPhone,
+      errorCode: null,
+      errorMessage: error instanceof Error ? error.message : String(error),
+      critical: false,
+    });
+    return { delivered: false, nudged };
+  }
+}
+
+function ownerConfirmationText(outcome: { delivered: boolean; nudged: boolean }, successText: string): string {
+  if (outcome.delivered) return successText;
+  if (outcome.nudged) {
+    return "No se pudo entregar tu respuesta directamente (probablemente pasaron mas de 24h desde el ultimo mensaje del cliente) - le mandamos un aviso para que vuelva a escribir, respondele de nuevo apenas lo haga.";
+  }
+  return "No se pudo entregar tu respuesta al cliente de ninguna forma (probablemente pasaron mas de 24h desde su ultimo mensaje). Pedile que te escriba de nuevo para poder responderle.";
 }
 
 export async function handleOwnerReply(
@@ -97,12 +150,13 @@ export async function handleOwnerReply(
     // raw words. Falls back to forwarding the raw text (still prefixed) when it doesn't match anything.
     if (pendingQuestion.kind === "PHOTO_PRODUCT") {
       const match = await findConfidentProductMatch(businessId, answerText);
+      let outcome: { delivered: boolean; nudged: boolean };
       if (match.product) {
         const price = `$${match.product.price.toString()} ${match.product.currency}`;
         const productText = formatForWhatsapp(`Según nuestro equipo, el producto que buscas es: *${match.product.name}* - ${price}`);
-        await sendTextMessage(credentials, pendingQuestion.customer.phoneNumber, productText);
+        outcome = await deliverOwnerAnswerToCustomer(businessId, credentials, pendingQuestion.customer.phoneNumber, productText);
         await recordMessage(businessId, pendingQuestion.conversationId, "ASSISTANT", productText);
-        if (match.product.media.length > 0) {
+        if (outcome.delivered && match.product.media.length > 0) {
           try {
             await sendImageMessage(credentials, pendingQuestion.customer.phoneNumber, match.product.media[0].url);
           } catch (error) {
@@ -111,18 +165,18 @@ export async function handleOwnerReply(
         }
       } else {
         const fallbackText = formatForWhatsapp(`Según nuestro equipo: ${answerText}`);
-        await sendTextMessage(credentials, pendingQuestion.customer.phoneNumber, fallbackText);
+        outcome = await deliverOwnerAnswerToCustomer(businessId, credentials, pendingQuestion.customer.phoneNumber, fallbackText);
         await recordMessage(businessId, pendingQuestion.conversationId, "ASSISTANT", fallbackText);
       }
       await clearPendingOwnerQuestion(pendingQuestion.questionId);
       await setHumanControl(businessId, pendingQuestion.conversationId, false);
-      const confirmedProductText = "Listo, le confirme el producto al cliente ✅";
+      const confirmedProductText = ownerConfirmationText(outcome, "Listo, le confirme el producto al cliente ✅");
       await trackOwnerSend(businessId, confirmedProductText, () => sendTextMessage(credentials, ownerPhone, confirmedProductText));
       return;
     }
 
     const formattedAnswer = formatForWhatsapp(answerText);
-    await sendTextMessage(credentials, pendingQuestion.customer.phoneNumber, formattedAnswer);
+    const answerOutcome = await deliverOwnerAnswerToCustomer(businessId, credentials, pendingQuestion.customer.phoneNumber, formattedAnswer);
     await recordMessage(businessId, pendingQuestion.conversationId, "ASSISTANT", formattedAnswer);
     await clearPendingOwnerQuestion(pendingQuestion.questionId);
     await setHumanControl(businessId, pendingQuestion.conversationId, false);
@@ -130,7 +184,7 @@ export async function handleOwnerReply(
     // FAQ entry instead of discarding it after this one use (never auto-published, just queued for
     // review in the admin panel).
     await recordAskOwnerResolution(businessId, pendingQuestion.question, answerText, pendingQuestion.conversationId);
-    const forwardedText = "Listo, le reenvie tu respuesta al cliente ✅";
+    const forwardedText = ownerConfirmationText(answerOutcome, "Listo, le reenvie tu respuesta al cliente ✅");
     await trackOwnerSend(businessId, forwardedText, () => sendTextMessage(credentials, ownerPhone, forwardedText));
     return;
   }
@@ -463,6 +517,7 @@ whatsappRouter.post("/webhook", async (req, res) => {
         neverSay: business.botNeverSay,
         customInstructions: business.customInstructions,
         autoSendPhotoOnQuote: business.autoSendPhotoOnQuote,
+        offerPhotosBeforeSending: business.offerPhotosBeforeSending,
         requirePaymentProof: business.requirePaymentProof,
         category: business.businessCategory,
         genderedAddressEnabled: business.genderedAddressEnabled,

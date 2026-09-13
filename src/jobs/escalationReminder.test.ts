@@ -133,3 +133,94 @@ test("runEscalationReminderJob leaves a recent unanswered question alone", async
     await prisma.pendingOwnerQuestion.deleteMany({ where: { conversationId } });
   }
 });
+
+test("runEscalationReminderJob reminds about a stalled conversation with no PendingOwnerQuestion (flag_conversation_intent origin)", async () => {
+  // F1 from the 2026-09-13 audit: flag_conversation_intent sets humanControl:true but never creates a
+  // PendingOwnerQuestion, so it was invisible to findPendingOwnerQuestionsDueForReminder forever.
+  stubWhatsappFetch();
+  const customer = await prisma.customer.create({ data: { businessId, phoneNumber: `573008${Date.now()}` } });
+  const conv = await prisma.conversation.create({
+    data: {
+      customerId: customer.id,
+      humanControl: true,
+      intent: "SOLICITA_AGENTE",
+      humanControlSince: new Date(Date.now() - 4 * 60 * 60 * 1000),
+    },
+  });
+  try {
+    await runEscalationReminderJob();
+
+    assert.equal(sentMessages.length, 2, "owner reminder + customer follow-up");
+    assert.match(sentMessages[0].body, /asesor/i);
+
+    const updated = await prisma.conversation.findUniqueOrThrow({ where: { id: conv.id } });
+    assert.equal(updated.stalledReminderStage, 1);
+    assert.ok(updated.stalledReminderSentAt);
+
+    sentMessages = [];
+    await runEscalationReminderJob();
+    assert.equal(sentMessages.length, 0, "must not repeat the stage-1 reminder on the next run");
+  } finally {
+    restoreFetch();
+    await prisma.message.deleteMany({ where: { conversationId: conv.id } });
+    await prisma.conversation.deleteMany({ where: { id: conv.id } });
+    await prisma.customer.deleteMany({ where: { id: customer.id } });
+  }
+});
+
+test("runEscalationReminderJob sends a final stage-2 reminder 24h after stage 1, then caps", async () => {
+  stubWhatsappFetch();
+  const customer = await prisma.customer.create({ data: { businessId, phoneNumber: `573009${Date.now()}` } });
+  const conv = await prisma.conversation.create({
+    data: {
+      customerId: customer.id,
+      humanControl: true,
+      humanControlSince: new Date(Date.now() - 30 * 60 * 60 * 1000),
+      stalledReminderStage: 1,
+      stalledReminderSentAt: new Date(Date.now() - 25 * 60 * 60 * 1000),
+    },
+  });
+  try {
+    await runEscalationReminderJob();
+
+    assert.equal(sentMessages.length, 1, "stage 2 only alerts the owner, no repeat customer message");
+    assert.match(sentMessages[0].body, /24 horas/);
+
+    const updated = await prisma.conversation.findUniqueOrThrow({ where: { id: conv.id } });
+    assert.equal(updated.stalledReminderStage, 2);
+
+    sentMessages = [];
+    await runEscalationReminderJob();
+    assert.equal(sentMessages.length, 0, "stage 2 is the cap - no further reminders ever");
+  } finally {
+    restoreFetch();
+    await prisma.conversation.deleteMany({ where: { id: conv.id } });
+    await prisma.customer.deleteMany({ where: { id: customer.id } });
+  }
+});
+
+test("runEscalationReminderJob does not double-fire the watchdog for a conversation whose question the dedicated mechanism already covers", async () => {
+  stubWhatsappFetch();
+  const customer = await prisma.customer.create({ data: { businessId, phoneNumber: `573010${Date.now()}` } });
+  const since = new Date(Date.now() - 4 * 60 * 60 * 1000);
+  const conv = await prisma.conversation.create({ data: { customerId: customer.id, humanControl: true, humanControlSince: since } });
+  try {
+    await prisma.pendingOwnerQuestion.create({
+      data: { conversationId: conv.id, wamid: `wamid.photo-${randomUUID()}`, question: "Identificar producto", createdAt: since, kind: "PHOTO_PRODUCT" },
+    });
+
+    await runEscalationReminderJob();
+
+    // The per-question mechanism reminds once (owner + customer = 2). The watchdog must stay silent this
+    // run since the conversation's only question is still open and younger than the 24h stage-2 floor.
+    assert.equal(sentMessages.length, 2);
+    const updatedConv = await prisma.conversation.findUniqueOrThrow({ where: { id: conv.id } });
+    assert.equal(updatedConv.stalledReminderStage, 0, "watchdog leaves stage untouched while the question mechanism owns this escalation");
+  } finally {
+    restoreFetch();
+    await prisma.pendingOwnerQuestion.deleteMany({ where: { conversationId: conv.id } });
+    await prisma.message.deleteMany({ where: { conversationId: conv.id } });
+    await prisma.conversation.deleteMany({ where: { id: conv.id } });
+    await prisma.customer.deleteMany({ where: { id: customer.id } });
+  }
+});

@@ -138,6 +138,7 @@ async function replayConversation(businessId: string, fixture: FixtureConversati
     neverSay: business.botNeverSay,
     customInstructions: business.customInstructions,
     autoSendPhotoOnQuote: business.autoSendPhotoOnQuote,
+    offerPhotosBeforeSending: business.offerPhotosBeforeSending,
     requirePaymentProof: business.requirePaymentProof,
     category: business.businessCategory,
     shippingRatesConfigured,

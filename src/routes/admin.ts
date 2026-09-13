@@ -42,6 +42,8 @@ import {
   type WhatsappCredentials,
 } from "../whatsapp/client";
 import { getAiUsageSummary, getPlanUsage, logAiUsage } from "../ai/usage";
+import { getAgentIncidentSummary } from "../ai/incidents";
+import { getConfigHealth } from "../ai/configHealth";
 import { detectProductColors } from "../ai/colorDetection";
 import { generateClosingMessage } from "../ai/agent";
 import { extractSaleDetails } from "../ai/extractSale";
@@ -108,6 +110,7 @@ adminRouter.put("/api/business", requireOwner, async (req, res) => {
     botGreeting,
     botNeverSay,
     autoSendPhotoOnQuote,
+    offerPhotosBeforeSending,
     requirePaymentProof,
     businessCategory,
     contactPhone,
@@ -132,6 +135,7 @@ adminRouter.put("/api/business", requireOwner, async (req, res) => {
       botGreeting: botGreeting || null,
       botNeverSay: botNeverSay || null,
       autoSendPhotoOnQuote: Boolean(autoSendPhotoOnQuote),
+      offerPhotosBeforeSending: Boolean(offerPhotosBeforeSending),
       requirePaymentProof: Boolean(requirePaymentProof),
       businessCategory: businessCategory || null,
       contactPhone,
@@ -591,6 +595,21 @@ adminRouter.get("/api/ai-usage", async (req, res) => {
   const businessId = businessIdOf(req);
   const [summary, planUsage] = await Promise.all([getAiUsageSummary(businessId), getPlanUsage(businessId)]);
   res.json({ ...summary, planUsage });
+});
+
+// Fase F, 2026-09-13 audit (F9): surfaces what used to only exist as console.error/warn lines in
+// production logs - loop exhaustions, backstop interventions, degraded replies (last 7 days) plus a live
+// count of conversations currently stuck with humanControl:true (Fase A's watchdog fields).
+adminRouter.get("/api/agent-incidents", async (req, res) => {
+  const summary = await getAgentIncidentSummary(businessIdOf(req));
+  res.json(summary);
+});
+
+// Fase G, 2026-09-13 audit: surfaces the config gaps that today fail silently in production - see
+// configHealth.ts for exactly which ones and why each matters.
+adminRouter.get("/api/config-health", async (req, res) => {
+  const health = await getConfigHealth(businessIdOf(req));
+  res.json(health);
 });
 
 adminRouter.put("/api/customers/:id/tags", async (req, res) => {

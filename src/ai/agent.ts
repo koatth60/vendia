@@ -4,6 +4,9 @@ import { catalogTools, runCatalogTool, type ToolContext } from "./tools";
 import { getRecentHistory } from "../conversation/service";
 import { logAiUsage } from "./usage";
 import { prisma } from "../db/client";
+import { sendOwnerAlert } from "../whatsapp/client";
+import { recordOwnerMessage } from "../delivery/ownerLog";
+import { recordAgentIncident } from "./incidents";
 import { listActiveProducts, textMentionsConfiguredCategory } from "../catalog/products";
 import { listActivePaymentMethods } from "../catalog/paymentMethods";
 import { canonicalColors } from "../catalog/attributeTaxonomy";
@@ -356,18 +359,19 @@ export function matchesConfiguredPaymentMethod(label: string, realMethods: { lab
 
 const SHIPPING_MENTION_PATTERN = /env[ií]o/i;
 
-// Detection-only, unlike guardAgainstPaymentHallucination above: a shipping cost is usually one clause
-// inside a longer message (order summary, product price alongside it), so blindly discarding the whole
-// reply the way the payment guard does would also nuke unrelated real content. And with several
-// configured tiers (see ShippingRate/get_shipping_rates), there's no single "the real number" to
-// auto-substitute the way the full payment-methods list works as a fallback - so this only logs for
-// visibility instead of rewriting the customer-facing text, closing half the gap (a real number source
-// now exists via the tool) without risking a worse mutation on the other half.
+// Mostly detection-only, unlike guardAgainstPaymentHallucination above: a shipping cost is usually one
+// clause inside a longer message (order summary, product price alongside it), so blindly discarding the
+// whole reply the way the payment guard does would also nuke unrelated real content. With several
+// configured tiers (see ShippingRate/get_shipping_rates) there's no single "the real number" to
+// auto-substitute - stays detection-only there. Revisited 2026-09-13 (audit F6): with exactly ONE
+// configured tier there IS a single unambiguous real number, so that one case now gets corrected in place
+// instead of only logged - same reasoning as guardAgainstOrderTotalMismatch below reaching a different
+// conclusion for a genuinely ambiguous multi-tier case.
 export function guardAgainstShippingCostHallucination(
   text: string,
   shippingRates: { label: string; cost: string }[] | null
-): void {
-  if (!shippingRates?.length || !SHIPPING_MENTION_PATTERN.test(text)) return;
+): string {
+  if (!shippingRates?.length || !SHIPPING_MENTION_PATTERN.test(text)) return text;
   // Parse-and-round rather than stripping non-digits like the reply-text side does below: a Decimal's
   // toString() can carry a real fractional part ("9000.00", or worse with no @db.Decimal scale set,
   // "9000.000000000000000000000000") - stripping the "." there concatenates the fraction's zeros onto the
@@ -389,17 +393,62 @@ export function guardAgainstShippingCostHallucination(
   // Digit run capped at 4-6 (not 4-9): every real configured tier tops out at 6 digits (88.900), while a
   // cedula or celular runs 7-10 - capping here also stops the fake anonymized placeholder digits
   // ("00000000"/"3000000000") from a nearby "datos de entrega" block being mistaken for a cost.
-  const nearbyChunks = text.match(/env[ií]o[^.\n]{0,40}?\$?[ \t]?[\d.,]{4,6}\b/gi) ?? [];
+  const chunkPattern = /env[ií]o[^.\n]{0,40}?\$?[ \t]?[\d.,]{4,6}\b/gi;
+  const nearbyChunks = text.match(chunkPattern) ?? [];
+  let sawMismatch = false;
   for (const chunk of nearbyChunks) {
     const digits = (chunk.match(/[\d.,]{4,6}/) ?? [""])[0].replace(/\D/g, "");
     if (digits.length >= 4 && digits.length <= 6 && !knownCosts.has(digits)) {
-      console.error("Costo de envio mencionado no coincide con ninguna tarifa real configurada - revisar:", {
-        modelText: text,
-        realRates: shippingRates,
-      });
-      return;
+      sawMismatch = true;
+      break;
     }
   }
+  if (!sawMismatch) return text;
+
+  console.error("Costo de envio mencionado no coincide con ninguna tarifa real configurada - revisar:", {
+    modelText: text,
+    realRates: shippingRates,
+  });
+
+  // Only safe to auto-correct with exactly one configured tier - the real number is unambiguous. With 2+
+  // tiers there's no way to know which one applies without the customer's city/category context this
+  // guard doesn't have, so it stays detection-only there, same as before.
+  if (shippingRates.length !== 1) return text;
+  const realCostDigits = String(Math.round(parseFloat(shippingRates[0].cost)));
+  const formattedCost = realCostDigits.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+  return text.replace(chunkPattern, (chunk) => chunk.replace(/[\d.,]{4,6}\b/, formattedCost));
+}
+
+const ORDER_TOTAL_MENTION_PATTERN = /total/i;
+
+// B5 (2026-09-13 audit): a guard exists for a hallucinated payment number (guardAgainstPaymentHallucination,
+// hard-replaces the whole reply) and for shipping cost (guardAgainstShippingCostHallucination,
+// detection-only - several tiers, no single "the" real number). Nothing existed for the order TOTAL the
+// bot tells the customer, even though show_order_summary already computes exactly one real, unambiguous
+// total per call - a wrong number here is a customer confirming payment for the wrong amount, same money
+// risk class as the payment guard. Detection + owner alert (not an in-place rewrite like the payment
+// guard): the figure appears in varied formatting ("$145.000", "145000"), and blindly substring-replacing
+// it risks corrupting unrelated text worse than the shipping guard's already-accepted "detect, don't
+// rewrite" tradeoff for the exact same reason.
+export async function guardAgainstOrderTotalMismatch(context: ToolContext, text: string, realTotal: number | null): Promise<void> {
+  if (realTotal === null || !ORDER_TOTAL_MENTION_PATTERN.test(text)) return;
+  const realTotalDigits = String(Math.round(realTotal));
+  const nearbyChunks = text.match(/total[^.\n]{0,30}?\$?[ \t]?[\d.,]{4,9}\b/gi) ?? [];
+  const mentionedTotals = nearbyChunks
+    .map((chunk) => (chunk.match(/[\d.,]{4,9}\b/) ?? [""])[0].replace(/\D/g, ""))
+    .filter(Boolean);
+  const hasMismatch = mentionedTotals.some((digits) => digits !== realTotalDigits);
+  if (!hasMismatch) return;
+
+  console.error("Total del pedido mencionado no coincide con el real de show_order_summary - posible cifra inventada:", {
+    modelText: text,
+    realTotal,
+    mentionedTotals,
+  });
+  await alertOwner(
+    context,
+    `Aviso: el bot le menciono al cliente un total de pedido distinto al real ($${realTotalDigits}). Revisa esa conversacion antes de que se confirme un pago con la cifra equivocada.`
+  );
 }
 
 function looksLikeIdOrPhone(text: string): boolean {
@@ -504,15 +553,44 @@ type ClaimBackstopGuard = {
   repair: (text: string) => Promise<string>;
 };
 
-async function applyClaimBackstops(text: string, guards: ClaimBackstopGuard[]): Promise<string> {
+async function applyClaimBackstops(
+  text: string,
+  guards: ClaimBackstopGuard[],
+  businessId: string,
+  conversationId: string
+): Promise<string> {
   for (const guard of guards) {
     if (guard.alreadyHandled || !guard.extraCondition) continue;
     const testText = guard.matchAgainstStrippedText ? stripMarkdownEmphasis(text) : text;
     if (guard.pattern.test(testText) && !guard.suppressor.test(testText)) {
       text = await guard.repair(text);
+      await recordAgentIncident(businessId, "BACKSTOP_INTERVENTION", `Guard "${guard.name}" reparo una promesa incumplida`, conversationId);
     }
   }
   return text;
+}
+
+// B4 (2026-09-13 audit): when finalizeTurn ends up sending the generic FALLBACK_TEXT apology, or the
+// tool-calling loop exhausts all 5 iterations without a real answer, the customer gets a dead end and
+// nobody - not even the owner - ever finds out unless they happen to read server logs. This surfaces it
+// as a real WhatsApp alert instead, same channel as every other escalation.
+async function alertOwner(context: ToolContext, text: string): Promise<void> {
+  const business = await prisma.business.findUnique({ where: { id: context.businessId }, select: { contactPhone: true } });
+  if (!business?.contactPhone) return;
+  try {
+    const wamid = await sendOwnerAlert(context.credentials, business.contactPhone, text);
+    await recordOwnerMessage(context.businessId, { direction: "OUT", body: text, success: Boolean(wamid) });
+  } catch (error) {
+    console.error("No se pudo avisar al dueno:", error);
+  }
+}
+
+async function alertOwnerOfDegradedReply(context: ToolContext, reason: string): Promise<void> {
+  await alertOwner(
+    context,
+    `Aviso: el bot le mando una respuesta generica a un cliente en vez de resolverle la consulta. Motivo: ${reason}. Revisa esa conversacion en el panel.`
+  );
+  await recordAgentIncident(context.businessId, "DEGRADED_REPLY", reason, context.conversationId);
 }
 
 export async function generateReply(
@@ -562,6 +640,9 @@ export async function generateReply(
   // actually scoped the product this turn (reliability plan Phase 2, item 3, 2026-09-13).
   let searchScopedThisTurn: { productId: string; productName: string; variantId: string | null }[] | null = null;
   let shippingModalitiesThisTurn: { code: string; label: string }[] | null = null;
+  // Set when show_order_summary ran this turn and returned ready:true - the one real, unambiguous total
+  // for this order, used by guardAgainstOrderTotalMismatch below (B5, 2026-09-13 audit).
+  let orderSummaryTotalThisTurn: number | null = null;
 
   async function finalizeTurn(text: string): Promise<string> {
     text = guardAgainstPaymentHallucination(text, paymentMethodsThisTurn);
@@ -575,7 +656,8 @@ export async function generateReply(
       };
       if (shippingResult?.rates?.length) shippingRatesThisTurn = shippingResult.rates;
     }
-    guardAgainstShippingCostHallucination(text, shippingRatesThisTurn);
+    text = guardAgainstShippingCostHallucination(text, shippingRatesThisTurn);
+    await guardAgainstOrderTotalMismatch(context, text, orderSummaryTotalThisTurn);
 
     text = await applyClaimBackstops(text, [
       {
@@ -641,7 +723,7 @@ export async function generateReply(
           return t;
         },
       },
-    ]);
+    ], context.businessId, conversationId);
 
     if (intentFlaggedThisTurn === 0 && customerText && customerRequestsHuman(customerText)) {
       await runCatalogTool(context, "flag_conversation_intent", { intent: "SOLICITA_AGENTE" });
@@ -778,10 +860,15 @@ export async function generateReply(
   // vertical vocabulary (see textMentionsConfiguredCategory). Picked option (b) from the plan (force
   // tool_choice) over option (a) (pre-execute the filter in code) - smaller diff, model still controls the
   // real arguments, matches the plan's own recommendation to start there.
+  //
+  // 2026-09-13 audit (F7): originally required BOTH a color word AND a configured category word in the
+  // same message, so a color-only reply ("el negro", "quiero el rosadito") or a category-only question
+  // ("¿que relojes tienen?") never forced the tool at all - only the narrow "reloj negro" case did.
+  // find_products_by_attributes's own schema (Phase 5) already accepts category/color/freeText
+  // independently, so there's no reason to require both here either - loosened to OR.
   const shouldForceAttributeFilter =
     !!customerText &&
-    canonicalColors(customerText).length > 0 &&
-    (await textMentionsConfiguredCategory(context.businessId, customerText));
+    (canonicalColors(customerText).length > 0 || (await textMentionsConfiguredCategory(context.businessId, customerText)));
 
   try {
     for (let iteration = 0; iteration < 5; iteration++) {
@@ -915,6 +1002,8 @@ export async function generateReply(
           matches?: { productId: string; productName: string; variantId: string | null }[];
           ambiguousAcrossCategories?: boolean;
           modalities?: { code: string; label: string }[];
+          ready?: boolean;
+          total?: number;
         };
         if (result?.mediaJustSent || result?.sent) mediaSentThisTurn++;
         if (call.function.name === "ask_owner") ownerAskedThisTurn++;
@@ -947,6 +1036,9 @@ export async function generateReply(
         ) {
           attributeMatchThisTurn = result.matches;
         }
+        if (call.function.name === "show_order_summary" && result?.ready && typeof result.total === "number") {
+          orderSummaryTotalThisTurn = result.total;
+        }
         if (call.function.name === "get_shipping_payment_modalities" && Array.isArray(result?.modalities) && result.modalities.length > 0) {
           shippingModalitiesThisTurn = result.modalities;
         }
@@ -964,8 +1056,35 @@ export async function generateReply(
     // itself has nothing to say, still running finalizeTurn's own safety nets (name/contact/photo
     // backstops) against whatever the customer said this turn.
     console.error("Fallo la llamada a DeepSeek en generateReply:", error);
+    if (!lastText) await alertOwnerOfDegradedReply(context, "Fallo la llamada a DeepSeek y no habia texto previo que mostrar");
     return finalizeTurn(lastText || FALLBACK_TEXT);
   }
 
-  return finalizeTurn(lastText || FALLBACK_TEXT);
+  // Reached only when the model kept requesting tools through all 5 iterations without ever returning
+  // plain text - F2 from the 2026-09-13 audit. Returning `lastText` here used to often be literally the
+  // intermediate "dame un momento, reviso el catalogo" the model wrote ALONGSIDE a tool call, not a real
+  // answer - and none of the applyClaimBackstops guards above catch it, because the tools DID run this
+  // turn (their `alreadyHandled` is true), so the customer got the raw dangling promise with nothing
+  // after it. One extra untooled completion (this rare path only, never the normal turn) asks the model
+  // to write the actual final answer using everything already gathered in `messages` instead of just
+  // returning whatever text happened to come along with the last tool call.
+  console.warn(`generateReply: loop de tool-calling agotado (5 iteraciones) sin respuesta final, conversation=${conversationId}`);
+  await recordAgentIncident(context.businessId, "LOOP_EXHAUSTED", "Loop de tool-calling agotado (5 iteraciones) sin respuesta final", conversationId);
+  let finalText = lastText;
+  try {
+    const finalCompletion = await deepseek.chat.completions.create({
+      model: DEEPSEEK_MODEL,
+      max_tokens: 1024,
+      messages,
+      // No `tools` here on purpose - forces a plain-text answer instead of yet another tool request.
+      // @ts-expect-error DeepSeek-specific param, not in the OpenAI SDK types.
+      thinking: { type: "disabled" },
+    });
+    await logAiUsage({ businessId: context.businessId, conversationId, kind: "CHAT", model: DEEPSEEK_MODEL, usage: finalCompletion.usage });
+    finalText = finalCompletion.choices[0]?.message?.content?.trim() || lastText;
+  } catch (error) {
+    console.error("Fallo la llamada final (sin herramientas) tras agotar el loop de tool-calling:", error);
+  }
+  if (!finalText) await alertOwnerOfDegradedReply(context, "Se agoto el loop de herramientas y no se logro generar ninguna respuesta final");
+  return finalizeTurn(finalText || FALLBACK_TEXT);
 }

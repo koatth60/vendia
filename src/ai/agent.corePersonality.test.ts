@@ -59,3 +59,22 @@ test("shipping rates directive: added when the business has real ShippingRate ro
   assert.match(prompt, /TARIFAS DE ENVIO POR CATEGORIA/);
   assert.match(prompt, /get_shipping_rates/);
 });
+
+// Fase E, 2026-09-13 audit (F8): third photo mode - list the catalog and OFFER photos instead of
+// auto-sending or waiting to be asked. Opt-in (Business.offerPhotosBeforeSending), takes priority over
+// autoSendPhotoOnQuote when set.
+test("photo directive: defaults to AUTO when neither flag is set", () => {
+  const prompt = buildSystemPrompt({});
+  assert.match(prompt, /el sistema ya le manda la foto\/video al cliente automaticamente/);
+});
+
+test("photo directive: autoSendPhotoOnQuote:false alone selects REACTIVE", () => {
+  const prompt = buildSystemPrompt({ autoSendPhotoOnQuote: false });
+  assert.match(prompt, /si el cliente pide ver fotos, imagenes o video de un producto, usa send_product_media/);
+});
+
+test("photo directive: offerPhotosBeforeSending selects the offer-then-send variant regardless of autoSendPhotoOnQuote", () => {
+  const prompt = buildSystemPrompt({ offerPhotosBeforeSending: true, autoSendPhotoOnQuote: true });
+  assert.match(prompt, /NO mandes fotos todavia/);
+  assert.match(prompt, /hasMedia/);
+});

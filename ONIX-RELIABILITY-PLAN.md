@@ -362,9 +362,9 @@ se perdió ninguna regla: 41 marcadores críticos (nombres de herramientas, valo
 prohibidas literales, los placeholders `{{IDIOMA}}`/`{{FOTOS}}`/`{{COMPROBANTES}}`/`{{TARIFAS_ENVIO}}`)
 siguen presentes; cláusula de override de `customInstructions` re-verificada como todavía acotada a
 guion/orden y no a contenido técnico. `npx tsc --noEmit` limpio, suite completa 213/213.
-**Commiteado (`d12af7f`), NO desplegado**: a diferencia de las fases anteriores, esta cambia comportamiento
-que el modelo ve directamente. Su gate es el `npm run regression` batcheado (esta fase + el rewrite de
-customInstructions de Track B) — todavía sin correr.
+**Commiteado (`d12af7f`), DESPLEGADO A PRODUCCION 2026-09-13**: regression batcheado (esta fase + rewrite
+customInstructions Track B) corrido y confirmado limpio por el usuario. `git archive HEAD | ssh` +
+`pm2 restart vendia --update-env` (sin migración, sin cambio de schema).
 
 Texto original de la fase, por si hace falta revisar el criterio:
 Mismo hallazgo que la vez pasada sigue siendo cierto: las 42 apariciones de "nunca" NO son una frase

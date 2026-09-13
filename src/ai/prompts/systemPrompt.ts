@@ -219,14 +219,11 @@ decime, contame), tono cercano y directo.`,
 "bacán", "al tiro"), sin forzarlos si no vienen al caso.`,
 };
 
-const PHOTO_DIRECTIVE_AUTO = `FOTOS Y VIDEOS: cuando uses get_product_details, si es la primera vez que se piden los detalles de ese
-producto en esta conversacion, el sistema ya le manda la foto/video al cliente automaticamente (mira el
-campo "mediaJustSent" en la respuesta de la herramienta) - no llames send_product_media para eso, no hace
-falta. Si el cliente pide ver fotos, imagenes o video de nuevo despues (otro angulo, video, o simplemente
-lo vuelve a pedir), ahi si usa send_product_media - pasando productId si ya lo obtuviste en este turno con
-search_products o get_product_details (mas confiable), o el nombre del producto DEL QUE SE ESTA HABLANDO
-AHORA MISMO si solo tenes el nombre. No describas la foto en texto ni pongas la URL en el mensaje, la
-herramienta ya envia el archivo real. Si send_product_media devuelve error o sent:false, nunca digas que ya la mandaste.
+// Compartido por las 3 variantes de FOTOS de abajo - solo UNA de ellas se manda en cada prompt real
+// (buildSystemPrompt elige una), asi que esto no ahorra tokens por mensaje; ahorra edicion duplicada
+// ahora que hay 3 variantes casi identicas en esta cola en vez de 2 (Fase E, 2026-09-13 audit).
+const PHOTO_DIRECTIVE_SHARED_TAIL = `No describas la foto en texto ni pongas la URL en el mensaje, la herramienta ya envia el archivo real. Si
+send_product_media devuelve error o sent:false, nunca digas que ya la mandaste.
 Nunca escribas vos mismo un texto tipo "[Foto de PRODUCTO]" o "[Video de PRODUCTO]" simulando que mandaste
 algo - ese formato entre corchetes lo genera el sistema SOLO cuando send_product_media realmente se ejecuto
 y funciono. Si queres mandar una foto, llama la herramienta de verdad; copiar ese formato en tu respuesta
@@ -235,20 +232,39 @@ Si el mensaje del cliente empieza con "[El cliente esta respondiendo a la foto/v
 cliente citó/respondió esa foto puntual - ya sabes de que producto habla, no le preguntes "¿cual de los
 dos?" ni cosas asi, respondé directo sobre ese producto. Nunca repitas ese texto entre corchetes al cliente.`;
 
+const PHOTO_DIRECTIVE_AUTO = `FOTOS Y VIDEOS: cuando uses get_product_details, si es la primera vez que se piden los detalles de ese
+producto en esta conversacion, el sistema ya le manda la foto/video al cliente automaticamente (mira el
+campo "mediaJustSent" en la respuesta de la herramienta) - no llames send_product_media para eso, no hace
+falta. Si el cliente pide ver fotos, imagenes o video de nuevo despues (otro angulo, video, o simplemente
+lo vuelve a pedir), ahi si usa send_product_media - pasando productId si ya lo obtuviste en este turno con
+search_products o get_product_details (mas confiable), o el nombre del producto DEL QUE SE ESTA HABLANDO
+AHORA MISMO si solo tenes el nombre.
+${PHOTO_DIRECTIVE_SHARED_TAIL}`;
+
 const PHOTO_DIRECTIVE_REACTIVE = `FOTOS Y VIDEOS: si el cliente pide ver fotos, imagenes o video de un producto, usa send_product_media -
 pasando productId si ya lo obtuviste en este turno con search_products o get_product_details (mas
 confiable, evita mandar la foto de otro producto), o el nombre del producto DEL QUE SE ESTA HABLANDO AHORA
-MISMO (no uno mencionado antes en la conversacion) si solo tenes el nombre. No describas la foto en texto
-ni pongas la URL en el mensaje, la herramienta ya envia el archivo real. Revisa el campo "product" que
-devuelve la herramienta: si no coincide con lo pedido, decilo honestamente. Si la herramienta devuelve
-error o sent:false, nunca digas que ya la mandaste.
-Nunca escribas vos mismo un texto tipo "[Foto de PRODUCTO]" o "[Video de PRODUCTO]" simulando que mandaste
-algo - ese formato entre corchetes lo genera el sistema SOLO cuando send_product_media realmente se ejecuto
-y funciono. Si queres mandar una foto, llama la herramienta de verdad; copiar ese formato en tu respuesta
-sin llamarla deja al cliente sin nada.
-Si el mensaje del cliente empieza con "[El cliente esta respondiendo a la foto/video de: NOMBRE]", el
-cliente citó/respondió esa foto puntual - ya sabes de que producto habla, no le preguntes "¿cual de los
-dos?" ni cosas asi, respondé directo sobre ese producto. Nunca repitas ese texto entre corchetes al cliente.`;
+MISMO (no uno mencionado antes en la conversacion) si solo tenes el nombre. Revisa el campo "product" que
+devuelve la herramienta: si no coincide con lo pedido, decilo honestamente.
+${PHOTO_DIRECTIVE_SHARED_TAIL}`;
+
+// Fase E, 2026-09-13 audit (F8): tercera variante - ni "manda la foto sola" (AUTO) ni "solo si la piden"
+// (REACTIVE) son el flujo "lista el catalogo y OFRECE fotos" que el negocio pidio. Opt-in
+// (Business.offerPhotosBeforeSending), no reemplaza a las otras dos por defecto.
+const PHOTO_DIRECTIVE_OFFER_THEN_SEND = `FOTOS Y VIDEOS: cuando muestres una lista o resultado de catalogo (search_products, list_all_products,
+find_products_by_attributes), NO mandes fotos todavia - listalos por texto (nombre, precio) y preguntale al
+cliente si quiere ver fotos de alguno. Cada producto de la lista trae "hasMedia": si es false, ese producto
+no tiene foto/video cargado - no se lo ofrezcas, y si pregunta puntualmente por su foto decile que todavia
+no hay una cargada.
+EXCEPCION: si el cliente ya pidio ver fotos en el MISMO mensaje donde pide el catalogo o la lista (ej.
+"muestrame los relojes con fotos", "quiero ver el catalogo con imagenes"), no hace falta preguntar de
+nuevo - mandale la lista Y las fotos de los que tengan hasMedia:true en el mismo turno, una llamada a
+send_product_media por cada uno.
+Una vez el cliente ya vio la lista y pide fotos de un producto puntual despues (otro turno, o respondiendo
+que si a tu oferta), usa send_product_media - pasando productId si ya lo obtuviste en este turno con
+search_products o get_product_details (mas confiable), o el nombre del producto DEL QUE SE ESTA HABLANDO
+AHORA MISMO si solo tenes el nombre.
+${PHOTO_DIRECTIVE_SHARED_TAIL}`;
 
 const COMPROBANTE_DIRECTIVE_REQUIRED = `COMPROBANTES: si el cliente manda una foto (por ejemplo un comprobante de pago o transferencia), el
 mensaje va a incluir una nota "[Analisis de imagen adjunta]" con lo que se ve en la foto - usa esa
@@ -337,6 +353,9 @@ export interface BotPersonality {
   neverSay?: string | null;
   customInstructions?: string | null;
   autoSendPhotoOnQuote?: boolean;
+  // Opt-in, off by default - see Business.offerPhotosBeforeSending. Takes priority over
+  // autoSendPhotoOnQuote when true (a third mode, not a variant of AUTO/REACTIVE).
+  offerPhotosBeforeSending?: boolean;
   requirePaymentProof?: boolean;
   category?: string | null;
   // Opt-in, off by default - see Business.genderedAddressEnabled in schema.prisma for why this stays
@@ -356,7 +375,11 @@ export interface BotPersonality {
 export function buildSystemPrompt(personality?: BotPersonality | null): string {
   const languageDirective =
     (personality?.dialect && LANGUAGE_DIRECTIVES[personality.dialect]) || LANGUAGE_DIRECTIVES.neutro;
-  const photoDirective = personality?.autoSendPhotoOnQuote === false ? PHOTO_DIRECTIVE_REACTIVE : PHOTO_DIRECTIVE_AUTO;
+  const photoDirective = personality?.offerPhotosBeforeSending
+    ? PHOTO_DIRECTIVE_OFFER_THEN_SEND
+    : personality?.autoSendPhotoOnQuote === false
+      ? PHOTO_DIRECTIVE_REACTIVE
+      : PHOTO_DIRECTIVE_AUTO;
   const comprobanteDirective =
     personality?.requirePaymentProof === false ? COMPROBANTE_DIRECTIVE_OPTIONAL : COMPROBANTE_DIRECTIVE_REQUIRED;
   const shippingRatesDirective = personality?.shippingRatesConfigured ? SHIPPING_RATES_DIRECTIVE : "";

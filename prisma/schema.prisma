@@ -29,6 +29,11 @@ model Business {
   botGreeting               String?
   botNeverSay               String?
   autoSendPhotoOnQuote      Boolean                   @default(true)
+  // Fase E, 2026-09-13 audit (F8): a third photo mode - list the catalog by text and OFFER photos instead
+  // of sending them right away, unless the customer's own message already asked for photos (then send
+  // list+photos together). Independent flag rather than a 3rd value of autoSendPhotoOnQuote - keeps that
+  // field's existing AUTO/REACTIVE meaning untouched for every business that hasn't opted into this.
+  offerPhotosBeforeSending  Boolean                   @default(false)
   requirePaymentProof       Boolean                   @default(true)
   businessCategory          String?
   email                     String                    @unique
@@ -70,6 +75,7 @@ model Business {
   faqEntries                FaqEntry[]
   learnedFaqCandidates      LearnedFaqCandidate[]
   deliveryFailures          DeliveryFailure[]
+  agentIncidents            AgentIncident[]
   ownerMessageLogs          OwnerMessageLog[]
   orders                    Order[]
   teamMembers               TeamMember[]
@@ -411,6 +417,13 @@ model Conversation {
   intent                       ConversationIntent?
   humanControl                 Boolean                @default(false)
   humanControlAckSent          Boolean                @default(false)
+  // Set/reset by setHumanControl every time humanControl flips (either direction) - the clock the
+  // stalled-conversation watchdog measures against (jobs/escalationReminder.ts), independent of
+  // PendingOwnerQuestion.createdAt so a flag_conversation_intent/manual-takeover escalation (neither of
+  // which creates a PendingOwnerQuestion) is still caught if nobody answers it.
+  humanControlSince            DateTime?
+  stalledReminderStage         Int                    @default(0)
+  stalledReminderSentAt        DateTime?
   followUpSentAt               DateTime?
   pendingConfirmationMessageId String?                @unique
   pendingOrderSummary          String?
@@ -509,4 +522,26 @@ model AiUsageLog {
   createdAt       DateTime    @default(now())
 
   @@index([businessId, createdAt])
+}
+
+// Fase F, 2026-09-13 audit (F9): none of the backend safety nets in agent.ts (loop exhaustion,
+// applyClaimBackstops repairs) left any queryable trace before this - only a console.error/warn nobody
+// reads unless they happen to be tailing production logs. One row per intervention, cheap and
+// best-effort (recordAgentIncident in agent.ts never lets a logging failure break the real reply).
+model AgentIncident {
+  id             String            @id @default(cuid())
+  business       Business          @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  businessId     String
+  conversationId String?
+  kind           AgentIncidentKind
+  detail         String
+  createdAt      DateTime          @default(now())
+
+  @@index([businessId, createdAt])
+}
+
+enum AgentIncidentKind {
+  LOOP_EXHAUSTED
+  BACKSTOP_INTERVENTION
+  DEGRADED_REPLY
 }
