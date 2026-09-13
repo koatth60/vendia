@@ -218,8 +218,14 @@ export async function sendImageMessage(
 // yet (or doesn't exist for this business's WABA), so behavior degrades gracefully instead of failing
 // silently.
 export async function sendOwnerAlert(credentials: WhatsappCredentials, to: string, bodyText: string): Promise<string> {
+  // A template body parameter rejects newlines/tabs and 5+ consecutive spaces (Meta error #132018) -
+  // the alert text is built from a customer's own message plus a fixed wrapper, both of which routinely
+  // contain line breaks. Collapsing them here means the template send actually succeeds instead of
+  // silently falling through to the plain-text fallback below on every multi-line alert (confirmed
+  // failing in production logs for days before this fix).
+  const templateSafeText = bodyText.replace(/[\r\n\t]+/g, " ").replace(/ {2,}/g, " ").trim();
   try {
-    return await sendTemplateMessage(credentials, to, "onix_owner_alert", "es", [bodyText]);
+    return await sendTemplateMessage(credentials, to, "onix_owner_alert", "es", [templateSafeText]);
   } catch (error) {
     console.error("No se pudo enviar alerta al dueno via plantilla, probando texto libre:", error);
     return sendTextMessage(credentials, to, bodyText);
