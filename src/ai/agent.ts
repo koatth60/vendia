@@ -814,6 +814,23 @@ export function guardAgainstPaymentHallucination(
   ].join("\n\n");
 }
 
+// Un metodo real puede combinar varios canales en una sola etiqueta (ej. "Nequi, Llave o Daviplata") -
+// el modelo confirma con el cliente solo el canal puntual que uso ("Nequi"), no la etiqueta completa.
+// Encontrado por npm run regression 2026-09-13: el match exacto original bloqueaba close_conversation en
+// 6/37 conversaciones reales de MAGByLizN, siempre por este mismo motivo (su unico metodo configurado
+// combina 3 canales). Acepta el match si todas las palabras del label del modelo aparecen entre las del
+// label real, ademas del match exacto original.
+export function matchesConfiguredPaymentMethod(label: string, realMethods: { label: string }[]): boolean {
+  const inputLabelNorm = normalizeForMatch(label.trim());
+  const inputTokens = tokenize(label.trim());
+  return realMethods.some((m) => {
+    if (normalizeForMatch(m.label) === inputLabelNorm) return true;
+    if (inputTokens.length === 0) return false;
+    const realTokens = new Set(tokenize(m.label));
+    return inputTokens.every((t) => realTokens.has(t));
+  });
+}
+
 const SHIPPING_MENTION_PATTERN = /env[ií]o/i;
 
 // Detection-only, unlike guardAgainstPaymentHallucination above: a shipping cost is usually one clause
@@ -1308,8 +1325,7 @@ export async function generateReply(
           input.paymentMethodLabel.trim()
         ) {
           const realMethods = await listActivePaymentMethods(context.businessId);
-          const inputLabelNorm = normalizeForMatch(input.paymentMethodLabel.trim());
-          const isRealLabel = realMethods.some((m) => normalizeForMatch(m.label) === inputLabelNorm);
+          const isRealLabel = matchesConfiguredPaymentMethod(input.paymentMethodLabel, realMethods);
           if (realMethods.length > 0 && !isRealLabel) {
             console.error(
               "close_conversation bloqueado: paymentMethodLabel no coincide con ninguna forma de pago real configurada:",

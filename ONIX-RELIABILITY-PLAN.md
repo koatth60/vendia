@@ -311,13 +311,31 @@ señal que más pesa para que el modelo elija bien qué función llamar, no se t
 `close_conversation`, `cancel_order`, `flag_conversation_intent`, `get_shipping_rate_for_city`,
 `get_shipping_rates`. Neto: **-1,347 caracteres** en el bloque `catalogTools` (diff real, no estimado).
 `npx tsc --noEmit` limpio, `tools.test.ts` 44/44 (ningún test depende del texto de `description`).
-**Riesgo real de esta fase, a diferencia de 6.0b**: esto SÍ puede afectar qué herramienta elige llamar el
-modelo o cuándo — no es un cambio de forma de dato, es texto que el modelo lee para decidir. La validación
-real (`agent.categoryColorScopePaid.ts`, que cubre justo el escenario de `find_products_by_attributes`) NO
-se corrió — es real-cost, pendiente de que el usuario confirme cuándo correrla. Hasta entonces, tratar como
-implementado-pero-no-probado, igual que Phase 4 en su momento. Validar: `tools.test.ts` (comportamiento en
-runtime, no shape) + `agent.categoryColorScopePaid.ts` — pedir aprobación al usuario antes de correrlo, es
-real-cost — para confirmar que el modelo sigue llamando bien las herramientas sin la prosa recortada.
+**Commiteado (`6b3a24e`) y desplegado a producción 2026-09-13** — CORE, aplica a todos los negocios.
+
+**Validación real, 2026-09-13**: el usuario pidió cubrir las 9 herramientas tocadas, no solo la de
+color/categoría, antes de dar por buena la fase. Corridos con aprobación explícita del usuario (todos real-
+cost, DeepSeek real):
+- `agent.categoryColorScopePaid.ts` (4/4) — cubre `find_products_by_attributes`/`send_product_media`.
+- `agent.escalationPaid.ts` (8/8) — cubre `ask_owner`, `cancel_order`, `get_order_status`, `show_order_summary`.
+- `agent.ambiguousRequestsPaid.ts` (2/2) — cubre `send_product_media` en listas/referencias posicionales.
+- `npm run regression` (37 conversaciones reales, 470 turnos) — cobertura amplia de `close_conversation`,
+  `flag_conversation_intent`, tarifas de envío, todo lo que los tests puntuales no tocan.
+
+**Bug real encontrado por el regression run (NO causado por esta fase, confirmado por lectura de código —
+la lógica del guard no depende del texto de `description` que se tocó hoy)**: 6/470 turnos con
+`close_conversation bloqueado: paymentMethodLabel no coincide... Nequi`. El guard de la Phase 2
+(`agent.ts`, 2026-09-12) comparaba el `paymentMethodLabel` del modelo contra los métodos reales con
+coincidencia EXACTA. El único método real de MAGByLizN es `"Nequi, Llave o Daviplata"` (3 canales en una
+sola etiqueta) — el modelo confirma correctamente solo el canal que usó el cliente ("Nequi"), pero eso no
+matcheaba exacto contra la etiqueta combinada, bloqueando el cierre en su canal de pago más común.
+**Arreglado el mismo día**: lógica extraída a `matchesConfiguredPaymentMethod(label, realMethods)`
+(exportada desde `agent.ts`, mismo patrón que `guardAgainstPaymentHallucination`) — acepta el match exacto
+original Y, si no matchea, si todas las palabras del label del modelo aparecen entre las del label real
+(tokenizado). 3 tests nuevos en `agent.paymentGuard.test.ts` cubriendo el caso real. `npm test` completo
+199/199. **Pendiente para la próxima corrida de `npm run regression`: confirmar que estas 6 conversaciones
+ya no aparecen flageadas** (baseline de este bug: 6/470, esperado después del fix: 0/470 por este motivo
+puntual — otros nuevos hallazgos son otro tema).
 
 **Fase 6.2 — `BASE_SYSTEM_PROMPT`: consolidar por significado (riesgo medio-alto — la fase que se pausó).**
 Mismo hallazgo que la vez pasada sigue siendo cierto: las 42 apariciones de "nunca" NO son una frase

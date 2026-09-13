@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { guardAgainstPaymentHallucination } from "./agent";
+import { guardAgainstPaymentHallucination, matchesConfiguredPaymentMethod } from "./agent";
 
 // Regression for a real production incident (2026-09-12): the model told a customer to pay to a
 // completely fabricated Nequi number and titular ("Elizabeth Ríos") that matched none of the business's
@@ -43,4 +43,24 @@ test("does not false-positive on Colombian-formatted prices (dot as thousands se
   const text = "El total de tu pedido por transferencia Nequi es de $1.234.567, número de cuenta 3022168936.";
   const result = guardAgainstPaymentHallucination(text, REAL_METHODS);
   assert.equal(result, text, "dotted price formatting must never look like an unverified account number");
+});
+
+// Regression for a real production incident found via npm run regression (2026-09-13): close_conversation
+// blocked in 6/37 real MAGByLizN conversations because the model confirmed the customer's actual channel
+// ("Nequi") instead of repeating the full combined label ("Nequi, Llave o Daviplata") - the exact-match
+// check treated a legitimate close as a hallucination.
+test("matchesConfiguredPaymentMethod: a single channel name matches a combined multi-channel label", () => {
+  assert.equal(matchesConfiguredPaymentMethod("Nequi", REAL_METHODS), true);
+  assert.equal(matchesConfiguredPaymentMethod("Daviplata", REAL_METHODS), true);
+  assert.equal(matchesConfiguredPaymentMethod("Llave", REAL_METHODS), true);
+});
+
+test("matchesConfiguredPaymentMethod: exact label still matches", () => {
+  assert.equal(matchesConfiguredPaymentMethod("Bancolombia", REAL_METHODS), true);
+  assert.equal(matchesConfiguredPaymentMethod("Nequi, Llave o Daviplata", REAL_METHODS), true);
+});
+
+test("matchesConfiguredPaymentMethod: a fabricated label still fails to match", () => {
+  assert.equal(matchesConfiguredPaymentMethod("PayPal", REAL_METHODS), false);
+  assert.equal(matchesConfiguredPaymentMethod("Efectivo", REAL_METHODS), false);
 });
