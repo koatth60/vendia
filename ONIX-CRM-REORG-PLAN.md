@@ -1,6 +1,7 @@
 # Onix — Diagnóstico de la aplicación y plan de reorganización hacia un CRM
 
 Fecha: 2026-09-13
+Estado: Fases 0, 1, 2 y 3 implementadas (ver "Estado de ejecución" al final). Faltan 4 y 5.
 Alcance: panel de administración (frontend) + capa de rutas (backend). No toca el agente, los prompts,
 las tools, el webhook de WhatsApp ni la lógica de negocio existente.
 
@@ -338,3 +339,68 @@ columnas opcionales y tablas nuevas). Ningún test existente se edita.
 | La ficha de cliente se vuelve lenta si calcula métricas al vuelo | Índices nuevos desde la fase 2; desnormalizar `totalSpent` sólo si hace falta |
 | Una migración de Prisma en producción | Todas las columnas nuevas son opcionales o con valor por defecto; se aplican con `migrate deploy` antes del reinicio de PM2 |
 | Olvidar recargar Nginx tras reiniciar PM2 | Es un fallo conocido del despliegue de este proyecto: recargar Nginx después de cada `pm2 restart` |
+
+---
+
+## Parte 3 — Estado de ejecución
+
+| Fase | Estado | Commit |
+|---|---|---|
+| 0 — Andamiaje (extraer CSS/JS, partir `admin.ts`) | Hecha | `64a1b00` |
+| 1 — Navegación en 5 secciones | Hecha | `6ede57e` |
+| 2 — CRM: clientes | Hecha | `f100447` |
+| 3 — Inicio y salud del bot | Hecha | `f100447` |
+| 4 — Bot: cerrar huecos de configuración | Pendiente | — |
+| 5 — Escala y pulido | Pendiente | — |
+
+Nada está desplegado todavía: las cuatro fases están commiteadas en `master` local, a la espera de la
+orden de despliegue.
+
+### Desvíos respecto al plan original
+
+- **Fase 0**: se extrajo el JavaScript a un solo `js/admin.js` en vez de a quince módulos ES con una
+  carpeta `views/`. El objetivo real (que el panel deje de ser un archivo HTML de 4.000 líneas con todo
+  adentro) se cumple, y la extracción se pudo verificar byte a byte contra el original, cosa que un
+  troceado en quince archivos no permitía. Partirlo más fino sigue siendo posible y ya no urge.
+- **Fase 1**: la navegación se implementó como dos filas horizontales (secciones + subnav contextual)
+  en lugar de una barra lateral fija. Reusa el layout y los breakpoints que ya estaban probados; pasar
+  a barra lateral más adelante es puro CSS, sin tocar JavaScript.
+- **P5 (dos botones "Guardar cambios")**: revisado con el código delante, no era una pérdida de datos.
+  Todos los paneles viven en el mismo DOM, así que cualquiera de los botones guarda el estado actual y
+  correcto del formulario completo. Partir el guardado por sección exigiría antes endurecer
+  `PUT /api/business`, donde hoy varios campos usan `x || null` y `Boolean(x)`: con un payload parcial,
+  omitir un campo lo pondría en null o en false en vez de dejarlo como está. Queda anotado como trabajo
+  de backend, no se tocó a ciegas.
+
+### Multicanal (Instagram, Facebook, Mercado Libre)
+
+Requisito que apareció durante la ejecución. Lo ya hecho:
+
+- Enum `Channel` con `Customer.channel` y `Conversation.channel`, ambos con default `WHATSAPP`. El CRM
+  ya lee y muestra el canal, así que sumar uno nuevo no obliga a migrar datos.
+- La sección del panel se llama **Canales**, no "WhatsApp".
+
+Lo que queda decidido explícitamente **para después**, cuando exista el segundo canal de verdad:
+
+- `Customer.@@unique([businessId, phoneNumber])` sigue siendo la identidad, que es específica de
+  WhatsApp. Un cliente de Instagram no tiene teléfono.
+- Unificar a la misma persona entre canales (el mismo humano escribiendo por WhatsApp y por Instagram)
+  necesita una tabla de identidades por canal, y no tiene sentido diseñarla sin un segundo canal real
+  contra el cual validarla.
+- El envío sigue acoplado a `whatsapp/client.ts`. Cuando entre el segundo canal habrá que meter una
+  capa de canal por debajo de `recordMessage`/`sendTextMessage`; el CRM de arriba no debería enterarse.
+
+### Fase 4 — qué falta exactamente
+
+1. Interfaz de tarifas de envío y reglas por ciudad (`ShippingRate`, `ShippingCityRule`): el agente ya
+   las consulta y hoy solo se pueden cargar por script.
+2. Administración del catálogo de etiquetas (`CustomerTag`): el modelo y los endpoints ya existen
+   (Fase 2), falta la pantalla para crear/renombrar/borrar y elegir color.
+3. Separar "Personalidad" de "Reglas e instrucciones" dentro de Bot > Configuración.
+
+### Fase 5 — qué falta exactamente
+
+1. Paginación por cursor en conversaciones y mensajes (la de clientes ya quedó hecha en Fase 2).
+2. Buscador global.
+3. Renombrar `/vendia-admin` a `/zaqi-admin` con redirección, limpiar la clave `vendia-admin-tab` de
+   `localStorage` y actualizar el README a la marca actual.
