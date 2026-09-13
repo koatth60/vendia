@@ -1,5 +1,5 @@
 import { prisma } from "../db/client";
-import { normalizeForMatch } from "../search/text";
+import { normalizeForMatch, escapeForRegExp } from "../search/text";
 
 export async function listShippingRates(businessId: string) {
   return prisma.shippingRate.findMany({
@@ -29,9 +29,23 @@ export async function resolveShippingRateForCity(businessId: string, city: strin
   const normalizedCity = normalizeForMatch(city.trim());
   if (!normalizedCity) return null;
 
-  const rule = await prisma.shippingCityRule.findUnique({
+  let rule = await prisma.shippingCityRule.findUnique({
     where: { businessId_normalizedCity: { businessId, normalizedCity } },
   });
+
+  if (!rule) {
+    // Exact match failed - real customer text often carries extra qualifiers a configured city name
+    // doesn't have ("Bogota D.C.", "Medellin centro"), so it never equals the stored normalizedCity even
+    // though the intent is unambiguous. Fall back to whichever configured city name appears as a whole
+    // word inside what the customer typed, instead of giving up and pushing the decision to model prose
+    // (reliability plan Phase 3, item 3, 2026-09-13). Longest match wins so a business with both "Bogota"
+    // and "Bogota Norte" configured resolves the more specific one first.
+    const rules = await prisma.shippingCityRule.findMany({ where: { businessId } });
+    const candidates = rules
+      .filter((r) => new RegExp(`(^|[^a-z0-9])${escapeForRegExp(r.normalizedCity)}($|[^a-z0-9])`, "i").test(normalizedCity))
+      .sort((a, b) => b.normalizedCity.length - a.normalizedCity.length);
+    rule = candidates[0] ?? null;
+  }
   if (!rule) return null;
 
   const rate = await prisma.shippingRate.findFirst({

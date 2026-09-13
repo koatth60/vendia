@@ -20,3 +20,7 @@ export function normalizeForMatch(text: string): string {
     .normalize("NFD")
     .replace(/[̀-ͯ]/g, "");
 }
+
+export function escapeForRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}

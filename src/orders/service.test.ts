@@ -99,6 +99,64 @@ test("resolveOrderItems: a variantLabel that matches one color resolves to that 
   await prisma.product.delete({ where: { id: product.id } });
 });
 
+// Reliability plan Phase 3, item 1 (2026-09-13): matchVariant used to score a variant's color via
+// canonicalColors(v.color)[0] - only the FIRST canonical color of a multi-color label. A variant literally
+// named "Negro/Dorado" never matched a customer asking for "dorado" since only "negro" (the first token)
+// was ever compared.
+test("resolveOrderItems: a variant labeled with two colors matches a request for either one", async () => {
+  const product = await createProduct(businessId, {
+    name: "Reloj Bicolor Test",
+    description: "Reloj con caratula de dos colores",
+    price: 60000,
+    currency: "COP",
+    stock: 0,
+  });
+  const bicolor = await createProductVariant(businessId, product.id, { color: "Negro/Dorado", stock: 2 });
+  await createProductVariant(businessId, product.id, { color: "Plateado", stock: 1 });
+
+  const result = await resolveOrderItems(businessId, [
+    { productName: "Reloj Bicolor Test", quantity: 1, variantLabel: "dorado" },
+  ]);
+  assert.equal(result.needsAttribute.length, 0);
+  assert.equal(result.items.length, 1);
+  assert.equal(result.items[0].variantId, bicolor.id);
+
+  await prisma.product.delete({ where: { id: product.id } });
+});
+
+// Phase 3, item 2: matchVariant used to score size via `labelNorm.includes(normalizeForMatch(v.size))`, a
+// raw substring check - a variant sized "M" matched any customer text containing an "m" anywhere, e.g.
+// "morado". Needs a word-boundary check instead.
+test("resolveOrderItems: a size variant does not false-match an unrelated word merely containing its letter", async () => {
+  const product = await createProduct(businessId, {
+    name: "Camiseta Talla Test",
+    description: "Camiseta en varias tallas",
+    price: 35000,
+    currency: "COP",
+    stock: 0,
+  });
+  await createProductVariant(businessId, product.id, { size: "M", stock: 2 });
+  await createProductVariant(businessId, product.id, { size: "L", stock: 1 });
+
+  // "morado" contains the letter "m" but is not the size "M" - must NOT resolve, since neither size has
+  // real evidence and there's no way to tell which one the customer meant.
+  const falseMatch = await resolveOrderItems(businessId, [
+    { productName: "Camiseta Talla Test", quantity: 1, variantLabel: "morado" },
+  ]);
+  assert.equal(falseMatch.items.length, 0, "must NOT resolve to the 'M' variant just because 'morado' contains an m");
+  assert.equal(falseMatch.needsAttribute.length, 1);
+
+  // A real, unambiguous size mention still resolves correctly.
+  const realMatch = await resolveOrderItems(businessId, [
+    { productName: "Camiseta Talla Test", quantity: 1, variantLabel: "talla M" },
+  ]);
+  assert.equal(realMatch.needsAttribute.length, 0);
+  assert.equal(realMatch.items.length, 1);
+  assert.equal(realMatch.items[0].variantLabel, "M");
+
+  await prisma.product.delete({ where: { id: product.id } });
+});
+
 test("resolveOrderItems: a product with no variants at all resolves exactly as before (no attribute needed)", async () => {
   const product = await createProduct(businessId, {
     name: "Producto Simple Test",

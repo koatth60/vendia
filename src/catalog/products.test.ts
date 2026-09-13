@@ -11,6 +11,7 @@ import {
   deleteProductVariant,
   listActiveProducts,
   findProductsByAttributes,
+  textMentionsConfiguredCategory,
 } from "./products";
 
 let businessId: string;
@@ -51,6 +52,72 @@ test("searchProducts matches an unaccented query against accented stored text", 
 test("searchProducts returns nothing for a query that matches no product", async () => {
   const results = await searchProducts(businessId, "refrigerador industrial");
   assert.equal(results.length, 0);
+});
+
+// Reliability plan Phase 3, item 4 (2026-09-13): relevanceScore used to check `category.includes(token)`
+// as a raw substring, not a whole-word match - a query token as short as "pro" silently matched any
+// category string containing "producto" (an extremely common Spanish category label meaning "product"),
+// returning a completely unrelated item as if the customer had actually searched for something matching
+// its name or category.
+test("searchProducts does not false-match a short query token against an unrelated word that merely contains it", async () => {
+  const business = await prisma.business.create({
+    data: { name: `Test ${randomUUID()}`, email: `test-${randomUUID()}@example.com`, passwordHash: "x" },
+  });
+  await prisma.product.create({
+    data: {
+      businessId: business.id,
+      name: "Camiseta Basica",
+      description: "Camiseta comoda de algodon",
+      category: "Producto General",
+      price: 20000,
+      currency: "COP",
+      stock: 10,
+    },
+  });
+
+  try {
+    // "pro" is a real 3-letter token (tokenize keeps 3+ char words) that is a SUBSTRING of "Producto" but
+    // not a whole word match against anything on this product - must return nothing.
+    const results = await searchProducts(business.id, "pro");
+    assert.equal(results.length, 0);
+  } finally {
+    await prisma.product.deleteMany({ where: { businessId: business.id } });
+    await prisma.business.delete({ where: { id: business.id } });
+  }
+});
+
+// Same gap as the CategoryAlias fix for findProductsByAttributes, threaded through search_products too -
+// a customer hitting the free-text search path (not the attribute filter) with a business-specific
+// category synonym used to get zero results even though the real category matches once the synonym is
+// resolved.
+test("searchProducts resolves a business's own CategoryAlias synonym, not just the literal category word", async () => {
+  const business = await prisma.business.create({
+    data: { name: `Test ${randomUUID()}`, email: `test-${randomUUID()}@example.com`, passwordHash: "x" },
+  });
+  try {
+    await prisma.categoryAlias.create({
+      data: { businessId: business.id, canonical: "Smartwatches", synonym: "reloj", normalizedSynonym: "reloj" },
+    });
+    await prisma.product.create({
+      data: {
+        businessId: business.id,
+        name: "Serie X Deportivo",
+        description: "Pantalla tactil, resistente al agua",
+        category: "Smartwatches",
+        price: 150000,
+        currency: "COP",
+        stock: 4,
+      },
+    });
+
+    const results = await searchProducts(business.id, "reloj");
+    assert.equal(results.length, 1);
+    assert.equal(results[0].name, "Serie X Deportivo");
+  } finally {
+    await prisma.product.deleteMany({ where: { businessId: business.id } });
+    await prisma.categoryAlias.deleteMany({ where: { businessId: business.id } });
+    await prisma.business.delete({ where: { id: business.id } });
+  }
 });
 
 // Regression coverage for the "bot sends the wrong product's photos" bug: a vision-derived description
@@ -396,6 +463,74 @@ test("createProduct stores color and size for the simple single-variant case", a
     assert.equal(product.size, "M");
   } finally {
     await prisma.product.deleteMany({ where: { businessId: business.id } });
+    await prisma.business.delete({ where: { id: business.id } });
+  }
+});
+
+// Reliability plan Phase 4 (2026-09-13): textMentionsConfiguredCategory is the classifier agent.ts uses
+// to decide whether to force tool_choice toward find_products_by_attributes for a "color negro" style
+// message - must recognize this business's REAL category words (and their aliases), never a hardcoded
+// vertical vocabulary, and must not false-fire on an unrelated word.
+test("textMentionsConfiguredCategory: recognizes a real category word from this business's own catalog", async () => {
+  const business = await prisma.business.create({
+    data: { name: `Test ${randomUUID()}`, email: `test-${randomUUID()}@example.com`, passwordHash: "x" },
+  });
+  try {
+    await prisma.product.create({
+      data: {
+        businessId: business.id,
+        name: "Serie X",
+        description: "Reloj inteligente",
+        category: "Smartwatches",
+        price: 100000,
+        currency: "COP",
+        stock: 3,
+      },
+    });
+
+    assert.equal(await textMentionsConfiguredCategory(business.id, "quiero un smartwatch negro"), true);
+    assert.equal(await textMentionsConfiguredCategory(business.id, "tienen audifonos rojos"), false);
+  } finally {
+    await prisma.product.deleteMany({ where: { businessId: business.id } });
+    await prisma.business.delete({ where: { id: business.id } });
+  }
+});
+
+test("textMentionsConfiguredCategory: recognizes a CategoryAlias synonym, not just the literal category word", async () => {
+  const business = await prisma.business.create({
+    data: { name: `Test ${randomUUID()}`, email: `test-${randomUUID()}@example.com`, passwordHash: "x" },
+  });
+  try {
+    await prisma.categoryAlias.create({
+      data: { businessId: business.id, canonical: "Smartwatches", synonym: "reloj", normalizedSynonym: "reloj" },
+    });
+    await prisma.product.create({
+      data: {
+        businessId: business.id,
+        name: "Serie X",
+        description: "Reloj inteligente",
+        category: "Smartwatches",
+        price: 100000,
+        currency: "COP",
+        stock: 3,
+      },
+    });
+
+    assert.equal(await textMentionsConfiguredCategory(business.id, "quiero un reloj negro"), true);
+  } finally {
+    await prisma.product.deleteMany({ where: { businessId: business.id } });
+    await prisma.categoryAlias.deleteMany({ where: { businessId: business.id } });
+    await prisma.business.delete({ where: { id: business.id } });
+  }
+});
+
+test("textMentionsConfiguredCategory: false when the business has no products/categories at all", async () => {
+  const business = await prisma.business.create({
+    data: { name: `Test ${randomUUID()}`, email: `test-${randomUUID()}@example.com`, passwordHash: "x" },
+  });
+  try {
+    assert.equal(await textMentionsConfiguredCategory(business.id, "quiero un reloj negro"), false);
+  } finally {
     await prisma.business.delete({ where: { id: business.id } });
   }
 });

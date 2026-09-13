@@ -70,16 +70,59 @@ export async function getProductById(businessId: string, id: string) {
   return withMedia;
 }
 
-function relevanceScore(tokens: string[], product: { name: string; description: string; category: string | null }): number {
-  const name = normalizeForMatch(product.name);
-  const description = normalizeForMatch(product.description);
-  const category = normalizeForMatch(product.category ?? "");
+// This business's own category-word synonyms (e.g. "reloj"="smartwatch", "guineo"="banano") - see
+// CategoryAlias in schema.prisma and attributeTaxonomy.ts. Shared by every caller that scores products
+// against a category word, so search_products/findConfidentProductMatch see the same synonyms
+// findProductsByAttributes already does (reliability plan Phase 3, item 4, 2026-09-13).
+async function loadCategoryAliasMap(businessId: string): Promise<Map<string, string>> {
+  const aliasRows = await prisma.categoryAlias.findMany({ where: { businessId } });
+  return new Map(aliasRows.map((a) => [a.normalizedSynonym, canonicalizeCategoryWord(a.canonical)]));
+}
+
+// Used by agent.ts's Phase 4 tool_choice-forcing classifier (reliability plan, 2026-09-13): true when the
+// customer's own text contains a category word this business actually has - a real category on one of its
+// active products, or one of this business's own CategoryAlias synonyms for it. Deliberately never a
+// hardcoded vertical vocabulary, same reasoning as findProductsByAttributes/relevanceScore above.
+export async function textMentionsConfiguredCategory(businessId: string, text: string): Promise<boolean> {
+  const tokens = tokenize(text);
+  if (tokens.length === 0) return false;
+
+  const [categories, categoryAliasMap] = await Promise.all([
+    prisma.product.findMany({ where: { businessId, active: true }, select: { category: true }, distinct: ["category"] }),
+    loadCategoryAliasMap(businessId),
+  ]);
+  const categoryTokens = new Set(
+    categories
+      .flatMap((c) => (c.category ? tokenize(c.category) : []))
+      .map((w) => canonicalizeCategoryWord(w, categoryAliasMap))
+  );
+  if (categoryTokens.size === 0) return false;
+
+  return tokens.some((t) => categoryTokens.has(canonicalizeCategoryWord(t, categoryAliasMap)));
+}
+
+// Whole-token match, not `.includes()` on the raw string - a substring check let a query token like "pro"
+// match inside an unrelated word such as "producto" (same bug class fixed in agent.ts's media backstop,
+// see findMentionedProductsForMediaBackstop's comment there). Category words also go through the same
+// canonicalizeCategoryWord + aliasMap used by findProductsByAttributes, so a synonym like "reloj" for a
+// business whose real category is "Smartwatches" scores here too, not just in the dedicated attribute
+// filter (Phase 3, item 4).
+function relevanceScore(
+  tokens: string[],
+  product: { name: string; description: string; category: string | null },
+  categoryAliasMap: ReadonlyMap<string, string>
+): number {
+  const nameTokens = new Set(tokenize(product.name));
+  const descriptionTokens = new Set(tokenize(product.description));
+  const categoryTokens = new Set(
+    (product.category ? tokenize(product.category) : []).map((w) => canonicalizeCategoryWord(w, categoryAliasMap))
+  );
 
   let score = 0;
   for (const token of tokens) {
-    if (name.includes(token)) score += 3;
-    if (category.includes(token)) score += 2;
-    if (description.includes(token)) score += 1;
+    if (nameTokens.has(token)) score += 3;
+    if (categoryTokens.has(canonicalizeCategoryWord(token, categoryAliasMap))) score += 2;
+    if (descriptionTokens.has(token)) score += 1;
   }
   return score;
 }
@@ -92,10 +135,10 @@ export async function searchProducts(businessId: string, query: string) {
   const tokens = tokenize(query);
   if (tokens.length === 0) return listActiveProducts(businessId);
 
-  const products = await prisma.product.findMany({
-    where: { businessId, active: true },
-    include: PRODUCT_INCLUDE,
-  });
+  const [products, categoryAliasMap] = await Promise.all([
+    prisma.product.findMany({ where: { businessId, active: true }, include: PRODUCT_INCLUDE }),
+    loadCategoryAliasMap(businessId),
+  ]);
 
   // Tie-break by id so results are deterministic across calls - without it, two products scoring
   // equally kept whatever order Postgres happened to return them in for that particular query, which
@@ -103,7 +146,7 @@ export async function searchProducts(businessId: string, query: string) {
   // later turn (e.g. the text-based re-search inside send_product_media landing on a different product
   // than the one the model had just described).
   const matches = products
-    .map((product) => ({ product, score: relevanceScore(tokens, product) }))
+    .map((product) => ({ product, score: relevanceScore(tokens, product, categoryAliasMap) }))
     .filter(({ score }) => score > 0)
     .sort((a, b) => b.score - a.score || a.product.id.localeCompare(b.product.id))
     .map(({ product }) => product);
@@ -136,13 +179,13 @@ export async function findConfidentProductMatch(
   const tokens = tokenize(query);
   if (tokens.length === 0) return { product: null, ambiguous: false };
 
-  const products = await prisma.product.findMany({
-    where: { businessId, active: true },
-    include: PRODUCT_INCLUDE,
-  });
+  const [products, categoryAliasMap] = await Promise.all([
+    prisma.product.findMany({ where: { businessId, active: true }, include: PRODUCT_INCLUDE }),
+    loadCategoryAliasMap(businessId),
+  ]);
 
   const scored = products
-    .map((product) => ({ product, score: relevanceScore(tokens, product) }))
+    .map((product) => ({ product, score: relevanceScore(tokens, product, categoryAliasMap) }))
     .filter(({ score }) => score > 0)
     .sort((a, b) => b.score - a.score || a.product.id.localeCompare(b.product.id));
 
@@ -198,8 +241,7 @@ export async function findProductsByAttributes(
   // hardcoded list here (a fixed dictionary would only ever help one vertical). Canonical values get
   // folded through the plain (no-alias) form too, so an admin typing "Relojes" as the canonical still
   // lands in the same bucket as the plural/accent-folded product-category words below.
-  const aliasRows = attrs.category ? await prisma.categoryAlias.findMany({ where: { businessId } }) : [];
-  const categoryAliasMap = new Map(aliasRows.map((a) => [a.normalizedSynonym, canonicalizeCategoryWord(a.canonical)]));
+  const categoryAliasMap = attrs.category ? await loadCategoryAliasMap(businessId) : new Map<string, string>();
   const targetCategory = attrs.category ? canonicalizeCategoryWord(attrs.category, categoryAliasMap) : null;
 
   // Neither a real color nor a real category to filter by - falling through would return the entire

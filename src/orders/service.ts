@@ -2,7 +2,7 @@ import { prisma } from "../db/client";
 import type { OrderFulfillmentStatus } from "@prisma/client";
 import { findConfidentProductMatch } from "../catalog/products";
 import { canonicalColors } from "../catalog/attributeTaxonomy";
-import { normalizeForMatch } from "../search/text";
+import { normalizeForMatch, escapeForRegExp } from "../search/text";
 import { sendInteractiveButtonsMessage, type WhatsappCredentials } from "../whatsapp/client";
 import { getPresignedMediaUrl } from "../media/s3";
 import { emitOrderNew, emitOrderUpdated } from "../realtime/events";
@@ -52,8 +52,17 @@ function matchVariant(variants: VariantForMatch[], label: string): { variant: Va
   const scored = active
     .map((v) => {
       let score = 0;
-      if (v.color && labelColors.includes(canonicalColors(v.color)[0])) score += 2;
-      if (v.size && labelNorm.includes(normalizeForMatch(v.size))) score += 2;
+      // Full set, not just the first canonical color - a variant labeled "negro/dorado" has two, and a
+      // customer asking for "dorado" must still match it (reliability plan Phase 3, item 1, 2026-09-13).
+      if (v.color && canonicalColors(v.color).some((c) => labelColors.includes(c))) score += 2;
+      // Word-boundary check, not a raw substring - "labelNorm.includes(size)" used to let a variant sized
+      // "M" match any customer text containing an "m" anywhere, e.g. "morado" (Phase 3, item 2).
+      if (v.size) {
+        const sizeNorm = normalizeForMatch(v.size).trim();
+        if (sizeNorm && new RegExp(`(^|[^a-z0-9])${escapeForRegExp(sizeNorm)}($|[^a-z0-9])`, "i").test(labelNorm)) {
+          score += 2;
+        }
+      }
       return { v, score };
     })
     .filter((s) => s.score > 0)
