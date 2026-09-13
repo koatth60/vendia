@@ -1464,6 +1464,12 @@ function renderCard(p) {
           ${p.color ? `<span class="category-tag">Color: ${escapeHtml(p.color)}</span>` : ''}
           ${p.size ? `<span class="category-tag">Talla: ${escapeHtml(p.size)}</span>` : ''}
         </div>
+        ${variants.length > 0 && p.stock > 0 ? `
+          <div class="hint" style="background:var(--warn-light); color:var(--warn); padding:8px 10px; border-radius:var(--radius-md); margin-top:4px;">
+            Este producto tenía <strong>${p.stock} en stock</strong> antes de tener colores - no se perdió, pero no cuenta en el total de arriba hasta que lo repartas entre los colores de abajo.
+            <button class="btn-ghost" style="padding:2px 0; margin-top:2px; font-weight:700; color:var(--warn); text-decoration:underline;" onclick="clearLeftoverStock('${p.id}')">Ya lo repartí, quitar este aviso</button>
+          </div>
+        ` : ''}
         ${renderVariantSection(p.id, variants)}
       </div>
       <div class="product-footer">
@@ -1876,6 +1882,22 @@ function scrollToAndHighlightProduct(productId) {
   setTimeout(() => card.classList.remove('is-new'), 2500);
   const colorInput = document.getElementById(`new-variant-color-${productId}`);
   if (colorInput) setTimeout(() => colorInput.focus(), 400);
+}
+
+// Clears the leftover pre-variant stock number once the admin has actually redistributed it among the
+// real color variants (see the warning banner in renderCard) - the field itself is otherwise unused
+// and disabled once a product has variants (see startEdit), so there's no other way to zero it out.
+async function clearLeftoverStock(id) {
+  try {
+    await apiFetch(`/admin/api/products/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ stock: 0 }),
+    });
+    loadProducts();
+  } catch (err) {
+    setStatus(`No se pudo quitar el aviso: ${err.message}`, true);
+  }
 }
 
 async function toggleActive(id, active) {
