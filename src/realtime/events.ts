@@ -26,8 +26,34 @@ export interface ConversationRow {
   lastMessage: { role: string; content: string; createdAt: Date } | null;
 }
 
-export function emitNewMessage(businessId: string, conversationId: string, message: MessageEventPayload, unreadCount: number): void {
-  realtimeEvents.emit("message:new", businessId, { conversationId, message, unreadCount });
+// One row per customer for the admin panel's Conversaciones list, grouping that customer's
+// Conversation rows (see [[onix-conversations-group-by-customer]]) so a customer whose last sale
+// already closed doesn't show up as a second, unrelated-looking row the next time they write in.
+// `cycles` is the compact per-conversation list the frontend needs to map an incoming
+// conversationId (from message:new/conversation:updated) back to the customer row it belongs to,
+// without a second fetch.
+export interface CustomerRow {
+  customerId: string;
+  activeConversationId: string;
+  status: string;
+  intent: string | null;
+  humanControl: boolean;
+  updatedAt: Date;
+  unreadCount: number;
+  orderCount: number;
+  customer: { id: string; phoneNumber: string; name: string | null; tags: string[] };
+  lastMessage: { role: string; content: string; createdAt: Date } | null;
+  cycles: { id: string; status: string; updatedAt: Date }[];
+}
+
+export function emitNewMessage(
+  businessId: string,
+  conversationId: string,
+  customerId: string,
+  message: MessageEventPayload,
+  unreadCount: number
+): void {
+  realtimeEvents.emit("message:new", businessId, { conversationId, customerId, message, unreadCount });
 }
 
 export function emitNewConversation(businessId: string, conversation: ConversationRow): void {

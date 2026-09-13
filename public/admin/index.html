@@ -27,6 +27,12 @@
     --danger-light: #fef2f2;
     --warn: #b45309;
     --warn-light: #fef3c7;
+    --info: #3730a3;
+    --info-light: #e0e7ff;
+    --funnel-quoted: #92400e;
+    --funnel-quoted-light: #fef3c7;
+    --funnel-negotiating: #9a3412;
+    --funnel-negotiating-light: #ffedd5;
     --radius-lg: 18px;
     --radius-md: 11px;
     --shadow-sm: 0 1px 2px rgba(18,33,26,.05);
@@ -282,10 +288,28 @@
   .conv-preview { font-size: 12.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
   .conv-meta { text-align: right; flex-shrink: 0; }
   .conv-time { font-size: 11px; color: var(--muted-soft); }
+  /* Discreet recurring-customer hint next to the time - decision 2026-09-13: text, not another badge. */
+  .conv-orders { font-size: 10.5px; color: var(--muted-soft); margin-top: 2px; }
+  .conv-badges { display: flex; justify-content: flex-end; }
+  /* Between two sales cycles in the merged customer thread (see ONIX-CONVERSATIONS-GROUPING-PLAN.md). */
+  .cycle-separator { display: flex; align-items: center; gap: 8px; margin: 14px 0; font-size: 11px; color: var(--muted-soft); }
+  .cycle-separator::before, .cycle-separator::after { content: ''; flex: 1; height: 1px; background: var(--border-soft); }
+  .cycle-load-more { text-align: center; padding: 4px 0 12px; }
   .status-badge { font-size: 10.5px; font-weight: 700; padding: 2px 8px; border-radius: 999px; display: inline-block; margin-top: 5px; }
-  .status-NEW, .status-INTERESTED, .status-QUOTED, .status-NEGOTIATING { background: var(--border-soft); color: var(--muted); }
+  /* Embudo con progresion de color en vez de un solo gris para las 4 etapas en curso - de un vistazo
+     se distingue Nuevo de Negociando en la lista, no solo al abrir el chat. */
+  .status-NEW { background: var(--border-soft); color: var(--muted); }
+  .status-INTERESTED { background: var(--info-light); color: var(--info); }
+  .status-QUOTED { background: var(--funnel-quoted-light); color: var(--funnel-quoted); }
+  .status-NEGOTIATING { background: var(--funnel-negotiating-light); color: var(--funnel-negotiating); }
   .status-SOLD { background: var(--brand-light); color: var(--brand-dark); }
   .status-LOST { background: var(--danger-light); color: var(--danger); }
+  /* Pide asesor es una solicitud, no una queja - color distinto del resto de los intents. */
+  .intent-badge { background: var(--danger-light); color: var(--danger); }
+  .intent-badge.intent-SOLICITA_AGENTE { background: var(--warn-light); color: var(--warn); }
+  .intent-badge .intent-dismiss { cursor: pointer; margin-left: 4px; opacity: .7; }
+  .intent-badge .intent-dismiss:hover { opacity: 1; }
+  .handoff-badge { background: var(--warn-light); color: var(--warn); }
 
   /* Orders */
   .order-subtabs { display: flex; gap: 8px; margin: 4px 0 16px; flex-wrap: wrap; }
@@ -2244,17 +2268,39 @@ function timeAgo(iso) {
   return `hace ${days} d`;
 }
 
-// Shared between the initial list render and the realtime conversation:new/conversation:updated
-// handlers, so a socket-pushed row looks identical to one loaded via the REST endpoint.
-function conversationRowHtml(c) {
+// One badge per row, by priority: an escalated intent outranks "tú atiendes", which outranks the plain
+// funnel status - before this, a row could show both the intent AND the "en vivo" badge at once (and
+// with SOLICITA_AGENTE, the same 🙋 emoji twice), see ONIX-CONVERSATIONS-GROUPING-PLAN.md Fase 5.
+// `conversationId` (the row's activeConversationId, or the open thread's own id) powers the ✕ that
+// dismisses a resolved intent - omitted (e.g. a future read-only context) simply hides the ✕.
+function statusBadgeHtml({ status, intent, humanControl, conversationId }) {
+  if (intent) {
+    const dismiss = conversationId
+      ? `<span class="intent-dismiss" title="Marcar como resuelto" onclick="event.stopPropagation(); dismissIntent('${conversationId}')">✕</span>`
+      : '';
+    return `<span class="status-badge intent-badge intent-${intent}">${INTENT_LABELS[intent] || intent}${dismiss}</span>`;
+  }
+  if (humanControl) {
+    return '<span class="status-badge handoff-badge">✋ Tú atiendes</span>';
+  }
+  return `<span class="status-badge status-${status}">${STATUS_LABELS[status] || status}</span>`;
+}
+
+// One row per CUSTOMER (grouping this customer's Conversation rows - see
+// [[onix-conversations-group-by-customer]] and ONIX-CONVERSATIONS-GROUPING-PLAN.md), shared between the
+// initial list render and the realtime conversation:new handler for a genuinely new customer.
+function customerRowHtml(c) {
   const displayName = c.customer.name || c.customer.phoneNumber;
   const initial = displayName.trim().charAt(0).toUpperCase() || '?';
   const preview = c.lastMessage
     ? `${c.lastMessage.role === 'ASSISTANT' ? 'Tú (bot): ' : ''}${escapeHtml(c.lastMessage.content).slice(0, 80)}`
     : 'Sin mensajes';
   const unread = c.unreadCount || 0;
+  // Discreet recurring-customer hint (decision 2026-09-13: text, not another colored badge - the row
+  // already carries enough of those).
+  const orders = c.orderCount > 0 ? `<div class="conv-orders">${c.orderCount} compra${c.orderCount === 1 ? '' : 's'}</div>` : '';
   return `
-    <div class="conv-row${c.id === currentConversationId ? ' active' : ''}" data-conversation-id="${c.id}" data-unread="${unread}" onclick="openConversation('${c.id}')">
+    <div class="conv-row${c.customerId === currentCustomerId ? ' active' : ''}" data-customer-id="${c.customerId}" data-active-conversation-id="${c.activeConversationId}" data-unread="${unread}" onclick="openCustomer('${c.customerId}')">
       <div class="conv-avatar" style="background:${avatarColor(c.customer.phoneNumber)};">${escapeHtml(initial)}</div>
       <div class="conv-info">
         <div class="conv-name">${escapeHtml(displayName)}</div>
@@ -2262,42 +2308,67 @@ function conversationRowHtml(c) {
       </div>
       <div class="conv-meta">
         <div class="conv-time" data-updated-at="${c.updatedAt}">${timeAgo(c.updatedAt)}</div>
+        ${orders}
         ${unread > 0 ? `<span class="unread-badge">${unread > 99 ? '99+' : unread}</span>` : ''}
-        ${c.humanControl ? '<span class="status-badge" style="background:#fef3c7; color:#92400e;">🙋 En vivo</span>' : ''}
-        ${c.intent ? `<span class="status-badge" style="background:#fee2e2; color:#991b1b;">${INTENT_LABELS[c.intent] || c.intent}</span>` : ''}
-        <span class="status-badge status-${c.status}">${STATUS_LABELS[c.status] || c.status}</span>
+        <div class="conv-badges">${statusBadgeHtml({ status: c.status, intent: c.intent, humanControl: c.humanControl, conversationId: c.activeConversationId })}</div>
       </div>
     </div>
   `;
 }
 
-async function loadConversations() {
+// Turns a single-conversation realtime payload (conversation:new/updated - see ConversationRow in
+// src/realtime/events.ts) into the shape customerRowHtml needs, for the one case where the customer
+// genuinely has no row yet (their very first conversation ever) - orderCount is always 0 there.
+function customerRowFromConversationEvent(c) {
+  return {
+    customerId: c.customer.id,
+    activeConversationId: c.id,
+    status: c.status,
+    intent: c.intent,
+    humanControl: c.humanControl,
+    updatedAt: c.updatedAt,
+    unreadCount: c.unreadCount,
+    orderCount: 0,
+    customer: c.customer,
+    lastMessage: c.lastMessage,
+  };
+}
+
+async function loadCustomers() {
   const container = document.getElementById('conversations-list');
   try {
-    const res = await apiFetch('/admin/api/conversations');
-    const conversations = await res.json();
-    document.getElementById('tab-count-conversations').textContent = conversations.length;
+    const res = await apiFetch('/admin/api/customers');
+    const customers = await res.json();
+    document.getElementById('tab-count-conversations').textContent = customers.length;
 
-    if (!Array.isArray(conversations) || conversations.length === 0) {
+    if (!Array.isArray(customers) || customers.length === 0) {
       container.innerHTML = '<div class="empty-state"><div class="big">💬</div>Todavía no hay conversaciones.<br/>Van a aparecer acá apenas un cliente le escriba al bot.</div>';
       updateTotalUnreadBadge();
       return;
     }
 
-    container.innerHTML = conversations.map(conversationRowHtml).join('');
+    container.innerHTML = customers.map(customerRowHtml).join('');
     updateTotalUnreadBadge();
   } catch (err) {
     container.innerHTML = `<div class="empty-state" style="color:var(--danger);">No se pudieron cargar las conversaciones: ${escapeHtml(err.message)}</div>`;
   }
 }
 
-let currentConversationId = null;
+let currentConversationId = null; // always the open customer's activeConversationId - every action
+                                   // (composer, handoff, close-sale) keeps targeting this, unchanged.
 let currentCustomerId = null;
 let currentCustomerTags = [];
 let currentCustomerName = '';
 let currentCustomerPhone = '';
 let conversationPollTimer = null;
 let renderedMessageIds = new Set();
+// Merged-thread state (see ONIX-CONVERSATIONS-GROUPING-PLAN.md Fase 2/4): threadCycleBlocks holds one
+// pre-rendered message-bubbles block per loaded cycle, oldest-first; threadCyclesMeta is the full
+// per-cycle metadata (status/order) used to label the separators between blocks; threadHasMore says
+// whether an even older cycle exists beyond what's loaded.
+let threadCycleBlocks = [];
+let threadCyclesMeta = [];
+let threadHasMore = false;
 
 function openImageLightbox(url) {
   const video = document.getElementById('image-lightbox-video');
@@ -2419,7 +2490,7 @@ async function saveCustomerNameEdit() {
     currentCustomerName = name;
     document.getElementById('modal-title').textContent = name || currentCustomerPhone;
     cancelEditCustomerName();
-    loadConversations();
+    loadCustomers();
   } catch (err) {
     setStatus(`No se pudo guardar el nombre: ${err.message}`, true);
   }
@@ -2428,7 +2499,7 @@ async function saveCustomerNameEdit() {
 function renderTags() {
   const box = document.getElementById('modal-tags');
   box.innerHTML = currentCustomerTags.map((t) => `
-    <span class="status-badge" style="background:#e0e7ff; color:#3730a3;">${escapeHtml(t)} <span style="cursor:pointer; margin-left:4px;" onclick="removeTag('${escapeHtml(t)}')">✕</span></span>
+    <span class="status-badge" style="background:var(--info-light); color:var(--info);">${escapeHtml(t)} <span style="cursor:pointer; margin-left:4px;" onclick="removeTag('${escapeHtml(t)}')">✕</span></span>
   `).join('') + `<input id="modal-tag-input" type="text" placeholder="+ etiqueta" style="border:none; outline:none; font-size:12px; width:80px;" onkeydown="if(event.key==='Enter') addTag();" />`;
 }
 
@@ -2459,45 +2530,138 @@ function removeTag(tag) {
   saveTags();
 }
 
-async function openConversation(id) {
+// COP-style money label for a closed cycle's separator - falls back to a plain "amount currency"
+// string if Intl doesn't recognize the currency code (shouldn't happen for the currencies this app
+// actually uses, but a formatting error here shouldn't ever break rendering the thread).
+function formatMoney(amount, currency) {
+  try {
+    return new Intl.NumberFormat('es-CO', { style: 'currency', currency: currency || 'COP', maximumFractionDigits: 0 }).format(amount);
+  } catch {
+    return `${amount} ${currency || ''}`;
+  }
+}
+
+function cycleMetaById(id) {
+  return threadCyclesMeta.find((cycle) => cycle.id === id);
+}
+
+// Marks where one sales cycle ended and the next began, between that cycle's messages and the next
+// block - the whole reason a customer's history now reads as one continuous thread with visible seams
+// instead of the confusing "brand new chat" the grouping fix replaces (see plan Fase 1, decision 1).
+function cycleSeparatorHtml(cycle) {
+  const dateLabel = new Date(cycle.updatedAt).toLocaleDateString('es-CO', { day: 'numeric', month: 'short' });
+  const label = cycle.status === 'SOLD'
+    ? `Venta cerrada · ${dateLabel}${cycle.order ? ` · ${escapeHtml(cycle.order.summary)} · ${formatMoney(cycle.order.totalAmount, cycle.order.currency)}` : ''}`
+    : `Conversación cerrada sin venta · ${dateLabel}`;
+  return `<div class="cycle-separator"><span>${label}</span></div>`;
+}
+
+// Repaints #modal-thread from threadCycleBlocks - called after the initial open AND after loading an
+// older cycle, so both paths share one rendering path instead of drifting apart.
+function renderMergedThread() {
   const thread = document.getElementById('modal-thread');
-  currentConversationId = id;
+  let html = threadHasMore
+    ? '<div class="cycle-load-more"><button class="btn-secondary" type="button" onclick="loadOlderCycle()">Ver conversación anterior ↑</button></div>'
+    : '';
+  threadCycleBlocks.forEach((block, i) => {
+    html += block.html;
+    if (i < threadCycleBlocks.length - 1) {
+      const meta = cycleMetaById(block.conversationId);
+      if (meta) html += cycleSeparatorHtml(meta);
+    }
+  });
+  thread.innerHTML = html || '<div class="chat-thread-empty" style="text-align:center; color:var(--muted); font-size:13px; padding:20px;">Sin mensajes todavía.</div>';
+}
+
+// Fetches this customer's next-older cycle and prepends it above what's already loaded, preserving
+// scroll position (otherwise the view jumps as content is inserted above the visible area) - lazy by
+// design (see plan Fase 2): getCustomerThreadForBusiness would otherwise fire a fresh presigned S3 URL
+// for every photo across every cycle on a single open.
+async function loadOlderCycle() {
+  if (!threadHasMore || !currentCustomerId || threadCycleBlocks.length === 0) return;
+  const oldest = threadCycleBlocks[0];
+  const thread = document.getElementById('modal-thread');
+  const prevScrollHeight = thread.scrollHeight;
+  try {
+    const res = await apiFetch(`/admin/api/customers/${currentCustomerId}/thread?before=${oldest.conversationId}`);
+    const data = await res.json();
+    threadHasMore = data.hasMore;
+    if (!data.conversationId) {
+      renderMergedThread();
+      return;
+    }
+    data.messages.forEach((m) => renderedMessageIds.add(m.id));
+    threadCycleBlocks.unshift({ conversationId: data.conversationId, html: data.messages.map(messageBubbleHtml).join('') });
+    renderMergedThread();
+    thread.scrollTop = thread.scrollHeight - prevScrollHeight;
+  } catch (err) {
+    setStatus(`No se pudo cargar la conversación anterior: ${err.message}`, true);
+  }
+}
+
+function renderModalSubtitle({ status, intent, conversationId, customerName, customerPhone }) {
+  document.getElementById('modal-subtitle').innerHTML =
+    (customerName ? `${escapeHtml(customerPhone)} · ` : '') +
+    statusBadgeHtml({ status, intent, humanControl: false, conversationId });
+}
+
+// The ✕ on an intent badge (list row or chat header) - lets the owner dismiss a resolved PQR/devolución/
+// pide-asesor instead of it sitting there until the whole sales cycle closes (plan Fase 5, decision A).
+async function dismissIntent(conversationId) {
+  try {
+    await apiFetch(`/admin/api/conversations/${conversationId}/intent`, { method: 'PUT' });
+  } catch (err) {
+    setStatus(`No se pudo quitar la etiqueta: ${err.message}`, true);
+  }
+}
+
+async function openCustomer(customerId) {
+  const thread = document.getElementById('modal-thread');
+  currentCustomerId = customerId;
   document.getElementById('chat-panel-empty').style.display = 'none';
   document.getElementById('chat-panel-active').style.display = 'flex';
   document.getElementById('chat-split').classList.add('chat-split--open');
-  document.querySelectorAll('.conv-row').forEach((row) => row.classList.toggle('active', row.dataset.conversationId === id));
+  document.querySelectorAll('.conv-row').forEach((row) => row.classList.toggle('active', row.dataset.customerId === customerId));
   thread.innerHTML = '<div style="text-align:center; color:var(--muted); font-size:13px; padding:20px;">Cargando…</div>';
   // Opening it counts as reading it - clear the badge immediately (the server also resets its own
-  // counter as a side effect of the fetch below and broadcasts that, this just avoids waiting on the
+  // counters as a side effect of the fetch below and broadcasts that, this just avoids waiting on the
   // round trip for the person who's looking right at it).
-  setRowUnreadCount(id, 0);
+  setRowUnreadCount(customerId, 0);
 
   try {
-    const res = await apiFetch(`/admin/api/conversations/${id}`);
-    const conversation = await res.json();
-    renderHandoffState(conversation.humanControl);
-    updateCloseSaleButtonVisibility(conversation.status);
-    currentCustomerId = conversation.customer.id;
-    currentCustomerTags = [...(conversation.customer.tags || [])];
-    currentCustomerName = conversation.customer.name || '';
-    currentCustomerPhone = conversation.customer.phoneNumber;
+    const res = await apiFetch(`/admin/api/customers/${customerId}/thread`);
+    const data = await res.json();
+    // Every existing action (composer, handoff, close-sale, extract-sale-details, the 30s poll) keeps
+    // targeting currentConversationId exactly as before the grouping change - only what feeds the
+    // sidebar/thread rendering changed.
+    currentConversationId = data.activeConversationId;
+    threadCyclesMeta = data.cycles;
+    threadHasMore = data.hasMore;
+    renderHandoffState(data.humanControl);
+    updateCloseSaleButtonVisibility(data.status);
+    currentCustomerTags = [...(data.customer.tags || [])];
+    currentCustomerName = data.customer.name || '';
+    currentCustomerPhone = data.customer.phoneNumber;
     cancelEditCustomerName();
     renderTags();
 
-    const displayName = conversation.customer.name || conversation.customer.phoneNumber;
+    const displayName = data.customer.name || data.customer.phoneNumber;
     const initial = displayName.trim().charAt(0).toUpperCase() || '?';
     const avatarEl = document.getElementById('modal-avatar');
     avatarEl.textContent = initial;
-    avatarEl.style.background = avatarColor(conversation.customer.phoneNumber);
+    avatarEl.style.background = avatarColor(data.customer.phoneNumber);
     document.getElementById('modal-title').textContent = displayName;
-    document.getElementById('modal-subtitle').innerHTML =
-      (conversation.customer.name ? `${escapeHtml(conversation.customer.phoneNumber)} · ` : '') +
-      `<span class="status-badge status-${conversation.status}">${STATUS_LABELS[conversation.status] || conversation.status}</span>` +
-      (conversation.intent ? ` <span class="status-badge" style="background:#fee2e2; color:#991b1b;">${INTENT_LABELS[conversation.intent] || conversation.intent}</span>` : '');
+    renderModalSubtitle({
+      status: data.status,
+      intent: data.intent,
+      conversationId: data.conversationId,
+      customerName: data.customer.name,
+      customerPhone: data.customer.phoneNumber,
+    });
 
-    renderedMessageIds = new Set(conversation.messages.map((m) => m.id));
-    thread.innerHTML = conversation.messages.map(messageBubbleHtml).join('') ||
-      '<div class="chat-thread-empty" style="text-align:center; color:var(--muted); font-size:13px; padding:20px;">Sin mensajes todavía.</div>';
+    renderedMessageIds = new Set(data.messages.map((m) => m.id));
+    threadCycleBlocks = [{ conversationId: data.conversationId, html: data.messages.map(messageBubbleHtml).join('') }];
+    renderMergedThread();
 
     thread.scrollTop = thread.scrollHeight;
     startConversationPolling();
@@ -2515,6 +2679,9 @@ function closeConversation() {
   currentCustomerId = null;
   currentCustomerTags = [];
   renderedMessageIds = new Set();
+  threadCycleBlocks = [];
+  threadCyclesMeta = [];
+  threadHasMore = false;
   stopConversationPolling();
   clearComposerFile();
   closeSaleFormCancel();
@@ -2591,7 +2758,7 @@ async function confirmCloseSale() {
     });
     setStatus('Venta cerrada, pedido registrado ✓');
     closeSaleFormCancel();
-    openConversation(currentConversationId);
+    openCustomer(currentCustomerId);
   } catch (err) {
     setStatus(`No se pudo cerrar la venta: ${err.message}`, true);
     status.textContent = `Error: ${err.message}`;
@@ -2666,7 +2833,7 @@ async function sendManualMessage() {
     input.value = '';
     clearComposerFile();
     renderHandoffState(true);
-    await openConversation(currentConversationId);
+    await openCustomer(currentCustomerId);
   } catch (err) {
     setStatus(`No se pudo enviar el mensaje: ${err.message}`, true);
   } finally {
@@ -3569,12 +3736,12 @@ async function loadRole() {
 }
 
 // Patches the sidebar row in place (preview text + relative time) and bumps it to the top of the
-// list - avoids a full loadConversations() refetch for the common case (a new message on a
-// conversation already visible in the sidebar). Returns false if the row isn't in the DOM yet (a
-// brand-new conversation's first message can arrive before its conversation:new event), so the
-// caller can fall back to a one-off refetch.
-function bumpConversationRow(conversationId, previewText, isAssistant, updatedAtIso) {
-  const row = document.querySelector(`.conv-row[data-conversation-id="${conversationId}"]`);
+// list - avoids a full loadCustomers() refetch for the common case (a new message on a customer
+// already visible in the sidebar). Returns false if the row isn't in the DOM yet (a brand-new
+// customer's first message can arrive before its conversation:new event), so the caller can fall back
+// to a one-off refetch.
+function bumpCustomerRow(customerId, previewText, isAssistant, updatedAtIso) {
+  const row = document.querySelector(`.conv-row[data-customer-id="${customerId}"]`);
   if (!row) return false;
   const previewEl = row.querySelector('.conv-preview');
   if (previewEl) previewEl.textContent = `${isAssistant ? 'Tú (bot): ' : ''}${String(previewText ?? '').slice(0, 80)}`;
@@ -3591,8 +3758,8 @@ function bumpConversationRow(conversationId, previewText, isAssistant, updatedAt
 // Patches a row's unread badge in place and keeps the tab-level total in sync. `data-unread` on the
 // row is the source of truth the total is summed from, instead of parsing the badge's own text back
 // into a number (which would mis-parse the "99+" cap).
-function setRowUnreadCount(conversationId, count) {
-  const row = document.querySelector(`.conv-row[data-conversation-id="${conversationId}"]`);
+function setRowUnreadCount(customerId, count) {
+  const row = document.querySelector(`.conv-row[data-customer-id="${customerId}"]`);
   if (row) {
     row.dataset.unread = String(count);
     let badge = row.querySelector('.unread-badge');
@@ -3600,7 +3767,7 @@ function setRowUnreadCount(conversationId, count) {
       if (!badge) {
         badge = document.createElement('span');
         badge.className = 'unread-badge';
-        row.querySelector('.conv-meta').prepend(badge);
+        row.querySelector('.conv-meta').insertBefore(badge, row.querySelector('.conv-badges'));
       }
       badge.textContent = count > 99 ? '99+' : String(count);
     } else if (badge) {
@@ -3654,9 +3821,9 @@ function isActivelyViewingConversation(conversationId) {
 // had a conversation open, switched to another tab while new messages piled up, then switched back.
 function markConversationReadIfViewing() {
   if (!currentConversationId || !isActivelyViewingConversation(currentConversationId)) return;
-  const row = document.querySelector(`.conv-row[data-conversation-id="${currentConversationId}"]`);
+  const row = document.querySelector(`.conv-row[data-customer-id="${currentCustomerId}"]`);
   if (row && Number(row.dataset.unread) > 0) {
-    setRowUnreadCount(currentConversationId, 0);
+    setRowUnreadCount(currentCustomerId, 0);
     apiFetch(`/admin/api/conversations/${currentConversationId}`).catch(() => {});
   }
 }
@@ -3666,7 +3833,7 @@ function initRealtime() {
 
   socket.on('connect', () => {
     setRealtimeStatus(true);
-    loadConversations();
+    loadCustomers();
     loadOrderCounts();
     loadOrders(true);
   });
@@ -3680,57 +3847,80 @@ function initRealtime() {
   // reason (a missed event, a brief disconnect that didn't trigger the connect handler's refetch,
   // etc.) there was no self-healing, the stale badge would just sit there until a manual reload.
   setInterval(() => {
-    loadConversations();
+    loadCustomers();
     loadOrderCounts();
     loadOrders(true);
   }, 30000);
 
-  socket.on('message:new', ({ conversationId, message, unreadCount }) => {
+  socket.on('message:new', ({ conversationId, customerId, message, unreadCount }) => {
     if (conversationId === currentConversationId) {
       // Keep the thread DOM current regardless of visibility, so it's already correct whenever they
       // do look - just don't treat it as read yet unless they're actually looking right now.
       renderThreadMessages(document.getElementById('modal-thread'), [message]);
     }
     if (isActivelyViewingConversation(conversationId)) {
-      setRowUnreadCount(conversationId, 0);
+      setRowUnreadCount(customerId, 0);
       if (message.role === 'CUSTOMER') {
         apiFetch(`/admin/api/conversations/${conversationId}`).catch(() => {});
       }
     } else {
-      setRowUnreadCount(conversationId, unreadCount);
+      // This is the unread count for THIS conversation, not the customer's summed total - close
+      // enough in practice (a closed cycle's own unreadCount never moves again once it's reset), and
+      // loadCustomers() below (and the 30s reconciliation poll) corrects any drift.
+      setRowUnreadCount(customerId, unreadCount);
     }
     const previewText =
       message.mediaType === 'IMAGE' ? (message.content || '📷 Imagen')
       : message.mediaType === 'VIDEO' ? (message.content || '🎥 Video')
       : message.content;
-    const bumped = bumpConversationRow(conversationId, previewText, message.role === 'ASSISTANT', message.createdAt);
-    if (!bumped) loadConversations();
+    const bumped = bumpCustomerRow(customerId, previewText, message.role === 'ASSISTANT', message.createdAt);
+    if (!bumped) loadCustomers();
   });
 
   socket.on('conversation:new', (c) => {
-    if (document.querySelector(`.conv-row[data-conversation-id="${c.id}"]`)) return;
+    if (document.querySelector(`.conv-row[data-customer-id="${c.customer.id}"]`)) {
+      // This customer already has a row from an earlier sales cycle - the exact case
+      // [[onix-conversations-group-by-customer]] fixes: refresh that row (picks up the new
+      // activeConversationId/orderCount) instead of inserting a second, visually-duplicate one.
+      loadCustomers();
+      return;
+    }
     const list = document.getElementById('conversations-list');
     const emptyState = list.querySelector('.empty-state');
     if (emptyState) list.innerHTML = '';
-    list.insertAdjacentHTML('afterbegin', conversationRowHtml(c));
+    list.insertAdjacentHTML('afterbegin', customerRowHtml(customerRowFromConversationEvent(c)));
     const countEl = document.getElementById('tab-count-conversations');
     if (countEl) countEl.textContent = String(document.querySelectorAll('.conv-row').length);
     updateTotalUnreadBadge();
   });
 
   socket.on('conversation:updated', (c) => {
-    const row = document.querySelector(`.conv-row[data-conversation-id="${c.id}"]`);
+    const row = document.querySelector(`.conv-row[data-customer-id="${c.customer.id}"]`);
     if (row) {
-      row.outerHTML = conversationRowHtml(c);
+      // Patches in place rather than a full outerHTML replace - most emits of this event (handoff
+      // toggle, status change, intent change) carry no lastMessage/orderCount, so a blind replace used
+      // to blank the preview text back to "Sin mensajes" and reset "N compras" on every such change.
+      const displayName = c.customer.name || c.customer.phoneNumber;
+      const nameEl = row.querySelector('.conv-name');
+      if (nameEl) nameEl.textContent = displayName;
+      const avatarEl = row.querySelector('.conv-avatar');
+      if (avatarEl) { avatarEl.textContent = displayName.trim().charAt(0).toUpperCase() || '?'; avatarEl.style.background = avatarColor(c.customer.phoneNumber); }
+      if (c.lastMessage) {
+        const previewEl = row.querySelector('.conv-preview');
+        if (previewEl) previewEl.textContent = `${c.lastMessage.role === 'ASSISTANT' ? 'Tú (bot): ' : ''}${String(c.lastMessage.content).slice(0, 80)}`;
+      }
+      row.dataset.activeConversationId = c.id;
+      const badgesEl = row.querySelector('.conv-badges');
+      if (badgesEl) badgesEl.innerHTML = statusBadgeHtml({ status: c.status, intent: c.intent, humanControl: c.humanControl, conversationId: c.id });
     } else {
-      loadConversations();
+      loadCustomers();
     }
     updateTotalUnreadBadge();
     if (c.id === currentConversationId) {
       renderHandoffState(c.humanControl);
       updateCloseSaleButtonVisibility(c.status);
       // 2026-09-13 fix: a name saved mid-conversation (save_customer_name) used to never reach an
-      // already-open chat header - only openConversation() ever wrote #modal-title, so the owner kept
+      // already-open chat header - only openCustomer() ever wrote #modal-title, so the owner kept
       // seeing the raw phone number until they closed and reopened the conversation.
       const nameInputOpen = document.getElementById('modal-title-input').style.display !== 'none';
       if (!nameInputOpen) {
@@ -3738,10 +3928,13 @@ function initRealtime() {
         currentCustomerPhone = c.customer.phoneNumber;
         const displayName = c.customer.name || c.customer.phoneNumber;
         document.getElementById('modal-title').textContent = displayName;
-        document.getElementById('modal-subtitle').innerHTML =
-          (c.customer.name ? `${escapeHtml(c.customer.phoneNumber)} · ` : '') +
-          `<span class="status-badge status-${c.status}">${STATUS_LABELS[c.status] || c.status}</span>` +
-          (c.intent ? ` <span class="status-badge" style="background:#fee2e2; color:#991b1b;">${INTENT_LABELS[c.intent] || c.intent}</span>` : '');
+        renderModalSubtitle({
+          status: c.status,
+          intent: c.intent,
+          conversationId: c.id,
+          customerName: c.customer.name,
+          customerPhone: c.customer.phoneNumber,
+        });
         const avatarEl = document.getElementById('modal-avatar');
         avatarEl.textContent = displayName.trim().charAt(0).toUpperCase() || '?';
         avatarEl.style.background = avatarColor(c.customer.phoneNumber);
@@ -3766,7 +3959,7 @@ async function boot() {
   loadBusiness();
   loadProducts();
   loadPaymentMethods();
-  loadConversations();
+  loadCustomers();
   loadFaqEntries();
   loadFaqCandidates();
   loadCategoryAliases();

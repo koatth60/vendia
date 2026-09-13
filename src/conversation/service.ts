@@ -1,7 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "../db/client";
 import { getPresignedMediaUrl } from "../media/s3";
-import { emitNewMessage, emitNewConversation, emitConversationUpdated, type ConversationRow } from "../realtime/events";
+import { emitNewMessage, emitNewConversation, emitConversationUpdated, type ConversationRow, type CustomerRow } from "../realtime/events";
 
 export async function getOrCreateCustomer(businessId: string, phoneNumber: string) {
   return prisma.customer.upsert({
@@ -78,7 +78,7 @@ export async function recordMessage(
   const touched = await prisma.conversation.update({
     where: { id: conversationId },
     data: { updatedAt: new Date() },
-    select: { humanControl: true, unreadCount: true },
+    select: { humanControl: true, unreadCount: true, customerId: true },
   });
 
   let unreadCount = touched.unreadCount;
@@ -94,6 +94,7 @@ export async function recordMessage(
   emitNewMessage(
     businessId,
     conversationId,
+    touched.customerId,
     {
       id: message.id,
       role: message.role,
@@ -197,6 +198,26 @@ export async function setConversationIntent(
   const conversation = await prisma.conversation.update({
     where: { id: conversationId },
     data: { intent },
+    include: { customer: true },
+  });
+  emitConversationUpdated(businessId, formatConversationRow(conversation));
+  return conversation;
+}
+
+// Lets the owner manually dismiss an intent badge from the admin panel once they've resolved it (a
+// PQR they already handled, a return already processed, etc.) - before this, flag_conversation_intent
+// was the only thing that ever touched this field, so a resolved PQR badge sat on the conversation
+// until the whole sales cycle closed. Scoped by businessId via findFirst first (like setHumanControl),
+// unlike setConversationIntent above which trusts a caller-supplied conversationId alone - this is a
+// new admin-panel-triggered action, so it gets the safer check from the start.
+export async function clearConversationIntent(businessId: string, conversationId: string) {
+  const existing = await prisma.conversation.findFirst({
+    where: { id: conversationId, customer: { businessId } },
+  });
+  if (!existing) return null;
+  const conversation = await prisma.conversation.update({
+    where: { id: conversationId },
+    data: { intent: null },
     include: { customer: true },
   });
   emitConversationUpdated(businessId, formatConversationRow(conversation));
@@ -473,7 +494,6 @@ function formatConversationRow(c: {
   customer: { id: string; phoneNumber: string; name: string | null; tags: string[] };
   messages?: { role: string; content: string; mediaType: string | null; createdAt: Date }[];
 }): ConversationRow {
-  const last = c.messages?.[0];
   return {
     id: c.id,
     status: c.status,
@@ -482,18 +502,23 @@ function formatConversationRow(c: {
     updatedAt: c.updatedAt,
     unreadCount: c.unreadCount,
     customer: { id: c.customer.id, phoneNumber: c.customer.phoneNumber, name: c.customer.name, tags: c.customer.tags },
-    lastMessage: last
-      ? {
-          role: last.role,
-          content:
-            last.mediaType === "IMAGE"
-              ? last.content || "📷 Imagen"
-              : last.mediaType === "VIDEO"
-                ? last.content || "🎥 Video"
-                : last.content,
-          createdAt: last.createdAt,
-        }
-      : null,
+    lastMessage: formatLastMessagePreview(c.messages?.[0]),
+  };
+}
+
+// Shared by formatConversationRow and formatCustomerRow so the sidebar preview text (media captions
+// included) never drifts between the per-conversation and per-customer row shapes.
+function formatLastMessagePreview(last?: { role: string; content: string; mediaType: string | null; createdAt: Date }) {
+  if (!last) return null;
+  return {
+    role: last.role,
+    content:
+      last.mediaType === "IMAGE"
+        ? last.content || "📷 Imagen"
+        : last.mediaType === "VIDEO"
+          ? last.content || "🎥 Video"
+          : last.content,
+    createdAt: last.createdAt,
   };
 }
 
@@ -548,6 +573,170 @@ export async function getConversationForBusiness(businessId: string, conversatio
     },
     messages: await Promise.all(
       conversation.messages.map(async (m) => ({
+        id: m.id,
+        role: m.role,
+        content: m.content,
+        createdAt: m.createdAt,
+        mediaUrl: m.mediaS3Key ? await getPresignedMediaUrl(m.mediaS3Key) : null,
+        mediaType: m.mediaType,
+      }))
+    ),
+  };
+}
+
+// Groups a customer's Conversation rows into one row for the admin panel's Conversaciones list (see
+// [[onix-conversations-group-by-customer]]) - the data model is unchanged (still one Conversation per
+// sales cycle, Order.conversationId stays @unique), this only changes what the LIST shows. `conversations`
+// must already be sorted updatedAt desc and belong to a single customer - conversations[0] is then always
+// that customer's most recent activity regardless of status.
+function formatCustomerRow(
+  conversations: {
+    id: string;
+    customerId: string;
+    status: string;
+    intent: string | null;
+    humanControl: boolean;
+    updatedAt: Date;
+    unreadCount: number;
+    customer: { id: string; phoneNumber: string; name: string | null; tags: string[] };
+    messages?: { role: string; content: string; mediaType: string | null; createdAt: Date }[];
+  }[]
+): CustomerRow {
+  const mostRecent = conversations[0];
+  const active = conversations.find((c) => c.status !== "SOLD" && c.status !== "LOST") ?? mostRecent;
+  const unreadCount = conversations.reduce((sum, c) => sum + c.unreadCount, 0);
+  // One Order per SOLD conversation (Order.conversationId is @unique) - counting SOLD conversations is
+  // exactly counting this customer's completed orders, with no extra join.
+  const orderCount = conversations.filter((c) => c.status === "SOLD").length;
+
+  return {
+    customerId: active.customerId,
+    activeConversationId: active.id,
+    status: active.status,
+    intent: active.intent,
+    humanControl: active.humanControl,
+    updatedAt: mostRecent.updatedAt,
+    unreadCount,
+    orderCount,
+    customer: {
+      id: active.customer.id,
+      phoneNumber: active.customer.phoneNumber,
+      name: active.customer.name,
+      tags: active.customer.tags,
+    },
+    lastMessage: formatLastMessagePreview(mostRecent.messages?.[0]),
+    cycles: conversations.map((c) => ({ id: c.id, status: c.status, updatedAt: c.updatedAt })),
+  };
+}
+
+export async function listCustomerThreadsForBusiness(businessId: string): Promise<CustomerRow[]> {
+  const conversations = await prisma.conversation.findMany({
+    where: { customer: { businessId } },
+    include: {
+      customer: true,
+      messages: { orderBy: { createdAt: "desc" }, take: 1 },
+    },
+    orderBy: { updatedAt: "desc" },
+  });
+
+  const byCustomer = new Map<string, typeof conversations>();
+  for (const c of conversations) {
+    const group = byCustomer.get(c.customerId);
+    if (group) group.push(c);
+    else byCustomer.set(c.customerId, [c]);
+  }
+
+  const rows = [...byCustomer.values()].map(formatCustomerRow);
+  // Sorted explicitly rather than relying on Map insertion order matching it (it already does, since
+  // `conversations` above is globally sorted desc and a customer's first appearance in that stream is
+  // always their own max updatedAt) - explicit is cheap here and doesn't depend on that holding under
+  // timestamp ties or future changes to the query above.
+  rows.sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
+  return rows;
+}
+
+// The grouped-thread view behind a customer row: messages for ONE cycle (the active one, or an older
+// one via `before`) plus lightweight metadata for every cycle so the frontend can render "Venta cerrada
+// · <fecha> · <resumen>" separators between them. Deliberately doesn't load every cycle's messages up
+// front - getConversationForBusiness already showed that firing a fresh presigned S3 URL for every
+// piece of media adds up, and a customer with several closed sales would multiply that on every open.
+export async function getCustomerThreadForBusiness(businessId: string, customerId: string, before?: string) {
+  const customer = await prisma.customer.findFirst({ where: { id: customerId, businessId } });
+  if (!customer) return null;
+
+  const conversations = await prisma.conversation.findMany({
+    where: { customerId },
+    include: { order: true },
+    orderBy: { updatedAt: "desc" },
+  });
+  if (conversations.length === 0) return null;
+
+  const cycles = conversations.map((c) => ({
+    id: c.id,
+    status: c.status,
+    updatedAt: c.updatedAt,
+    order: c.order ? { summary: c.order.summary, totalAmount: Number(c.order.totalAmount), currency: c.order.currency } : null,
+  }));
+  const activeConversationId =
+    conversations.find((c) => c.status !== "SOLD" && c.status !== "LOST")?.id ?? conversations[0].id;
+  const customerBasic = { id: customer.id, phoneNumber: customer.phoneNumber, name: customer.name, tags: customer.tags };
+
+  let targetIndex: number;
+  if (before) {
+    // "Load the cycle before this one" - conversations is sorted updatedAt desc, so the next OLDER
+    // cycle sits right after `before`'s own position in the array.
+    const beforeIndex = conversations.findIndex((c) => c.id === before);
+    targetIndex = beforeIndex === -1 ? conversations.length : beforeIndex + 1;
+  } else {
+    targetIndex = conversations.findIndex((c) => c.id === activeConversationId);
+
+    // Opening the grouped thread reads every conversation of this customer at once - unlike the old
+    // single-cycle view, there's no per-cycle "currently open elsewhere" concept left to protect, so
+    // nothing stays half-read behind the cycle that's actually shown.
+    const unreadIds = conversations.filter((c) => c.unreadCount > 0).map((c) => c.id);
+    if (unreadIds.length > 0) {
+      await prisma.conversation.updateMany({ where: { id: { in: unreadIds } }, data: { unreadCount: 0 } });
+      await emitConversationRowsForCustomer(businessId, customerId);
+    }
+  }
+
+  if (targetIndex >= conversations.length) {
+    // `before` pointed at the oldest cycle already, or at an id this customer doesn't have (stale
+    // client state) - nothing older left to show.
+    return {
+      customerId: customer.id,
+      customer: customerBasic,
+      activeConversationId,
+      conversationId: null,
+      status: null,
+      intent: null,
+      humanControl: false,
+      hasMore: false,
+      cycles,
+      messages: [],
+    };
+  }
+
+  const target = conversations[targetIndex];
+  const hasMore = targetIndex + 1 < conversations.length;
+
+  const messages = await prisma.message.findMany({
+    where: { conversationId: target.id },
+    orderBy: { createdAt: "asc" },
+  });
+
+  return {
+    customerId: customer.id,
+    customer: customerBasic,
+    activeConversationId,
+    conversationId: target.id,
+    status: target.status,
+    intent: target.intent,
+    humanControl: target.humanControl,
+    hasMore,
+    cycles,
+    messages: await Promise.all(
+      messages.map(async (m) => ({
         id: m.id,
         role: m.role,
         content: m.content,

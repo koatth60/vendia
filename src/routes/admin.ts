@@ -19,8 +19,11 @@ import { hashPassword } from "../auth/service";
 import {
   listConversationsForBusiness,
   getConversationForBusiness,
+  listCustomerThreadsForBusiness,
+  getCustomerThreadForBusiness,
   setHumanControl,
   clearAgentRequestFlag,
+  clearConversationIntent,
   clearPendingOwnerQuestionsForConversation,
   recordMessage,
   setCustomerTags,
@@ -757,6 +760,26 @@ adminRouter.get("/api/conversations", async (req, res) => {
   res.json(conversations);
 });
 
+// Grouped-by-customer view of the Conversaciones list (see ONIX-CONVERSATIONS-GROUPING-PLAN.md) - one
+// row per customer instead of one per Conversation, so a customer whose last sale already closed
+// doesn't reappear as a second, unrelated-looking row the next time they write in. The underlying data
+// model is untouched: /api/conversations/:id and everything under it still operate on a single
+// Conversation id (the customer row's activeConversationId).
+adminRouter.get("/api/customers", async (req, res) => {
+  const customers = await listCustomerThreadsForBusiness(businessIdOf(req));
+  res.json(customers);
+});
+
+adminRouter.get("/api/customers/:id/thread", async (req, res) => {
+  const before = typeof req.query.before === "string" ? req.query.before : undefined;
+  const thread = await getCustomerThreadForBusiness(businessIdOf(req), String(req.params.id), before);
+  if (!thread) {
+    res.status(404).json({ error: "Cliente no encontrado" });
+    return;
+  }
+  res.json(thread);
+});
+
 adminRouter.get("/api/conversations/:id", async (req, res) => {
   const conversation = await getConversationForBusiness(businessIdOf(req), String(req.params.id));
   if (!conversation) {
@@ -776,6 +799,18 @@ adminRouter.put("/api/conversations/:id/handoff", async (req, res) => {
   }
   if (active) await clearAgentRequestFlag(businessId, String(req.params.id));
   res.json({ id: conversation.id, humanControl: conversation.humanControl });
+});
+
+// Lets the owner dismiss an intent badge (PQR/Devolución/No recibido/Pide asesor) from the panel once
+// they've resolved it - flag_conversation_intent is the only thing that sets it, and previously nothing
+// short of the whole conversation closing ever cleared it.
+adminRouter.put("/api/conversations/:id/intent", async (req, res) => {
+  const conversation = await clearConversationIntent(businessIdOf(req), String(req.params.id));
+  if (!conversation) {
+    res.status(404).json({ error: "Conversación no encontrada" });
+    return;
+  }
+  res.json({ id: conversation.id, intent: conversation.intent });
 });
 
 adminRouter.post("/api/conversations/:id/messages", upload.single("file"), async (req, res) => {
