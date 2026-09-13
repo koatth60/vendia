@@ -398,7 +398,7 @@ descartar explícitamente (Fase 7.2 del plan original). 4 tests nuevos (llamada 
 real en `*.test.ts`). Verificado en vivo contra el dev server con un negocio de prueba local (creado y
 borrado dentro de la misma sesión, no un cliente real): preview muestra el texto reescrito, el textarea
 original queda intacto hasta apretar "Usar este texto", "Descartar" no cambia nada. `npx tsc --noEmit`
-limpio, suite completa 213/213. Commiteado, no desplegado todavía.
+limpio, suite completa 213/213. **Commiteado (`ba43ec6`) y desplegado a producción 2026-09-13**.
 
 **Fase 7.3 — validación real (pendiente).** Probar con el `customInstructions` real de MAG.IMP (el más
 largo hoy): comparar tokens antes/después del texto optimizado, y correr `npm run regression` (con
