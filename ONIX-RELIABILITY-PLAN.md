@@ -421,10 +421,10 @@ fase real:
 3. **Tipar los inputs de herramientas en vez de castear a mano.** `runCatalogTool` hace `String(input.x)`
    caso por caso — un schema de validación por herramienta (zod, si ya está en el proyecto) rechazaría un
    input malformado ANTES de ejecutar, en vez de silenciosamente convertir cualquier cosa a string.
-4. **Un chequeo/test que alarme si un tool-result es gigante.** Nada hoy te avisa si el catálogo de un
-   negocio nuevo hace que `search_products`/`list_all_products` devuelvan un payload enorme — se encontró
-   por auditoría manual (este mismo mensaje). Un test simple que falle si un tool result supera cierto
-   tamaño de caracteres detectaría este tipo de problema en CI, no en producción.
+4. **DONE 2026-09-13.** Test agregado en `tools.test.ts` (`a2d5b19`): seed de un producto con descripción
+   de 5000 chars, assert de que cada item de `search_products` (fallback) y `list_all_products` no supera
+   400 chars en JSON — falla rápido en CI si algún cambio futuro rompe el truncado de Fase 6.0b, en vez de
+   descubrirse por auditoría manual de nuevo. Test-only, sin cambio de runtime, no requiere deploy.
 5. **Exponer cache-hit-ratio y tamaño de tool-results por negocio en `/api/ai-usage`.** El endpoint ya
    existe (`admin.ts:591`) pero hoy solo se ve el total agregado — desglosar por negocio hace visible un
    catálogo/instructions pesado sin tener que correr una query manual como se hizo hoy para encontrar el
