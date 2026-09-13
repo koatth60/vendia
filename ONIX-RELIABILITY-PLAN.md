@@ -379,7 +379,7 @@ instrucción de "confirmá con get_shipping_rates" cuando esa herramienta nunca 
 fijo. 4 tests nuevos (`agent.corePersonality.test.ts`), `npm test` completo 201/201. **No es real-cost de
 validar** — es un cambio de forma de dato (boolean condition), no de texto que el modelo interprete distinto
 en el caso configurado (el texto que SÍ ve un negocio con tarifas es casi idéntico al de antes), así que no
-se corrió ningún paid test para esta fase. No commiteado/desplegado todavía.
+se corrió ningún paid test para esta fase. **Commiteado (`ff14102`) y desplegado a producción 2026-09-13**.
 
 ### Track B — feature nueva: optimizador de `customInstructions` con IA
 
