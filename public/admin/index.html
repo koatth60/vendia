@@ -54,6 +54,9 @@
     <button class="tab-btn" data-tab="conversations" onclick="switchTab('conversations')">
       <span class="tab-icon">📥</span> Bandeja
     </button>
+    <button class="tab-btn" data-tab="customers" onclick="switchTab('customers')">
+      <span class="tab-icon">👤</span> Clientes
+    </button>
     <button class="tab-btn" data-tab="orders" onclick="switchTab('orders')">
       <span class="tab-icon">📦</span> Pedidos
     </button>
@@ -71,6 +74,9 @@
     </button>
     <button class="tab-btn" data-tab="whatsapp" onclick="switchTab('whatsapp')">
       <span class="tab-icon">📲</span> Canales
+    </button>
+    <button class="tab-btn" data-tab="health" onclick="switchTab('health')">
+      <span class="tab-icon">🩺</span> Salud
     </button>
   </div>
 
@@ -96,9 +102,12 @@
       <div class="panel-header">
         <div>
           <div class="panel-title">Inicio</div>
-          <div class="panel-subtitle">Todo el manejo de tu bot, en un solo lugar.</div>
+          <div class="panel-subtitle">Lo que necesita tu atención hoy.</div>
         </div>
+        <button class="btn-ghost" onclick="loadDashboard()">↻ Actualizar</button>
       </div>
+      <div id="dashboard-container"></div>
+      <div class="section-title">Ir a</div>
       <div class="inicio-shortcuts">
         <button type="button" class="inicio-shortcut-card" onclick="switchSection('crm')">
           <div class="icon">💬</div>
@@ -286,6 +295,72 @@
           <button id="reset-data-btn" class="btn-danger" disabled onclick="resetTestData()">Borrar conversaciones, clientes y pedidos</button>
         </div>
       </div>
+    </div>
+
+    <!-- Fase 2: Clientes. La lista y la ficha son dos estados del mismo panel (no dos pestañas):
+         entrar a un cliente reemplaza la lista, y "Volver" la restaura sin recargar nada. -->
+    <div class="tab-panel" data-tab-panel="customers">
+      <div id="customers-list-view">
+        <div class="panel-header">
+          <div>
+            <div class="panel-title">Clientes</div>
+            <div class="panel-subtitle">Cada persona que le escribió a tu bot, con su historial y sus compras.</div>
+          </div>
+          <button class="btn-ghost" onclick="loadCustomerList(true)">↻ Actualizar</button>
+        </div>
+        <div class="card">
+          <div class="crm-filters">
+            <input id="crm-search" type="search" placeholder="Buscar por nombre, teléfono, email o cédula" oninput="onCrmSearchInput()" />
+            <select id="crm-stage-filter" onchange="loadCustomerList(true)">
+              <option value="">Todas las etapas</option>
+              <option value="NUEVO">Nuevo</option>
+              <option value="ACTIVO">Activo</option>
+              <option value="COMPRADOR">Comprador</option>
+              <option value="RECURRENTE">Recurrente</option>
+              <option value="INACTIVO">Inactivo</option>
+            </select>
+            <select id="crm-tag-filter" onchange="loadCustomerList(true)">
+              <option value="">Todas las etiquetas</option>
+            </select>
+          </div>
+        </div>
+        <div class="card" style="padding:0; overflow:hidden;">
+          <div id="customers-rows"></div>
+          <div class="order-list-footer" id="customers-load-more-wrap" hidden>
+            <button class="btn-ghost" onclick="loadCustomerList(false)">Cargar más</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="customer-detail-view" hidden>
+        <div class="panel-header">
+          <div style="display:flex; align-items:center; gap:10px;">
+            <button class="btn-ghost" onclick="closeCustomerProfile()">‹ Volver</button>
+            <div>
+              <div class="panel-title" id="crm-detail-name">Cliente</div>
+              <div class="panel-subtitle" id="crm-detail-sub"></div>
+            </div>
+          </div>
+          <div style="display:flex; gap:8px;">
+            <button class="btn-secondary" id="crm-open-chat-btn" onclick="openCustomerChatFromProfile()">💬 Ver chat</button>
+            <button class="btn-primary" onclick="saveCustomerProfile()">Guardar cambios</button>
+          </div>
+        </div>
+        <div id="crm-detail-body"></div>
+      </div>
+    </div>
+
+    <!-- Fase 3: Salud del bot. Incidentes del agente, fallos de entrega (antes solo visibles desde el
+         panel interno de Zaqi) y la conversación bot <-> dueño. -->
+    <div class="tab-panel" data-tab-panel="health">
+      <div class="panel-header">
+        <div>
+          <div class="panel-title">Salud del bot</div>
+          <div class="panel-subtitle">Incidentes, mensajes que no llegaron y la conversación entre el bot y vos.</div>
+        </div>
+        <button class="btn-ghost" onclick="loadHealth()">↻ Actualizar</button>
+      </div>
+      <div id="health-container"></div>
     </div>
 
     <div class="tab-panel" data-tab-panel="catalog">

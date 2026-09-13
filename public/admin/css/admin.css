@@ -106,6 +106,56 @@
   .inicio-shortcut-card .title { font-weight: 700; font-size: 14px; margin-top: 8px; }
   .inicio-shortcut-card .desc { font-size: 12.5px; color: var(--muted); margin-top: 4px; }
 
+  /* Fase 2/3: CRM de clientes y tablero de Inicio */
+  .crm-filters { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 10px; }
+  .crm-filters input, .crm-filters select { margin: 0; }
+  .crm-row {
+    display: flex; align-items: center; gap: 12px; padding: 12px 16px; cursor: pointer;
+    border-bottom: 1px solid var(--border-soft); background: transparent; width: 100%; text-align: left;
+    font-family: inherit; border-radius: 0;
+  }
+  .crm-row:last-child { border-bottom: none; }
+  .crm-row:hover { background: var(--border-soft); }
+  .crm-row-main { flex: 1; min-width: 0; }
+  .crm-row-name { font-weight: 650; font-size: 13.5px; color: var(--ink); }
+  .crm-row-meta { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .crm-row-side { text-align: right; flex-shrink: 0; font-size: 12px; color: var(--muted); }
+  .stage-pill {
+    display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 999px;
+    font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em;
+  }
+  .stage-NUEVO { background: var(--info-light); color: var(--info); }
+  .stage-ACTIVO { background: var(--brand-light); color: var(--brand-dark); }
+  .stage-COMPRADOR { background: var(--funnel-quoted-light); color: var(--funnel-quoted); }
+  .stage-RECURRENTE { background: #dcfce7; color: #15803d; }
+  .stage-INACTIVO { background: var(--border-soft); color: var(--muted); }
+  .channel-pill {
+    display: inline-flex; align-items: center; gap: 3px; padding: 2px 7px; border-radius: 999px;
+    background: var(--border-soft); color: var(--muted); font-size: 10.5px; font-weight: 700;
+  }
+  .metric-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+  .metric-card { border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--card); padding: 14px; }
+  .metric-card .label { font-size: 11.5px; color: var(--muted); }
+  .metric-card .value { font-size: 20px; font-weight: 700; margin-top: 4px; font-family: var(--display); }
+  .metric-card .sub { font-size: 11.5px; color: var(--muted-soft); margin-top: 2px; }
+  .action-card {
+    display: flex; align-items: flex-start; gap: 12px; padding: 14px 16px; border: 1px solid var(--border);
+    border-radius: var(--radius-md); background: var(--card); cursor: pointer; width: 100%;
+    text-align: left; font-family: inherit; margin-bottom: 10px;
+  }
+  .action-card:hover { border-color: var(--brand); }
+  .action-card.is-urgent { border-color: var(--danger); background: var(--danger-light); }
+  .action-card .count { font-size: 22px; font-weight: 800; font-family: var(--display); min-width: 34px; }
+  .action-card .title { font-weight: 650; font-size: 13.5px; }
+  .action-card .sample { font-size: 12px; color: var(--muted); margin-top: 3px; line-height: 1.45; }
+  .timeline-item { display: flex; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--border-soft); font-size: 12.5px; }
+  .timeline-item:last-child { border-bottom: none; }
+  .timeline-kind { flex-shrink: 0; width: 74px; font-size: 10.5px; font-weight: 700; color: var(--muted); text-transform: uppercase; padding-top: 2px; }
+  .timeline-body { flex: 1; min-width: 0; word-break: break-word; }
+  .timeline-time { flex-shrink: 0; font-size: 11px; color: var(--muted-soft); }
+  .note-item { border: 1px solid var(--border); border-radius: var(--radius-md); padding: 10px 12px; margin-bottom: 8px; background: var(--card); }
+  .note-meta { font-size: 11px; color: var(--muted-soft); margin-top: 6px; }
+
   main { max-width: 900px; margin: 0 auto; padding: 24px 20px 64px; transition: max-width .15s ease; }
   main.wide { max-width: 1560px; padding-bottom: 16px; }
 
@@ -330,6 +380,10 @@
   .order-subtab-btn.active { color: var(--brand-dark); background: var(--brand-light); border-color: var(--brand-light); }
   .order-subtab-btn .status-badge { pointer-events: none; }
   .order-list-footer { display: flex; align-items: center; justify-content: center; padding: 14px; }
+  /* `display: flex` de la regla de arriba le gana al display:none que el navegador le da a [hidden],
+     asi que "Cargar más" se veia siempre, incluso sin pagina siguiente (el JS ya ponia .hidden = true).
+     Se arregla para Pedidos y para la lista de Clientes, que reusa el mismo pie. */
+  .order-list-footer[hidden] { display: none; }
   .order-section-head { display: flex; align-items: center; gap: 10px; margin: 30px 0 10px; }
   .order-section-head:first-of-type { margin-top: 4px; }
   .order-section-title { font-family: var(--display); font-weight: 700; font-size: 15px; color: var(--ink); }
@@ -443,6 +497,11 @@
     .tab-btn { padding: 12px 10px; font-size: 12.5px; }
     .subnav { padding: 6px 12px; }
     .inicio-shortcuts { grid-template-columns: 1fr; }
+    .crm-filters { grid-template-columns: 1fr; }
+    .metric-grid { grid-template-columns: 1fr 1fr; }
+    /* La cabecera de la ficha (volver + nombre + Ver chat + Guardar) no entra en una fila de 375px. */
+    #customer-detail-view .panel-header { flex-direction: column; align-items: stretch; gap: 10px; }
+    #customer-detail-view .panel-header > div { width: 100%; }
     .brand-name { font-size: 15px; }
     .brand-sub { font-size: 10px; }
     main { padding: 18px 14px 48px; }

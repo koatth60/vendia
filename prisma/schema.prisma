@@ -76,6 +76,8 @@ model Business {
   learnedFaqCandidates      LearnedFaqCandidate[]
   deliveryFailures          DeliveryFailure[]
   agentIncidents            AgentIncident[]
+  customerNotes             CustomerNote[]
+  customerTags              CustomerTag[]
   ownerMessageLogs          OwnerMessageLog[]
   orders                    Order[]
   teamMembers               TeamMember[]
@@ -393,6 +395,31 @@ enum MediaType {
   AUDIO
 }
 
+// Por que canal entro este cliente/conversacion. Hoy todo es WHATSAPP (unico canal implementado) y ese
+// es el default, asi que ninguna fila existente cambia de comportamiento. Se agrega ahora, antes de
+// construir el CRM encima, para que sumar Instagram/Facebook/Mercado Libre mas adelante no obligue a
+// migrar datos ni a rehacer la ficha de cliente: el CRM ya lee y muestra el canal desde el dia uno.
+// Deliberadamente NO se toca Customer.@@unique([businessId, phoneNumber]) ni se agrega una identidad
+// por canal todavia - unificar a la misma persona entre canales (mismo humano en WhatsApp e Instagram)
+// es una decision aparte, que recien tiene sentido cuando exista el segundo canal real.
+enum Channel {
+  WHATSAPP
+  INSTAGRAM
+  FACEBOOK
+  MERCADOLIBRE
+}
+
+// Etapa del cliente como PERSONA, distinta de Conversation.status (que es el estado de UN ciclo de
+// venta). Un cliente puede tener una conversacion SOLD cerrada y seguir siendo RECURRENTE; el status
+// por conversacion no puede expresar eso. Default NUEVO para todas las filas existentes.
+enum CustomerStage {
+  NUEVO
+  ACTIVO
+  COMPRADOR
+  RECURRENTE
+  INACTIVO
+}
+
 model Customer {
   id            String         @id @default(cuid())
   business      Business       @relation(fields: [businessId], references: [id], onDelete: Cascade)
@@ -401,18 +428,67 @@ model Customer {
   name          String?
   idNumber      String?
   deliveryPhone String?
+  email         String?
+  address       String?
+  stage         CustomerStage  @default(NUEVO)
+  channel       Channel        @default(WHATSAPP)
+  // Como llego este cliente (campana, referido, etc). Texto libre a proposito: cada negocio tiene su
+  // propio vocabulario de origen y no hay ninguno que sirva para todos.
+  source        String?
+  // Ultimo mensaje intercambiado con este cliente, en cualquiera de sus conversaciones. Existe para
+  // que la lista de clientes del CRM pueda ordenar y paginar por recencia con un indice, en vez de
+  // traer todas las conversaciones del negocio y agrupar en memoria (ver P10 del plan). Lo mantiene
+  // recordMessage(); la migracion lo rellena con el ultimo mensaje real de cada cliente.
+  lastContactAt DateTime?
   tags          String[]       @default([])
+  notes         CustomerNote[]
   conversations Conversation[]
   orders        Order[]
   createdAt     DateTime       @default(now())
 
   @@unique([businessId, phoneNumber])
+  @@index([businessId, lastContactAt])
+}
+
+// Notas internas del negocio sobre un cliente. Nunca se le mandan al cliente ni entran al prompt del
+// bot - son para el equipo humano que atiende.
+model CustomerNote {
+  id         String   @id @default(cuid())
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  businessId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  customerId String
+  body       String
+  // Nombre de quien la escribio, resuelto al momento de crearla (dueño o empleado). Se guarda como
+  // texto y no como FK a TeamMember a proposito: si ese empleado se borra despues, la nota sigue
+  // diciendo quien la escribio en vez de quedar huerfana.
+  authorName String?
+  createdAt  DateTime @default(now())
+
+  @@index([customerId, createdAt])
+}
+
+// Catalogo de etiquetas del negocio: le da color y autocompletado a los strings que ya viven en
+// Customer.tags. NO reemplaza ese String[] - una etiqueta escrita a mano que no este en esta tabla
+// sigue funcionando exactamente igual que antes, solo se muestra con el color por defecto.
+model CustomerTag {
+  id         String   @id @default(cuid())
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  businessId String
+  label      String
+  color      String   @default("#5c6e65")
+  createdAt  DateTime @default(now())
+
+  @@unique([businessId, label])
 }
 
 model Conversation {
   id                           String                 @id @default(cuid())
   customer                     Customer               @relation(fields: [customerId], references: [id])
   customerId                   String
+  // Canal por el que llego esta conversacion (ver enum Channel). Default WHATSAPP: hoy es el unico
+  // canal implementado y toda fila existente queda igual.
+  channel                      Channel                @default(WHATSAPP)
   status                       ConversationStatus     @default(NEW)
   intent                       ConversationIntent?
   humanControl                 Boolean                @default(false)

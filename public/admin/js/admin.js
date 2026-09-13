@@ -50,9 +50,9 @@ window.addEventListener('resize', () => {
 // switchSection() sólo resuelve la pestaña por defecto y delega en switchTab().
 const PANEL_SECTION = {
   inicio: 'inicio',
-  conversations: 'crm', orders: 'crm',
+  conversations: 'crm', customers: 'crm', orders: 'crm',
   catalog: 'catalogo',
-  business: 'bot', faq: 'bot', payments: 'bot', whatsapp: 'bot',
+  business: 'bot', faq: 'bot', payments: 'bot', whatsapp: 'bot', health: 'bot',
   negocio: 'negocio', team: 'negocio', 'ai-usage': 'negocio', analytics: 'negocio',
 };
 const SECTION_DEFAULT = {
@@ -72,6 +72,15 @@ function switchTab(name) {
     requestAnimationFrame(fitChatSplit);
     markConversationReadIfViewing();
   }
+  // Carga perezosa de las vistas nuevas: nada de esto se pide hasta que el dueño entra a la seccion.
+  // La lista de clientes se trae una sola vez (tiene su propio boton de actualizar); el tablero y la
+  // salud se refrescan en cada visita porque son justamente "que esta pasando ahora".
+  if (name === 'customers' && !crmLoadedOnce) {
+    loadCrmTagOptions();
+    loadCustomerList(true);
+  }
+  if (name === 'inicio') loadDashboard();
+  if (name === 'health') loadHealth();
   try { localStorage.setItem('vendia-admin-tab', name); } catch {}
   // replaceState (no pushState) a proposito: refleja la vista actual en la URL para poder compartir
   // el enlace o refrescar sin perder el lugar, sin llenar el historial del navegador con cada click.
@@ -2167,7 +2176,10 @@ function orderCardTop(o) {
   const date = new Date(o.createdAt).toLocaleString('es-CO', { dateStyle: 'medium', timeStyle: 'short' });
   return `
     <div class="order-card-top">
-      <div class="order-card-name">${escapeHtml(displayName)}</div>
+      <div class="order-card-name">
+        ${escapeHtml(displayName)}
+        ${o.customer.id ? `<button class="btn-ghost" style="padding:0 6px; font-size:11px; font-weight:600;" onclick="goToCustomerProfile('${o.customer.id}')">ver cliente ›</button>` : ''}
+      </div>
       <div class="order-card-date">${date}</div>
     </div>
     <div class="order-card-items">${itemsList}</div>
@@ -2434,14 +2446,14 @@ async function loadAnalytics() {
 
 function configHealthChecklistHtml(health) {
   const items = [
-    { ok: health.hasContactPhone, label: 'Teléfono de contacto configurado', missing: 'Sin esto, ninguna escalación al dueño (ask_owner, PQR, etc) llega a ningún lado - configuralo en "Tu negocio".' },
-    { ok: health.hasCategoriesConfigured, label: 'Al menos un producto con categoría cargada', missing: 'Sin categorías, el bot depende de una vocabulario derivado de los nombres de producto para reconocer consultas como "¿qué relojes tienen?" - cargar la categoría real en "Catálogo" es más confiable.' },
-    { ok: health.hasPaymentMethods, label: 'Al menos un método de pago activo', missing: 'Sin un método de pago configurado, el bot no puede confirmarle al cliente cómo pagar - agregalo en "Pagos".' },
+    { ok: health.hasContactPhone, label: 'Teléfono de contacto configurado', missing: 'Sin esto, ninguna escalación al dueño (ask_owner, PQR, etc) llega a ningún lado - configuralo en Negocio > Identidad.' },
+    { ok: health.hasCategoriesConfigured, label: 'Al menos un producto con categoría cargada', missing: 'Sin categorías, el bot depende de una vocabulario derivado de los nombres de producto para reconocer consultas como "¿qué relojes tienen?" - cargar la categoría real en Catálogo es más confiable.' },
+    { ok: health.hasPaymentMethods, label: 'Al menos un método de pago activo', missing: 'Sin un método de pago configurado, el bot no puede confirmarle al cliente cómo pagar - agregalo en Bot > Pagos.' },
     {
       ok: health.hasApprovedOwnerAlertTemplate === null ? null : health.hasApprovedOwnerAlertTemplate,
       label: 'Plantilla "onix_owner_alert" aprobada por WhatsApp',
-      missing: 'Sin esta plantilla aprobada, una escalación nocturna (fuera de la ventana de 24h del dueño) puede no llegarle nunca - revisá "WhatsApp" → Plantillas.',
-      unknown: 'No se pudo verificar todavía (conectá WhatsApp Business primero en la pestaña "WhatsApp").',
+      missing: 'Sin esta plantilla aprobada, una escalación nocturna (fuera de la ventana de 24h del dueño) puede no llegarle nunca - revisá Bot > Canales > Plantillas.',
+      unknown: 'No se pudo verificar todavía (conectá WhatsApp Business primero en Bot > Canales).',
     },
   ];
   return items.map((item) => {
@@ -2885,6 +2897,20 @@ function initRealtime() {
 
   socket.on('order:new', () => { loadOrderCounts(); loadOrders(true); });
   socket.on('order:updated', () => { loadOrderCounts(); loadOrders(true); });
+
+  // El backend emitia delivery:failed desde que existe DeliveryFailure, pero el panel del cliente
+  // nunca lo escuchaba: un fallo critico (una escalacion que el dueño nunca recibio) solo se veia
+  // desde el panel interno de Zaqi. Ahora avisa en el momento y refresca las vistas que lo muestran.
+  socket.on('delivery:failed', (failure) => {
+    setStatus(
+      failure && failure.critical
+        ? 'Un mensaje al dueño no se pudo entregar - revisá Bot > Salud'
+        : 'Un mensaje a un cliente no se pudo entregar - revisá Bot > Salud',
+      true
+    );
+    if (document.querySelector('.tab-btn[data-tab="health"]')?.classList.contains('active')) loadHealth();
+    if (document.querySelector('.tab-btn[data-tab="inicio"]')?.classList.contains('active')) loadDashboard();
+  });
 }
 
 async function boot() {
@@ -2919,4 +2945,481 @@ async function boot() {
   initRealtime();
 }
 
+// ==============================================================================================
+// Fase 2 - CRM de clientes (ver ONIX-CRM-REORG-PLAN.md)
+// La lista y la ficha son dos estados del mismo panel. La lista pagina por cursor contra
+// /admin/api/crm/customers; la ficha lee /admin/api/crm/customers/:id, que ya trae metricas,
+// pedidos y notas en una sola respuesta.
+// ==============================================================================================
+
+const STAGE_LABELS = {
+  NUEVO: 'Nuevo',
+  ACTIVO: 'Activo',
+  COMPRADOR: 'Comprador',
+  RECURRENTE: 'Recurrente',
+  INACTIVO: 'Inactivo',
+};
+
+const CHANNEL_LABELS = {
+  WHATSAPP: '📲 WhatsApp',
+  INSTAGRAM: '📷 Instagram',
+  FACEBOOK: '👥 Facebook',
+  MERCADOLIBRE: '🛒 Mercado Libre',
+};
+
+let crmCursor = null;
+let crmSearchTimer = null;
+let crmLoadedOnce = false;
+let currentCrmProfile = null;
+
+function stagePillHtml(stage) {
+  const label = STAGE_LABELS[stage] || stage;
+  return `<span class="stage-pill stage-${escapeHtml(stage)}">${escapeHtml(label)}</span>`;
+}
+
+function channelPillHtml(channel) {
+  return `<span class="channel-pill">${escapeHtml(CHANNEL_LABELS[channel] || channel)}</span>`;
+}
+
+// Se espera a que el dueño deje de escribir antes de pegarle al servidor: sin esto, "ludy" son cuatro
+// consultas y la ultima puede llegar antes que la anterior y pintar resultados viejos.
+function onCrmSearchInput() {
+  if (crmSearchTimer) clearTimeout(crmSearchTimer);
+  crmSearchTimer = setTimeout(() => loadCustomerList(true), 300);
+}
+
+async function loadCustomerList(reset) {
+  const container = document.getElementById('customers-rows');
+  if (reset) crmCursor = null;
+
+  const params = new URLSearchParams();
+  const q = document.getElementById('crm-search').value.trim();
+  const stage = document.getElementById('crm-stage-filter').value;
+  const tag = document.getElementById('crm-tag-filter').value;
+  if (q) params.set('q', q);
+  if (stage) params.set('stage', stage);
+  if (tag) params.set('tag', tag);
+  if (!reset && crmCursor) params.set('cursor', crmCursor);
+
+  if (reset) container.innerHTML = '<div class="empty-state">Cargando…</div>';
+
+  try {
+    const res = await apiFetch(`/admin/api/crm/customers?${params.toString()}`);
+    const data = await res.json();
+    crmCursor = data.nextCursor;
+    crmLoadedOnce = true;
+
+    const rows = data.customers.map((c) => `
+      <button type="button" class="crm-row" onclick="openCustomerProfile('${c.id}')">
+        <div class="conv-avatar">${escapeHtml((c.name || c.phoneNumber || '?').trim().charAt(0).toUpperCase())}</div>
+        <div class="crm-row-main">
+          <div class="crm-row-name">${escapeHtml(c.name || c.phoneNumber)}</div>
+          <div class="crm-row-meta">
+            ${escapeHtml(c.phoneNumber)}
+            ${c.tags.length ? ' · ' + c.tags.map((t) => escapeHtml(t)).join(', ') : ''}
+          </div>
+        </div>
+        <div class="crm-row-side">
+          <div>${stagePillHtml(c.stage)}</div>
+          <div style="margin-top:4px;">${c.orderCount} pedido${c.orderCount === 1 ? '' : 's'}</div>
+          <div style="margin-top:2px;">${c.lastContactAt ? escapeHtml(timeAgo(c.lastContactAt)) : '—'}</div>
+        </div>
+      </button>
+    `).join('');
+
+    if (reset) {
+      container.innerHTML = rows || '<div class="empty-state"><div class="big">👤</div>No hay clientes que coincidan.</div>';
+    } else {
+      container.insertAdjacentHTML('beforeend', rows);
+    }
+    document.getElementById('customers-load-more-wrap').hidden = !data.nextCursor;
+  } catch (err) {
+    container.innerHTML = `<div class="empty-state" style="color:var(--danger);">No se pudieron cargar los clientes: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+async function loadCrmTagOptions() {
+  try {
+    const res = await apiFetch('/admin/api/crm/tags');
+    const tags = await res.json();
+    const select = document.getElementById('crm-tag-filter');
+    const current = select.value;
+    select.innerHTML = '<option value="">Todas las etiquetas</option>'
+      + tags.map((t) => `<option value="${escapeHtml(t.label)}">${escapeHtml(t.label)}</option>`).join('');
+    select.value = current;
+  } catch {}
+}
+
+async function openCustomerProfile(customerId) {
+  document.getElementById('customers-list-view').hidden = true;
+  document.getElementById('customer-detail-view').hidden = false;
+  document.getElementById('crm-detail-body').innerHTML = '<div class="card empty-state">Cargando…</div>';
+
+  try {
+    const res = await apiFetch(`/admin/api/crm/customers/${customerId}`);
+    const profile = await res.json();
+    currentCrmProfile = profile;
+    renderCustomerProfile(profile);
+    loadCustomerTimeline(customerId);
+  } catch (err) {
+    document.getElementById('crm-detail-body').innerHTML =
+      `<div class="card empty-state" style="color:var(--danger);">No se pudo cargar la ficha: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+function closeCustomerProfile() {
+  currentCrmProfile = null;
+  document.getElementById('customer-detail-view').hidden = true;
+  document.getElementById('customers-list-view').hidden = false;
+}
+
+// Enlace cruzado ficha -> chat (P9 del diagnostico: antes no habia forma de saltar de un lado al otro).
+// Usa openCustomer(), la misma funcion que abre el hilo desde la Bandeja, para no duplicar esa logica.
+function openCustomerChatFromProfile() {
+  if (!currentCrmProfile) return;
+  const id = currentCrmProfile.id;
+  switchTab('conversations');
+  openCustomer(id);
+}
+
+function renderCustomerProfile(p) {
+  const m = p.metrics;
+  document.getElementById('crm-detail-name').textContent = p.name || p.phoneNumber;
+  document.getElementById('crm-detail-sub').innerHTML =
+    `${escapeHtml(p.phoneNumber)} · ${channelPillHtml(p.channel)} · cliente desde ${new Date(p.createdAt).toLocaleDateString('es-CO')}`;
+  document.getElementById('crm-open-chat-btn').hidden = !p.activeConversationId;
+
+  const orderRows = p.orders.length === 0
+    ? '<div class="empty-state" style="padding:18px;">Todavía no tiene pedidos.</div>'
+    : p.orders.map((o) => `
+        <div style="display:flex; justify-content:space-between; gap:10px; padding:10px 0; border-bottom:1px solid var(--border-soft);">
+          <div style="min-width:0;">
+            <div style="font-size:13px; font-weight:600;">${escapeHtml(o.summary)}</div>
+            <div style="font-size:11.5px; color:var(--muted); margin-top:2px;">
+              ${new Date(o.createdAt).toLocaleDateString('es-CO')} · ${escapeHtml(o.fulfillmentStatus)}
+            </div>
+          </div>
+          <div style="font-weight:700; white-space:nowrap;">${escapeHtml(formatMoney(o.totalAmount, o.currency))}</div>
+        </div>
+      `).join('');
+
+  const noteItems = p.notes.length === 0
+    ? '<div style="font-size:12.5px; color:var(--muted);">Sin notas todavía.</div>'
+    : p.notes.map((n) => `
+        <div class="note-item">
+          <div style="font-size:13px; white-space:pre-wrap;">${escapeHtml(n.body)}</div>
+          <div class="note-meta">
+            ${escapeHtml(n.authorName || 'Alguien')} · ${escapeHtml(timeAgo(n.createdAt))}
+            <button class="btn-ghost" style="padding:0 6px; font-size:11px;" onclick="deleteCrmNote('${n.id}')">Eliminar</button>
+          </div>
+        </div>
+      `).join('');
+
+  document.getElementById('crm-detail-body').innerHTML = `
+    <div class="metric-grid" style="margin-bottom:16px;">
+      <div class="metric-card">
+        <div class="label">Total comprado</div>
+        <div class="value">${escapeHtml(formatMoney(m.totalSpent, m.currency))}</div>
+        <div class="sub">${m.orderCount} pedido${m.orderCount === 1 ? '' : 's'}</div>
+      </div>
+      <div class="metric-card">
+        <div class="label">Ticket promedio</div>
+        <div class="value">${escapeHtml(formatMoney(m.avgTicket, m.currency))}</div>
+      </div>
+      <div class="metric-card">
+        <div class="label">Última compra</div>
+        <div class="value" style="font-size:15px;">${m.lastPurchaseAt ? new Date(m.lastPurchaseAt).toLocaleDateString('es-CO') : '—'}</div>
+        <div class="sub">${m.firstPurchaseAt ? 'primera: ' + new Date(m.firstPurchaseAt).toLocaleDateString('es-CO') : 'sin compras'}</div>
+      </div>
+      <div class="metric-card">
+        <div class="label">Sin contacto hace</div>
+        <div class="value">${m.daysSinceContact === null ? '—' : m.daysSinceContact + ' d'}</div>
+      </div>
+    </div>
+
+    <div class="section-title">Datos del cliente</div>
+    <div class="card">
+      <div class="grid-2">
+        <div><label>Nombre</label><input id="crm-f-name" value="${escapeHtml(p.name || '')}" /></div>
+        <div><label>Etapa</label>
+          <select id="crm-f-stage">
+            ${Object.entries(STAGE_LABELS).map(([v, l]) => `<option value="${v}" ${p.stage === v ? 'selected' : ''}>${escapeHtml(l)}</option>`).join('')}
+          </select>
+        </div>
+        <div><label>Email</label><input id="crm-f-email" value="${escapeHtml(p.email || '')}" placeholder="Opcional" /></div>
+        <div><label>Cédula</label><input id="crm-f-idNumber" value="${escapeHtml(p.idNumber || '')}" placeholder="Opcional" /></div>
+        <div><label>Teléfono de entrega</label><input id="crm-f-deliveryPhone" value="${escapeHtml(p.deliveryPhone || '')}" placeholder="Opcional" /></div>
+        <div><label>Cómo llegó</label><input id="crm-f-source" value="${escapeHtml(p.source || '')}" placeholder="Ej: Instagram, referido" /></div>
+      </div>
+      <label>Dirección</label>
+      <input id="crm-f-address" value="${escapeHtml(p.address || '')}" placeholder="Opcional" />
+      <label>Etiquetas (separadas por coma)</label>
+      <input id="crm-f-tags" value="${escapeHtml(p.tags.join(', '))}" placeholder="Ej: mayorista, vip" />
+    </div>
+
+    <div class="section-title">Pedidos</div>
+    <div class="card">${orderRows}</div>
+
+    <div class="section-title">Notas internas</div>
+    <div class="card">
+      <div style="font-size:12.5px; color:var(--muted); margin-bottom:8px;">Solo las ve tu equipo. Nunca se le mandan al cliente ni las usa el bot.</div>
+      <textarea id="crm-note-body" placeholder="Ej: Pidió factura a nombre de la empresa" style="min-height:60px;"></textarea>
+      <div class="actions-row">
+        <button class="btn-secondary" onclick="addCrmNote()">+ Agregar nota</button>
+      </div>
+      <div style="margin-top:12px;">${noteItems}</div>
+    </div>
+
+    <div class="section-title">Línea de tiempo</div>
+    <div class="card" id="crm-timeline"><div class="empty-state" style="padding:18px;">Cargando…</div></div>
+  `;
+}
+
+async function loadCustomerTimeline(customerId) {
+  const container = document.getElementById('crm-timeline');
+  if (!container) return;
+  try {
+    const res = await apiFetch(`/admin/api/crm/customers/${customerId}/timeline`);
+    const events = await res.json();
+    const KIND_LABEL = { MESSAGE: 'Mensaje', ORDER: 'Pedido', NOTE: 'Nota' };
+    container.innerHTML = events.length === 0
+      ? '<div class="empty-state" style="padding:18px;">Sin actividad todavía.</div>'
+      : events.map((e) => `
+          <div class="timeline-item">
+            <div class="timeline-kind">${escapeHtml(KIND_LABEL[e.kind] || e.kind)}</div>
+            <div class="timeline-body">${escapeHtml(String(e.detail || '').slice(0, 220))}</div>
+            <div class="timeline-time">${escapeHtml(timeAgo(e.createdAt))}</div>
+          </div>
+        `).join('');
+  } catch (err) {
+    container.innerHTML = `<div class="empty-state" style="color:var(--danger); padding:18px;">No se pudo cargar: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+async function saveCustomerProfile() {
+  if (!currentCrmProfile) return;
+  const payload = {
+    name: document.getElementById('crm-f-name').value.trim(),
+    email: document.getElementById('crm-f-email').value.trim(),
+    address: document.getElementById('crm-f-address').value.trim(),
+    idNumber: document.getElementById('crm-f-idNumber').value.trim(),
+    deliveryPhone: document.getElementById('crm-f-deliveryPhone').value.trim(),
+    source: document.getElementById('crm-f-source').value.trim(),
+    stage: document.getElementById('crm-f-stage').value,
+    tags: document.getElementById('crm-f-tags').value.split(',').map((t) => t.trim()).filter(Boolean),
+  };
+  try {
+    await apiFetch(`/admin/api/crm/customers/${currentCrmProfile.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    setStatus('Cliente actualizado');
+    await openCustomerProfile(currentCrmProfile.id);
+  } catch (err) {
+    setStatus(`No se pudo guardar: ${err.message}`, true);
+  }
+}
+
+async function addCrmNote() {
+  if (!currentCrmProfile) return;
+  const body = document.getElementById('crm-note-body').value.trim();
+  if (!body) {
+    setStatus('Escribí algo en la nota', true);
+    return;
+  }
+  try {
+    await apiFetch(`/admin/api/crm/customers/${currentCrmProfile.id}/notes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ body }),
+    });
+    setStatus('Nota agregada');
+    await openCustomerProfile(currentCrmProfile.id);
+  } catch (err) {
+    setStatus(`No se pudo agregar la nota: ${err.message}`, true);
+  }
+}
+
+async function deleteCrmNote(noteId) {
+  if (!confirm('¿Eliminar esta nota?')) return;
+  try {
+    await apiFetch(`/admin/api/crm/notes/${noteId}`, { method: 'DELETE' });
+    setStatus('Nota eliminada');
+    if (currentCrmProfile) await openCustomerProfile(currentCrmProfile.id);
+  } catch (err) {
+    setStatus(`No se pudo eliminar: ${err.message}`, true);
+  }
+}
+
+// ==============================================================================================
+// Fase 3 - Inicio (tablero) y Salud del bot
+// ==============================================================================================
+
+const ACTION_META = {
+  HUMAN_WAITING: { title: 'Conversaciones esperando a un humano', go: () => switchTab('conversations') },
+  OWNER_QUESTION: { title: 'Preguntas del bot sin responder', go: () => switchTab('conversations') },
+  ORDER_PENDING: { title: 'Pedidos pendientes de envío', go: () => switchTab('orders') },
+  DELIVERY_FAILURE: { title: 'Mensajes que no le llegaron a nadie', go: () => switchTab('health') },
+  FAQ_CANDIDATE: { title: 'Sugerencias de FAQ por revisar', go: () => switchTab('faq') },
+};
+
+async function loadDashboard() {
+  const container = document.getElementById('dashboard-container');
+  if (!container) return;
+  try {
+    const res = await apiFetch('/admin/api/dashboard');
+    const data = await res.json();
+    const k = data.kpis;
+
+    const pending = data.actions.filter((a) => a.count > 0);
+    const actionsHtml = pending.length === 0
+      ? '<div class="card empty-state"><div class="big">✅</div>Nada pendiente. Todo al día.</div>'
+      : pending.map((a) => {
+          const meta = ACTION_META[a.kind] || { title: a.kind };
+          const urgent = a.kind === 'DELIVERY_FAILURE' || a.kind === 'OWNER_QUESTION';
+          const sample = a.sample.slice(0, 3).map((s) => escapeHtml(s.label)).join(' · ');
+          return `
+            <button type="button" class="action-card ${urgent ? 'is-urgent' : ''}" onclick="runDashboardAction('${a.kind}')">
+              <div class="count">${a.count}</div>
+              <div style="min-width:0;">
+                <div class="title">${escapeHtml(meta.title)}</div>
+                <div class="sample">${sample}${a.count > 3 ? ' …' : ''}</div>
+              </div>
+            </button>`;
+        }).join('');
+
+    container.innerHTML = `
+      <div class="section-title">Requiere tu atención</div>
+      ${actionsHtml}
+
+      <div class="section-title">Este mes</div>
+      <div class="metric-grid" style="margin-bottom:8px;">
+        <div class="metric-card">
+          <div class="label">Ventas del mes</div>
+          <div class="value">${escapeHtml(formatMoney(k.monthSales, k.currency))}</div>
+          <div class="sub">${k.monthOrderCount} pedido${k.monthOrderCount === 1 ? '' : 's'}</div>
+        </div>
+        <div class="metric-card">
+          <div class="label">Conversión (30 días)</div>
+          <div class="value">${(k.conversionRate * 100).toFixed(1)}%</div>
+          <div class="sub">${k.sold} vendidas / ${k.lost} perdidas</div>
+        </div>
+        <div class="metric-card">
+          <div class="label">Conversaciones activas</div>
+          <div class="value">${k.activeConversations}</div>
+        </div>
+        <div class="metric-card">
+          <div class="label">Satisfacción</div>
+          <div class="value">${k.avgCsat !== null ? k.avgCsat.toFixed(1) + '/3' : '—'}</div>
+          <div class="sub">${k.csatCount} respuesta${k.csatCount === 1 ? '' : 's'}</div>
+        </div>
+      </div>
+
+      <div class="section-title">Chequeo de configuración</div>
+      <div class="card">${configHealthChecklistHtml(data.health)}</div>
+    `;
+  } catch (err) {
+    container.innerHTML = `<div class="card empty-state" style="color:var(--danger);">No se pudo cargar el tablero: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+function runDashboardAction(kind) {
+  const meta = ACTION_META[kind];
+  if (meta && meta.go) meta.go();
+}
+
+async function loadHealth() {
+  const container = document.getElementById('health-container');
+  if (!container) return;
+  container.innerHTML = '<div class="card empty-state">Cargando…</div>';
+  try {
+    const [failuresRes, logRes, incidentsRes] = await Promise.all([
+      apiFetch('/admin/api/delivery-failures'),
+      apiFetch('/admin/api/owner-log'),
+      apiFetch('/admin/api/agent-incidents'),
+    ]);
+    const failures = await failuresRes.json();
+    const log = await logRes.json();
+    const incidents = await incidentsRes.json();
+
+    const failureRows = failures.length === 0
+      ? '<div class="empty-state" style="padding:18px;">Ningún mensaje falló. Todo llegó.</div>'
+      : failures.map((f) => `
+          <div style="display:flex; justify-content:space-between; gap:10px; align-items:flex-start; padding:11px 0; border-bottom:1px solid var(--border-soft);">
+            <div style="min-width:0;">
+              <div style="font-size:13px; font-weight:600;">
+                ${escapeHtml(f.recipientPhone)}
+                ${f.critical ? '<span class="stage-pill" style="background:var(--danger-light); color:var(--danger); margin-left:6px;">Crítico</span>' : ''}
+              </div>
+              <div style="font-size:12px; color:var(--muted); margin-top:3px;">${escapeHtml(f.errorMessage)}</div>
+              <div style="font-size:11px; color:var(--muted-soft); margin-top:2px;">${escapeHtml(timeAgo(f.createdAt))}</div>
+            </div>
+            <button class="btn-secondary" style="flex-shrink:0;" onclick="resolveFailure('${f.id}')">Marcar resuelto</button>
+          </div>
+        `).join('');
+
+    const logRows = log.length === 0
+      ? '<div class="empty-state" style="padding:18px;">El bot todavía no te escribió.</div>'
+      : log.slice(0, 40).map((m) => `
+          <div class="bubble bubble-${m.direction === 'OUT' ? 'CUSTOMER' : 'ASSISTANT'}" style="max-width:82%;">
+            <div class="bubble-text">${escapeHtml(m.body)}</div>
+            <span class="bubble-time">${escapeHtml(timeAgo(m.createdAt))}${m.success === false ? ' · no se pudo entregar' : ''}</span>
+          </div>
+        `).join('');
+
+    container.innerHTML = `
+      <div class="metric-grid" style="margin-bottom:16px;">
+        <div class="metric-card">
+          <div class="label">Conversaciones estancadas</div>
+          <div class="value" ${incidents.stalledConversations > 0 ? 'style="color:var(--warn);"' : ''}>${incidents.stalledConversations}</div>
+          <div class="sub">Pausadas esperando a un humano</div>
+        </div>
+        <div class="metric-card">
+          <div class="label">Respuestas degradadas (7 días)</div>
+          <div class="value" ${incidents.degradedReplies + incidents.loopExhausted > 0 ? 'style="color:var(--danger);"' : ''}>${incidents.degradedReplies + incidents.loopExhausted}</div>
+          <div class="sub">${incidents.loopExhausted} por agotar herramientas · ${incidents.degradedReplies} genéricas</div>
+        </div>
+        <div class="metric-card">
+          <div class="label">Intervenciones de respaldo</div>
+          <div class="value">${incidents.backstopInterventions}</div>
+          <div class="sub">El bot prometió algo y el sistema lo completó</div>
+        </div>
+      </div>
+
+      <div class="section-title">Mensajes que no llegaron</div>
+      <div class="card">
+        <div style="font-size:12.5px; color:var(--muted); margin-bottom:6px;">
+          WhatsApp acepta el envío y recién después avisa si falló. Un fallo <strong>crítico</strong> es uno dirigido a tu propio número: suele significar que una escalación nunca te llegó.
+        </div>
+        ${failureRows}
+      </div>
+
+      <div class="section-title">Conversación del bot con vos</div>
+      <div class="card chat-thread" style="max-height:420px; overflow-y:auto;">${logRows}</div>
+    `;
+  } catch (err) {
+    container.innerHTML = `<div class="card empty-state" style="color:var(--danger);">No se pudo cargar la salud del bot: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+async function resolveFailure(id) {
+  try {
+    await apiFetch(`/admin/api/delivery-failures/${id}/resolve`, { method: 'POST' });
+    setStatus('Marcado como resuelto');
+    loadHealth();
+  } catch (err) {
+    setStatus(`No se pudo marcar: ${err.message}`, true);
+  }
+}
+
+// Enlace cruzado Pedidos -> ficha del cliente. Entra a la seccion CRM, cambia a Clientes y abre la
+// ficha directamente, sin que el dueño tenga que buscar a esa persona a mano en la lista.
+function goToCustomerProfile(customerId) {
+  switchTab('customers');
+  openCustomerProfile(customerId);
+}
+
+// Se invoca al final del archivo a proposito: boot() puede abrir la ultima pestaña usada, incluida
+// una de las vistas nuevas del CRM, y sus const/let viven mas abajo (TDZ si se llamara antes).
 boot();

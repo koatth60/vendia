@@ -1,5 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "../db/client";
+import { touchCustomerLastContact } from "../crm/customers";
 import { getPresignedMediaUrl } from "../media/s3";
 import { emitNewMessage, emitNewConversation, emitConversationUpdated, type ConversationRow, type CustomerRow } from "../realtime/events";
 
@@ -80,6 +81,16 @@ export async function recordMessage(
     data: { updatedAt: new Date() },
     select: { humanControl: true, unreadCount: true, customerId: true },
   });
+
+  // Recencia a nivel CLIENTE, para que la lista del CRM pueda ordenar y paginar por indice en vez de
+  // agrupar conversaciones en memoria (ver Customer.lastContactAt en schema.prisma). Es un UPDATE por
+  // id; si falla, el mensaje ya quedo guardado y enviado, asi que no se deja propagar - a lo sumo ese
+  // cliente queda un mensaje desactualizado en el orden de la lista.
+  try {
+    await touchCustomerLastContact(touched.customerId, message.createdAt);
+  } catch (error) {
+    console.error("No se pudo actualizar lastContactAt del cliente:", error);
+  }
 
   let unreadCount = touched.unreadCount;
   if (role === "CUSTOMER" && touched.humanControl) {

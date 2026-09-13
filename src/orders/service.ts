@@ -294,6 +294,9 @@ export async function listOrdersForBusiness(
     orders.map(async (order) => ({
       ...formatOrder(order),
       customer: {
+        // id agregado en Fase 2 para poder enlazar un pedido con la ficha del cliente en el CRM
+        // (P9 del diagnostico: antes no habia ningun salto entre pedido, cliente y conversacion).
+        id: order.customer.id,
         phoneNumber: order.customer.phoneNumber,
         name: order.customer.name,
         idNumber: order.customer.idNumber,

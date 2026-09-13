@@ -9,6 +9,7 @@ import { insightsRouter } from "./insights";
 import { customersRouter } from "./customers";
 import { ordersRouter } from "./orders";
 import { conversationsRouter } from "./conversations";
+import { dashboardRouter } from "./dashboard";
 
 export const adminRouter = Router();
 
@@ -23,3 +24,4 @@ adminRouter.use(insightsRouter);
 adminRouter.use(customersRouter);
 adminRouter.use(ordersRouter);
 adminRouter.use(conversationsRouter);
+adminRouter.use(dashboardRouter);
