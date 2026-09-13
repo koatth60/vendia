@@ -141,6 +141,11 @@ export const catalogTools: OpenAI.Chat.ChatCompletionTool[] = [
             description: "El resto del mensaje del cliente relacionado al pedido, por si el color esta mencionado ahi y no en el campo color (ej: diminutivos como 'rosadito').",
           },
         },
+        // At least one of category/color/freeText, or this call carries no real evidence to filter by -
+        // same invariant runtime already enforces (an empty call returns matches:[]), now visible in the
+        // schema itself instead of only discoverable by calling it (reliability plan Phase 5, item 1,
+        // 2026-09-13).
+        anyOf: [{ required: ["category"] }, { required: ["color"] }, { required: ["freeText"] }],
       },
     },
   },
@@ -199,6 +204,10 @@ export const catalogTools: OpenAI.Chat.ChatCompletionTool[] = [
               "SOLO si ese producto tiene variantes (varios colores/tallas) y find_products_by_attributes ya te dio el 'variantId' del color/talla exacto que el cliente quiere - manda solo las fotos de ESE color, no las de todos. No inventes un variantId, solo usa el que te devolvio la herramienta.",
           },
         },
+        // Exactly one of productId/productName identifies the product - the runtime already treats them
+        // this way (productId wins if both are given, an error if neither is), now visible in the schema
+        // itself (reliability plan Phase 5, item 2, 2026-09-13).
+        oneOf: [{ required: ["productId"] }, { required: ["productName"] }],
       },
     },
   },

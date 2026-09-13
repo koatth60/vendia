@@ -9,6 +9,7 @@ import {
   PAYMENT_OPTIONS_CLAIM_PATTERN,
   CATALOG_CHECK_CLAIM_PATTERN,
   SHIPPING_MODALITY_CLAIM_PATTERN,
+  stripMarkdownEmphasis,
 } from "./agent";
 
 // Regression for a bug class found 2026-09-12 (see agent.photoBackstop.test.ts for the original photo
@@ -97,4 +98,24 @@ test("shipping modality: a genuine dropped-promise claim fires get_shipping_paym
 
 test("shipping modality: an unrelated mention of 'anticipado'/'contraentrega' with no options language does not fire", () => {
   assert.equal(fires(SHIPPING_MODALITY_CLAIM_PATTERN, "El envio contraentrega llega en 2 a 3 dias habiles"), false);
+});
+
+// Reliability plan Phase 1, item 2 (2026-09-13): stripMarkdownEmphasis was only ever applied to HISTORY
+// (lastAssistantText), never to the CURRENT turn's own reply text - so a bolded claim word the model just
+// wrote in this same turn still silently disarmed the backstop. finalizeTurn's claim-backstop registry now
+// matches against a markdown-stripped copy of the current turn's text (matchAgainstStrippedText). This is
+// the same regression shape as agent.customerName.test.ts's ASK_NAME_PATTERN markdown test, applied to a
+// CLAIM_PATTERN instead of an ASK_PATTERN.
+test("payment options claim: bold markdown around the claim word must not silently disarm the backstop", () => {
+  const text = "Te *comparto* las opciones de pago";
+  assert.equal(
+    fires(PAYMENT_OPTIONS_CLAIM_PATTERN, text),
+    false,
+    "the raw bolded text misses the claim - this is the gap finalizeTurn closes by stripping markdown before matching"
+  );
+  assert.equal(
+    fires(PAYMENT_OPTIONS_CLAIM_PATTERN, stripMarkdownEmphasis(text)),
+    true,
+    "stripping markdown first restores the match"
+  );
 });

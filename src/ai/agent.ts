@@ -4,7 +4,9 @@ import { catalogTools, runCatalogTool, SHIPPING_MODALITY_LABELS, type ToolContex
 import { getRecentHistory } from "../conversation/service";
 import { logAiUsage } from "./usage";
 import { prisma } from "../db/client";
-import { listActiveProducts } from "../catalog/products";
+import { listActiveProducts, textMentionsConfiguredCategory } from "../catalog/products";
+import { listActivePaymentMethods } from "../catalog/paymentMethods";
+import { canonicalColors } from "../catalog/attributeTaxonomy";
 import { tokenize, normalizeForMatch } from "../search/text";
 
 // 2026-09-13: se reemplazo el pedido de datos "uno a la vez" por "todos juntos" (a pedido de la dueña).
@@ -942,6 +944,37 @@ function lastAssistantText(history: { role: string; content: string }[]): string
   return "";
 }
 
+// The "model claimed X happened but never called the real tool" backstops (payment options, shipping
+// modality, catalog check, escalation) all repeat the exact same shape: skip if the real tool already ran
+// this turn, skip unless some extra per-guard condition holds, then check CLAIM_PATTERN vs the shared
+// OFFER_OR_PENDING_CONFIRMATION_PATTERN suppressor. This registry replaces four copy-pasted if-blocks with
+// one loop (reliability plan Phase 1, 2026-09-13) - pure refactor, no behavior change. Verified against
+// agent.claimBackstopGuards.test.ts and agent.corePersonality.test.ts.
+type ClaimBackstopGuard = {
+  name: string;
+  pattern: RegExp;
+  suppressor: RegExp;
+  alreadyHandled: boolean;
+  extraCondition: boolean;
+  // Match against a markdown-stripped copy of the CURRENT turn's text, not the real text - closes the
+  // same gap stripMarkdownEmphasis already closed for lastAssistantText/history (see that function's
+  // comment): the model's own bolded "*te comparto* las opciones" would otherwise silently disarm this
+  // backstop, since the pattern expects the key phrase as contiguous plain text.
+  matchAgainstStrippedText?: boolean;
+  repair: (text: string) => Promise<string>;
+};
+
+async function applyClaimBackstops(text: string, guards: ClaimBackstopGuard[]): Promise<string> {
+  for (const guard of guards) {
+    if (guard.alreadyHandled || !guard.extraCondition) continue;
+    const testText = guard.matchAgainstStrippedText ? stripMarkdownEmphasis(text) : text;
+    if (guard.pattern.test(testText) && !guard.suppressor.test(testText)) {
+      text = await guard.repair(text);
+    }
+  }
+  return text;
+}
+
 export async function generateReply(
   conversationId: string,
   context: ToolContext,
@@ -982,6 +1015,12 @@ export async function generateReply(
   // this already-scoped result set over guessing from prose whenever it's available, instead of
   // re-deriving "which products" by scanning text for any name overlap (blind to color/category).
   let attributeMatchThisTurn: { productId: string; productName: string; variantId: string | null }[] | null = null;
+  // Same idea as attributeMatchThisTurn, for search_products instead of find_products_by_attributes: set
+  // only when this turn's keyword search resolved to exactly ONE product (no color/variant scoping
+  // possible from a plain keyword search, so variantId is always null here). Lets the send_product_media
+  // guard below also catch a stale productId when THIS tool, not find_products_by_attributes, is what
+  // actually scoped the product this turn (reliability plan Phase 2, item 3, 2026-09-13).
+  let searchScopedThisTurn: { productId: string; productName: string; variantId: string | null }[] | null = null;
   let shippingModalitiesThisTurn: { code: string; label: string }[] | null = null;
 
   async function finalizeTurn(text: string): Promise<string> {
@@ -998,63 +1037,71 @@ export async function generateReply(
     }
     guardAgainstShippingCostHallucination(text, shippingRatesThisTurn);
 
-    if (
-      !paymentMethodsThisTurn &&
-      !/\d{6,}/.test(text) &&
-      PAYMENT_OPTIONS_CLAIM_PATTERN.test(text) &&
-      !OFFER_OR_PENDING_CONFIRMATION_PATTERN.test(text)
-    ) {
-      const result = (await runCatalogTool(context, "get_payment_methods", {})) as {
-        methods?: { label: string; details: string }[];
-      };
-      if (result?.methods?.length) {
-        text = `${text}\n\n${result.methods.map((m) => `*${m.label}*\n${m.details}`).join("\n\n")}`;
-      }
-    }
-
-    // Same dropped-promise family, for shipping-payment-modality - only fires for a business that
-    // actually configured this concept (empty for most businesses, see Business.shippingPaymentModalities).
-    if (
-      !shippingModalitiesThisTurn &&
-      personality?.shippingPaymentModalities &&
-      personality.shippingPaymentModalities.length > 0 &&
-      SHIPPING_MODALITY_CLAIM_PATTERN.test(text) &&
-      !OFFER_OR_PENDING_CONFIRMATION_PATTERN.test(text)
-    ) {
-      const result = (await runCatalogTool(context, "get_shipping_payment_modalities", {})) as {
-        modalities?: { code: string; label: string }[];
-      };
-      if (result?.modalities?.length) {
-        text = `${text}\n\n${result.modalities.map((m, i) => `${i + 1}. ${m.label}`).join("\n")}`;
-      }
-    }
-
-    if (
-      catalogCheckedThisTurn === 0 &&
-      customerText &&
-      CATALOG_CHECK_CLAIM_PATTERN.test(text) &&
-      !OFFER_OR_PENDING_CONFIRMATION_PATTERN.test(text)
-    ) {
-      const result = (await runCatalogTool(context, "search_products", { query: customerText })) as
-        | { id: string; name: string; price: string; currency: string }[]
-        | { results?: { id: string; name: string; price: string; currency: string }[] };
-      const products = Array.isArray(result) ? result : result?.results ?? [];
-      if (products.length > 0) {
-        text = `${text}\n\n${products
-          .slice(0, 8)
-          .map((p) => `*${p.name}* — $${p.price} ${p.currency}`)
-          .join("\n")}`;
-      }
-    }
-
-    if (
-      ownerAskedThisTurn === 0 &&
-      ESCALATION_CLAIM_PATTERN.test(text) &&
-      customerText &&
-      !OFFER_OR_PENDING_CONFIRMATION_PATTERN.test(text)
-    ) {
-      await runCatalogTool(context, "ask_owner", { question: customerText });
-    }
+    text = await applyClaimBackstops(text, [
+      {
+        name: "payment_options",
+        pattern: PAYMENT_OPTIONS_CLAIM_PATTERN,
+        suppressor: OFFER_OR_PENDING_CONFIRMATION_PATTERN,
+        alreadyHandled: !!paymentMethodsThisTurn,
+        extraCondition: !/\d{6,}/.test(text),
+        matchAgainstStrippedText: true,
+        repair: async (t) => {
+          const result = (await runCatalogTool(context, "get_payment_methods", {})) as {
+            methods?: { label: string; details: string }[];
+          };
+          if (!result?.methods?.length) return t;
+          return `${t}\n\n${result.methods.map((m) => `*${m.label}*\n${m.details}`).join("\n\n")}`;
+        },
+      },
+      {
+        // Same dropped-promise family, for shipping-payment-modality - only fires for a business that
+        // actually configured this concept (empty for most businesses, see
+        // Business.shippingPaymentModalities).
+        name: "shipping_modality",
+        pattern: SHIPPING_MODALITY_CLAIM_PATTERN,
+        suppressor: OFFER_OR_PENDING_CONFIRMATION_PATTERN,
+        alreadyHandled: !!shippingModalitiesThisTurn,
+        extraCondition: !!(personality?.shippingPaymentModalities && personality.shippingPaymentModalities.length > 0),
+        repair: async (t) => {
+          const result = (await runCatalogTool(context, "get_shipping_payment_modalities", {})) as {
+            modalities?: { code: string; label: string }[];
+          };
+          if (!result?.modalities?.length) return t;
+          return `${t}\n\n${result.modalities.map((m, i) => `${i + 1}. ${m.label}`).join("\n")}`;
+        },
+      },
+      {
+        name: "catalog_check",
+        pattern: CATALOG_CHECK_CLAIM_PATTERN,
+        suppressor: OFFER_OR_PENDING_CONFIRMATION_PATTERN,
+        alreadyHandled: catalogCheckedThisTurn !== 0,
+        extraCondition: !!customerText,
+        matchAgainstStrippedText: true,
+        repair: async (t) => {
+          const result = (await runCatalogTool(context, "search_products", { query: customerText })) as
+            | { id: string; name: string; price: string; currency: string }[]
+            | { results?: { id: string; name: string; price: string; currency: string }[] };
+          const products = Array.isArray(result) ? result : result?.results ?? [];
+          if (products.length === 0) return t;
+          return `${t}\n\n${products
+            .slice(0, 8)
+            .map((p) => `*${p.name}* — $${p.price} ${p.currency}`)
+            .join("\n")}`;
+        },
+      },
+      {
+        name: "escalation",
+        pattern: ESCALATION_CLAIM_PATTERN,
+        suppressor: OFFER_OR_PENDING_CONFIRMATION_PATTERN,
+        alreadyHandled: ownerAskedThisTurn !== 0,
+        extraCondition: !!customerText,
+        matchAgainstStrippedText: true,
+        repair: async (t) => {
+          await runCatalogTool(context, "ask_owner", { question: customerText });
+          return t;
+        },
+      },
+    ]);
 
     if (intentFlaggedThisTurn === 0 && customerText && customerRequestsHuman(customerText)) {
       await runCatalogTool(context, "flag_conversation_intent", { intent: "SOLICITA_AGENTE" });
@@ -1085,7 +1132,7 @@ export async function generateReply(
     if (mediaSentThisTurn > 0) return text;
 
     const customerAsked = !!customerText && PHOTO_REQUEST_PATTERN.test(customerText);
-    const fakeMediaTag = FAKE_MEDIA_TAG_PATTERN.test(text);
+    const fakeMediaTag = FAKE_MEDIA_TAG_PATTERN.test(stripMarkdownEmphasis(text));
     const modelClaimsSent =
       (PHOTO_CLAIM_PATTERN.test(text) &&
         PHOTO_REQUEST_PATTERN.test(text) &&
@@ -1182,6 +1229,20 @@ export async function generateReply(
 
   const FALLBACK_TEXT = "Disculpa, tuve un problema procesando tu consulta. Un asesor te va a contactar pronto.";
 
+  // Reliability plan Phase 4 (2026-09-13): stop depending on the model to voluntarily call
+  // find_products_by_attributes for a "color negro" / "reloj negro" style message - a real production bug
+  // ("reloj negro sends airpods/wrong colors", 2026-09-12) traced back to the model sometimes skipping
+  // that tool entirely despite the prompt instruction. Forces tool_choice (not the arguments - the model
+  // still picks those) on the FIRST completion of the turn only, and only when the customer's own text has
+  // BOTH a real color word and a category word this business actually has configured - never a hardcoded
+  // vertical vocabulary (see textMentionsConfiguredCategory). Picked option (b) from the plan (force
+  // tool_choice) over option (a) (pre-execute the filter in code) - smaller diff, model still controls the
+  // real arguments, matches the plan's own recommendation to start there.
+  const shouldForceAttributeFilter =
+    !!customerText &&
+    canonicalColors(customerText).length > 0 &&
+    (await textMentionsConfiguredCategory(context.businessId, customerText));
+
   try {
     for (let iteration = 0; iteration < 5; iteration++) {
       const response = await deepseek.chat.completions.create({
@@ -1189,6 +1250,9 @@ export async function generateReply(
         max_tokens: 1024,
         messages,
         tools: catalogTools,
+        ...(iteration === 0 && shouldForceAttributeFilter
+          ? { tool_choice: { type: "function" as const, function: { name: "find_products_by_attributes" } } }
+          : {}),
         // @ts-expect-error DeepSeek-specific param, not in the OpenAI SDK types. Disabled: reasoning
         // tokens add latency/cost we don't need for a WhatsApp sales reply.
         thinking: { type: "disabled" },
@@ -1233,11 +1297,49 @@ export async function generateReply(
         // trusting the model to pick the right ID. Only engages once a real attribute filter has run this
         // turn; every other send_product_media call (a directly-named product, no color/category filter
         // involved) is unaffected.
-        if (call.function.name === "send_product_media" && attributeMatchThisTurn && attributeMatchThisTurn.length > 0) {
+        // A hallucinated paymentMethodLabel used to reach a real Order record with no check at all
+        // (createOrder persists whatever close_conversation was called with) - validate it against this
+        // business's REAL active payment methods before the tool ever runs, same shape as the
+        // send_product_media guard above (reliability plan Phase 2, item 1, 2026-09-13).
+        if (
+          call.function.name === "close_conversation" &&
+          input.outcome !== "LOST" &&
+          typeof input.paymentMethodLabel === "string" &&
+          input.paymentMethodLabel.trim()
+        ) {
+          const realMethods = await listActivePaymentMethods(context.businessId);
+          const inputLabelNorm = normalizeForMatch(input.paymentMethodLabel.trim());
+          const isRealLabel = realMethods.some((m) => normalizeForMatch(m.label) === inputLabelNorm);
+          if (realMethods.length > 0 && !isRealLabel) {
+            console.error(
+              "close_conversation bloqueado: paymentMethodLabel no coincide con ninguna forma de pago real configurada:",
+              input.paymentMethodLabel
+            );
+            messages.push({
+              role: "tool",
+              tool_call_id: call.id,
+              content: JSON.stringify({
+                closed: false,
+                error: `"${input.paymentMethodLabel}" no es una forma de pago real configurada para este negocio - no se cerro nada. Formas de pago reales: ${realMethods
+                  .map((m) => m.label)
+                  .join(", ")}. Usa exactamente uno de esos labels, tal como lo devolvio get_payment_methods.`,
+              }),
+            });
+            continue;
+          }
+        }
+
+        const scopedProductsThisTurn =
+          attributeMatchThisTurn && attributeMatchThisTurn.length > 0
+            ? attributeMatchThisTurn
+            : searchScopedThisTurn && searchScopedThisTurn.length > 0
+              ? searchScopedThisTurn
+              : null;
+        if (call.function.name === "send_product_media" && scopedProductsThisTurn) {
           const inputProductId = input.productId ? String(input.productId) : null;
           const inputProductName = input.productName ? normalizeForMatch(String(input.productName)) : null;
           const inputVariantId = input.variantId ? String(input.variantId) : null;
-          const isRealMatch = attributeMatchThisTurn.some((m) => {
+          const isRealMatch = scopedProductsThisTurn.some((m) => {
             const productMatches = inputProductId
               ? m.productId === inputProductId
               : inputProductName !== null && normalizeForMatch(m.productName).includes(inputProductName);
@@ -1246,7 +1348,7 @@ export async function generateReply(
           });
           if (!isRealMatch) {
             console.error(
-              "send_product_media bloqueado: productId/variantId no esta entre los resultados reales de find_products_by_attributes de este turno:",
+              "send_product_media bloqueado: productId/variantId no esta entre los resultados reales de la busqueda de este turno:",
               input
             );
             messages.push({
@@ -1255,7 +1357,7 @@ export async function generateReply(
               content: JSON.stringify({
                 sent: false,
                 error:
-                  "Ese producto/variante no esta entre los resultados reales de tu busqueda por color/categoria de este turno - no se envio nada. Usa unicamente el productId/variantId que te devolvio find_products_by_attributes en ESTE turno.",
+                  "Ese producto/variante no esta entre los resultados reales de tu busqueda de este turno - no se envio nada. Usa unicamente el productId/variantId que te devolvio find_products_by_attributes o search_products en ESTE turno.",
               }),
             });
             continue;
@@ -1282,6 +1384,12 @@ export async function generateReply(
         if (call.function.name === "flag_conversation_intent") intentFlaggedThisTurn++;
         if (["search_products", "get_product_details", "list_all_products"].includes(call.function.name)) {
           catalogCheckedThisTurn++;
+        }
+        if (call.function.name === "search_products" && Array.isArray(result) && result.length === 1) {
+          const onlyMatch = result[0] as { id?: unknown; name?: unknown };
+          if (typeof onlyMatch.id === "string" && typeof onlyMatch.name === "string") {
+            searchScopedThisTurn = [{ productId: onlyMatch.id, productName: onlyMatch.name, variantId: null }];
+          }
         }
         if (call.function.name === "get_payment_methods" && Array.isArray(result?.methods)) {
           paymentMethodsThisTurn = result.methods;
