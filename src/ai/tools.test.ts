@@ -309,6 +309,50 @@ test("search_products falls back to the full catalog (with a note) when no keywo
   assert.match(result.note, /catalogo completo/i);
 });
 
+const MAX_LIST_ITEM_JSON_CHARS = 400;
+
+test("catalog list views (search_products fallback, list_all_products) never leak an untruncated description", async () => {
+  // Regression for ONIX-RELIABILITY-PLAN.md Fase 6.0b: an un-truncated description in a list-shaped
+  // tool result silently ballooned one search_products call to ~18.8k chars in production, bigger than
+  // BASE_SYSTEM_PROMPT itself, always at cache-miss price. This asserts the per-item cap holds regardless
+  // of how long a real product description gets, so a future edit that bypasses forList/truncateForList
+  // fails a fast test instead of only showing up in a production token bill.
+  const longDescProduct = await prisma.product.create({
+    data: {
+      businessId,
+      name: "Zzz Articulo De Prueba Descripcion Larga",
+      description: "x".repeat(5000),
+      price: 50000,
+      currency: "COP",
+      stock: 1,
+    },
+  });
+
+  try {
+    const context = await freshContext();
+
+    const searchFallback = (await runCatalogTool(context, "search_products", { query: "consulta sin match" })) as {
+      results: Record<string, unknown>[];
+    };
+    for (const item of searchFallback.results) {
+      assert.ok(
+        JSON.stringify(item).length <= MAX_LIST_ITEM_JSON_CHARS,
+        `search_products fallback item exceeds ${MAX_LIST_ITEM_JSON_CHARS} chars: ${JSON.stringify(item).slice(0, 120)}...`
+      );
+    }
+
+    const listAll = (await runCatalogTool(context, "list_all_products", {})) as Record<string, unknown>[];
+    for (const item of listAll) {
+      assert.ok(
+        JSON.stringify(item).length <= MAX_LIST_ITEM_JSON_CHARS,
+        `list_all_products item exceeds ${MAX_LIST_ITEM_JSON_CHARS} chars: ${JSON.stringify(item).slice(0, 120)}...`
+      );
+    }
+  } finally {
+    await prisma.product.deleteMany({ where: { id: longDescProduct.id } });
+  }
+});
+
 // Regression tests for the "bot sends the wrong product's photos" bug. Root cause: send_product_media
 // re-searched by fuzzy text independently of whatever product the model had already resolved, with no
 // minimum confidence - a single incidental shared word between two unrelated products (e.g. a color
