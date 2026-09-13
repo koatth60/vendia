@@ -2,7 +2,7 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { prisma } from "../db/client";
-import { checkPlanCap } from "./usage";
+import { checkPlanCap, getAiUsageSummary } from "./usage";
 
 let businessId: string;
 let customerId: string;
@@ -55,4 +55,25 @@ test("checkPlanCap trips once the limit is exceeded, and only notifies once per 
   const second = await checkPlanCap(businessId);
   assert.equal(second.capped, true);
   assert.equal(second.justCrossed, false, "should not re-notify the owner every single message");
+});
+
+test("getAiUsageSummary computes cacheHitRatio from real AiUsageLog rows", async () => {
+  await prisma.aiUsageLog.createMany({
+    data: [
+      { businessId, kind: "CHAT", model: "deepseek-v4-flash", cacheHitTokens: 9000, cacheMissTokens: 1000, outputTokens: 100, costUsd: 0.001 },
+      { businessId, kind: "CHAT", model: "deepseek-v4-flash", cacheHitTokens: 0, cacheMissTokens: 0, outputTokens: 50, costUsd: 0.0001 },
+    ],
+  });
+
+  const summary = await getAiUsageSummary(businessId);
+  assert.equal(summary.totalCacheHitTokens, 9000);
+  assert.equal(summary.totalCacheMissTokens, 1000);
+  assert.equal(summary.cacheHitRatio, 90, "9000/10000 cache-hit tokens = 90%");
+
+  await prisma.aiUsageLog.deleteMany({ where: { businessId } });
+});
+
+test("getAiUsageSummary reports cacheHitRatio 0 instead of NaN when there are no logs", async () => {
+  const summary = await getAiUsageSummary(businessId);
+  assert.equal(summary.cacheHitRatio, 0);
 });

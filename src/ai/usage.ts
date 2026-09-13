@@ -131,8 +131,15 @@ export async function getAiUsageSummary(businessId: string, days = 14) {
   const totalCalls = logs.length;
   const chatCalls = logs.filter((l) => l.kind === "CHAT").length;
   const visionCalls = logs.filter((l) => l.kind === "VISION" || l.kind === "VISION_ESCALATION").length;
-  const totalInputTokens = logs.reduce((sum, l) => sum + l.cacheHitTokens + l.cacheMissTokens, 0);
+  const totalCacheHitTokens = logs.reduce((sum, l) => sum + l.cacheHitTokens, 0);
+  const totalCacheMissTokens = logs.reduce((sum, l) => sum + l.cacheMissTokens, 0);
+  const totalInputTokens = totalCacheHitTokens + totalCacheMissTokens;
   const totalOutputTokens = logs.reduce((sum, l) => sum + l.outputTokens, 0);
+  // See ONIX-RELIABILITY-PLAN.md Track C item 5 / Fase 6.0 - cache-miss tokens cost ~50x more than
+  // cache-hit for the DeepSeek flash model, so a low ratio here (not raw token count) is what actually
+  // signals a business worth investigating (e.g. a heavy catalog generating a lot of never-cached
+  // tool-result content). Surfaces the same number the manual query in Fase 6.0 needed, per business.
+  const cacheHitRatio = totalInputTokens === 0 ? 0 : Math.round((totalCacheHitTokens / totalInputTokens) * 1000) / 10;
 
   const byDayMap = new Map<string, number>();
   for (const log of logs) {
@@ -141,5 +148,16 @@ export async function getAiUsageSummary(businessId: string, days = 14) {
   }
   const byDay = Array.from(byDayMap.entries()).map(([date, costUsd]) => ({ date, costUsd }));
 
-  return { totalCostUsd, totalCalls, chatCalls, visionCalls, totalInputTokens, totalOutputTokens, byDay };
+  return {
+    totalCostUsd,
+    totalCalls,
+    chatCalls,
+    visionCalls,
+    totalInputTokens,
+    totalOutputTokens,
+    totalCacheHitTokens,
+    totalCacheMissTokens,
+    cacheHitRatio,
+    byDay,
+  };
 }

@@ -3344,6 +3344,7 @@ async function loadAiUsage() {
           <div style="font-size:12px; color:var(--muted);">Tokens (14 días)</div>
           <div style="font-size:24px; font-weight:700;">${(s.totalInputTokens + s.totalOutputTokens).toLocaleString('es-CO')}</div>
           <div style="font-size:12px; color:var(--muted);">${s.totalInputTokens.toLocaleString('es-CO')} entrada / ${s.totalOutputTokens.toLocaleString('es-CO')} salida</div>
+          <div style="font-size:12px; color:var(--muted); margin-top:4px;">Cache hit: ${s.cacheHitRatio}%</div>
         </div>
       </div>
       <div class="section-title">Costo por día</div>
