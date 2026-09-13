@@ -433,8 +433,8 @@ fase real:
    agregar rechazo estricto ahí cambiaría un comportamiento tolerante ya deliberado, no solo sumaría una
    red de seguridad. Herramientas sin campos riesgosos (`get_faq`, `cancel_order`, etc) quedan sin schema,
    sin cambio de comportamiento. 7 tests nuevos en `tools.test.ts`, `npx tsc --noEmit` limpio, suite
-   completa 209/209 (corrida archivo por archivo, mismo motivo que el item 1). Commiteado, no desplegado
-   todavía.
+   completa 209/209 (corrida archivo por archivo, mismo motivo que el item 1). **Commiteado (`0972ec3`) y
+   desplegado a producción 2026-09-13**.
 4. **DONE 2026-09-13.** Test agregado en `tools.test.ts` (`a2d5b19`): seed de un producto con descripción
    de 5000 chars, assert de que cada item de `search_products` (fallback) y `list_all_products` no supera
    400 chars en JSON — falla rápido en CI si algún cambio futuro rompe el truncado de Fase 6.0b, en vez de
