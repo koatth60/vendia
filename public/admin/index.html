@@ -595,6 +595,14 @@
             Mejorar redacción
           </button>
         </div>
+        <div id="improve-preview" class="card" style="display:none; margin-top:10px; background:var(--border-soft);">
+          <div style="font-size:12px; color:var(--muted); margin-bottom:6px;">Propuesta de la IA - todavía no se guardó nada, revisala antes de usarla:</div>
+          <textarea id="improve-preview-text" style="width:100%; min-height:120px;"></textarea>
+          <div style="display:flex; gap:8px; margin-top:8px;">
+            <button type="button" class="btn-primary" onclick="acceptImprovedInstructions()">Usar este texto</button>
+            <button type="button" class="btn-ghost" onclick="discardImprovedInstructions()">Descartar</button>
+          </div>
+        </div>
       </div>
 
       <div class="settings-group settings-group-last">
@@ -1337,15 +1345,29 @@ async function improveInstructions() {
       body: JSON.stringify({ text }),
     });
     const data = await res.json();
-    textarea.value = data.improved;
-    renderInstructionChips();
-    setStatus('Redacción mejorada ✓');
+    // Never auto-replace the real textarea - show the proposal for the owner to review/edit and
+    // explicitly accept or discard first (ONIX-RELIABILITY-PLAN.md Track B, Fase 7.2).
+    document.getElementById('improve-preview-text').value = data.improved;
+    document.getElementById('improve-preview').style.display = 'block';
+    setStatus('Revisa la propuesta antes de usarla');
   } catch (err) {
     setStatus(`No se pudo mejorar: ${err.message}`, true);
   } finally {
     btn.disabled = false;
     btn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.5l1.8 5.7 5.7 1.8-5.7 1.8L12 17.5l-1.8-5.7-5.7-1.8 5.7-1.8L12 2.5z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8L19 15z"/></svg> Mejorar redacción';
   }
+}
+
+function acceptImprovedInstructions() {
+  const improved = document.getElementById('improve-preview-text').value;
+  document.getElementById('business-instructions').value = improved;
+  document.getElementById('improve-preview').style.display = 'none';
+  renderInstructionChips();
+  setStatus('Redacción actualizada - no olvides Guardar para confirmarla ✓');
+}
+
+function discardImprovedInstructions() {
+  document.getElementById('improve-preview').style.display = 'none';
 }
 
 async function logout() {

@@ -46,6 +46,7 @@ import { detectProductColors } from "../ai/colorDetection";
 import { generateClosingMessage } from "../ai/agent";
 import { extractSaleDetails } from "../ai/extractSale";
 import { deepseek, DEEPSEEK_MODEL } from "../ai/client";
+import { IMPROVE_INSTRUCTIONS_PROMPT } from "../ai/prompts/improveInstructions";
 import { getAnalyticsSummary } from "../analytics/service";
 import { listFaqEntries, createFaqEntry, updateFaqEntry, deleteFaqEntry } from "../catalog/faq";
 import { listCategoryAliases, createCategoryAlias, deleteCategoryAlias } from "../catalog/categoryAliases";
@@ -278,17 +279,15 @@ adminRouter.post("/api/improve-instructions", requireOwner, async (req, res) => 
     return;
   }
 
+  // Scale the completion ceiling with input size - a fixed 600 truncates a business's longer real
+  // customInstructions (seen up to ~8.3k chars / ~2.7k tokens in production) mid-rewrite.
+  const maxTokens = Math.min(4000, Math.max(600, Math.ceil(text.length / 3)));
+
   const response = await deepseek.chat.completions.create({
     model: DEEPSEEK_MODEL,
-    max_tokens: 600,
+    max_tokens: maxTokens,
     messages: [
-      {
-        role: "system",
-        content: `Reescribe instrucciones de un dueño de negocio para su asistente de ventas de WhatsApp.
-Corrige ortografía y gramática, organiza en viñetas claras y cortas, en español neutro. NO inventes reglas
-nuevas ni cambies el significado de lo que pidió - solo aclara la redacción. No agregues explicaciones,
-devuelve unicamente las instrucciones reescritas.`,
-      },
+      { role: "system", content: IMPROVE_INSTRUCTIONS_PROMPT },
       { role: "user", content: text },
     ],
     // @ts-expect-error DeepSeek-specific param, not in the OpenAI SDK types. Disabled: reasoning
