@@ -997,7 +997,7 @@
         </div>
         <div><label>Stock</label><input id="edit-stock" type="number" /><div id="edit-stock-hint" class="hint" hidden>Este producto tiene variantes - el stock se calcula sumando las variantes (pestaña de abajo), este campo no se usa.</div></div>
         <div class="full"><label>Categoría</label><input id="edit-cat" /></div>
-        <div><label>Color (si es un solo color)</label><input id="edit-color" placeholder="Ej: Negro" /></div>
+        <div><label>Color (si es un solo color)</label><input id="edit-color" placeholder="Ej: Negro" /><div id="edit-color-hint" class="hint" hidden>Este producto tiene variantes - el color de cada una se edita en la pestaña de abajo, este campo no se usa.</div></div>
         <div id="edit-size-wrapper" hidden><label>Talla (si es una sola talla)</label><input id="edit-size" placeholder="Ej: M" /></div>
         <div class="full" style="display:flex; gap:8px; margin-top:10px;">
           <button class="btn-primary" onclick="saveEdit()">Guardar</button>
@@ -1750,7 +1750,10 @@ function startEdit(id) {
   stockInput.disabled = hasVariants;
   document.getElementById('edit-stock-hint').hidden = !hasVariants;
   document.getElementById('edit-cat').value = p.category || '';
-  document.getElementById('edit-color').value = p.color || '';
+  const colorInput = document.getElementById('edit-color');
+  colorInput.value = hasVariants ? (p.variants || []).map(v => v.color).filter(Boolean).join(', ') : (p.color || '');
+  colorInput.disabled = hasVariants;
+  document.getElementById('edit-color-hint').hidden = !hasVariants;
   document.getElementById('edit-size').value = p.size || '';
   document.getElementById('product-edit-modal').style.display = 'flex';
 }
