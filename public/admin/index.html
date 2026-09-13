@@ -29,46 +29,104 @@
     </div>
   </div>
 
+  <!-- Fase 1 reorg (ver ONIX-CRM-REORG-PLAN.md): 5 secciones primarias en vez de 10 pestanas planas.
+       Las secciones con varios paneles muestran una segunda fila (.subnav) con las mismas pestanas
+       de siempre (mismos data-tab, mismo switchTab) agrupadas por tema. -->
   <div class="tabbar">
-    <button class="tab-btn active" data-tab="business" onclick="switchTab('business')">
-      <span class="tab-icon">🏬</span> Tu negocio
+    <button class="tab-btn primary-tab-btn active" data-section="inicio" data-tab="inicio" onclick="switchSection('inicio')">
+      <span class="tab-icon">🏠</span> Inicio
     </button>
-    <button class="tab-btn" data-tab="catalog" onclick="switchTab('catalog')">
+    <button class="tab-btn primary-tab-btn" data-section="crm" onclick="switchSection('crm')">
+      <span class="tab-icon">💬</span> CRM <span class="tab-count" id="tab-count-conversations">0</span><span class="unread-badge" id="tab-unread-conversations" hidden>0</span>
+    </button>
+    <button class="tab-btn primary-tab-btn" data-section="catalogo" data-tab="catalog" onclick="switchSection('catalogo')">
       <span class="tab-icon">📦</span> Catálogo <span class="tab-count" id="tab-count-catalog">0</span>
+    </button>
+    <button class="tab-btn primary-tab-btn" data-section="bot" onclick="switchSection('bot')">
+      <span class="tab-icon">🤖</span> Bot
+    </button>
+    <button class="tab-btn primary-tab-btn" data-section="negocio" onclick="switchSection('negocio')">
+      <span class="tab-icon">🏬</span> Negocio
+    </button>
+  </div>
+
+  <div class="subnav" data-section-group="crm">
+    <button class="tab-btn" data-tab="conversations" onclick="switchTab('conversations')">
+      <span class="tab-icon">📥</span> Bandeja
+    </button>
+    <button class="tab-btn" data-tab="orders" onclick="switchTab('orders')">
+      <span class="tab-icon">📦</span> Pedidos
+    </button>
+  </div>
+
+  <div class="subnav" data-section-group="bot">
+    <button class="tab-btn" data-tab="business" onclick="switchTab('business')">
+      <span class="tab-icon">⚙️</span> Configuración
+    </button>
+    <button class="tab-btn" data-tab="faq" onclick="switchTab('faq')">
+      <span class="tab-icon">❓</span> FAQ
     </button>
     <button class="tab-btn" data-tab="payments" onclick="switchTab('payments')">
       <span class="tab-icon">💳</span> Pagos
     </button>
     <button class="tab-btn" data-tab="whatsapp" onclick="switchTab('whatsapp')">
-      <span class="tab-icon">📲</span> WhatsApp
+      <span class="tab-icon">📲</span> Canales
     </button>
-    <button class="tab-btn" data-tab="faq" onclick="switchTab('faq')">
-      <span class="tab-icon">❓</span> FAQ
+  </div>
+
+  <div class="subnav" data-section-group="negocio">
+    <button class="tab-btn" data-tab="negocio" onclick="switchTab('negocio')">
+      <span class="tab-icon">🏬</span> Identidad
     </button>
-    <button class="tab-btn" data-tab="conversations" onclick="switchTab('conversations')">
-      <span class="tab-icon">💬</span> Conversaciones <span class="tab-count" id="tab-count-conversations">0</span><span class="unread-badge" id="tab-unread-conversations" hidden>0</span>
-    </button>
-    <button class="tab-btn" data-tab="orders" onclick="switchTab('orders')">
-      <span class="tab-icon">📦</span> Pedidos
-    </button>
-    <button class="tab-btn" data-tab="analytics" onclick="switchTab('analytics')">
-      <span class="tab-icon">📈</span> Analytics
+    <button class="tab-btn owner-only" data-tab="team" onclick="switchTab('team')" hidden>
+      <span class="tab-icon">👥</span> Equipo
     </button>
     <button class="tab-btn" data-tab="ai-usage" onclick="switchTab('ai-usage')">
       <span class="tab-icon">📊</span> Consumo IA
     </button>
-    <button class="tab-btn owner-only" data-tab="team" onclick="switchTab('team')" hidden>
-      <span class="tab-icon">👥</span> Equipo
+    <button class="tab-btn" data-tab="analytics" onclick="switchTab('analytics')">
+      <span class="tab-icon">📈</span> Analytics
     </button>
   </div>
 
   <main>
     <div id="status"></div>
 
-    <div class="tab-panel active" data-tab-panel="business">
+    <div class="tab-panel active" data-tab-panel="inicio">
       <div class="panel-header">
         <div>
-          <div class="panel-title">Tu negocio</div>
+          <div class="panel-title">Inicio</div>
+          <div class="panel-subtitle">Todo el manejo de tu bot, en un solo lugar.</div>
+        </div>
+      </div>
+      <div class="inicio-shortcuts">
+        <button type="button" class="inicio-shortcut-card" onclick="switchSection('crm')">
+          <div class="icon">💬</div>
+          <div class="title">CRM</div>
+          <div class="desc">Conversaciones en vivo y pedidos.</div>
+        </button>
+        <button type="button" class="inicio-shortcut-card" onclick="switchSection('catalogo')">
+          <div class="icon">📦</div>
+          <div class="title">Catálogo</div>
+          <div class="desc">Productos, precios, stock y fotos.</div>
+        </button>
+        <button type="button" class="inicio-shortcut-card" onclick="switchSection('bot')">
+          <div class="icon">🤖</div>
+          <div class="title">Bot</div>
+          <div class="desc">Personalidad, reglas, FAQ, pagos y canales.</div>
+        </button>
+        <button type="button" class="inicio-shortcut-card" onclick="switchSection('negocio')">
+          <div class="icon">🏬</div>
+          <div class="title">Negocio</div>
+          <div class="desc">Identidad, equipo y consumo de IA.</div>
+        </button>
+      </div>
+    </div>
+
+    <div class="tab-panel" data-tab-panel="business">
+      <div class="panel-header">
+        <div>
+          <div class="panel-title">Configuración del bot</div>
           <div class="panel-subtitle">Cómo se presenta tu bot y qué reglas propias sigue.</div>
         </div>
         <button class="btn-primary owner-only" onclick="saveBusiness()">Guardar cambios</button>
@@ -190,7 +248,20 @@
           </div>
         </div>
       </div>
+    </div>
 
+    <!-- Fase 1 reorg: identidad del negocio (Contacto, Zona de peligro) separada de la configuracion
+         del bot - antes vivian juntas en el mismo panel "Tu negocio" (ver P4 en ONIX-CRM-REORG-PLAN.md).
+         Mismos ids (#business-contact-name, #reset-data-btn, etc), mismas funciones (saveBusiness(),
+         resetTestData()) - solo cambia en que panel viven. -->
+    <div class="tab-panel" data-tab-panel="negocio">
+      <div class="panel-header">
+        <div>
+          <div class="panel-title">Negocio</div>
+          <div class="panel-subtitle">Identidad de tu cuenta y datos de contacto del dueño.</div>
+        </div>
+        <button class="btn-primary owner-only" onclick="saveBusiness()">Guardar cambios</button>
+      </div>
       <div class="settings-group settings-group-last">
         <div class="settings-group-title">Contacto</div>
         <div class="grid-2">
@@ -347,8 +418,8 @@
     <div class="tab-panel" data-tab-panel="whatsapp">
       <div class="panel-header">
         <div>
-          <div class="panel-title">WhatsApp</div>
-          <div class="panel-subtitle">Seguimiento automático post-venta y plantillas aprobadas por Meta.</div>
+          <div class="panel-title">Canales</div>
+          <div class="panel-subtitle">Hoy: WhatsApp. Seguimiento automático post-venta y plantillas aprobadas por Meta. (Instagram, Facebook y Mercado Libre - próximamente.)</div>
         </div>
       </div>
       <div class="card">

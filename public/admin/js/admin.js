@@ -43,6 +43,26 @@ window.addEventListener('resize', () => {
   if (document.querySelector('.tab-btn[data-tab="conversations"]').classList.contains('active')) fitChatSplit();
 });
 
+// Fase 1 reorg (ver ONIX-CRM-REORG-PLAN.md): 5 secciones primarias (Inicio/CRM/Catálogo/Bot/Negocio)
+// en vez de 10 pestañas planas. Cada pestaña de siempre (mismo nombre, mismo data-tab) ahora vive
+// dentro de una seccion; PANEL_SECTION dice cual, SECTION_DEFAULT cual pestaña se abre por defecto
+// al clickear la seccion. switchTab() sigue siendo la única función que cambia qué panel se ve -
+// switchSection() sólo resuelve la pestaña por defecto y delega en switchTab().
+const PANEL_SECTION = {
+  inicio: 'inicio',
+  conversations: 'crm', orders: 'crm',
+  catalog: 'catalogo',
+  business: 'bot', faq: 'bot', payments: 'bot', whatsapp: 'bot',
+  negocio: 'negocio', team: 'negocio', 'ai-usage': 'negocio', analytics: 'negocio',
+};
+const SECTION_DEFAULT = {
+  inicio: 'inicio', crm: 'conversations', catalogo: 'catalog', bot: 'business', negocio: 'negocio',
+};
+
+function switchSection(section) {
+  switchTab(SECTION_DEFAULT[section] || section);
+}
+
 function switchTab(name) {
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.dataset.tabPanel === name));
@@ -53,6 +73,13 @@ function switchTab(name) {
     markConversationReadIfViewing();
   }
   try { localStorage.setItem('vendia-admin-tab', name); } catch {}
+  // replaceState (no pushState) a proposito: refleja la vista actual en la URL para poder compartir
+  // el enlace o refrescar sin perder el lugar, sin llenar el historial del navegador con cada click.
+  try { history.replaceState(null, '', '#/' + name); } catch {}
+
+  const section = PANEL_SECTION[name] || 'inicio';
+  document.querySelectorAll('.primary-tab-btn').forEach(b => b.classList.toggle('active', b.dataset.section === section));
+  document.querySelectorAll('.subnav').forEach(s => s.classList.toggle('active', s.dataset.sectionGroup === section));
 }
 
 async function loadBusiness() {
@@ -2863,10 +2890,17 @@ function initRealtime() {
 async function boot() {
   await loadRole();
 
-  let initialTab = 'business';
+  // Deep-link (URL hash) gana sobre lo último guardado en localStorage - así un enlace compartido a
+  // una sección concreta abre ahí en vez de donde el dueño se quedó la última vez en ESTE navegador.
+  let initialTab = 'inicio';
   try {
+    const fromHash = location.hash.replace(/^#\/?/, '');
     const saved = localStorage.getItem('vendia-admin-tab');
-    if (saved && document.querySelector(`.tab-btn[data-tab="${saved}"]`) && !(saved === 'team' && !isOwner)) initialTab = saved;
+    const candidate =
+      (fromHash && document.querySelector(`.tab-btn[data-tab="${fromHash}"]`)) ? fromHash
+      : (saved && document.querySelector(`.tab-btn[data-tab="${saved}"]`)) ? saved
+      : null;
+    if (candidate && !(candidate === 'team' && !isOwner)) initialTab = candidate;
   } catch {}
   switchTab(initialTab);
 
