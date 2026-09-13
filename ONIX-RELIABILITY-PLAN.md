@@ -422,9 +422,19 @@ fase real:
    `contactSaved` y el guard de media como `if`s sueltos "porque tenían forma distinta" — si esa forma se
    puede generalizar un poco, sumarlos al `ClaimBackstopGuard` registry deja un solo lugar para razonar sobre
    todos los guards en vez de dos.
-3. **Tipar los inputs de herramientas en vez de castear a mano.** `runCatalogTool` hace `String(input.x)`
-   caso por caso — un schema de validación por herramienta (zod, si ya está en el proyecto) rechazaría un
-   input malformado ANTES de ejecutar, en vez de silenciosamente convertir cualquier cosa a string.
+3. **DONE 2026-09-13.** `zod` ya era dependencia del proyecto pero no se usaba en ningún lado. Agregado un
+   gate de validación antes del `switch` en `runCatalogTool` (`tools.ts`, `0972ec3`): cada herramienta con
+   al menos un campo que vale la pena chequear tiene un schema (campos escalares restringidos a
+   string|number, `items` de `close_conversation`/`show_order_summary` con forma real de objeto) — un
+   schema que falla devuelve `{error}` tipado antes de correr el cuerpo de la herramienta, en vez de
+   convertir silenciosamente cualquier cosa a `"[object Object]"` o tratar un `items` mal formado como
+   lista vacía. Dejado fuera a propósito: campos enum con su propio fallback existente (`outcome` de
+   close_conversation, `intent` de flag_conversation_intent, `status` de update_conversation_status) —
+   agregar rechazo estricto ahí cambiaría un comportamiento tolerante ya deliberado, no solo sumaría una
+   red de seguridad. Herramientas sin campos riesgosos (`get_faq`, `cancel_order`, etc) quedan sin schema,
+   sin cambio de comportamiento. 7 tests nuevos en `tools.test.ts`, `npx tsc --noEmit` limpio, suite
+   completa 209/209 (corrida archivo por archivo, mismo motivo que el item 1). Commiteado, no desplegado
+   todavía.
 4. **DONE 2026-09-13.** Test agregado en `tools.test.ts` (`a2d5b19`): seed de un producto con descripción
    de 5000 chars, assert de que cada item de `search_products` (fallback) y `list_all_products` no supera
    400 chars en JSON — falla rápido en CI si algún cambio futuro rompe el truncado de Fase 6.0b, en vez de
