@@ -1432,15 +1432,23 @@ function toggleGenderedAddressFields() {
 }
 
 function renderCard(p) {
-  const media = p.media || [];
   const variants = p.variants || [];
-  const thumbs = media.map(m => `
+  // ONE gallery per product, general photos and every variant's own photos together - each thumbnail
+  // carries its real current assignment (null = general, or a variant id) via renderMediaAssignSelect,
+  // so reassigning a color never moves a photo to a second, separate strip elsewhere on the card. See
+  // renderVariantSection for why that split UI got removed.
+  const allMedia = [
+    ...(p.media || []).map(m => ({ ...m, variantId: null })),
+    ...variants.flatMap(v => (v.media || []).map(m => ({ ...m, variantId: v.id }))),
+  ];
+  const media = p.media || [];
+  const thumbs = allMedia.map(m => `
     <span class="thumb-wrap">
       ${m.type === 'VIDEO'
         ? `<video class="thumb" src="${m.url}" onclick="openVideoLightbox('${m.url}')"></video>`
         : `<img class="thumb" src="${m.url}" onclick="openImageLightbox('${m.url}')" />`}
       <button class="thumb-remove" onclick="deleteMedia('${m.id}')">×</button>
-      ${renderMediaAssignSelect(m.id, null, variants)}
+      ${renderMediaAssignSelect(m.id, m.variantId, variants)}
     </span>
   `).join('');
 
@@ -1560,47 +1568,31 @@ function renderVariantSection(productId, variants, product) {
         <label>Stock</label>
         <input class="variant-stock-input" type="number" value="${product.stock}" onchange="updateProductField('${productId}', 'stock', this.value)" />
       </div>
-      <span style="width:26px; flex-shrink:0;" title="Este producto tiene un solo color - usa las fotos generales de arriba"></span>
       <button class="variant-delete-btn" title="Quitar este color (el stock queda en el producto)" onclick="updateProductField('${productId}', 'color', '')">×</button>
     </div>
   ` : '';
-  const rows = variants.map(v => {
-    const vMedia = v.media || [];
-    const firstMedia = vMedia[0];
-    const photoPreview = firstMedia
-      ? (firstMedia.type === 'VIDEO' ? `<video src="${firstMedia.url}"></video>` : `<img src="${firstMedia.url}" />`)
-      : '+';
-    const vThumbsRest = vMedia.map(m => `
-      <span class="thumb-wrap">
-        ${m.type === 'VIDEO'
-          ? `<video class="thumb" src="${m.url}" onclick="openVideoLightbox('${m.url}')"></video>`
-          : `<img class="thumb" src="${m.url}" onclick="openImageLightbox('${m.url}')" />`}
-        <button class="thumb-remove" onclick="deleteMedia('${m.id}')">×</button>
-        ${renderMediaAssignSelect(m.id, v.id, variants)}
-      </span>
-    `).join('');
-    return `
-      <div class="variant-row">
-        ${colorSwatchHtml(v.color)}
-        <input class="variant-name-input" placeholder="Color" value="${escapeHtml(v.color || '')}" onchange="updateVariant('${v.id}', 'color', this.value)" />
-        ${showTalla ? `<input class="variant-size-input" placeholder="Talla" value="${escapeHtml(v.size || '')}" onchange="updateVariant('${v.id}', 'size', this.value)" />` : ''}
-        <div class="variant-stock-wrap">
-          <label>Stock</label>
-          <input class="variant-stock-input" type="number" value="${v.stock}" onchange="updateVariant('${v.id}', 'stock', this.value)" />
-        </div>
-        <label class="variant-photo-btn ${firstMedia ? 'has-photo' : ''}" title="Foto propia de este color (opcional, si no subís se usa la foto del producto)">
-          ${photoPreview}
-          <input type="file" accept="image/jpeg,image/png,video/*" onchange="uploadVariantMedia('${productId}', '${v.id}', this)" />
-        </label>
-        <button class="variant-delete-btn" title="Eliminar variante" onclick="deleteVariant('${v.id}', '${productId}')">×</button>
+  // Photos live in ONE place - the gallery at the top of the card (see renderCard's unified `thumbs`,
+  // built from product + every variant's media together) - each thumbnail carries its own color select
+  // there. A second, separate photo strip per variant row here used to show the exact same underlying
+  // files again, which read as duplicated even though nothing was duplicated in storage - reported
+  // directly as confusing. Variant rows are now just color/talla/stock/delete; assign an existing photo
+  // to a color from the gallery above instead.
+  const rows = variants.map(v => `
+    <div class="variant-row">
+      ${colorSwatchHtml(v.color)}
+      <input class="variant-name-input" placeholder="Color" value="${escapeHtml(v.color || '')}" onchange="updateVariant('${v.id}', 'color', this.value)" />
+      ${showTalla ? `<input class="variant-size-input" placeholder="Talla" value="${escapeHtml(v.size || '')}" onchange="updateVariant('${v.id}', 'size', this.value)" />` : ''}
+      <div class="variant-stock-wrap">
+        <label>Stock</label>
+        <input class="variant-stock-input" type="number" value="${v.stock}" onchange="updateVariant('${v.id}', 'stock', this.value)" />
       </div>
-      ${vMedia.length > 0 ? `<div class="thumb-strip" style="padding:4px 0 0 26px;">${vThumbsRest}</div>` : ''}
-    `;
-  }).join('');
+      <button class="variant-delete-btn" title="Eliminar variante" onclick="deleteVariant('${v.id}', '${productId}')">×</button>
+    </div>
+  `).join('');
 
   return `
     <div class="variant-section">
-      <div class="variant-section-title">${showTalla ? 'Colores/tallas' : 'Colores'} (sin foto propia usan la foto del producto)</div>
+      <div class="variant-section-title">${showTalla ? 'Colores/tallas' : 'Colores'} - las fotos se asignan desde la galería de arriba</div>
       <div class="variant-list">${singleColorRow}${rows}</div>
       <div class="variant-add-row">
         ${colorSwatchHtml('')}
@@ -1725,25 +1717,6 @@ async function deleteVariant(variantId, productId) {
     loadProducts();
   } catch (err) {
     setStatus(`No se pudo eliminar la variante: ${err.message}`, true);
-  }
-}
-
-async function uploadVariantMedia(productId, variantId, input) {
-  const file = input.files[0];
-  if (!file) return;
-  const formData = new FormData();
-  formData.append('file', file);
-  formData.append('variantId', variantId);
-  setStatus('Subiendo archivo...');
-  try {
-    await apiFetch(`/admin/api/products/${productId}/media`, {
-      method: 'POST',
-      body: formData,
-    });
-    setStatus('Archivo subido ✓');
-    loadProducts();
-  } catch (err) {
-    setStatus(`Error subiendo archivo: ${err.message}`, true);
   }
 }
 
