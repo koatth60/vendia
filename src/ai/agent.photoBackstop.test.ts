@@ -125,6 +125,42 @@ test("category dominance: does not affect products with no category set (backwar
 // dropping the earbuds combo purely for being outnumbered 2-to-1 by category, even though it was named
 // in full, not through a coincidental word collision. Fix: never drop a near-exact name match (ratio
 // >= 0.9) regardless of category.
+// Real production incident (2026-09-13, MAGByLizN business, exact catalog names and bot message text).
+// Two combined root causes: (1) the bot's numbered list used KEYCAP EMOJI ("1️⃣...4️⃣"), not plain "1. "
+// markers - the bare digit inside the emoji leaked into the haystack and coincidentally matched
+// "AIRPODS SERIE 4"'s own trailing "4". (2) the real watch names carry a marketing parenthetical
+// ("(Edición Deportiva / Robusta)") that the bot's own shorthand mention never repeats - counting those
+// extra words in the ratio's denominator dropped the real watches below threshold. Both watches ended up
+// NEVER sent while airpods/earbuds got sent 3 times instead.
+test("real incident: emoji-numbered list matches the real long-named watches, not the unrelated airpods", () => {
+  const products = [
+    { name: "Reloj Inteligente Smartwatch Serie 12 Ultra 3 (Edición Deportiva / Robusta)", media: ["x"], category: "Tecnologia (Smartwatches)" },
+    { name: "Reloj Inteligente Smartwatch Serie 11 Mini (Edición Compacta y Elegante)", media: ["x"], category: "Tecnologia (Smartwatches)" },
+    { name: "Smartwatch gen 9", media: ["x"], category: "Tecnologia (smartwatch)" },
+    { name: "Smartwatch V20 Caballero", media: ["x"], category: "Tecnologia (Smartwatches)" },
+    { name: "AIRPODS SERIE 4", media: ["x"], category: "Tecnologia (Audifonos)" },
+    { name: "Combo k11 Mini", media: ["x"], category: "Tecnologia (Audifonos)" },
+    { name: "COMBO SMARTWATCH T2000 ULTRA", media: ["x"], category: "Tecnologia (Smartwatches)" },
+  ];
+  const botReply =
+    "Claro que sí, Einer 💪 Déjame revisar bien el catálogo para mostrarte las opciones que mejor te sirvan para deporte.\n\n" +
+    "Estas son otras opciones deportivas que manejamos:\n\n" +
+    "1️⃣ *Smartwatch Serie 12 Ultra 3* — $140.000 · pantalla grande 49 mm, la más orientada a deporte\n" +
+    "2️⃣ *Smartwatch Serie 11 Mini* — $145.000 · 41 mm, compacta y elegante\n" +
+    "3️⃣ *Smartwatch gen 9* — $85.000\n" +
+    "4️⃣ *Combo Smartwatch T2000 Ultra* — $80.000\n\n" +
+    "¿Quieres que te cuente más de alguna de estas?";
+  const customerText = "Si la verdad es muy clave la parte de ciclismo pero si tienes algun otro q me pueda medir esa parte en deportes me gustaria q me la enseñaras";
+  const haystack = `${customerText} ${botReply}`;
+
+  const matched = findMentionedProductsForMediaBackstop(products, haystack);
+
+  assert.ok(matched.some((p) => p.name.includes("Serie 12 Ultra 3")), "must match the real Serie 12 Ultra 3 watch despite its marketing parenthetical");
+  assert.ok(matched.some((p) => p.name.includes("Serie 11 Mini")), "must match the real Serie 11 Mini watch despite its marketing parenthetical");
+  assert.ok(!matched.some((p) => p.name === "AIRPODS SERIE 4"), "must NOT match airpods from the stray keycap-emoji digit");
+  assert.ok(!matched.some((p) => p.name === "Combo k11 Mini"), "must NOT match the unrelated earbuds combo");
+});
+
 test("category dominance: keeps a minority-category match that was named by its full real name", () => {
   const products = [
     { name: "Combo Smartwatch T2000 Ultra", media: ["x"], category: "Tecnologia (Smartwatch)" },

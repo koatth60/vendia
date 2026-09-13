@@ -133,13 +133,31 @@ export async function updateConversationStatus(
   return conversation;
 }
 
+// Real production bug (2026-09-13): saveCustomerName/saveCustomerContactInfo/setCustomerTags update
+// Customer, not Conversation, so none of them ever emitted conversation:updated the way
+// updateConversationStatus/setHumanControl/setConversationIntent do - a name saved mid-conversation never
+// reached an already-open admin panel (the sidebar row and chat header kept showing the phone number
+// until a full page reload). A customer can have several conversations (see the "group by customer"
+// deferral) - emit one row per conversation so every open panel tab for this customer updates.
+async function emitConversationRowsForCustomer(businessId: string, customerId: string): Promise<void> {
+  const conversations = await prisma.conversation.findMany({
+    where: { customerId },
+    include: { customer: true, messages: { orderBy: { createdAt: "desc" }, take: 1 } },
+  });
+  for (const conversation of conversations) {
+    emitConversationUpdated(businessId, formatConversationRow(conversation));
+  }
+}
+
 export async function saveCustomerName(businessId: string, customerId: string, name: string | null) {
   const customer = await prisma.customer.findFirst({ where: { id: customerId, businessId } });
   if (!customer) return null;
-  return prisma.customer.update({
+  const updated = await prisma.customer.update({
     where: { id: customerId },
     data: { name },
   });
+  await emitConversationRowsForCustomer(businessId, customerId);
+  return updated;
 }
 
 export async function saveCustomerContactInfo(
@@ -149,22 +167,26 @@ export async function saveCustomerContactInfo(
 ) {
   const customer = await prisma.customer.findFirst({ where: { id: customerId, businessId } });
   if (!customer) return null;
-  return prisma.customer.update({
+  const updated = await prisma.customer.update({
     where: { id: customerId },
     data: {
       ...(data.idNumber ? { idNumber: data.idNumber } : {}),
       ...(data.deliveryPhone ? { deliveryPhone: data.deliveryPhone } : {}),
     },
   });
+  await emitConversationRowsForCustomer(businessId, customerId);
+  return updated;
 }
 
 export async function setCustomerTags(businessId: string, customerId: string, tags: string[]) {
   const customer = await prisma.customer.findFirst({ where: { id: customerId, businessId } });
   if (!customer) return null;
-  return prisma.customer.update({
+  const updated = await prisma.customer.update({
     where: { id: customerId },
     data: { tags },
   });
+  await emitConversationRowsForCustomer(businessId, customerId);
+  return updated;
 }
 
 export async function setConversationIntent(

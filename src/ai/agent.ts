@@ -30,6 +30,48 @@ function messageText(m: { content: string; imageAnalysis: string | null }): stri
   return `${caption ? `${caption}\n\n` : ""}[Analisis de imagen adjunta]: ${m.imageAnalysis}`;
 }
 
+// recordMessage writes one ASSISTANT row PER media item sent (sendMediaWithSpacing, tools.ts), each with
+// content exactly "[Foto de X]"/"[Video de X]" - a real backstop blast of 8-9 photos filled 8-9 of the 20
+// history slots with that literal string. Real production incident (2026-09-13): the model, seeing its own
+// recent turns dominated by that exact bracket format, started FABRICATING it in its own reply text without
+// ever calling send_product_media - FAKE_MEDIA_TAG_PATTERN caught the fabrication and re-triggered the
+// photo backstop, which wrote more "[Foto de X]" rows into history, reinforcing the same pattern for the
+// next turn. Collapses each consecutive run of these into one compact summary line before the history goes
+// to the model - it still knows photos went out (so it doesn't re-offer them), but never sees enough of the
+// literal format to imitate it, and the collapse is a net token REDUCTION. Exported as a pure function for
+// a cheap test - no DB/LLM needed. Deliberately NOT applied to `history` itself (used elsewhere for
+// lastAssistantText, which needs the real prior text, e.g. to detect the bot's own name-asking phrasing).
+const MEDIA_CAPTION_PATTERN = /^\[(?:Foto|Video) de (.+)\]$/;
+
+export function collapseMediaCaptions<T extends { role: string; content: string; imageAnalysis: string | null }>(
+  history: T[]
+): T[] {
+  const result: T[] = [];
+  let mediaRun: string[] = [];
+
+  const flush = () => {
+    if (mediaRun.length === 0) return;
+    const summary =
+      mediaRun.length === 1
+        ? `[Se envio 1 foto/video: ${mediaRun[0]}]`
+        : `[Se enviaron ${mediaRun.length} fotos/videos: ${mediaRun.join(", ")}]`;
+    result.push({ role: "ASSISTANT", content: summary, imageAnalysis: null } as T);
+    mediaRun = [];
+  };
+
+  for (const m of history) {
+    const match = m.role === "ASSISTANT" ? m.content.match(MEDIA_CAPTION_PATTERN) : null;
+    if (match) {
+      mediaRun.push(match[1]);
+      continue;
+    }
+    flush();
+    result.push(m);
+  }
+  flush();
+  return result;
+}
+
 // getRecentHistory only sends the last RECENT_WINDOW messages to the model - a long conversation would
 // otherwise lose everything said before that. Instead of re-summarizing the whole older-messages history
 // from scratch each time (which grows unbounded), this only feeds the newly-aged-out slice through the
@@ -115,6 +157,16 @@ export async function getOrRefreshContextSummary(conversationId: string, busines
 // already did on its own.
 export const PHOTO_REQUEST_PATTERN =
   /\b(foto|fotos|imagen|imagenes|imágenes|video|videos|muestra|muéstrame|muestrame|enseñ|ense[nñ]a|mandame|mándame|manda la|envia la|envía la|pasame|pásame|regal[aá]me|regala la)\b/i;
+// Real production bug (2026-09-13): PHOTO_REQUEST_PATTERN's bare verbs (muestra/enseña/manda) match
+// ordinary Spanish that has nothing to do with photos - "ese reloj no me MUESTRA la distancia" (a screen
+// complaint) fired the media backstop and blasted 8 unrequested photos. Used ONLY for the customer's own
+// message (never for the bot's text, which stays on PHOTO_REQUEST_PATTERN below) - requires either a media
+// noun, or a send-verb bound to a clitic object ("muéstramela", "me la mandes"). A bare verb alone no
+// longer qualifies, so callers must ALSO check CUSTOMER_PHOTO_NEGATION_PATTERN to reject "no me
+// muestra/enseña..." before treating this as a real request.
+export const CUSTOMER_PHOTO_REQUEST_PATTERN =
+  /\b(foto|fotos|imagen|imagenes|imágenes|video|videos)\b|\b(mu[eé]stra(me)?la|mu[eé]stramelas?|ens[eé][ñn]a(me)?la|ens[eé][ñn]amelas?|m[aá]ndamela|m[aá]ndamelas|p[aá]samela|p[aá]samelas|me la (muestras|muestres|ense[ñn]as|ense[ñn]es|enseñaras|enseñara|mandas|mandes|pasas|pases)|me las (muestras|muestres|ense[ñn]as|ense[ñn]es|mandas|mandes|pasas|pases))\b/i;
+export const CUSTOMER_PHOTO_NEGATION_PATTERN = /\bno me (muestra|ense[nñ]a)\b/i;
 // Broadened beyond "te mand.." to also catch phrasings without "te" ("ya la mande", "ahi la envio") and
 // "aca"/"aqui esta(n)" - a real conversation slipped through the narrower pattern with "ya se la mande".
 export const PHOTO_CLAIM_PATTERN =
@@ -187,7 +239,7 @@ export const CATALOG_CHECK_CLAIM_PATTERN =
 // turn actually asked for the name (so a random two-word customer message elsewhere never gets
 // mistaken for one) and the customer's answer is shaped like a name, not a sentence.
 export const ASK_NAME_PATTERN =
-  /\b(a nombre de qui[eé]n|tu nombre completo|nombre completo|c[oó]mo te llamas|cu[aá]l es tu nombre|tu nombre,? por favor)\b/i;
+  /\b(a nombre de qui[eé]n|tu nombre completo|nombre completo|c[oó]mo te llamas|cu[aá]l es tu nombre|tu nombre,? por favor|con qui[eé]n tengo el (gusto|placer)|con qui[eé]n hablo|me (regalas|compartes|confirmas) tu nombre)\b/i;
 
 // Same failure mode once more, for the case the prior fix didn't cover: the customer volunteers their
 // name unprompted ("Hola soy David", "mi nombre es Maria Jose") instead of answering a question that
@@ -283,6 +335,41 @@ function looksLikePersonName(text: string): boolean {
   if (words.length > 4) return false;
   if (!words.every((w) => /^[A-Za-zÀ-ÿ'-]+$/.test(w))) return false;
   return !NOT_A_NAME.has(trimmed.toLowerCase());
+}
+
+function toTitleCase(text: string): string {
+  return text
+    .split(/\s+/)
+    .map((w) => (w.length > 0 ? w.charAt(0).toUpperCase() + w.slice(1).toLowerCase() : w))
+    .join(" ");
+}
+
+// Real production bug (2026-09-13): looksLikePersonName alone rejects the customer's answer whenever it
+// arrives wrapped in ordinary greeting/politeness words - "Hola con einer mucho gusto" is 5 words, over
+// looksLikePersonName's 4-word cap, so a real, correctly-answered name-ask never got saved. Strips known
+// filler words (greetings, "con", "mucho gusto", the self-intro verbs) before checking, so only the
+// actual name candidate is tested against looksLikePersonName's shape/length rules - a genuinely long or
+// sentence-shaped answer still correctly returns null once the filler is removed. Exported for a cheap
+// pure-function test - no DB/LLM needed.
+const NAME_ANSWER_FILLER_WORDS = new Set([
+  "hola", "buenas", "buenos", "dias", "días", "tardes", "noches", "que", "qué", "tal", "con", "mucho",
+  "mucha", "gusto", "el", "la", "es", "soy", "yo",
+]);
+
+export function extractNameFromAnswer(customerText: string): string | null {
+  // A real name answer is essentially never phrased as a question - guards against a customer replying
+  // with an unrelated question right after being asked for their name (e.g. "Hola, cuanto cuesta el
+  // envio?"), which would otherwise strip down to a short all-alphabetic phrase that superficially fits
+  // looksLikePersonName's shape check just like a real name would.
+  if (/[?¿]/.test(customerText)) return null;
+  const words = customerText
+    .trim()
+    .split(/\s+/)
+    .map((w) => w.replace(/^[¡¿]+|[.,!¡¿?]+$/g, ""))
+    .filter((w) => w.length > 0 && !NAME_ANSWER_FILLER_WORDS.has(w.toLowerCase()));
+  if (words.length === 0) return null;
+  const candidate = words.join(" ");
+  return looksLikePersonName(candidate) ? toTitleCase(candidate) : null;
 }
 
 // "soy"/"mi nombre es"/"me llamo" also introduce non-name words in ordinary Spanish ("soy de Bogota",
@@ -466,6 +553,24 @@ function looksLikeIdOrPhone(text: string): boolean {
 // matching evidence; the product's real name text (what follows the marker) still does.
 const LIST_MARKER_PATTERN = /^\s*\d+[.):]\s*/gm;
 
+// A numbered list written with keycap emoji ("1️⃣ Producto A... 4️⃣ Producto D") isn't caught by
+// LIST_MARKER_PATTERN above (no literal "."/")"/":" character - it's a digit followed by the Unicode
+// variation-selector + combining-keycap marks). tokenize's generic non-alphanumeric strip removes those
+// marks but KEEPS the bare digit as its own token. Real production incident (2026-09-13): a numbered list
+// "1️⃣...4️⃣" left a bare "4" in the haystack, which matched the literal "4" in an unrelated real
+// product's name ("AIRPODS SERIE 4") - same bug class as the plain-marker case, different Unicode shape.
+const KEYCAP_DIGIT_PATTERN = /[0-9]️?⃣/g;
+
+// A business's own marketing subtitle in parentheses ("Reloj... Serie 12 Ultra 3 (Edición Deportiva /
+// Robusta)") is never repeated when the bot or customer refers to the product in shorthand - counting
+// those extra words in the ratio's denominator systematically under-scores exactly the long, real,
+// wordy names this business uses (verified against production data: a 10-token full name where the bot's
+// own shorthand mention only ever repeats the 5-6 words BEFORE the parenthetical scored 0.5, just under
+// the 0.6 threshold, so the real watches the customer was shown never matched while the bug above sent
+// unrelated earbuds instead). Stripped only for THIS scoring calculation, never from the name actually
+// shown to the customer.
+const NAME_PARENTHETICAL_SUFFIX_PATTERN = /\s*\([^)]*\)\s*$/;
+
 // Token-overlap match (not exact substring - the model paraphrases names constantly, e.g. "Boombox 4
 // LED" for "Parlante Bluetooth Portatil Boombox 4 LED") against a haystack that should already include
 // the customer's message, the bot's current reply, AND the bot's prior turn (see the photo-claim
@@ -475,13 +580,18 @@ export function findMentionedProductsForMediaBackstop<T extends { name: string; 
   products: T[],
   haystack: string
 ): T[] {
-  const haystackTokens = new Set(tokenize(haystack.replace(LIST_MARKER_PATTERN, " ")));
+  const haystackTokens = new Set(tokenize(haystack.replace(KEYCAP_DIGIT_PATTERN, " ").replace(LIST_MARKER_PATTERN, " ")));
   const scored = products
     .map((p) => {
       if (p.media.length === 0) return null;
-      const nameTokens = tokenize(p.name);
+      const nameTokens = tokenize(p.name.replace(NAME_PARENTHETICAL_SUFFIX_PATTERN, ""));
       if (nameTokens.length === 0) return null;
       const hits = nameTokens.filter((t) => haystackTokens.has(t)).length;
+      // A short name (1-2 tokens) crossing 0.6 on a single shared word is too weak on its own - real
+      // production bug (2026-09-13): "serie" alone (1/3 tokens of a 3-token name, well under 0.6 anyway,
+      // but a shorter 2-token name sharing just its generic first word would cross threshold with only 1
+      // hit). Require at least 2 matched tokens, or a full match for a genuinely 1-token name.
+      if (hits < Math.min(2, nameTokens.length)) return null;
       const ratio = hits / nameTokens.length;
       return ratio >= 0.6 ? { product: p, ratio } : null;
     })
@@ -599,8 +709,14 @@ export async function generateReply(
   personality?: BotPersonality | null,
   customerText?: string
 ): Promise<string> {
-  const history = await getRecentHistory(conversationId);
+  // Fetch a bigger window than the model actually sees: collapseMediaCaptions can shrink several rows
+  // (one per photo/video sent) down to a single summary line, so 30 raw rows reliably leaves ~20
+  // meaningful entries after collapsing. `history` itself (raw, uncollapsed) is still used below for
+  // lastAssistantText, which needs the real prior text - growing its window from 20 to 30 doesn't change
+  // that function's result (it scans backward and stops at the first CUSTOMER row either way).
+  const history = await getRecentHistory(conversationId, 30);
   const contextSummary = await getOrRefreshContextSummary(conversationId, context.businessId);
+  const modelFacingHistory = collapseMediaCaptions(history).slice(-20);
 
   const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
     { role: "system", content: buildSystemPrompt(personality) },
@@ -612,7 +728,7 @@ export async function generateReply(
           },
         ]
       : []),
-    ...history.map((m) => ({
+    ...modelFacingHistory.map((m) => ({
       role: toOpenAiRole(m.role),
       content: messageText(m),
     })),
@@ -730,8 +846,14 @@ export async function generateReply(
     }
 
     if (nameSavedThisTurn === 0 && customerText) {
-      if (looksLikePersonName(customerText) && ASK_NAME_PATTERN.test(lastAssistantText(history))) {
-        await runCatalogTool(context, "save_customer_name", { name: customerText.trim() });
+      if (ASK_NAME_PATTERN.test(lastAssistantText(history))) {
+        // extractNameFromAnswer handles both a bare "David" AND a greeting-wrapped answer like "Hola con
+        // einer mucho gusto" - a strict superset of the old bare looksLikePersonName(customerText) check
+        // (no fillers to strip just means the candidate is the original text, unchanged).
+        const answeredName = extractNameFromAnswer(customerText);
+        if (answeredName) {
+          await runCatalogTool(context, "save_customer_name", { name: answeredName });
+        }
       } else {
         const selfIntroName = extractSelfIntroducedName(customerText);
         if (selfIntroName) {
@@ -753,12 +875,25 @@ export async function generateReply(
 
     if (mediaSentThisTurn > 0) return text;
 
-    const customerAsked = !!customerText && PHOTO_REQUEST_PATTERN.test(customerText);
+    // 2026-09-13 audit incident: PHOTO_REQUEST_PATTERN's bare verbs matched "ese reloj no me MUESTRA la
+    // distancia" (a screen complaint, not a photo request) and blasted 8 unrequested photos - use the
+    // stricter CUSTOMER_PHOTO_REQUEST_PATTERN here, plus an explicit negation guard.
+    const customerAsked =
+      !!customerText &&
+      CUSTOMER_PHOTO_REQUEST_PATTERN.test(customerText) &&
+      !CUSTOMER_PHOTO_NEGATION_PATTERN.test(customerText);
     const fakeMediaTag = FAKE_MEDIA_TAG_PATTERN.test(stripMarkdownEmphasis(text));
+    // Same incident, blast 1: the bot's own reply was a CONDITIONAL OFFER ("Si quieres te mando fotos de
+    // los que te gusten") - PHOTO_CLAIM_PATTERN's "te mand.." matched it as if the send already happened.
+    // OFFER_OR_PENDING_CONFIRMATION_PATTERN already exists for exactly this bug class and already guards
+    // the payment/catalog/escalation backstops - it was never applied here. Deliberately NOT applied to
+    // fakeMediaTag: a literal fabricated "[Foto de X]" tag is unambiguous regardless of nearby offer
+    // language, unlike a natural-language claim.
     const modelClaimsSent =
       (PHOTO_CLAIM_PATTERN.test(text) &&
         PHOTO_REQUEST_PATTERN.test(text) &&
-        !OPEN_CLARIFYING_QUESTION_PATTERN.test(text)) ||
+        !OPEN_CLARIFYING_QUESTION_PATTERN.test(text) &&
+        !OFFER_OR_PENDING_CONFIRMATION_PATTERN.test(stripMarkdownEmphasis(text))) ||
       fakeMediaTag;
     if (!customerAsked && !modelClaimsSent) return text;
 
@@ -775,7 +910,7 @@ export async function generateReply(
     // production bug, 2026-09-12): the bot's own clarifying reply lists every candidate by name, so the
     // prose scan matched all of them regardless of color. When the model called the real filter this
     // turn, trust its result instead of re-guessing from text.
-    if (attributeMatchThisTurn && attributeMatchThisTurn.length <= 5) {
+    if (attributeMatchThisTurn && attributeMatchThisTurn.length <= 3) {
       for (let i = 0; i < attributeMatchThisTurn.length; i++) {
         if (i > 0) await new Promise((resolve) => setTimeout(resolve, 1200));
         const m = attributeMatchThisTurn[i];
@@ -785,7 +920,7 @@ export async function generateReply(
         // generateReply's own try/catch. Degrade instead: log and keep going, so one failed photo never
         // silences the whole turn or blocks the rest of the batch.
         try {
-          await runCatalogTool(context, "send_product_media", { productId: m.productId, variantId: m.variantId ?? undefined });
+          await runCatalogTool(context, "send_product_media", { productId: m.productId, variantId: m.variantId ?? undefined, skipIfAlreadySent: true });
         } catch (error) {
           console.error("Fallo el envio de una foto en el backstop de atributos:", error);
         }
@@ -840,7 +975,7 @@ export async function generateReply(
       // Same reasoning as the attribute-match loop above: never let one failed send take the whole
       // turn's reply down with it.
       try {
-        await runCatalogTool(context, "send_product_media", { productName: matched[i].name });
+        await runCatalogTool(context, "send_product_media", { productName: matched[i].name, skipIfAlreadySent: true });
       } catch (error) {
         console.error("Fallo el envio de una foto en el backstop de nombres:", error);
       }

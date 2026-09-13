@@ -2,7 +2,8 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { prisma } from "../db/client";
-import { recordMessage, getConversationForBusiness } from "./service";
+import { recordMessage, getConversationForBusiness, saveCustomerName, saveCustomerContactInfo, setCustomerTags } from "./service";
+import { realtimeEvents } from "../realtime/events";
 
 // Regression coverage for the unread-message-count feature: the admin panel badges each conversation
 // with how many CUSTOMER messages haven't been viewed yet, but ONLY while the bot has stopped
@@ -76,4 +77,66 @@ test("getConversationForBusiness is a no-op write when there's nothing unread", 
   assert.equal(before?.unreadCount, 0);
   const again = await getConversationForBusiness(businessId, conversation.id);
   assert.equal(again?.unreadCount, 0);
+});
+
+// Real production bug (2026-09-13): saveCustomerName updated Customer but never emitted
+// conversation:updated (unlike updateConversationStatus/setHumanControl/setConversationIntent, which all
+// do) - a name saved mid-conversation never reached an already-open admin panel. The socket handler in
+// public/admin/index.html re-renders a row on this exact event.
+function waitForEvent(eventName: string, businessId: string): Promise<any> {
+  return new Promise((resolve) => {
+    const handler = (emittedBusinessId: string, payload: unknown) => {
+      if (emittedBusinessId !== businessId) return;
+      realtimeEvents.off(eventName, handler);
+      resolve(payload);
+    };
+    realtimeEvents.on(eventName, handler);
+  });
+}
+
+// Each test below uses its OWN customer (not the shared `customerId`, which already has several
+// conversations from earlier tests in this file) so exactly one conversation:updated event fires and
+// waitForEvent can't accidentally resolve on some other test's leftover conversation.
+
+test("saveCustomerName emits conversation:updated with the new name for every open conversation of that customer", async () => {
+  const customer = await prisma.customer.create({ data: { businessId, phoneNumber: `573012${Date.now()}` } });
+  const conversation = await prisma.conversation.create({ data: { customerId: customer.id } });
+  try {
+    const eventPromise = waitForEvent("conversation:updated", businessId);
+    await saveCustomerName(businessId, customer.id, "Einer");
+    const payload = await eventPromise;
+    assert.equal(payload.id, conversation.id);
+    assert.equal(payload.customer.name, "Einer");
+  } finally {
+    await prisma.conversation.deleteMany({ where: { customerId: customer.id } });
+    await prisma.customer.deleteMany({ where: { id: customer.id } });
+  }
+});
+
+test("saveCustomerContactInfo also emits conversation:updated (same gap, same fix)", async () => {
+  const customer = await prisma.customer.create({ data: { businessId, phoneNumber: `573013${Date.now()}` } });
+  await prisma.conversation.create({ data: { customerId: customer.id } });
+  try {
+    const eventPromise = waitForEvent("conversation:updated", businessId);
+    await saveCustomerContactInfo(businessId, customer.id, { idNumber: "123456789" });
+    const payload = await eventPromise;
+    assert.equal(payload.customer.id, customer.id);
+  } finally {
+    await prisma.conversation.deleteMany({ where: { customerId: customer.id } });
+    await prisma.customer.deleteMany({ where: { id: customer.id } });
+  }
+});
+
+test("setCustomerTags also emits conversation:updated (same gap, same fix)", async () => {
+  const customer = await prisma.customer.create({ data: { businessId, phoneNumber: `573014${Date.now()}` } });
+  await prisma.conversation.create({ data: { customerId: customer.id } });
+  try {
+    const eventPromise = waitForEvent("conversation:updated", businessId);
+    await setCustomerTags(businessId, customer.id, ["vip"]);
+    const payload = await eventPromise;
+    assert.equal(payload.customer.tags.includes("vip"), true);
+  } finally {
+    await prisma.conversation.deleteMany({ where: { customerId: customer.id } });
+    await prisma.customer.deleteMany({ where: { id: customer.id } });
+  }
 });

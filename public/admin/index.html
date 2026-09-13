@@ -3729,6 +3729,23 @@ function initRealtime() {
     if (c.id === currentConversationId) {
       renderHandoffState(c.humanControl);
       updateCloseSaleButtonVisibility(c.status);
+      // 2026-09-13 fix: a name saved mid-conversation (save_customer_name) used to never reach an
+      // already-open chat header - only openConversation() ever wrote #modal-title, so the owner kept
+      // seeing the raw phone number until they closed and reopened the conversation.
+      const nameInputOpen = document.getElementById('modal-title-input').style.display !== 'none';
+      if (!nameInputOpen) {
+        currentCustomerName = c.customer.name || '';
+        currentCustomerPhone = c.customer.phoneNumber;
+        const displayName = c.customer.name || c.customer.phoneNumber;
+        document.getElementById('modal-title').textContent = displayName;
+        document.getElementById('modal-subtitle').innerHTML =
+          (c.customer.name ? `${escapeHtml(c.customer.phoneNumber)} · ` : '') +
+          `<span class="status-badge status-${c.status}">${STATUS_LABELS[c.status] || c.status}</span>` +
+          (c.intent ? ` <span class="status-badge" style="background:#fee2e2; color:#991b1b;">${INTENT_LABELS[c.intent] || c.intent}</span>` : '');
+        const avatarEl = document.getElementById('modal-avatar');
+        avatarEl.textContent = displayName.trim().charAt(0).toUpperCase() || '?';
+        avatarEl.style.background = avatarColor(c.customer.phoneNumber);
+      }
     }
   });
 

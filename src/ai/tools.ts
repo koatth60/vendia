@@ -9,6 +9,7 @@ import {
 } from "../catalog/products";
 import { listActivePaymentMethods } from "../catalog/paymentMethods";
 import { listShippingRates, resolveShippingRateForCity } from "../catalog/shippingRates";
+import { recordAgentIncident } from "./incidents";
 
 // Shared with agent.ts (both the tool result here and the system-prompt directive there need the same
 // Spanish wording for each modality) - defined once here since agent.ts already imports from this file,
@@ -793,6 +794,13 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
       return results.map((p) => formatProduct(p, { forList: true }));
     }
     case "send_product_media": {
+      // Internal-only, never in the JSON schema the model sees (zero prompt-token cost) - set ONLY by
+      // agent.ts's own media backstop loops (finalizeTurn), never by the model's own tool calls. 2026-09-13
+      // production incident: the backstop resent the exact same photo set 3 times in one conversation
+      // because this case never read/wrote Conversation.mediaSentProductIds at all (only
+      // get_product_details's auto-send path did) - the model's OWN explicit requests (e.g. "mándamela
+      // otra vez") must still always go through, so the skip only applies to the backstop's own re-checks.
+      const skipIfAlreadySent = input.skipIfAlreadySent === true;
       const productId = input.productId ? String(input.productId).trim() : "";
       const query = String(input.productName ?? "");
 
@@ -839,6 +847,24 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
         return { sent: false, product: product.name, reason: "Este producto no tiene fotos ni videos cargados" };
       }
 
+      // Dedup key: the compound "productId#variantId" for a scoped color/size so a DIFFERENT variant is
+      // never suppressed, the plain productId otherwise (matches what get_product_details already checks).
+      const dedupKey = variantId ? `${product.id}#${variantId}` : product.id;
+      const conversation = await prisma.conversation.findUnique({
+        where: { id: context.conversationId },
+        select: { mediaSentProductIds: true },
+      });
+      const alreadySent = conversation?.mediaSentProductIds.includes(dedupKey) ?? false;
+      if (skipIfAlreadySent && alreadySent) {
+        await recordAgentIncident(
+          businessId,
+          "BACKSTOP_INTERVENTION",
+          `send_product_media backstop se salto un reenvio duplicado de "${product.name}"${variantLabel ? ` (${variantLabel})` : ""}`,
+          context.conversationId
+        );
+        return { sent: false, skipped: true, product: product.name, variant: variantLabel, reason: "Ya se le mandaron estas fotos antes en esta conversacion" };
+      }
+
       await sendMediaWithSpacing(
         businessId,
         context.credentials,
@@ -848,6 +874,17 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
         variantLabel ? `${product.name} (${variantLabel})` : product.name,
         media
       );
+
+      if (!alreadySent) {
+        const updated = new Set(conversation?.mediaSentProductIds ?? []);
+        updated.add(product.id);
+        updated.add(dedupKey);
+        await prisma.conversation.update({
+          where: { id: context.conversationId },
+          data: { mediaSentProductIds: { set: [...updated] } },
+        });
+      }
+
       return { sent: true, product: product.name, variant: variantLabel, count: media.length };
     }
     case "get_faq": {

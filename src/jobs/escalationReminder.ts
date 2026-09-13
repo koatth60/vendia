@@ -61,6 +61,14 @@ export async function runEscalationReminderJob(): Promise<void> {
       accessToken: business.whatsappAccessToken!,
     };
 
+    // Real production bug (2026-09-13): a conversation with TWO open PendingOwnerQuestion rows due at
+    // once (customer asked 2 different questions before the owner answered either) sent
+    // CUSTOMER_FOLLOWUP_TEXT once PER QUESTION - the same customer got the identical "seguimos
+    // revisando" message twice in the same second. Owner alerts stay per-question (each names its own
+    // real question); the customer-facing nudge is deduped to once per conversation per run, shared
+    // across BOTH loops below (a conversation could otherwise appear in both).
+    const customerNotifiedThisRun = new Set<string>();
+
     const dueQuestions = await findPendingOwnerQuestionsDueForReminder(business.id, stage1Before);
     for (const pending of dueQuestions) {
       // No newlines - the onix_owner_alert template rejects them (WhatsApp error 132018), so a
@@ -79,11 +87,14 @@ export async function runEscalationReminderJob(): Promise<void> {
         console.error(`No se pudo enviar recordatorio de escalacion (pending=${pending.questionId}):`, error);
       }
 
-      try {
-        const customerWamid = await sendTextMessage(credentials, pending.customer.phoneNumber, CUSTOMER_FOLLOWUP_TEXT);
-        await recordMessage(business.id, pending.conversationId, "ASSISTANT", CUSTOMER_FOLLOWUP_TEXT, customerWamid || undefined);
-      } catch (error) {
-        console.error(`No se pudo avisar al cliente que seguimos revisando (pending=${pending.questionId}):`, error);
+      if (!customerNotifiedThisRun.has(pending.conversationId)) {
+        customerNotifiedThisRun.add(pending.conversationId);
+        try {
+          const customerWamid = await sendTextMessage(credentials, pending.customer.phoneNumber, CUSTOMER_FOLLOWUP_TEXT);
+          await recordMessage(business.id, pending.conversationId, "ASSISTANT", CUSTOMER_FOLLOWUP_TEXT, customerWamid || undefined);
+        } catch (error) {
+          console.error(`No se pudo avisar al cliente que seguimos revisando (pending=${pending.questionId}):`, error);
+        }
       }
 
       await markPendingOwnerQuestionReminded(pending.questionId);
@@ -112,7 +123,8 @@ export async function runEscalationReminderJob(): Promise<void> {
 
       // Only the first nudge tells the customer anything - repeating the same canned line a second time
       // (24h later, still no reply) would just be noise on top of noise for someone already waiting.
-      if (conversation.nextStage === 1) {
+      if (conversation.nextStage === 1 && !customerNotifiedThisRun.has(conversation.conversationId)) {
+        customerNotifiedThisRun.add(conversation.conversationId);
         try {
           const customerWamid = await sendTextMessage(credentials, conversation.customer.phoneNumber, CUSTOMER_FOLLOWUP_TEXT);
           await recordMessage(business.id, conversation.conversationId, "ASSISTANT", CUSTOMER_FOLLOWUP_TEXT, customerWamid || undefined);

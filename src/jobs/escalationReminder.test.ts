@@ -224,3 +224,35 @@ test("runEscalationReminderJob does not double-fire the watchdog for a conversat
     await prisma.customer.deleteMany({ where: { id: customer.id } });
   }
 });
+
+// Real production incident (2026-09-13): the customer got the identical "Seguimos revisando..." message
+// TWICE in the same second - a conversation with two separate open questions due for reminder at once
+// sent the customer-facing nudge once PER QUESTION. Owner alerts must stay per-question (each names its
+// own real question); the customer nudge must be deduped to once per conversation per run.
+test("runEscalationReminderJob sends the customer-facing follow-up only ONCE when a conversation has two open questions due at once", async () => {
+  stubWhatsappFetch();
+  const customer = await prisma.customer.create({ data: { businessId, phoneNumber: `573011${Date.now()}` } });
+  const conv = await prisma.conversation.create({ data: { customerId: customer.id, humanControl: true } });
+  const oldEnough = new Date(Date.now() - 4 * 60 * 60 * 1000);
+  try {
+    await prisma.pendingOwnerQuestion.create({
+      data: { conversationId: conv.id, wamid: `wamid.q1-${randomUUID()}`, question: "Pregunta uno", createdAt: oldEnough },
+    });
+    await prisma.pendingOwnerQuestion.create({
+      data: { conversationId: conv.id, wamid: `wamid.q2-${randomUUID()}`, question: "Pregunta dos", createdAt: oldEnough },
+    });
+
+    await runEscalationReminderJob();
+
+    const toOwner = sentMessages.filter((m) => m.to === "573000000000");
+    const toCustomer = sentMessages.filter((m) => m.to === customer.phoneNumber);
+    assert.equal(toOwner.length, 2, "the owner must still be reminded once per real open question");
+    assert.equal(toCustomer.length, 1, "the customer must get the follow-up only once, not once per question");
+  } finally {
+    restoreFetch();
+    await prisma.pendingOwnerQuestion.deleteMany({ where: { conversationId: conv.id } });
+    await prisma.message.deleteMany({ where: { conversationId: conv.id } });
+    await prisma.conversation.deleteMany({ where: { id: conv.id } });
+    await prisma.customer.deleteMany({ where: { id: customer.id } });
+  }
+});

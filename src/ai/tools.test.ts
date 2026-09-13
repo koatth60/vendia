@@ -429,6 +429,108 @@ test("send_product_media refuses to guess and sends nothing when the text match 
   }
 });
 
+// 2026-09-13 production incident: the media backstop in agent.ts resent the SAME photo set 3 times in one
+// real conversation because this case never read/wrote Conversation.mediaSentProductIds at all. Fix:
+// skipIfAlreadySent (internal-only, never in the JSON schema the model sees) lets the backstop's own
+// re-checks skip a duplicate while the model's own explicit calls (e.g. "mándamela otra vez") still work.
+test("send_product_media with skipIfAlreadySent skips a duplicate resend of the same product", async () => {
+  stubWhatsappFetch();
+  try {
+    const watch = await prisma.product.create({
+      data: {
+        businessId,
+        name: "Smartwatch Dedup Test",
+        description: "Reloj deportivo",
+        price: 140000,
+        currency: "COP",
+        stock: 5,
+        media: { create: [{ type: "IMAGE", url: "https://example.com/dedup.jpg", s3Key: "dedup.jpg" }] },
+      },
+    });
+    const context = await freshContext();
+
+    const first = (await runCatalogTool(context, "send_product_media", { productId: watch.id, skipIfAlreadySent: true })) as { sent: boolean };
+    assert.equal(first.sent, true, "first send must go through");
+
+    const second = (await runCatalogTool(context, "send_product_media", { productId: watch.id, skipIfAlreadySent: true })) as {
+      sent: boolean;
+      skipped?: boolean;
+    };
+    assert.equal(second.sent, false, "backstop re-check must skip the duplicate");
+    assert.equal(second.skipped, true);
+
+    const incident = await prisma.agentIncident.findFirst({ where: { businessId, kind: "BACKSTOP_INTERVENTION" } });
+    assert.ok(incident, "the skipped duplicate must be recorded as an AgentIncident");
+  } finally {
+    restoreFetch();
+    await prisma.agentIncident.deleteMany({ where: { businessId } });
+  }
+});
+
+test("send_product_media WITHOUT skipIfAlreadySent (the model's own explicit call) always resends", async () => {
+  stubWhatsappFetch();
+  try {
+    const watch = await prisma.product.create({
+      data: {
+        businessId,
+        name: "Smartwatch Explicit Resend Test",
+        description: "Reloj deportivo",
+        price: 140000,
+        currency: "COP",
+        stock: 5,
+        media: { create: [{ type: "IMAGE", url: "https://example.com/explicit.jpg", s3Key: "explicit.jpg" }] },
+      },
+    });
+    const context = await freshContext();
+
+    await runCatalogTool(context, "send_product_media", { productId: watch.id, skipIfAlreadySent: true });
+    const second = (await runCatalogTool(context, "send_product_media", { productId: watch.id })) as { sent: boolean };
+    assert.equal(second.sent, true, "the model's own explicit request (no skipIfAlreadySent) must still send");
+  } finally {
+    restoreFetch();
+  }
+});
+
+test("send_product_media dedup does not suppress a DIFFERENT variant/color of the same product", async () => {
+  stubWhatsappFetch();
+  try {
+    const product = await prisma.product.create({
+      data: {
+        businessId,
+        name: "Smartwatch Variant Dedup Test",
+        description: "Reloj con colores",
+        price: 140000,
+        currency: "COP",
+        stock: 5,
+        variants: {
+          create: [
+            { color: "Negro", stock: 3 },
+            { color: "Rojo", stock: 2 },
+          ],
+        },
+      },
+      include: { variants: true },
+    });
+    const [black, red] = product.variants;
+    // ProductMedia.product is a required relation separate from variant - nesting media under
+    // variants.create only sets variantId, not productId, so it must be created explicitly like this.
+    await prisma.productMedia.create({ data: { productId: product.id, variantId: black.id, type: "IMAGE", url: "https://example.com/black.jpg", s3Key: "black.jpg" } });
+    await prisma.productMedia.create({ data: { productId: product.id, variantId: red.id, type: "IMAGE", url: "https://example.com/red.jpg", s3Key: "red.jpg" } });
+    const context = await freshContext();
+
+    const firstBlack = (await runCatalogTool(context, "send_product_media", { productId: product.id, variantId: black.id, skipIfAlreadySent: true })) as { sent: boolean };
+    assert.equal(firstBlack.sent, true);
+
+    const secondBlack = (await runCatalogTool(context, "send_product_media", { productId: product.id, variantId: black.id, skipIfAlreadySent: true })) as { sent: boolean };
+    assert.equal(secondBlack.sent, false, "the same color must be deduped");
+
+    const firstRed = (await runCatalogTool(context, "send_product_media", { productId: product.id, variantId: red.id, skipIfAlreadySent: true })) as { sent: boolean };
+    assert.equal(firstRed.sent, true, "a DIFFERENT color must not be suppressed by the first one's dedup entry");
+  } finally {
+    restoreFetch();
+  }
+});
+
 test("send_product_media returns an ambiguous error listing both candidates on a tie, sending nothing", async () => {
   stubWhatsappFetch();
   try {
