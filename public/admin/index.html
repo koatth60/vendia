@@ -1631,6 +1631,10 @@ async function updateVariant(variantId, field, value) {
       body: JSON.stringify({ [field]: value }),
     });
     setStatus('Variante actualizada ✓');
+    // Without this, productsCache keeps the pre-edit stock/color - the input you just typed into shows
+    // the new value (it's just DOM state), but anything computed from the cache (the card's total stock
+    // badge, the edit modal's summed stock) stays stale until some other action happens to reload it.
+    await loadProducts();
   } catch (err) {
     setStatus(`No se pudo actualizar la variante: ${err.message}`, true);
     loadProducts();
