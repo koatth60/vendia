@@ -10,6 +10,7 @@ import { customersRouter } from "./customers";
 import { ordersRouter } from "./orders";
 import { conversationsRouter } from "./conversations";
 import { dashboardRouter } from "./dashboard";
+import { shippingRouter } from "./shipping";
 
 export const adminRouter = Router();
 
@@ -25,3 +26,4 @@ adminRouter.use(customersRouter);
 adminRouter.use(ordersRouter);
 adminRouter.use(conversationsRouter);
 adminRouter.use(dashboardRouter);
+adminRouter.use(shippingRouter);

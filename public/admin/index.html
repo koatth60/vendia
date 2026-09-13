@@ -64,13 +64,19 @@
 
   <div class="subnav" data-section-group="bot">
     <button class="tab-btn" data-tab="business" onclick="switchTab('business')">
-      <span class="tab-icon">⚙️</span> Configuración
+      <span class="tab-icon">⚙️</span> Personalidad
+    </button>
+    <button class="tab-btn" data-tab="rules" onclick="switchTab('rules')">
+      <span class="tab-icon">📏</span> Reglas
     </button>
     <button class="tab-btn" data-tab="faq" onclick="switchTab('faq')">
       <span class="tab-icon">❓</span> FAQ
     </button>
     <button class="tab-btn" data-tab="payments" onclick="switchTab('payments')">
       <span class="tab-icon">💳</span> Pagos
+    </button>
+    <button class="tab-btn" data-tab="shipping" onclick="switchTab('shipping')">
+      <span class="tab-icon">🚚</span> Envíos
     </button>
     <button class="tab-btn" data-tab="whatsapp" onclick="switchTab('whatsapp')">
       <span class="tab-icon">📲</span> Canales
@@ -135,32 +141,12 @@
     <div class="tab-panel" data-tab-panel="business">
       <div class="panel-header">
         <div>
-          <div class="panel-title">Configuración del bot</div>
-          <div class="panel-subtitle">Cómo se presenta tu bot y qué reglas propias sigue.</div>
+          <div class="panel-title">Personalidad</div>
+          <div class="panel-subtitle">Cómo se presenta tu bot: quién es, cómo habla y cómo se comporta.</div>
         </div>
         <button class="btn-primary owner-only" onclick="saveBusiness()">Guardar cambios</button>
       </div>
       <div class="settings-group">
-        <label>Nombre del negocio</label>
-        <input id="business-name" placeholder="Ej: Zapatillas Express" />
-        <label>Descripción (ayuda a la IA a entender tu negocio)</label>
-        <textarea id="business-description" placeholder="Ej: Vendemos calzado deportivo importado, envíos a todo el país."></textarea>
-      </div>
-
-      <div class="settings-group">
-        <div class="settings-group-title">Foto de perfil de WhatsApp</div>
-        <p class="settings-desc">La foto que ven tus clientes en el chat. El nombre del negocio en WhatsApp todavía no se puede cambiar (necesita verificación de Meta), pero la foto sí, en cualquier momento.</p>
-        <div style="display:flex; align-items:center; gap:14px;">
-          <input id="profile-photo-file" type="file" accept="image/*" style="display:none;" onchange="onProfilePhotoFileSelected(this)" />
-          <button class="btn-secondary" type="button" onclick="document.getElementById('profile-photo-file').click()">Subir foto</button>
-          <span id="profile-photo-status" style="font-size:12.5px; color:var(--muted);"></span>
-        </div>
-        <div class="hint">Puede tardar unos minutos en verse actualizada dentro de WhatsApp.</div>
-      </div>
-
-      <div class="settings-group">
-        <div class="settings-group-title">Personalidad del bot</div>
-        <p class="settings-desc">Así se siente tu bot como propio de tu negocio, no genérico.</p>
         <label>Categoría de tu negocio</label>
         <select id="bot-category" onchange="renderInstructionChips(); updateTallaFieldVisibility()">
           <option value="">Elige la que más se parezca (opcional)</option>
@@ -170,7 +156,7 @@
           <option value="servicios">Servicios (belleza, salud, citas)</option>
           <option value="joyeria">Joyería y accesorios</option>
         </select>
-        <div class="hint">Ajusta cómo describe productos y te sugiere reglas típicas de tu rubro más abajo.</div>
+        <div class="hint">Ajusta cómo describe productos y te sugiere reglas típicas de tu rubro en Bot &gt; Reglas.</div>
         <div class="grid-2">
           <div>
             <label>Nombre del asistente</label>
@@ -236,9 +222,23 @@
         </select>
         <label>Saludo personalizado (opcional)</label>
         <input id="bot-greeting" placeholder="Ej: ¡Hola! Bienvenido/a a Zapatillas Express, ¿en qué te puedo ayudar?" />
+      </div>
+    </div>
+
+    <!-- Fase 4 reorg: "Reglas e instrucciones" separado de "Personalidad" - antes vivian en el mismo
+         settings-group (ver P4/Fase 4 en ONIX-CRM-REORG-PLAN.md). Mismos ids, misma saveBusiness(). -->
+    <div class="tab-panel" data-tab-panel="rules">
+      <div class="panel-header">
+        <div>
+          <div class="panel-title">Reglas</div>
+          <div class="panel-subtitle">Lo que tu bot nunca debe decir, y cualquier instrucción propia que no entre en otra pestaña.</div>
+        </div>
+        <button class="btn-primary owner-only" onclick="saveBusiness()">Guardar cambios</button>
+      </div>
+      <div class="settings-group">
         <label>Cosas que tu bot nunca debe decir o hacer (opcional)</label>
         <textarea id="bot-never-say" placeholder="Ej: Nunca prometas fechas exactas de entrega. Nunca ofrezcas descuentos que no estén en el catálogo."></textarea>
-        <label>Instrucciones adicionales (opcional, para reglas que no entran arriba)</label>
+        <label>Instrucciones adicionales (opcional, para reglas que no entran en otra pestaña)</label>
         <div class="quick-chips" id="instruction-chips"></div>
         <textarea id="business-instructions" placeholder="Ej: Si preguntan por mayoristas, decí que escriban a ventas@..."></textarea>
         <div class="hint-row">
@@ -271,6 +271,24 @@
         </div>
         <button class="btn-primary owner-only" onclick="saveBusiness()">Guardar cambios</button>
       </div>
+      <div class="settings-group">
+        <label>Nombre del negocio</label>
+        <input id="business-name" placeholder="Ej: Zapatillas Express" />
+        <label>Descripción (ayuda a la IA a entender tu negocio)</label>
+        <textarea id="business-description" placeholder="Ej: Vendemos calzado deportivo importado, envíos a todo el país."></textarea>
+      </div>
+
+      <div class="settings-group">
+        <div class="settings-group-title">Foto de perfil de WhatsApp</div>
+        <p class="settings-desc">La foto que ven tus clientes en el chat. El nombre del negocio en WhatsApp todavía no se puede cambiar (necesita verificación de Meta), pero la foto sí, en cualquier momento.</p>
+        <div style="display:flex; align-items:center; gap:14px;">
+          <input id="profile-photo-file" type="file" accept="image/*" style="display:none;" onchange="onProfilePhotoFileSelected(this)" />
+          <button class="btn-secondary" type="button" onclick="document.getElementById('profile-photo-file').click()">Subir foto</button>
+          <span id="profile-photo-status" style="font-size:12.5px; color:var(--muted);"></span>
+        </div>
+        <div class="hint">Puede tardar unos minutos en verse actualizada dentro de WhatsApp.</div>
+      </div>
+
       <div class="settings-group settings-group-last">
         <div class="settings-group-title">Contacto</div>
         <div class="grid-2">
@@ -324,6 +342,23 @@
             </select>
           </div>
         </div>
+        <!-- Fase 4: catálogo de etiquetas (color + autocompletado). No reemplaza Customer.tags - una
+             etiqueta escrita a mano en la ficha del cliente que no esté acá sigue funcionando igual. -->
+        <details class="card">
+          <summary style="cursor:pointer; font-size:13px; font-weight:650;">🏷️ Gestionar etiquetas</summary>
+          <div style="margin-top:12px; display:flex; gap:8px; align-items:flex-end;">
+            <div style="flex:1;">
+              <label>Nueva etiqueta</label>
+              <input id="tag-manager-new-label" placeholder="Ej: mayorista" />
+            </div>
+            <div>
+              <label>Color</label>
+              <input id="tag-manager-new-color" type="color" value="#1fa855" style="width:60px; padding:2px; height:38px;" />
+            </div>
+            <button class="btn-primary" onclick="addTagFromManager()" style="margin-bottom:1px;">+ Agregar</button>
+          </div>
+          <div id="tag-manager-list" style="margin-top:12px; display:flex; flex-wrap:wrap; gap:6px;"></div>
+        </details>
         <div class="card" style="padding:0; overflow:hidden;">
           <div id="customers-rows"></div>
           <div class="order-list-footer" id="customers-load-more-wrap" hidden>
@@ -487,6 +522,55 @@
           <button class="btn-primary owner-only" id="pm-submit-btn" onclick="addPaymentMethod()">+ Agregar método de pago</button>
         </div>
         <div id="payment-methods-list" style="margin-top:16px; display:flex; flex-direction:column; gap:8px;"></div>
+      </div>
+    </div>
+
+    <!-- Fase 4: ShippingRate/ShippingCityRule existian desde antes y el agente ya las consulta
+         (get_shipping_rates/get_shipping_rate_for_city), pero solo se podian cargar con un script -
+         era el hueco de configuración más grande del diagnóstico original (P8). -->
+    <div class="tab-panel" data-tab-panel="shipping">
+      <div class="panel-header">
+        <div>
+          <div class="panel-title">Envíos</div>
+          <div class="panel-subtitle">Tarifas de envío y a qué tarifa corresponde cada ciudad. Tu bot las usa para cotizar el envío sin inventar un número.</div>
+        </div>
+      </div>
+      <div class="section-title">Tarifas</div>
+      <div class="card">
+        <p style="font-size:13px; color:var(--muted); margin-top:0;">Un nombre corto (ej: "Nacional", "Bogotá y alrededores") y el costo real. Las reglas de ciudad de abajo apuntan a estos nombres.</p>
+        <div class="grid-2">
+          <div>
+            <label>Nombre de la tarifa</label>
+            <input id="ship-rate-label" placeholder="Ej: Nacional" />
+          </div>
+          <div>
+            <label>Costo</label>
+            <input id="ship-rate-cost" type="number" min="0" placeholder="Ej: 12000" />
+          </div>
+        </div>
+        <div class="actions-row">
+          <button class="btn-secondary" id="ship-rate-cancel-btn" style="display:none;" onclick="cancelEditShippingRate()">Cancelar</button>
+          <button class="btn-primary" id="ship-rate-submit-btn" onclick="addShippingRate()">+ Agregar tarifa</button>
+        </div>
+        <div id="shipping-rates-list" style="margin-top:16px; display:flex; flex-direction:column; gap:8px;"></div>
+      </div>
+      <div class="section-title">Reglas por ciudad</div>
+      <div class="card">
+        <p style="font-size:13px; color:var(--muted); margin-top:0;">Qué tarifa le corresponde a una ciudad exacta (ej: "Bogotá" → "Nacional"). Para regiones o casos ambiguos, el bot sigue usando el criterio de tus instrucciones en Bot &gt; Reglas - esto solo resuelve el caso simple de una ciudad puntual.</p>
+        <div class="grid-2">
+          <div>
+            <label>Ciudad</label>
+            <input id="ship-city-name" placeholder="Ej: Bogotá" />
+          </div>
+          <div>
+            <label>Tarifa</label>
+            <select id="ship-city-rate"></select>
+          </div>
+        </div>
+        <div class="actions-row">
+          <button class="btn-primary" onclick="addShippingCityRule()">+ Agregar regla</button>
+        </div>
+        <div id="shipping-city-rules-list" style="margin-top:16px; display:flex; flex-direction:column; gap:8px;"></div>
       </div>
     </div>
 

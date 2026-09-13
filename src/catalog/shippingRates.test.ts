@@ -2,7 +2,14 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { prisma } from "../db/client";
-import { createShippingRate, createShippingCityRule, resolveShippingRateForCity } from "./shippingRates";
+import {
+  createShippingRate,
+  updateShippingRate,
+  deleteShippingRate,
+  createShippingCityRule,
+  deleteShippingCityRule,
+  resolveShippingRateForCity,
+} from "./shippingRates";
 
 let businessId: string;
 
@@ -59,4 +66,39 @@ test("resolveShippingRateForCity: the more specific of two configured city names
   const specific = await resolveShippingRateForCity(businessId, "Bogota Norte apto 302");
   assert.ok(specific);
   assert.equal(specific!.label, "Bogota Norte");
+});
+
+test("updateShippingRate solo cambia lo enviado y respeta el aislamiento por negocio", async () => {
+  const rate = await createShippingRate(businessId, { label: "Express", cost: 20000 });
+  const updated = await updateShippingRate(businessId, rate.id, { cost: 25000 });
+  assert.equal(Number(updated.cost), 25000);
+  assert.equal(updated.label, "Express", "el label no cambia si no se envia");
+
+  const other = await prisma.business.create({
+    data: { name: `Other ${randomUUID()}`, email: `other-${randomUUID()}@example.com`, passwordHash: "x" },
+  });
+  await assert.rejects(() => updateShippingRate(other.id, rate.id, { cost: 1 }), /no encontrada/);
+  await prisma.business.delete({ where: { id: other.id } });
+});
+
+test("deleteShippingRate borra la tarifa y falla sobre un id de otro negocio", async () => {
+  const rate = await createShippingRate(businessId, { label: "Temporal", cost: 5000 });
+  const other = await prisma.business.create({
+    data: { name: `Other ${randomUUID()}`, email: `other2-${randomUUID()}@example.com`, passwordHash: "x" },
+  });
+  await assert.rejects(() => deleteShippingRate(other.id, rate.id), /no encontrada/);
+  await deleteShippingRate(businessId, rate.id);
+  assert.equal(await prisma.shippingRate.findUnique({ where: { id: rate.id } }), null);
+  await prisma.business.delete({ where: { id: other.id } });
+});
+
+test("deleteShippingCityRule borra la regla y falla sobre un id de otro negocio", async () => {
+  const rule = await createShippingCityRule(businessId, { city: "Cali", label: "Nacional" });
+  const other = await prisma.business.create({
+    data: { name: `Other ${randomUUID()}`, email: `other3-${randomUUID()}@example.com`, passwordHash: "x" },
+  });
+  await assert.rejects(() => deleteShippingCityRule(other.id, rule.id), /no encontrada/);
+  await deleteShippingCityRule(businessId, rule.id);
+  assert.equal(await prisma.shippingCityRule.findUnique({ where: { id: rule.id } }), null);
+  await prisma.business.delete({ where: { id: other.id } });
 });

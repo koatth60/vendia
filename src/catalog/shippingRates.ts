@@ -12,6 +12,25 @@ export async function createShippingRate(businessId: string, data: { label: stri
   return prisma.shippingRate.create({ data: { businessId, label: data.label, cost: data.cost, sortOrder: data.sortOrder ?? 0 } });
 }
 
+// Fase 4 (ver ONIX-CRM-REORG-PLAN.md): estas dos tablas existian desde antes y el agente ya las
+// consulta (get_shipping_rates/get_shipping_rate_for_city), pero no tenian ninguna interfaz - se
+// cargaban con scripts/seed-magimp-shipping.ts. update/delete son nuevos, create/list ya existian.
+export async function updateShippingRate(
+  businessId: string,
+  id: string,
+  data: Partial<{ label: string; cost: number; sortOrder: number }>
+) {
+  const rate = await prisma.shippingRate.findFirst({ where: { id, businessId } });
+  if (!rate) throw new Error("Tarifa de envío no encontrada");
+  return prisma.shippingRate.update({ where: { id }, data });
+}
+
+export async function deleteShippingRate(businessId: string, id: string) {
+  const rate = await prisma.shippingRate.findFirst({ where: { id, businessId } });
+  if (!rate) throw new Error("Tarifa de envío no encontrada");
+  return prisma.shippingRate.delete({ where: { id } });
+}
+
 export async function listShippingCityRules(businessId: string) {
   return prisma.shippingCityRule.findMany({ where: { businessId }, orderBy: { createdAt: "asc" } });
 }
@@ -20,6 +39,12 @@ export async function createShippingCityRule(businessId: string, data: { city: s
   return prisma.shippingCityRule.create({
     data: { businessId, city: data.city.trim(), normalizedCity: normalizeForMatch(data.city.trim()), label: data.label },
   });
+}
+
+export async function deleteShippingCityRule(businessId: string, id: string) {
+  const rule = await prisma.shippingCityRule.findFirst({ where: { id, businessId } });
+  if (!rule) throw new Error("Regla de ciudad no encontrada");
+  return prisma.shippingCityRule.delete({ where: { id } });
 }
 
 // Resolves a customer-typed city against this business's configured exact-match rules, then re-resolves

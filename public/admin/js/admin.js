@@ -52,7 +52,7 @@ const PANEL_SECTION = {
   inicio: 'inicio',
   conversations: 'crm', customers: 'crm', orders: 'crm',
   catalog: 'catalogo',
-  business: 'bot', faq: 'bot', payments: 'bot', whatsapp: 'bot', health: 'bot',
+  business: 'bot', rules: 'bot', faq: 'bot', payments: 'bot', shipping: 'bot', whatsapp: 'bot', health: 'bot',
   negocio: 'negocio', team: 'negocio', 'ai-usage': 'negocio', analytics: 'negocio',
 };
 const SECTION_DEFAULT = {
@@ -77,10 +77,12 @@ function switchTab(name) {
   // salud se refrescan en cada visita porque son justamente "que esta pasando ahora".
   if (name === 'customers' && !crmLoadedOnce) {
     loadCrmTagOptions();
+    loadTagManager();
     loadCustomerList(true);
   }
   if (name === 'inicio') loadDashboard();
   if (name === 'health') loadHealth();
+  if (name === 'shipping') loadShipping();
   try { localStorage.setItem('vendia-admin-tab', name); } catch {}
   // replaceState (no pushState) a proposito: refleja la vista actual en la URL para poder compartir
   // el enlace o refrescar sin perder el lugar, sin llenar el historial del navegador con cada click.
@@ -3423,3 +3425,210 @@ function goToCustomerProfile(customerId) {
 // Se invoca al final del archivo a proposito: boot() puede abrir la ultima pestaña usada, incluida
 // una de las vistas nuevas del CRM, y sus const/let viven mas abajo (TDZ si se llamara antes).
 boot();
+
+// ==============================================================================================
+// Fase 4 - Envíos (ShippingRate / ShippingCityRule). El agente ya consultaba estas tablas con
+// get_shipping_rates y get_shipping_rate_for_city, pero no había ninguna pantalla para cargarlas
+// (ver P8 en ONIX-CRM-REORG-PLAN.md) - hasta ahora solo existía scripts/seed-magimp-shipping.ts.
+// ==============================================================================================
+
+let shippingRatesCache = [];
+let editingShippingRateId = null;
+
+async function loadShipping() {
+  await Promise.all([loadShippingRates(), loadShippingCityRules()]);
+}
+
+async function loadShippingRates() {
+  const container = document.getElementById('shipping-rates-list');
+  const select = document.getElementById('ship-city-rate');
+  try {
+    const res = await apiFetch('/admin/api/shipping-rates');
+    shippingRatesCache = await res.json();
+
+    select.innerHTML = shippingRatesCache.length === 0
+      ? '<option value="">Primero agregá una tarifa</option>'
+      : shippingRatesCache.map((r) => `<option value="${escapeHtml(r.label)}">${escapeHtml(r.label)} (${escapeHtml(formatMoney(r.cost, 'COP'))})</option>`).join('');
+
+    container.innerHTML = shippingRatesCache.length === 0
+      ? '<div style="font-size:13px; color:var(--muted);">Todavía no agregaste ninguna tarifa.</div>'
+      : shippingRatesCache.map((r) => `
+          <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px 12px; border:1px solid var(--border); border-radius:var(--radius-md);">
+            <div>
+              <strong style="font-size:13.5px;">${escapeHtml(r.label)}</strong>
+              <div style="font-size:12px; color:var(--muted); margin-top:2px;">${escapeHtml(formatMoney(r.cost, 'COP'))}</div>
+            </div>
+            <div style="display:flex; gap:6px; flex-shrink:0;">
+              <button class="btn-secondary" onclick="editShippingRate('${r.id}')">Editar</button>
+              <button class="btn-danger" onclick="deleteShippingRate('${r.id}')">Eliminar</button>
+            </div>
+          </div>
+        `).join('');
+  } catch (err) {
+    container.innerHTML = `<div style="font-size:13px; color:var(--danger);">No se pudieron cargar: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+function editShippingRate(id) {
+  const rate = shippingRatesCache.find((r) => r.id === id);
+  if (!rate) return;
+  editingShippingRateId = id;
+  document.getElementById('ship-rate-label').value = rate.label;
+  document.getElementById('ship-rate-cost').value = rate.cost;
+  document.getElementById('ship-rate-submit-btn').textContent = 'Guardar cambios';
+  document.getElementById('ship-rate-cancel-btn').style.display = 'inline-block';
+  document.getElementById('ship-rate-label').scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+function cancelEditShippingRate() {
+  editingShippingRateId = null;
+  document.getElementById('ship-rate-label').value = '';
+  document.getElementById('ship-rate-cost').value = '';
+  document.getElementById('ship-rate-submit-btn').textContent = '+ Agregar tarifa';
+  document.getElementById('ship-rate-cancel-btn').style.display = 'none';
+}
+
+async function addShippingRate() {
+  const label = document.getElementById('ship-rate-label').value.trim();
+  const cost = Number(document.getElementById('ship-rate-cost').value);
+  if (!label || !Number.isFinite(cost) || cost < 0) {
+    setStatus('Completá el nombre y un costo válido', true);
+    return;
+  }
+  try {
+    if (editingShippingRateId) {
+      await apiFetch(`/admin/api/shipping-rates/${editingShippingRateId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ label, cost }),
+      });
+      setStatus('Tarifa actualizada');
+    } else {
+      await apiFetch('/admin/api/shipping-rates', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ label, cost }),
+      });
+      setStatus('Tarifa agregada');
+    }
+  } catch (err) {
+    setStatus(`No se pudo guardar: ${err.message}`, true);
+    return;
+  }
+  cancelEditShippingRate();
+  loadShippingRates();
+}
+
+async function deleteShippingRate(id) {
+  if (!confirm('¿Eliminar esta tarifa? Las reglas de ciudad que apunten a ella dejarán de resolver un costo.')) return;
+  try {
+    await apiFetch(`/admin/api/shipping-rates/${id}`, { method: 'DELETE' });
+    loadShippingRates();
+  } catch (err) {
+    setStatus(`No se pudo eliminar: ${err.message}`, true);
+  }
+}
+
+async function loadShippingCityRules() {
+  const container = document.getElementById('shipping-city-rules-list');
+  try {
+    const res = await apiFetch('/admin/api/shipping-city-rules');
+    const rules = await res.json();
+    container.innerHTML = rules.length === 0
+      ? '<div style="font-size:13px; color:var(--muted);">Todavía no agregaste ninguna regla de ciudad.</div>'
+      : rules.map((r) => `
+          <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px 12px; border:1px solid var(--border); border-radius:var(--radius-md);">
+            <div style="font-size:13.5px;"><strong>${escapeHtml(r.city)}</strong> → ${escapeHtml(r.label)}</div>
+            <button class="btn-danger" onclick="deleteShippingCityRule('${r.id}')">Eliminar</button>
+          </div>
+        `).join('');
+  } catch (err) {
+    container.innerHTML = `<div style="font-size:13px; color:var(--danger);">No se pudieron cargar: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+async function addShippingCityRule() {
+  const city = document.getElementById('ship-city-name').value.trim();
+  const label = document.getElementById('ship-city-rate').value;
+  if (!city || !label) {
+    setStatus('Completá la ciudad y elegí una tarifa', true);
+    return;
+  }
+  try {
+    await apiFetch('/admin/api/shipping-city-rules', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ city, label }),
+    });
+    setStatus('Regla agregada');
+    document.getElementById('ship-city-name').value = '';
+    loadShippingCityRules();
+  } catch (err) {
+    setStatus(`No se pudo agregar: ${err.message}`, true);
+  }
+}
+
+async function deleteShippingCityRule(id) {
+  if (!confirm('¿Eliminar esta regla de ciudad?')) return;
+  try {
+    await apiFetch(`/admin/api/shipping-city-rules/${id}`, { method: 'DELETE' });
+    loadShippingCityRules();
+  } catch (err) {
+    setStatus(`No se pudo eliminar: ${err.message}`, true);
+  }
+}
+
+// ==============================================================================================
+// Fase 4 - Catálogo de etiquetas (CustomerTag). El modelo y los endpoints ya existían desde la
+// Fase 2 (le dan color/autocompletado al String[] tags de Customer, que sigue funcionando igual
+// sin ninguna etiqueta creada acá) - lo que faltaba era la pantalla. Vive dentro de Clientes en vez
+// de bajo Bot: es dato de segmentación de clientes, no de comportamiento del bot.
+// ==============================================================================================
+
+async function loadTagManager() {
+  const container = document.getElementById('tag-manager-list');
+  if (!container) return;
+  try {
+    const res = await apiFetch('/admin/api/crm/tags');
+    const tags = await res.json();
+    container.innerHTML = tags.length === 0
+      ? '<div style="font-size:12.5px; color:var(--muted);">Sin etiquetas propias todavía - podés escribir cualquier etiqueta en la ficha del cliente, esto solo le da color y autocompletado.</div>'
+      : tags.map((t) => `
+          <span class="channel-pill" style="background:${escapeHtml(t.color)}22; color:${escapeHtml(t.color)};">
+            ${escapeHtml(t.label)}
+            <button class="btn-ghost" style="padding:0 2px; font-size:11px;" onclick="deleteTagFromManager('${t.id}')">✕</button>
+          </span>
+        `).join(' ');
+  } catch (err) {
+    container.innerHTML = `<div style="font-size:12.5px; color:var(--danger);">No se pudieron cargar: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+async function addTagFromManager() {
+  const input = document.getElementById('tag-manager-new-label');
+  const color = document.getElementById('tag-manager-new-color');
+  const label = input.value.trim();
+  if (!label) return;
+  try {
+    await apiFetch('/admin/api/crm/tags', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ label, color: color.value }),
+    });
+    input.value = '';
+    loadTagManager();
+    loadCrmTagOptions();
+  } catch (err) {
+    setStatus(`No se pudo crear la etiqueta: ${err.message}`, true);
+  }
+}
+
+async function deleteTagFromManager(id) {
+  try {
+    await apiFetch(`/admin/api/crm/tags/${id}`, { method: 'DELETE' });
+    loadTagManager();
+    loadCrmTagOptions();
+  } catch (err) {
+    setStatus(`No se pudo eliminar la etiqueta: ${err.message}`, true);
+  }
+}
