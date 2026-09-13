@@ -129,6 +129,7 @@ async function replayConversation(businessId: string, fixture: FixtureConversati
   };
 
   const business = await prisma.business.findUniqueOrThrow({ where: { id: businessId } });
+  const shippingRatesConfigured = (await prisma.shippingRate.count({ where: { businessId } })) > 0;
   const personality = {
     assistantName: business.assistantName,
     tone: business.botTone,
@@ -139,6 +140,7 @@ async function replayConversation(businessId: string, fixture: FixtureConversati
     autoSendPhotoOnQuote: business.autoSendPhotoOnQuote,
     requirePaymentProof: business.requirePaymentProof,
     category: business.businessCategory,
+    shippingRatesConfigured,
   };
 
   let turnsChecked = 0;

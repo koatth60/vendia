@@ -145,16 +145,9 @@ este turno. Por eso nunca digas "te mando los datos en un mensaje aparte" ni "en
 haberlo hecho ya: si el cliente elige una forma de pago, incluye el numero/llave o link real en ese mismo
 mensaje.
 
-TARIFAS DE ENVIO POR CATEGORIA: si las instrucciones especificas de este negocio (mas abajo en este prompt)
-describen distintas tarifas de envio segun ciudad, zona o categoria, esa tabla en prosa es solo la
-referencia de COMO decidir la categoria - antes de decirle un valor de envio al cliente, llama siempre
-get_shipping_rates para confirmar el numero real configurado, nunca copies la cifra de la prosa de memoria
-(igual que con los pagos, un digito mal recordado es plata real mal cobrada). Si get_shipping_rates devuelve
-una lista vacia, este negocio no tiene tarifas cargadas asi - segui usando el texto de sus instrucciones tal
-cual esta escrito. La categoria/ciudad que le corresponde al cliente segui decidiéndola vos con las
-instrucciones del negocio; la herramienta solo confirma el numero exacto de la categoria que ya elegiste.
-
 {{COMPROBANTES}}
+
+{{TARIFAS_ENVIO}}
 
 Si el cliente muestra intencion de compra, guialo hacia confirmar el pedido. Pedile TODOS los datos que
 falten (nombre, cantidad, direccion de envio, forma de pago) JUNTOS en un solo mensaje, no de a uno. El
@@ -319,6 +312,20 @@ podes seguir con el cierre del pedido sin pedirle la foto. Si igual te manda una
 mensaje va a incluir una nota "[Analisis de imagen adjunta]" - usala como confirmacion adicional, pero no
 es obligatoria para cerrar.`;
 
+// Condicional, no siempre presente (reliability plan Fase 6.3, 2026-09-13) - a diferencia de FOTOS/
+// COMPROBANTES de arriba (que siempre muestran una u otra variante), este parrafo solo tiene sentido
+// cuando el negocio de verdad tiene ShippingRate reales cargadas: sin eso, get_shipping_rates siempre
+// devuelve vacio y la unica instruccion util ("no copies la cifra de memoria, confirmala aca") no aplica.
+// Un negocio sin tarifas reales cargadas sigue el texto de sus propias customInstructions igual, por la
+// regla general de prioridad de customInstructions (mas abajo en este prompt).
+const SHIPPING_RATES_DIRECTIVE = `TARIFAS DE ENVIO POR CATEGORIA: si las instrucciones especificas de este negocio (mas abajo en este prompt)
+describen distintas tarifas de envio segun ciudad, zona o categoria, esa tabla en prosa es solo la
+referencia de COMO decidir la categoria - antes de decirle un valor de envio al cliente, llama siempre
+get_shipping_rates para confirmar el numero real configurado, nunca copies la cifra de la prosa de memoria
+(igual que con los pagos, un digito mal recordado es plata real mal cobrada). La categoria/ciudad que le
+corresponde al cliente segui decidiéndola vos con las instrucciones del negocio; la herramienta solo
+confirma el numero exacto de la categoria que ya elegiste.`;
+
 const PRODUCT_IMAGE_DIRECTIVE = `IMAGEN DE PRODUCTO: si el cliente manda una foto que no es un comprobante de pago - por ejemplo una
 captura de un live, un video, otra conversacion, o red social mostrando un articulo - el mensaje va a
 incluir una nota "[Analisis de imagen adjunta]" con uno de estos prefijos:
@@ -385,6 +392,10 @@ export interface BotPersonality {
   // Empty/undefined = this business doesn't use the concept, generic payment flow unaffected. See
   // ShippingPaymentModality in schema.prisma.
   shippingPaymentModalities?: ("PREPAID_ALL" | "PREPAID_PRODUCT_COD_SHIPPING" | "COD_ALL")[];
+  // True when this business has at least one real ShippingRate row configured - gates
+  // SHIPPING_RATES_DIRECTIVE (reliability plan Fase 6.3). Computed by the caller (a DB count), not derived
+  // here, same as every other BotPersonality field.
+  shippingRatesConfigured?: boolean;
 }
 
 export function buildSystemPrompt(personality?: BotPersonality | null): string {
@@ -393,10 +404,12 @@ export function buildSystemPrompt(personality?: BotPersonality | null): string {
   const photoDirective = personality?.autoSendPhotoOnQuote === false ? PHOTO_DIRECTIVE_REACTIVE : PHOTO_DIRECTIVE_AUTO;
   const comprobanteDirective =
     personality?.requirePaymentProof === false ? COMPROBANTE_DIRECTIVE_OPTIONAL : COMPROBANTE_DIRECTIVE_REQUIRED;
+  const shippingRatesDirective = personality?.shippingRatesConfigured ? SHIPPING_RATES_DIRECTIVE : "";
   const parts: string[] = [
     BASE_SYSTEM_PROMPT.replace("{{IDIOMA}}", languageDirective)
       .replace("{{FOTOS}}", photoDirective)
-      .replace("{{COMPROBANTES}}", comprobanteDirective),
+      .replace("{{COMPROBANTES}}", comprobanteDirective)
+      .replace("{{TARIFAS_ENVIO}}", shippingRatesDirective),
     PRODUCT_IMAGE_DIRECTIVE,
   ];
 

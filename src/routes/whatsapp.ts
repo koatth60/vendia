@@ -444,6 +444,8 @@ whatsappRouter.post("/webhook", async (req, res) => {
       return;
     }
 
+    const shippingRatesConfigured = (await prisma.shippingRate.count({ where: { businessId: business.id } })) > 0;
+
     const reply = await generateReply(
       conversation.id,
       {
@@ -467,6 +469,7 @@ whatsappRouter.post("/webhook", async (req, res) => {
         femaleAddressTerm: business.femaleAddressTerm,
         maleAddressTerm: business.maleAddressTerm,
         shippingPaymentModalities: business.shippingPaymentModalities,
+        shippingRatesConfigured,
       },
       rawText
     );

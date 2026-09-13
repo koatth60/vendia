@@ -46,3 +46,16 @@ test("shipping payment modality: empty array (explicit, not just missing) adds n
   const prompt = buildSystemPrompt({ shippingPaymentModalities: [] });
   assert.doesNotMatch(prompt, /MODALIDAD DE PAGO DEL ENVIO/);
 });
+
+// Fase 6.3 (2026-09-13): TARIFAS DE ENVIO POR CATEGORIA only makes sense once a business has real
+// ShippingRate rows - a business with none just follows its own customInstructions prose either way.
+test("shipping rates directive: off by default (no ShippingRate configured), no directive added", () => {
+  const prompt = buildSystemPrompt({});
+  assert.doesNotMatch(prompt, /TARIFAS DE ENVIO POR CATEGORIA/);
+});
+
+test("shipping rates directive: added when the business has real ShippingRate rows configured", () => {
+  const prompt = buildSystemPrompt({ shippingRatesConfigured: true });
+  assert.match(prompt, /TARIFAS DE ENVIO POR CATEGORIA/);
+  assert.match(prompt, /get_shipping_rates/);
+});

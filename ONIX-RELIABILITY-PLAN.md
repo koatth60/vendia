@@ -366,6 +366,21 @@ ya se arma `BotPersonality` para esa conversación) y mover ese párrafo a condi
 dos. Revisar el resto del prompt buscando más párrafos atados a una feature opt-in — reglas de seguridad
 core (foto, pago, escalación) se quedan siempre, no son candidatas.
 
+**Implementado 2026-09-13**: `SHIPPING_RATES_DIRECTIVE` extraído como constante propia, `BotPersonality`
+gana `shippingRatesConfigured?: boolean`, `buildSystemPrompt` lo agrega solo si es `true`. Calculado en los
+2 lugares que arman `BotPersonality` desde datos reales: `whatsapp.ts` (`prisma.shippingRate.count(...) > 0`)
+y `scripts/run-regression-suite.ts` (mismo cálculo, para que el regression valide el comportamiento real en
+vez de siempre asumir "no configurado"). De paso se sacó del párrafo la frase sobre "si get_shipping_rates
+devuelve lista vacía" — ya no aplica, el párrafo solo se muestra cuando SÍ hay tarifas reales. Un negocio sin
+`ShippingRate` configuradas sigue su propio `customInstructions` igual, por la regla general de prioridad de
+`customInstructions` que ya existe más abajo en el prompt — no se pierde nada, solo se deja de repetir la
+instrucción de "confirmá con get_shipping_rates" cuando esa herramienta nunca va a tener nada que devolver.
+`BASE_SYSTEM_PROMPT`: 20,301 → 19,478 caracteres; el párrafo (681 caracteres) ahora es condicional en vez de
+fijo. 4 tests nuevos (`agent.corePersonality.test.ts`), `npm test` completo 201/201. **No es real-cost de
+validar** — es un cambio de forma de dato (boolean condition), no de texto que el modelo interprete distinto
+en el caso configurado (el texto que SÍ ve un negocio con tarifas es casi idéntico al de antes), así que no
+se corrió ningún paid test para esta fase. No commiteado/desplegado todavía.
+
 ### Track B — feature nueva: optimizador de `customInstructions` con IA
 
 Distinto del Track A: esto NO corre en cada mensaje del bot, corre UNA VEZ cuando el dueño lo pide desde el
