@@ -436,7 +436,7 @@ fase real:
    Tokens). 2 tests nuevos en `usage.test.ts`, `npx tsc --noEmit` limpio. **Pendiente**: la mitad de
    "tamaño de tool-results por negocio" — necesita instrumentación nueva (nada hoy mide el tamaño de un
    tool-result en el momento de la llamada), es un cambio aparte, no se hizo hoy para no sobre-construir.
-   Commiteado, no desplegado todavía.
+   **Commiteado (`da52e26`) y desplegado a producción 2026-09-13**.
 
 ## Orden sugerido para retomar
 
