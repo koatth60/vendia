@@ -31,6 +31,10 @@
     --display: var(--onix-font-sans);
   }
   * { box-sizing: border-box; }
+  /* Chrome no siempre hereda font-family de <select> hacia sus <option> en el
+     popup nativo - sin esto, la lista desplegada cae a la tipografia del
+     sistema mientras el resto del panel usa la del diseno. */
+  option { font-family: inherit; }
   html, body { max-width: 100%; overflow-x: hidden; }
   body.no-scroll { overflow-y: hidden; }
   body {
