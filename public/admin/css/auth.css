@@ -155,7 +155,7 @@ button[disabled] {
 
 /* --- El conmutador de tema vive arriba a la derecha ----------------------- */
 .auth-theme {
-  position: fixed; top: 16px; right: 16px; z-index: 2;
+  position: absolute; top: 16px; right: 16px; z-index: 2;
 }
 
 /* ===========================================================================

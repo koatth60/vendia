@@ -691,10 +691,10 @@
 
   @media (max-width: 760px) {
     .chat-split { height: 72vh; }
-    .chat-split-list { width: 100%; border-right: none; }
+    .chat-split-col { width: 100%; border-right: none; }
     .chat-split-thread { display: none; }
     .chat-back-btn { display: flex; }
-    .chat-split.chat-split--open .chat-split-list { display: none; }
+    .chat-split.chat-split--open .chat-split-col { display: none; }
     .chat-split.chat-split--open .chat-split-thread { display: flex; }
   }
 
@@ -769,6 +769,9 @@
     /* La cabecera de la ficha (volver + nombre + Ver chat + Guardar) no entra en una fila de 375px. */
     #customer-detail-view .panel-header { flex-direction: column; align-items: stretch; gap: 10px; }
     #customer-detail-view .panel-header > div { width: 100%; }
+    /* flex: 1 1 260px es un ancho mínimo pensado para fila; en columna ese
+       260px se vuelve alto y deja un hueco enorme bajo el nombre. */
+    #customer-detail-view .panel-header > div:first-child { flex: 0 1 auto; }
     .brand-name { font-size: 15px; }
     .brand-sub { font-size: 10px; }
     main { padding: 18px 14px 48px; }
@@ -829,6 +832,10 @@
     .panel-header { align-items: stretch; }
     .panel-header > div { width: 100%; }
     .panel-header button { width: 100%; min-height: 44px; }
+    /* Excepto el "‹ Volver" de la ficha de cliente: vive junto al nombre en
+       el primer hijo, no en la fila de acciones. A lo ancho lo separaba del
+       nombre en vez de acompañarlo. */
+    .panel-header > div:first-child button { width: auto; }
     .chat-panel-actions button { min-height: 44px; }
     .chat-panel-header { padding: 12px 14px; }
     .crm-row { padding: 12px 14px; }
