@@ -21,6 +21,8 @@ import {
   listQueuedOutbound,
   cancelQueuedOutbound,
   countConversationsWithQueuedOutbound,
+  customerDisplayName,
+  getOrCreateCustomer,
 } from "./service";
 import { realtimeEvents } from "../realtime/events";
 
@@ -580,4 +582,51 @@ test("la cola de salida guarda, lista, cancela y se cuenta por conversacion", as
   assert.deepEqual(pending.map((q) => q.body), ["Confirmame la direccion"], "lo cancelado no se entrega nunca");
 
   assert.equal(await cancelQueuedOutbound(businessId, first.id), false, "cancelar dos veces no hace nada");
+});
+
+// El nombre de perfil de WhatsApp (contacts[0].profile.name del webhook) llena la bandeja sin que nadie
+// pregunte nada, pero NUNCA puede pisar al nombre autoritativo: ese lo puso la clienta diciendolo por
+// chat, o el dueno escribiendolo a mano, y un cambio de perfil ajeno no puede borrarlo.
+test("customerDisplayName respeta la precedencia nombre propio > perfil de WhatsApp > numero", () => {
+  assert.equal(
+    customerDisplayName({ name: "Carolina Ruiz", whatsappProfileName: "caro🌸", phoneNumber: "573001112233" }),
+    "Carolina Ruiz",
+    "el nombre autoritativo gana siempre"
+  );
+  assert.equal(
+    customerDisplayName({ name: null, whatsappProfileName: "caro🌸", phoneNumber: "573001112233" }),
+    "caro🌸",
+    "sin nombre propio, el de WhatsApp es mejor que un numero crudo"
+  );
+  assert.equal(
+    customerDisplayName({ name: null, whatsappProfileName: null, phoneNumber: "573001112233" }),
+    "573001112233"
+  );
+  assert.equal(
+    customerDisplayName({ name: "", whatsappProfileName: "caro", phoneNumber: "573001112233" }),
+    "caro",
+    "un nombre vacio no es un nombre"
+  );
+});
+
+test("getOrCreateCustomer refresca el perfil de WhatsApp sin tocar el nombre autoritativo", async () => {
+  const phone = `57300${Date.now()}`.slice(0, 12);
+  const first = await getOrCreateCustomer(businessId, phone, "caro");
+  assert.equal(first.whatsappProfileName, "caro");
+  assert.equal(first.name, null, "el webhook no rellena `name`, solo el campo de perfil");
+
+  // La clienta dice su nombre por chat: ese es el autoritativo.
+  await prisma.customer.update({ where: { id: first.id }, data: { name: "Carolina Ruiz" } });
+
+  // Cambia su foto/nombre de perfil de WhatsApp. El nombre bueno tiene que sobrevivir.
+  const after = await getOrCreateCustomer(businessId, phone, "caro 2026 ✨");
+  assert.equal(after.whatsappProfileName, "caro 2026 ✨", "el de perfil si se refresca");
+  assert.equal(after.name, "Carolina Ruiz", "el autoritativo NO se toca");
+  assert.equal(customerDisplayName(after), "Carolina Ruiz");
+
+  // Un webhook sin nombre de perfil (Meta no siempre lo manda) no puede borrar el que ya teniamos.
+  const noProfile = await getOrCreateCustomer(businessId, phone, undefined);
+  assert.equal(noProfile.whatsappProfileName, "caro 2026 ✨", "sin dato nuevo, se conserva el anterior");
+
+  await prisma.customer.deleteMany({ where: { id: first.id } });
 });

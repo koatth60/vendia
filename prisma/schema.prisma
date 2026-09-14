@@ -451,7 +451,14 @@ model Customer {
   business      Business       @relation(fields: [businessId], references: [id], onDelete: Cascade)
   businessId    String
   phoneNumber   String
+  // Nombre AUTORITATIVO: el que la clienta dijo por chat (save_customer_name) o el que el dueno escribio
+  // a mano en el panel. Solo lo cambia una persona a proposito.
   name          String?
+  // Lo que WhatsApp reporta en cada webhook (contacts[0].profile.name): el nombre que la persona puso en
+  // SU propio perfil. Va aparte de `name` a proposito - lo refrescamos en cada mensaje y la persona puede
+  // cambiarlo cuando quiera, asi que si compartiera campo con `name` un cambio de perfil ajeno borraria
+  // el nombre bueno. Para mostrar se usa name ?? whatsappProfileName ?? phoneNumber.
+  whatsappProfileName String?
   idNumber      String?
   deliveryPhone String?
   email         String?

@@ -22,7 +22,10 @@ export interface ConversationRow {
   humanControl: boolean;
   updatedAt: Date;
   unreadCount: number;
-  customer: { id: string; phoneNumber: string; name: string | null; tags: string[] };
+  // `name` es el autoritativo y editable; `displayName` es lo que se pinta (name -> nombre de perfil de
+  // WhatsApp -> numero). Van los dos porque el panel EDITA name pero MUESTRA displayName: si mandaramos
+  // uno solo, abrir "editar nombre" precargaria el nombre de WhatsApp como si el dueno lo hubiera puesto.
+  customer: { id: string; phoneNumber: string; name: string | null; displayName: string; tags: string[] };
   lastMessage: { role: string; content: string; createdAt: Date } | null;
 }
 
@@ -41,7 +44,10 @@ export interface CustomerRow {
   updatedAt: Date;
   unreadCount: number;
   orderCount: number;
-  customer: { id: string; phoneNumber: string; name: string | null; tags: string[] };
+  // `name` es el autoritativo y editable; `displayName` es lo que se pinta (name -> nombre de perfil de
+  // WhatsApp -> numero). Van los dos porque el panel EDITA name pero MUESTRA displayName: si mandaramos
+  // uno solo, abrir "editar nombre" precargaria el nombre de WhatsApp como si el dueno lo hubiera puesto.
+  customer: { id: string; phoneNumber: string; name: string | null; displayName: string; tags: string[] };
   lastMessage: { role: string; content: string; createdAt: Date } | null;
   cycles: { id: string; status: string; updatedAt: Date }[];
 }

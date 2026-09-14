@@ -17,6 +17,7 @@ import {
   setHumanControl,
   updateConversationStatus,
   getRelatedProductNameForMessage,
+  customerDisplayName,
   queueOutboundMessage,
   listQueuedOutboundForCustomer,
   markQueuedOutboundSent,
@@ -425,7 +426,12 @@ whatsappRouter.post("/webhook", async (req, res) => {
       return;
     }
 
-    const customer = await getOrCreateCustomer(business.id, from);
+    // Meta manda en cada webhook el nombre que la persona puso en SU perfil de WhatsApp. Hasta ahora se
+    // descartaba, asi que la bandeja mostraba numeros crudos y el bot tenia que gastar un turno
+    // preguntando como se llama alguien que ya nos lo estaba diciendo. Solo alimenta la vista del panel:
+    // NO entra al prompt del bot (esa decision sigue parqueada, ver la nota de consentimiento).
+    const whatsappProfileName: string | undefined = value?.contacts?.[0]?.profile?.name;
+    const customer = await getOrCreateCustomer(business.id, from, whatsappProfileName);
     const conversation = await getOrCreateOpenConversation(business.id, customer.id);
 
     let text = "";
@@ -640,7 +646,7 @@ whatsappRouter.post("/webhook", async (req, res) => {
       await recordAgentIncident(business.id, "STALE_REPLY_DISCARDED", detail, conversation.id);
       await setHumanControl(business.id, conversation.id, true);
       if (business.contactPhone) {
-        const customerLabel = customer.name || from;
+        const customerLabel = customerDisplayName(customer);
         const staleAlertText = `El bot tardo ${Math.round(waitedMinutes)} minutos en responderle a ${customerLabel} y la respuesta se descarto por vieja. Esa conversacion quedo esperandote en el panel.`;
         await trackOwnerSend(business.id, staleAlertText, () => sendOwnerAlert(credentials, business.contactPhone!, staleAlertText));
       }

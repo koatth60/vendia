@@ -1427,7 +1427,7 @@ function statusBadgeHtml({ status, intent, humanControl, conversationId }) {
 // [[onix-conversations-group-by-customer]] and ONIX-CONVERSATIONS-GROUPING-PLAN.md), shared between the
 // initial list render and the realtime conversation:new handler for a genuinely new customer.
 function customerRowHtml(c) {
-  const displayName = c.customer.name || c.customer.phoneNumber;
+  const displayName = c.customer.displayName || c.customer.phoneNumber;
   const initial = displayName.trim().charAt(0).toUpperCase() || '?';
   const preview = c.lastMessage
     ? `${c.lastMessage.role === 'ASSISTANT' ? 'Tú (bot): ' : ''}${escapeHtml(c.lastMessage.content).slice(0, 80)}`
@@ -1827,7 +1827,7 @@ async function openCustomer(customerId) {
     cancelEditCustomerName();
     renderTags();
 
-    const displayName = data.customer.name || data.customer.phoneNumber;
+    const displayName = data.customer.displayName || data.customer.phoneNumber;
     const initial = displayName.trim().charAt(0).toUpperCase() || '?';
     const avatarEl = document.getElementById('modal-avatar');
     avatarEl.textContent = initial;
@@ -3382,7 +3382,7 @@ function initRealtime() {
       // Patches in place rather than a full outerHTML replace - most emits of this event (handoff
       // toggle, status change, intent change) carry no lastMessage/orderCount, so a blind replace used
       // to blank the preview text back to "Sin mensajes" and reset "N compras" on every such change.
-      const displayName = c.customer.name || c.customer.phoneNumber;
+      const displayName = c.customer.displayName || c.customer.phoneNumber;
       const nameEl = row.querySelector('.conv-name');
       if (nameEl) nameEl.textContent = displayName;
       const avatarEl = row.querySelector('.conv-avatar');
@@ -3408,7 +3408,7 @@ function initRealtime() {
       if (!nameInputOpen) {
         currentCustomerName = c.customer.name || '';
         currentCustomerPhone = c.customer.phoneNumber;
-        const displayName = c.customer.name || c.customer.phoneNumber;
+        const displayName = c.customer.displayName || c.customer.phoneNumber;
         document.getElementById('modal-title').textContent = displayName;
         renderModalSubtitle({
           status: c.status,

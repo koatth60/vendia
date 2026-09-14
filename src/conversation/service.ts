@@ -107,11 +107,25 @@ async function attachDeliveryFailures<T extends { whatsappMessageId: string | nu
   });
 }
 
-export async function getOrCreateCustomer(businessId: string, phoneNumber: string) {
+// El nombre para MOSTRAR. Precedencia deliberada: primero el autoritativo (lo dijo la clienta o lo
+// escribio el dueno), despues el de su perfil de WhatsApp, y el numero solo si no hay ninguno. Vive
+// aca y no en el front para que todas las vistas digan lo mismo sin repetir la cadena en cada lugar.
+export function customerDisplayName(customer: {
+  name: string | null;
+  whatsappProfileName: string | null;
+  phoneNumber: string;
+}): string {
+  return customer.name || customer.whatsappProfileName || customer.phoneNumber;
+}
+
+export async function getOrCreateCustomer(businessId: string, phoneNumber: string, whatsappProfileName?: string | null) {
+  // El nombre de perfil se refresca en CADA mensaje: la persona lo puede cambiar cuando quiera y el
+  // valor viejo no sirve. Nunca toca `name` - ese solo lo cambia una persona a proposito.
+  const profile = whatsappProfileName?.trim() || undefined;
   return prisma.customer.upsert({
     where: { businessId_phoneNumber: { businessId, phoneNumber } },
-    update: {},
-    create: { businessId, phoneNumber },
+    update: profile ? { whatsappProfileName: profile } : {},
+    create: { businessId, phoneNumber, whatsappProfileName: profile ?? null },
   });
 }
 
@@ -520,7 +534,7 @@ export const CUSTOMER_FOLLOWUP_TEXT = "Seguimos revisando tu consulta con el equ
 
 export type StalledConversation = {
   conversationId: string;
-  customer: { id: string; name: string | null; phoneNumber: string };
+  customer: { id: string; name: string | null; whatsappProfileName: string | null; phoneNumber: string };
   intent: string | null;
   nextStage: 1 | 2;
   openQuestion: string | null;
@@ -647,7 +661,7 @@ function formatConversationRow(c: {
   humanControl: boolean;
   updatedAt: Date;
   unreadCount: number;
-  customer: { id: string; phoneNumber: string; name: string | null; tags: string[] };
+  customer: { id: string; phoneNumber: string; name: string | null; whatsappProfileName: string | null; tags: string[] };
   messages?: { role: string; content: string; mediaType: string | null; createdAt: Date }[];
 }): ConversationRow {
   return {
@@ -657,7 +671,13 @@ function formatConversationRow(c: {
     humanControl: c.humanControl,
     updatedAt: c.updatedAt,
     unreadCount: c.unreadCount,
-    customer: { id: c.customer.id, phoneNumber: c.customer.phoneNumber, name: c.customer.name, tags: c.customer.tags },
+    customer: {
+      id: c.customer.id,
+      phoneNumber: c.customer.phoneNumber,
+      name: c.customer.name,
+      displayName: customerDisplayName(c.customer),
+      tags: c.customer.tags,
+    },
     lastMessage: formatLastMessagePreview(c.messages?.[0]),
   };
 }
@@ -741,6 +761,7 @@ export async function getConversationForBusiness(businessId: string, conversatio
       id: conversation.customer.id,
       phoneNumber: conversation.customer.phoneNumber,
       name: conversation.customer.name,
+      displayName: customerDisplayName(conversation.customer),
       tags: conversation.customer.tags,
     },
     messages: await attachDeliveryFailures(businessId, messagesWithMedia),
@@ -761,7 +782,7 @@ function formatCustomerRow(
     humanControl: boolean;
     updatedAt: Date;
     unreadCount: number;
-    customer: { id: string; phoneNumber: string; name: string | null; tags: string[] };
+    customer: { id: string; phoneNumber: string; name: string | null; whatsappProfileName: string | null; tags: string[] };
     messages?: { role: string; content: string; mediaType: string | null; createdAt: Date }[];
   }[]
 ): CustomerRow {
@@ -785,6 +806,7 @@ function formatCustomerRow(
       id: active.customer.id,
       phoneNumber: active.customer.phoneNumber,
       name: active.customer.name,
+      displayName: customerDisplayName(active.customer),
       tags: active.customer.tags,
     },
     lastMessage: formatLastMessagePreview(mostRecent.messages?.[0]),
@@ -842,7 +864,13 @@ export async function getCustomerThreadForBusiness(businessId: string, customerI
   }));
   const activeConversationId =
     conversations.find((c) => c.status !== "SOLD" && c.status !== "LOST")?.id ?? conversations[0].id;
-  const customerBasic = { id: customer.id, phoneNumber: customer.phoneNumber, name: customer.name, tags: customer.tags };
+  const customerBasic = {
+    id: customer.id,
+    phoneNumber: customer.phoneNumber,
+    name: customer.name,
+    displayName: customerDisplayName(customer),
+    tags: customer.tags,
+  };
 
   let targetIndex: number;
   if (before) {

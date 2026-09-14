@@ -9,6 +9,7 @@ import {
   recordMessage,
   CUSTOMER_FOLLOWUP_TEXT,
   getWindowState,
+  customerDisplayName,
 } from "../conversation/service";
 
 // Real incident (2026-09-14): a customer-facing nudge sent past the 24h window got a real wamid back
@@ -93,7 +94,7 @@ export async function runEscalationReminderJob(): Promise<void> {
       const reachable = await canReachCustomer(pending.conversationId);
       // No newlines - the onix_owner_alert template rejects them (WhatsApp error 132018), so a
       // multi-line body always fell through to the plain-text fallback instead of the real template.
-      const text = `Recordatorio: todavia no respondiste esta pregunta de ${pending.customer.name || pending.customer.phoneNumber}, sigue sin poder hablar con el bot: "${pending.question}"${reachable ? "" : WINDOW_CLOSED_NOTE}`;
+      const text = `Recordatorio: todavia no respondiste esta pregunta de ${customerDisplayName(pending.customer)}, sigue sin poder hablar con el bot: "${pending.question}"${reachable ? "" : WINDOW_CLOSED_NOTE}`;
       try {
         const wamid = await sendOwnerAlert(credentials, business.contactPhone, text);
         await recordOwnerMessage(business.id, { direction: "OUT", body: text, success: Boolean(wamid) });
@@ -122,7 +123,7 @@ export async function runEscalationReminderJob(): Promise<void> {
 
     const stalled = await findStalledConversationsDueForReminder(business.id, stage1Before, stage2Before);
     for (const conversation of stalled) {
-      const customerLabel = conversation.customer.name || conversation.customer.phoneNumber;
+      const customerLabel = customerDisplayName(conversation.customer);
       const reason = describeStalledOrigin(conversation);
       const reachable = await canReachCustomer(conversation.conversationId);
       const base =
