@@ -29,8 +29,14 @@ insightsRouter.get("/api/config-health", async (req, res) => {
 });
 
 
+// El panel ofrece 7 / 30 / 90 dias. Cualquier otro valor cae a 30 en vez de
+// dejar que el front pida un rango arbitrario contra la base.
+const ANALYTICS_RANGES = [7, 30, 90];
+
 insightsRouter.get("/api/analytics", async (req, res) => {
-  const summary = await getAnalyticsSummary(businessIdOf(req));
-  res.json(summary);
+  const requested = Number(req.query.days);
+  const days = ANALYTICS_RANGES.includes(requested) ? requested : 30;
+  const summary = await getAnalyticsSummary(businessIdOf(req), days);
+  res.json({ ...summary, days });
 });
 

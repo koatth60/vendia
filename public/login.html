@@ -24,36 +24,103 @@
 <link rel="stylesheet" href="/admin/css/auth.css?v=2" />
 <script src="/admin/js/theme.js?v=2" defer></script>
 </head>
-<body>
+<body class="auth-split">
   <button id="theme-toggle" class="theme-toggle auth-theme" type="button"></button>
-  <div class="blob-1"></div>
-  <div class="blob-2"></div>
-  <a class="back-home" href="/">
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M11 6l-6 6 6 6"/></svg>
-    Volver al inicio
-  </a>
-  <div class="card">
-    <div class="brand">
-      <div class="brand-mark">
-        <svg width="32" height="32" viewBox="0 0 32 32" role="img" aria-label="Zaqi Solutions"><circle cx="16" cy="16" r="14" fill="var(--onix-logo-disc)"></circle><g transform="translate(4.14 4.39) scale(0.365)" fill="var(--onix-logo-leaf)"><path d="M16 54 L45 20" stroke="var(--onix-logo-leaf)" stroke-width="4.5" stroke-linecap="round" fill="none"></path><ellipse cx="21.0" cy="36.7" rx="8.8" ry="3.9" transform="rotate(-111.5 21.0 36.7)"></ellipse><ellipse cx="26.3" cy="30.9" rx="8.5" ry="3.8" transform="rotate(-111.5 26.3 30.9)"></ellipse><ellipse cx="31.9" cy="25.3" rx="7.8" ry="3.6" transform="rotate(-111.5 31.9 25.3)"></ellipse><ellipse cx="37.4" cy="20.1" rx="6.8" ry="3.3" transform="rotate(-111.5 37.4 20.1)"></ellipse><ellipse cx="32.3" cy="46.3" rx="8.8" ry="3.9" transform="rotate(12.5 32.3 46.3)"></ellipse><ellipse cx="37.2" cy="40.2" rx="8.5" ry="3.8" transform="rotate(12.5 37.2 40.2)"></ellipse><ellipse cx="41.8" cy="33.8" rx="7.8" ry="3.6" transform="rotate(12.5 41.8 33.8)"></ellipse><ellipse cx="46.1" cy="27.5" rx="6.8" ry="3.3" transform="rotate(12.5 46.1 27.5)"></ellipse><ellipse cx="49.6" cy="14.6" rx="7.5" ry="3.6" transform="rotate(-49.5 49.6 14.6)"></ellipse></g></svg>
-      </div>
-      <div class="brand-name">zaqi solutions</div>
+
+  <div class="auth-pane auth-pane-form">
+    <div class="auth-top">
+      <a class="brand" href="/" style="justify-content:flex-start;margin-bottom:0;">
+        <div class="brand-mark">
+          <svg width="32" height="32" viewBox="0 0 32 32" role="img" aria-label="Zaqi Solutions"><circle cx="16" cy="16" r="14" fill="var(--onix-logo-disc)"></circle><g transform="translate(4.14 4.39) scale(0.365)" fill="var(--onix-logo-leaf)"><path d="M16 54 L45 20" stroke="var(--onix-logo-leaf)" stroke-width="4.5" stroke-linecap="round" fill="none"></path><ellipse cx="21.0" cy="36.7" rx="8.8" ry="3.9" transform="rotate(-111.5 21.0 36.7)"></ellipse><ellipse cx="26.3" cy="30.9" rx="8.5" ry="3.8" transform="rotate(-111.5 26.3 30.9)"></ellipse><ellipse cx="31.9" cy="25.3" rx="7.8" ry="3.6" transform="rotate(-111.5 31.9 25.3)"></ellipse><ellipse cx="37.4" cy="20.1" rx="6.8" ry="3.3" transform="rotate(-111.5 37.4 20.1)"></ellipse><ellipse cx="32.3" cy="46.3" rx="8.8" ry="3.9" transform="rotate(12.5 32.3 46.3)"></ellipse><ellipse cx="37.2" cy="40.2" rx="8.5" ry="3.8" transform="rotate(12.5 37.2 40.2)"></ellipse><ellipse cx="41.8" cy="33.8" rx="7.8" ry="3.6" transform="rotate(12.5 41.8 33.8)"></ellipse><ellipse cx="46.1" cy="27.5" rx="6.8" ry="3.3" transform="rotate(12.5 46.1 27.5)"></ellipse><ellipse cx="49.6" cy="14.6" rx="7.5" ry="3.6" transform="rotate(-49.5 49.6 14.6)"></ellipse></g></svg>
+        </div>
+        <div class="brand-name">zaqi solutions</div>
+      </a>
     </div>
-    <h1>Iniciar sesión</h1>
-    <form id="login-form">
-      <label>Email</label>
-      <input type="email" id="email" required autocomplete="email" />
-      <label>Contraseña</label>
-      <input type="password" id="password" required autocomplete="current-password" />
-      <div class="error" id="error"></div>
-      <button type="submit">Entrar</button>
-    </form>
-    <div class="foot" style="margin-top:14px;"><a href="/forgot-password.html">¿Olvidaste tu contraseña?</a></div>
-    <div class="foot">¿No tienes cuenta? <a href="/signup.html">Regístrate acá</a></div>
-    <div class="foot" style="margin-top:4px;"><a href="/terminos.html">Términos</a> · <a href="/privacidad.html">Privacidad</a></div>
+
+    <div class="auth-middle">
+      <div class="auth-inner">
+        <h1>Entra a tu panel</h1>
+        <p class="sub">Onix siguió vendiendo mientras no estabas.</p>
+
+        <form id="login-form">
+          <label for="email">Email</label>
+          <input type="email" id="email" required autocomplete="email" />
+
+          <div class="label-row">
+            <label for="password">Contraseña</label>
+            <a href="/forgot-password.html">¿La olvidaste?</a>
+          </div>
+          <div class="field-with-action">
+            <input type="password" id="password" required autocomplete="current-password" />
+            <button type="button" class="field-action" id="toggle-password" aria-label="Mostrar contraseña">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3.2"/></svg>
+            </button>
+          </div>
+
+          <div class="error" id="error"></div>
+          <button type="submit">Entrar al panel</button>
+        </form>
+
+        <div class="auth-or"><span></span></div>
+
+        <a class="btn-wide-secondary" href="/forgot-password.html">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5.5" width="18" height="13" rx="2.5"/><path d="m3.5 7 8.5 6 8.5-6"/></svg>
+          Recibir un enlace por correo
+        </a>
+
+        <div class="foot">¿Todavía no tienes cuenta? <a href="/signup.html">Crea la tuya</a></div>
+      </div>
+    </div>
+
+    <div class="auth-foot-legal">
+      <span>© 2026 Zaqi Solutions</span>
+      <a href="/terminos.html">Términos</a>
+      <a href="/privacidad.html">Privacidad</a>
+    </div>
+  </div>
+
+  <div class="auth-pane auth-pane-show">
+    <div class="auth-middle">
+      <div class="auth-inner">
+        <div class="show-eyebrow">Mientras dormías</div>
+        <p class="show-headline">Onix responde por vos toda la noche: contesta precios, manda fotos y deja la venta lista sin que toques el teléfono.</p>
+
+        <div class="show-chat">
+          <div class="show-chat-head">
+            <div class="show-avatar">MI</div>
+            <div>
+              <div class="show-chat-name">Mag.imp</div>
+              <div class="show-chat-state">en línea</div>
+            </div>
+          </div>
+          <div class="show-bubbles">
+            <div class="show-bubble show-bubble-in">¿Tienen el Smartwatch Serie 11 Mini en negro?</div>
+            <div class="show-bubble show-bubble-out">Sí, en negro mate. <span class="onix-num">$145.000</span>, correa metálica incluida. Te mando foto.</div>
+            <div class="show-bubble show-bubble-out">¿Cómo querés pagar? Nequi, transferencia o contraentrega.</div>
+          </div>
+        </div>
+
+        <div class="show-order">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m8.5 12 2.5 2.5 4.5-5"/></svg>
+          <div>
+            <div class="show-order-title">Pedido confirmado</div>
+            <div class="show-order-meta">$155.000 · Nequi</div>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 
 <script>
+document.getElementById('toggle-password').addEventListener('click', () => {
+  const input = document.getElementById('password');
+  const shown = input.type === 'text';
+  input.type = shown ? 'password' : 'text';
+  document.getElementById('toggle-password')
+    .setAttribute('aria-label', shown ? 'Mostrar contraseña' : 'Ocultar contraseña');
+  input.focus();
+});
+
 document.getElementById('login-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const errorEl = document.getElementById('error');

@@ -124,6 +124,12 @@
   /* Sombra: en claro hay elevación, en oscuro el borde hace ese trabajo */
   --onix-shadow-sm: 0 1px 2px rgba(15, 26, 21, 0.05);
   --onix-shadow-md: 0 8px 24px rgba(15, 26, 21, 0.07);
+  --onix-shadow-lg: 0 24px 64px rgba(15, 26, 21, 0.28);
+
+  /* Velo del modal y aro del punto de color: no son "un gris", cambian de
+     tema como todo lo demás. */
+  --onix-scrim: rgba(15, 26, 21, 0.45);
+  --onix-swatch-ring: rgba(15, 26, 21, 0.14);
 }
 
 /* =========================================================================
@@ -185,13 +191,15 @@
     --onix-invert-border: #28402F;
     --onix-invert-muted: #9DB3A7;
     --onix-invert-ink: #F2F7F4;
-  --onix-invert-ink: #F2F7F4;
 
     --onix-logo-disc: #35D07F;
     --onix-logo-leaf: #0B0E0D;
 
     --onix-shadow-sm: none;
     --onix-shadow-md: none;
+    --onix-shadow-lg: 0 24px 64px rgba(0, 0, 0, 0.55);
+    --onix-scrim: rgba(0, 0, 0, 0.62);
+    --onix-swatch-ring: rgba(232, 237, 234, 0.18);
   }
 }
 
@@ -230,6 +238,8 @@
   --onix-warn-soft: rgba(224, 163, 60, 0.16);
   --onix-info: #8FAEF0;
   --onix-info-soft: rgba(92, 131, 224, 0.16);
+  --onix-stage-negotiating: #E0783C;
+  --onix-stage-negotiating-soft: rgba(224, 120, 60, 0.16);
 
   --onix-series-clients: #5C83E0;
   --onix-series-bot: #1EA162;
@@ -241,11 +251,20 @@
   --onix-bubble-out: #204A34;
   --onix-bubble-out-ink: #DDF3E6;
 
+  --onix-invert: #16211B;
+  --onix-invert-surface: #1B2A22;
+  --onix-invert-border: #28402F;
+  --onix-invert-muted: #9DB3A7;
+  --onix-invert-ink: #F2F7F4;
+
   --onix-logo-disc: #35D07F;
   --onix-logo-leaf: #0B0E0D;
 
   --onix-shadow-sm: none;
   --onix-shadow-md: none;
+  --onix-shadow-lg: 0 24px 64px rgba(0, 0, 0, 0.55);
+  --onix-scrim: rgba(0, 0, 0, 0.62);
+  --onix-swatch-ring: rgba(232, 237, 234, 0.18);
 }
 
 /* =========================================================================

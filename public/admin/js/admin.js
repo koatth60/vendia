@@ -180,6 +180,8 @@ async function loadBusiness() {
     document.getElementById('ship-modality-cod-all').checked = modalities.includes('COD_ALL');
     renderInstructionChips();
     updateTallaFieldVisibility();
+    renderGreetPreview();
+    watchBusinessDirty();
     document.getElementById('business-contact-name').value = business.contactName || '';
     document.getElementById('business-contact-phone').value = business.contactPhone || '';
     document.getElementById('business-followup-template').dataset.saved = business.followUpTemplateName || '';
@@ -190,6 +192,43 @@ async function loadBusiness() {
   } catch (err) {
     setStatus(`No se pudo cargar el negocio: ${err.message}`, true);
   }
+}
+
+// La vista previa arma el mismo saludo que verá el cliente: el propio si el
+// dueño escribió uno, si no el que sale del nombre y el tono.
+const TONE_GREETING = {
+  cercano: (n, b) => `¡Hola! Buenas tardes. Bienvenido a ${b}, ¿en qué te puedo ayudar hoy?`,
+  formal: (n, b) => `Buenas tardes, le saluda ${n} de ${b}. ¿En qué puedo ayudarle?`,
+  juvenil: (n, b) => `¡Holaa! Soy ${n} de ${b} 👋 ¿Qué estás buscando?`,
+  profesional: (n, b) => `Hola, soy ${n} de ${b}. ¿En qué te puedo ayudar?`,
+};
+
+function renderGreetPreview() {
+  const bubble = document.getElementById('greet-preview-bubble');
+  if (!bubble) return;
+  const name = (document.getElementById('bot-assistant-name').value || '').trim() || 'tu bot';
+  const businessName = (document.getElementById('business-name').value || '').trim() || 'tu negocio';
+  const custom = (document.getElementById('bot-greeting').value || '').trim();
+  const tone = document.getElementById('bot-tone').value || 'cercano';
+  const build = TONE_GREETING[tone] || TONE_GREETING.cercano;
+  bubble.textContent = custom || build(name, businessName);
+  document.getElementById('greet-preview-name').textContent = name;
+}
+
+// Marca "cambios sin guardar" en cuanto algo del panel cambia.
+function watchBusinessDirty() {
+  const panel = document.querySelector('[data-tab-panel="business"]');
+  const flag = document.getElementById('business-dirty');
+  if (!panel || !flag || panel.dataset.dirtyWatched) return;
+  panel.dataset.dirtyWatched = '1';
+  panel.addEventListener('input', () => {
+    flag.hidden = false;
+    renderGreetPreview();
+  });
+  panel.addEventListener('change', () => {
+    flag.hidden = false;
+    renderGreetPreview();
+  });
 }
 
 async function loadWhatsappTemplates() {
@@ -457,6 +496,8 @@ async function saveBusiness() {
       }),
     });
     setStatus('Negocio guardado ✓');
+    const flag = document.getElementById('business-dirty');
+    if (flag) flag.hidden = true;
   } catch (err) {
     setStatus(`No se pudo guardar: ${err.message}`, true);
   }
@@ -480,6 +521,13 @@ let productsCache = [];
 // Paginación (feedback del dueño, 2026-09-13: un catálogo real puede pasar de cientos de SKUs).
 let productsPage = 1;
 let productsSearchTimer = null;
+
+function focusNewProductForm() {
+  const card = document.getElementById('new-product-card');
+  if (card) card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  const name = document.getElementById('p-name');
+  if (name) name.focus({ preventScroll: true });
+}
 
 function onProductsSearchInput() {
   if (productsSearchTimer) clearTimeout(productsSearchTimer);
@@ -510,13 +558,15 @@ async function loadProducts() {
     // El badge de la pestaña Catálogo debe mostrar el total real del negocio, no el tamaño de la
     // página actual - por eso usa `total` (del servidor) en vez de items.length.
     document.getElementById('tab-count-catalog').textContent = total;
+    const totalCount = document.getElementById('products-total-count');
+    if (totalCount) totalCount.textContent = total;
 
     container.innerHTML = items.length === 0
-      ? `<div class="card empty-state"><div class="big">🗂️</div>${q ? 'Ningún producto coincide con la búsqueda.' : 'Todavía no cargaste productos.<br/>Agregá el primero arriba.'}</div>`
+      ? `<div class="card empty-state">${q ? 'Ningún producto coincide con la búsqueda.' : 'Todavía no cargaste productos. Agregá el primero en el formulario de la izquierda.'}</div>`
       : `<div class="product-grid">${items.map(renderCard).join('')}</div>`;
 
     const totalPages = Math.max(1, Math.ceil(total / pageSize));
-    document.getElementById('products-page-label').textContent = `Página ${productsPage} de ${totalPages} (${total})`;
+    document.getElementById('products-page-label').textContent = `Página ${productsPage} de ${totalPages}`;
     document.getElementById('products-prev-btn').disabled = productsPage <= 1;
     document.getElementById('products-next-btn').disabled = productsPage >= totalPages;
   } catch (err) {
@@ -1393,9 +1443,38 @@ async function loadCustomers() {
     }
 
     container.innerHTML = customers.map(customerRowHtml).join('');
+    const inboxCount = document.getElementById('inbox-count');
+    if (inboxCount) inboxCount.textContent = customers.length;
+    applyInboxFilter();
     updateTotalUnreadBadge();
   } catch (err) {
     container.innerHTML = `<div class="empty-state" style="color:var(--danger);">No se pudieron cargar las conversaciones: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+// La lista no está paginada (loadCustomers trae todos los clientes), así que
+// filtrar acá no esconde filas que estén en otra página: no hay otra página.
+function applyInboxFilter() {
+  const select = document.getElementById('inbox-filter');
+  const list = document.getElementById('conversations-list');
+  if (!select || !list) return;
+  const unreadOnly = select.value === 'unread';
+  let shown = 0;
+  list.querySelectorAll('.conv-row').forEach((row) => {
+    const hide = unreadOnly && !row.classList.contains('has-unread');
+    row.hidden = hide;
+    if (!hide) shown++;
+  });
+  let empty = list.querySelector('.inbox-filter-empty');
+  if (unreadOnly && shown === 0) {
+    if (!empty) {
+      empty = document.createElement('div');
+      empty.className = 'empty-state inbox-filter-empty';
+      empty.textContent = 'No hay conversaciones sin leer.';
+      list.appendChild(empty);
+    }
+  } else if (empty) {
+    empty.remove();
   }
 }
 
@@ -1817,9 +1896,20 @@ async function confirmCloseSale() {
 function renderHandoffState(humanControl) {
   const btn = document.getElementById('modal-handoff-btn');
   const composer = document.getElementById('modal-composer');
-  btn.textContent = humanControl ? '🤖 Devolver a IA' : '🙋 Tomar control';
+  btn.textContent = humanControl ? 'Devolver a la IA' : 'Tomar control';
   btn.dataset.active = humanControl ? 'true' : 'false';
-  composer.style.display = humanControl ? 'flex' : 'none';
+  // El composer está siempre a la vista: escribir ES tomar el control (el POST
+  // de /messages hace setHumanControl(true) en el servidor), y el placeholder
+  // lo dice en vez de esconder el campo hasta que se toque un botón.
+  composer.style.display = 'flex';
+  const input = document.getElementById('modal-composer-input');
+  if (input) {
+    input.placeholder = humanControl
+      ? 'Escribe como el negocio…'
+      : 'Escribí para tomar el control de la conversación…';
+  }
+  const hint = document.getElementById('bot-auto-hint');
+  if (hint) hint.hidden = humanControl;
 }
 
 async function toggleHandoff() {
@@ -2263,49 +2353,99 @@ async function discardFaqCandidate(id) {
 
 const shipComposerFiles = {};
 
-function orderCardTop(o) {
+const ORDER_ICON = {
+  note: '<path d="M5 3.5h14v17l-3-2-2 2-2-2-2 2-2-2-3 2z"/><path d="M8.5 8.5h7M8.5 12h7"/>',
+  address: '<path d="M12 21s7-5.7 7-11a7 7 0 1 0-14 0c0 5.3 7 11 7 11z"/><circle cx="12" cy="10" r="2.5"/>',
+  payment: '<rect x="2.5" y="5.5" width="19" height="13" rx="2.5"/><path d="M2.5 10h19"/>',
+  id: '<rect x="2.5" y="5" width="19" height="14" rx="2.5"/><circle cx="8.5" cy="11" r="2"/><path d="M5.5 16c.6-1.6 1.7-2.4 3-2.4s2.4.8 3 2.4M14.5 10h4M14.5 13.5h4"/>',
+  phone: '<path d="M6.5 3.5h3l1.5 4-2 1.5a12 12 0 0 0 6 6l1.5-2 4 1.5v3a2 2 0 0 1-2.2 2A16.5 16.5 0 0 1 4.5 5.7 2 2 0 0 1 6.5 3.5z"/>',
+};
+
+function orderIcon(name) {
+  return `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${ORDER_ICON[name]}</svg>`;
+}
+
+function orderMetaItem(icon, text) {
+  return `<div class="order-meta-item">${orderIcon(icon)}<span title="${escapeHtml(text)}">${escapeHtml(text)}</span></div>`;
+}
+
+function orderStatusChip(o) {
+  if (o.canceledAt) return '<span class="order-status order-status-canceled">Cancelado</span>';
+  if (o.fulfillmentStatus === 'SHIPPED') return '<span class="order-status order-status-sent">Enviado</span>';
+  return '<span class="order-status">Pendiente de envío</span>';
+}
+
+function orderCardTop(o, actionsHtml = '') {
   const displayName = o.customer.name || o.customer.phoneNumber;
-  const itemsList = o.items.length > 0
-    ? o.items.map((i) => `${i.quantity}x ${escapeHtml(i.productName)}`).join(', ')
-    : '<span style="color:var(--muted);">sin productos identificados en el catálogo</span>';
-  const date = new Date(o.createdAt).toLocaleString('es-CO', { dateStyle: 'medium', timeStyle: 'short' });
+  const initial = (displayName || '?').trim().charAt(0).toUpperCase();
+  const date = new Date(o.createdAt).toLocaleString('es-CO', { dateStyle: 'short', timeStyle: 'short' });
+  const note = o.summary && o.summary.includes('— Nota:') ? o.summary.split('— Nota:')[1].trim() : '';
+
+  const items = o.items.length > 0
+    ? o.items.map((i) => `
+        <div class="order-item">
+          <span class="order-qty">${i.quantity}×</span>
+          <div>
+            <div class="order-item-name">${escapeHtml(i.productName)}</div>
+            ${i.variantLabel ? `<div class="order-item-sub">${escapeHtml(i.variantLabel)}</div>` : ''}
+          </div>
+        </div>`).join('')
+    : '<div class="order-item-sub">Sin productos identificados en el catálogo</div>';
+
+  const meta = [
+    o.shippingAddress ? orderMetaItem('address', o.shippingAddress) : '',
+    o.paymentMethodLabel ? orderMetaItem('payment', o.paymentMethodLabel) : '',
+    o.customer.idNumber ? orderMetaItem('id', `Cédula ${o.customer.idNumber}`) : '',
+    o.customer.deliveryPhone ? orderMetaItem('phone', o.customer.deliveryPhone) : '',
+  ].join('');
+
+  const product = Number(o.totalAmount) - Number(o.shippingCost || 0);
+
   return `
-    <div class="order-card-top">
-      <div class="order-card-name">
-        ${escapeHtml(displayName)}
-        ${o.customer.id ? `<button class="btn-ghost" style="padding:0 6px; font-size:11px; font-weight:600;" onclick="goToCustomerProfile('${o.customer.id}')">ver cliente ›</button>` : ''}
+    <div class="order-head">
+      <div class="conv-avatar">${escapeHtml(initial)}</div>
+      <div class="order-head-name">${escapeHtml(displayName)}</div>
+      ${o.customer.id ? `<button class="order-head-link" type="button" onclick="goToCustomerProfile('${o.customer.id}')">ver cliente ›</button>` : ''}
+      <div class="order-head-right">
+        ${CSAT_EMOJI[o.csatRating] ? `<span title="Calificación del cliente">${CSAT_EMOJI[o.csatRating]}</span>` : ''}
+        ${orderStatusChip(o)}
+        <span class="order-head-date">${date}</span>
       </div>
-      <div class="order-card-date">${date}</div>
     </div>
-    <div class="order-card-items">${itemsList}</div>
-    ${o.summary && o.summary.includes('— Nota:') ? `<div class="order-card-meta">📝 ${escapeHtml(o.summary.split('— Nota:')[1].trim())}</div>` : ''}
-    ${o.shippingAddress ? `<div class="order-card-meta">📍 ${escapeHtml(o.shippingAddress)}</div>` : ''}
-    ${o.paymentMethodLabel ? `<div class="order-card-meta">💳 ${escapeHtml(o.paymentMethodLabel)}</div>` : ''}
-    ${o.customer.idNumber ? `<div class="order-card-meta">🪪 Cédula: ${escapeHtml(o.customer.idNumber)}</div>` : ''}
-    ${o.customer.deliveryPhone ? `<div class="order-card-meta">📞 ${escapeHtml(o.customer.deliveryPhone)}</div>` : ''}
-    <div class="order-card-bottom">
-      <div>
-        <div class="order-card-total">${o.currency} ${Number(o.totalAmount).toLocaleString('es-CO')}</div>
-        ${o.shippingCost ? `<div style="font-size:11px; color:var(--muted);">incluye envío ${o.currency} ${Number(o.shippingCost).toLocaleString('es-CO')}</div>` : ''}
+    <div class="order-body">
+      <div class="order-body-main">
+        ${items}
+        ${note ? `<div class="order-note">${orderIcon('note')}<div>${escapeHtml(note)}</div></div>` : ''}
+        ${meta ? `<div class="order-meta-grid">${meta}</div>` : ''}
       </div>
-      ${CSAT_EMOJI[o.csatRating] ? `<span style="font-size:16px;" title="Calificación del cliente">${CSAT_EMOJI[o.csatRating]}</span>` : ''}
+      <div class="order-side">
+        <div class="order-sum-row"><span>Producto</span><span class="onix-num">${Number(product).toLocaleString('es-CO')}</span></div>
+        ${o.shippingCost ? `<div class="order-sum-row"><span>Envío</span><span class="onix-num">${Number(o.shippingCost).toLocaleString('es-CO')}</span></div>` : ''}
+        <div class="order-sum-total"><span>Total</span><span class="onix-num">${escapeHtml(o.currency)} ${Number(o.totalAmount).toLocaleString('es-CO')}</span></div>
+        ${actionsHtml ? `<div class="order-side-actions">${actionsHtml}</div>` : ''}
+      </div>
     </div>
   `;
 }
 
 function pendingOrderCard(o) {
+  const actions = `
+    <button class="btn-primary" type="button" onclick="openShipComposer('${o.id}')">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7"/></svg>
+      Marcar enviado
+    </button>
+    <button class="btn-secondary" type="button" onclick="cancelOrder('${o.id}')">Cancelar</button>`;
   return `
     <div class="order-card" data-order-id="${o.id}">
-      ${orderCardTop(o)}
-      <div class="order-card-actions">
-        <button class="btn-primary" type="button" onclick="openShipComposer('${o.id}')">✓ Marcar enviado</button>
-        <button class="btn-secondary" type="button" onclick="cancelOrder('${o.id}')">Cancelar</button>
-      </div>
+      ${orderCardTop(o, actions)}
       <div class="ship-composer" id="ship-composer-${o.id}" style="display:none;">
         <textarea id="ship-note-${o.id}" placeholder="Mensaje para el cliente (opcional) - ej: número de guía, transportadora..."></textarea>
         <div class="ship-composer-row">
           <input type="file" id="ship-file-${o.id}" accept="image/jpeg,image/png,video/*" style="display:none;" onchange="onShipFileChange('${o.id}', this)" />
-          <button class="btn-secondary" type="button" onclick="document.getElementById('ship-file-${o.id}').click()">📎 Adjuntar guía/foto</button>
+          <button class="btn-secondary" type="button" onclick="document.getElementById('ship-file-${o.id}').click()">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11.5 12 19.5a5 5 0 0 1-7-7l8-8a3.5 3.5 0 1 1 5 5l-8 8a2 2 0 0 1-3-3l7.5-7.5"/></svg>
+            Adjuntar guía/foto
+          </button>
           <span id="ship-file-name-${o.id}" style="font-size:12px; color:var(--muted);"></span>
           <div style="flex:1;"></div>
           <button class="btn-secondary" type="button" onclick="closeShipComposer('${o.id}')">Cancelar</button>
@@ -2326,8 +2466,11 @@ function shippedOrderCard(o) {
     <div class="order-card" data-order-id="${o.id}">
       ${orderCardTop(o)}
       <div class="order-card-shipment">
-        📦 Enviado ${shippedDate ? `· ${shippedDate}` : ''}
-        ${o.shipmentNote ? `<div style="margin-top:4px;">${formatMessageText(o.shipmentNote)}</div>` : ''}
+        <div class="order-meta-item">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 7.5 12 3.5l8.5 4v9L12 20.5l-8.5-4z"/><path d="M3.5 7.5 12 11.5l8.5-4M12 11.5v9"/></svg>
+          <span>Enviado ${shippedDate ? `· ${shippedDate}` : ''}</span>
+        </div>
+        ${o.shipmentNote ? `<div style="margin-top:6px;">${formatMessageText(o.shipmentNote)}</div>` : ''}
         ${media}
       </div>
     </div>
@@ -2339,7 +2482,10 @@ function canceledOrderCard(o) {
   return `
     <div class="order-card" data-order-id="${o.id}" style="opacity:.7;">
       ${orderCardTop(o)}
-      <div class="order-card-meta" style="margin-top:8px; color:var(--danger);">✕ Cancelado ${canceledDate ? `· ${canceledDate}` : ''}</div>
+      <div class="order-card-meta" style="margin-top:10px; color:var(--onix-danger);">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="m7 7 10 10M17 7 7 17"/></svg>
+        Cancelado ${canceledDate ? `· ${canceledDate}` : ''}
+      </div>
     </div>
   `;
 }
@@ -2456,11 +2602,52 @@ function loadMoreOrders() {
   loadOrders(false);
 }
 
+let analyticsRange = 30;
+let analyticsLast = null;
+
+function setAnalyticsRange(days) {
+  analyticsRange = days;
+  document.querySelectorAll('#analytics-range button').forEach((b) => {
+    b.classList.toggle('is-active', Number(b.dataset.days) === days);
+  });
+  loadAnalytics();
+}
+
+// El CSV se arma con lo que ya está en pantalla: no hay una segunda consulta
+// que pueda dar un número distinto al que el dueño está mirando.
+function exportAnalyticsCsv() {
+  const s = analyticsLast;
+  if (!s) { setStatus('Todavía no hay datos para exportar', true); return; }
+  const rows = [['seccion', 'etiqueta', 'valor']];
+  Object.entries(s.byStatus).forEach(([k, v]) => rows.push(['conversaciones_por_estado', STATUS_LABELS[k] || k, v]));
+  (s.messagesByDay || []).forEach((d) => {
+    rows.push(['mensajes_por_dia', `${d.date} clientes`, d.customer]);
+    rows.push(['mensajes_por_dia', `${d.date} bot`, d.assistant]);
+  });
+  (s.topProducts || []).forEach((p) => rows.push(['productos_mas_consultados', p.name, p.inquiryCount]));
+
+  const csv = rows.map((r) => r.map((cell) => {
+    const text = String(cell ?? '');
+    return /[",\n;]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+  }).join(',')).join('\r\n');
+
+  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `onix-analytics-${analyticsRange}d.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 async function loadAnalytics() {
   const container = document.getElementById('analytics-container');
   try {
-    const res = await apiFetch('/admin/api/analytics');
+    const res = await apiFetch(`/admin/api/analytics?days=${analyticsRange}`);
     const s = await res.json();
+    analyticsLast = s;
 
     // --- Embudo por estado -------------------------------------------------
     // Vendido y Perdido llevan color de estado; el resto es "en curso" y va en
@@ -2595,19 +2782,34 @@ function configHealthChecklistHtml(health) {
       unknown: 'No se pudo verificar todavía (conectá WhatsApp Business primero en Bot > Canales).',
     },
   ];
-  return items.map((item) => {
-    const icon = item.ok === null ? '⏳' : item.ok ? '✅' : '⚠️';
+  const ICON = {
+    ok: '<path d="m5 12.5 4.5 4.5L19 7"/>',
+    warn: '<path d="M12 4.5 21 19.5H3z"/><path d="M12 10v4M12 16.8v.2"/>',
+    unknown: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5v5l3 1.8"/>',
+  };
+  const cells = items.map((item) => {
+    const state = item.ok === null ? 'unknown' : item.ok ? 'ok' : 'warn';
     const detail = item.ok === null ? item.unknown : item.ok ? '' : item.missing;
     return `
-      <div style="display:flex; gap:10px; padding:10px 0; border-top:1px solid var(--border); align-items:flex-start;">
-        <div>${icon}</div>
+      <div class="check-item check-${state}">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICON[state]}</svg>
         <div>
-          <div style="font-weight:600;">${escapeHtml(item.label)}</div>
-          ${detail ? `<div style="font-size:12px; color:var(--muted); margin-top:2px;">${escapeHtml(detail)}</div>` : ''}
+          <div class="check-label">${escapeHtml(item.label)}</div>
+          ${detail ? `<div class="check-detail">${escapeHtml(detail)}</div>` : ''}
         </div>
-      </div>
-    `;
-  }).join('').replace('border-top:1px solid var(--border);', 'border-top:none;');
+      </div>`;
+  }).join('');
+  return `<div class="check-grid">${cells}</div>`;
+}
+
+function configHealthScore(health) {
+  const flags = [
+    health.hasContactPhone,
+    health.hasCategoriesConfigured,
+    health.hasPaymentMethods,
+    health.hasApprovedOwnerAlertTemplate,
+  ];
+  return `${flags.filter(Boolean).length}/${flags.length}`;
 }
 
 async function loadAiUsage() {
@@ -2631,7 +2833,7 @@ async function loadAiUsage() {
 
     const pu = s.planUsage;
     const planLabel = { BASICO: 'Básico', EMPRENDEDOR: 'Emprendedor', NEGOCIO: 'Negocio' }[pu.planTier] || pu.planTier;
-    const barColor = pu.usagePercent >= 100 ? 'var(--danger)' : pu.usagePercent >= 70 ? '#d97706' : 'var(--brand)';
+    const barColor = pu.usagePercent >= 100 ? 'var(--danger)' : pu.usagePercent >= 70 ? 'var(--onix-warn)' : 'var(--brand)';
     const monthLabel = new Date(pu.periodStart).toLocaleDateString('es-CO', { month: 'long', year: 'numeric' });
     const unlimited = pu.messageCap === null;
 
@@ -2649,7 +2851,7 @@ async function loadAiUsage() {
         ${pu.usagePercent >= 100
           ? '<div style="font-size:12px; color:var(--danger); margin-top:4px;">Superaste el límite estimado de tu plan este mes.</div>'
           : pu.usagePercent >= 70
-            ? '<div style="font-size:12px; color:#d97706; margin-top:4px;">Te estás acercando al límite de tu plan.</div>'
+            ? '<div style="font-size:12px; color:var(--onix-warn); margin-top:4px;">Te estás acercando al límite de tu plan.</div>'
             : ''}`}
       </div>
       <div class="grid-3" style="margin-bottom:16px;">
@@ -2682,7 +2884,7 @@ async function loadAiUsage() {
       <div class="grid-3">
         <div class="card">
           <div style="font-size:12px; color:var(--muted);">Conversaciones estancadas ahora</div>
-          <div style="font-size:24px; font-weight:700; ${incidents.stalledConversations > 0 ? 'color:#d97706;' : ''}">${incidents.stalledConversations}</div>
+          <div style="font-size:24px; font-weight:700; ${incidents.stalledConversations > 0 ? 'color:var(--onix-warn);' : ''}">${incidents.stalledConversations}</div>
           <div style="font-size:12px; color:var(--muted);">Pausadas (humano) esperando respuesta</div>
         </div>
         <div class="card">
@@ -2696,10 +2898,8 @@ async function loadAiUsage() {
           <div style="font-size:12px; color:var(--muted);">Veces que el bot prometió algo y el sistema lo completó</div>
         </div>
       </div>
-      <div class="section-title" style="margin-top:24px;">Chequeo de configuración</div>
-      <div class="card">
-        ${configHealthChecklistHtml(health)}
-      </div>
+      <div class="section-title" style="margin-top:24px;">Chequeo de configuración<span class="section-count onix-num">${configHealthScore(health)}</span></div>
+      ${configHealthChecklistHtml(health)}
     `;
   } catch (err) {
     container.innerHTML = `<div class="card empty-state" style="color:var(--danger);">No se pudo cargar el consumo: ${escapeHtml(err.message)}</div>`;
@@ -3173,23 +3373,27 @@ async function fetchCustomerPage(cursor, isBackgroundRefresh) {
 
     const rows = data.customers.map((c) => `
       <button type="button" class="crm-row" onclick="openCustomerProfile('${c.id}')">
-        <div class="conv-avatar">${escapeHtml((c.name || c.phoneNumber || '?').trim().charAt(0).toUpperCase())}</div>
-        <div class="crm-row-main">
-          <div class="crm-row-name">${escapeHtml(c.name || c.phoneNumber)}</div>
-          <div class="crm-row-meta">
-            ${escapeHtml(c.phoneNumber)}
-            ${c.tags.length ? ' · ' + c.tags.map((t) => escapeHtml(t)).join(', ') : ''}
+        <div class="crm-cell-client">
+          <div class="conv-avatar">${escapeHtml((c.name || c.phoneNumber || '?').trim().charAt(0).toUpperCase())}</div>
+          <div class="crm-row-main">
+            <div class="crm-row-name">${escapeHtml(c.name || c.phoneNumber)}</div>
+            <div class="crm-row-meta">
+              ${escapeHtml(c.phoneNumber)}
+              ${c.tags.length ? ' · ' + c.tags.map((t) => escapeHtml(t)).join(', ') : ''}
+            </div>
           </div>
         </div>
-        <div class="crm-row-side">
-          <div>${stagePillHtml(c.stage)}</div>
-          <div style="margin-top:4px;">${c.orderCount} pedido${c.orderCount === 1 ? '' : 's'}</div>
-          <div style="margin-top:2px;">${c.lastContactAt ? escapeHtml(timeAgo(c.lastContactAt)) : '—'}</div>
-        </div>
+        <div class="crm-cell-stage">${stagePillHtml(c.stage)}</div>
+        <div class="crm-cell-num onix-num">${c.orderCount} pedido${c.orderCount === 1 ? '' : 's'}</div>
+        <div class="crm-cell-num onix-num">${c.lastContactAt ? escapeHtml(timeAgo(c.lastContactAt)) : '—'}</div>
       </button>
     `).join('');
 
-    container.innerHTML = rows || '<div class="empty-state"><div class="big">👤</div>No hay clientes que coincidan.</div>';
+    container.innerHTML = rows || '<div class="empty-state">No hay clientes que coincidan.</div>';
+    const totalLabel = document.getElementById('customers-total-label');
+    if (totalLabel && typeof data.total === 'number') {
+      totalLabel.textContent = `${data.total} persona${data.total === 1 ? '' : 's'}`;
+    }
     updateCrmPagerUi();
   } catch (err) {
     // Un refresh de fondo fallido no debe borrar una lista buena que ya estaba en pantalla.
@@ -3437,11 +3641,11 @@ async function deleteCrmNote(noteId) {
 // ==============================================================================================
 
 const ACTION_META = {
-  HUMAN_WAITING: { title: 'Conversaciones esperando a un humano', go: () => switchTab('conversations') },
-  OWNER_QUESTION: { title: 'Preguntas del bot sin responder', go: () => switchTab('health') },
-  ORDER_PENDING: { title: 'Pedidos pendientes de envío', go: () => switchTab('orders') },
-  DELIVERY_FAILURE: { title: 'Mensajes que no le llegaron a nadie', go: () => switchTab('health') },
-  FAQ_CANDIDATE: { title: 'Sugerencias de FAQ por revisar', go: () => switchTab('faq') },
+  HUMAN_WAITING: { title: 'Conversaciones esperando a un humano', cta: 'Atender', go: () => switchTab('conversations') },
+  OWNER_QUESTION: { title: 'Preguntas del bot sin responder', cta: 'Revisar', go: () => switchTab('health') },
+  ORDER_PENDING: { title: 'Pedidos pendientes de envío', cta: 'Marcar enviado', go: () => switchTab('orders') },
+  DELIVERY_FAILURE: { title: 'Mensajes que no le llegaron a nadie', cta: 'Ver', go: () => switchTab('health') },
+  FAQ_CANDIDATE: { title: 'Sugerencias de FAQ por revisar', cta: 'Revisar', go: () => switchTab('faq') },
 };
 
 async function loadDashboard() {
@@ -3454,19 +3658,23 @@ async function loadDashboard() {
 
     const pending = data.actions.filter((a) => a.count > 0);
     const actionsHtml = pending.length === 0
-      ? '<div class="card empty-state"><div class="big">✅</div>Nada pendiente. Todo al día.</div>'
+      ? `<div class="card empty-state">
+           <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="var(--onix-accent)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m8.5 12 2.5 2.5 4.5-5"/></svg>
+           Nada pendiente. Todo al día.
+         </div>`
       : pending.map((a) => {
           const meta = ACTION_META[a.kind] || { title: a.kind };
           const urgent = a.kind === 'DELIVERY_FAILURE' || a.kind === 'OWNER_QUESTION';
           const sample = a.sample.slice(0, 3).map((s) => escapeHtml(s.label)).join(' · ');
           return `
-            <button type="button" class="action-card ${urgent ? 'is-urgent' : ''}" onclick="runDashboardAction('${a.kind}')">
-              <div class="count">${a.count}</div>
+            <div class="action-card ${urgent ? 'is-urgent' : ''}">
+              <div class="count onix-num">${a.count}</div>
               <div style="min-width:0;">
                 <div class="title">${escapeHtml(meta.title)}</div>
                 <div class="sample">${sample}${a.count > 3 ? ' …' : ''}</div>
               </div>
-            </button>`;
+              <button type="button" class="${a.kind === 'OWNER_QUESTION' ? 'btn-danger-solid' : urgent ? 'btn-danger' : 'btn-secondary'} action-cta" onclick="runDashboardAction('${a.kind}')">${escapeHtml(meta.cta || 'Ver')}</button>
+            </div>`;
         }).join('');
 
     container.innerHTML = `
@@ -3496,8 +3704,8 @@ async function loadDashboard() {
         </div>
       </div>
 
-      <div class="section-title">Chequeo de configuración</div>
-      <div class="card">${configHealthChecklistHtml(data.health)}</div>
+      <div class="section-title">Chequeo de configuración<span class="section-count onix-num">${configHealthScore(data.health)}</span></div>
+      ${configHealthChecklistHtml(data.health)}
     `;
   } catch (err) {
     container.innerHTML = `<div class="card empty-state" style="color:var(--danger);">No se pudo cargar el tablero: ${escapeHtml(err.message)}</div>`;

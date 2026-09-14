@@ -57,7 +57,8 @@
   }
   .sidebar-brand {
     display: flex; align-items: center; gap: 10px;
-    padding: 20px 20px 18px; border-bottom: 1px solid var(--onix-border);
+    height: 60px; padding: 0 20px;
+    border-bottom: 1px solid var(--onix-border-soft);
   }
   .brand-mark { width: 28px; height: 28px; flex-shrink: 0; }
   .brand-mark svg { display: block; }
@@ -167,7 +168,7 @@
       width: 100%; height: auto; position: static;
       border-right: none; border-bottom: 1px solid var(--onix-border);
     }
-    .sidebar-brand { grid-area: brand; border-bottom: none; padding: 12px 16px; }
+    .sidebar-brand { grid-area: brand; height: auto; border-bottom: none; padding: 12px 16px; }
     .sidebar-foot {
       grid-area: foot; margin-top: 0;
       padding: 12px 16px; border-top: none;
@@ -248,7 +249,7 @@
   .note-item { border: 1px solid var(--border); border-radius: var(--radius-md); padding: 10px 12px; margin-bottom: 8px; background: var(--card); }
   .note-meta { font-size: 11px; color: var(--muted-soft); margin-top: 6px; }
 
-  main { max-width: 1180px; margin: 0; padding: 26px 28px 64px; transition: max-width .15s ease; }
+  main { max-width: 1180px; margin: 0 auto; padding: 26px 28px 64px; transition: max-width .15s ease; }
   main.wide { max-width: none; padding-bottom: 16px; }
 
   .tab-panel { display: none; animation: fadeIn .18s ease; }
@@ -267,7 +268,7 @@
 
   .card {
     background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-lg);
-    padding: 24px; box-shadow: 0 1px 2px rgba(18,33,26,.04), 0 8px 20px -10px rgba(18,33,26,.10);
+    padding: 24px; box-shadow: var(--onix-shadow-md);
   }
   .settings-group { padding: 28px 0; border-bottom: 1px solid var(--border-soft); }
   .settings-group-last { border-bottom: none; }
@@ -348,7 +349,7 @@
     position: fixed; left: 50%; bottom: 28px; z-index: 200;
     display: flex; align-items: center; gap: 8px;
     background: var(--ink); color: var(--onix-accent-ink); font-size: 13px; font-weight: 650;
-    padding: 11px 18px; border-radius: 999px; box-shadow: 0 12px 28px -8px rgba(18,33,26,.35);
+    padding: 11px 18px; border-radius: 999px; box-shadow: var(--onix-shadow-lg);
     transform: translate(-50%, 12px); opacity: 0; pointer-events: none;
     transition: opacity .18s ease, transform .18s ease;
   }
@@ -395,7 +396,7 @@
   .variant-section-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; color: var(--muted-soft); margin-bottom: 8px; }
   .variant-list { display: flex; flex-direction: column; gap: 4px; }
   .variant-row { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: var(--radius-md); background: var(--border-soft); }
-  .variant-swatch { width: 18px; height: 18px; border-radius: 50%; flex-shrink: 0; border: 1px solid rgba(18,33,26,.12); box-shadow: inset 0 0 0 2px rgba(255,255,255,.5); }
+  .variant-swatch { width: 18px; height: 18px; border-radius: 50%; flex-shrink: 0; border: 1px solid var(--onix-swatch-ring); }
   .variant-swatch.is-unknown { background: repeating-conic-gradient(var(--border) 0% 25%, var(--card) 0% 50%) 0 0 / 8px 8px; }
   .variant-name-input { flex: 1; min-width: 0; border: none; background: transparent; padding: 4px 2px; font-size: 13px; font-weight: 600; color: var(--ink); }
   .variant-name-input:focus { background: var(--onix-surface); box-shadow: 0 0 0 2px var(--onix-accent-ring); border-radius: 6px; }
@@ -504,11 +505,125 @@
     width: clamp(260px, 30%, 340px); flex-shrink: 0;
     overflow-y: auto; border-right: 1px solid var(--border);
   }
+  /* Columna izquierda: cabecera fija arriba y la lista debajo, con su propio
+     scroll. Antes la lista era la columna entera y no tenía dónde poner el
+     título ni el filtro. */
+  .chat-split-col {
+    display: flex; flex-direction: column; min-height: 0;
+    width: clamp(260px, 30%, 340px); flex-shrink: 0;
+    border-right: 1px solid var(--onix-border);
+  }
+  .chat-split-col .chat-split-list {
+    width: auto; flex: 1; border-right: none;
+  }
+  .inbox-head {
+    display: flex; align-items: center; gap: 10px; flex-shrink: 0;
+    padding: 12px 14px; border-bottom: 1px solid var(--onix-border-soft);
+  }
+  .inbox-head-title {
+    display: flex; align-items: center; gap: 8px;
+    font: var(--onix-text-caps); letter-spacing: var(--onix-tracking-caps);
+    text-transform: uppercase; color: var(--onix-dim);
+  }
+  .inbox-count {
+    padding: 1px 7px; border-radius: var(--onix-radius-chip);
+    background: var(--onix-surface-2); color: var(--onix-muted);
+    font-size: 11px; letter-spacing: 0;
+  }
+  .inbox-filter {
+    width: auto; height: var(--onix-h-btn-sm); margin: 0 0 0 auto; padding: 0 26px 0 9px;
+    border: 1px solid var(--onix-border); border-radius: var(--onix-radius-control);
+    background-color: var(--onix-surface); color: var(--onix-ink-2);
+    font-size: 12px; font-family: inherit;
+  }
+  .inbox-filter-empty { padding: 24px 16px; }
+
+  /* Subbarra del hilo: etiquetas a la izquierda, estado del bot a la derecha. */
+  .thread-subbar {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    padding: 8px 16px;
+    border-bottom: 1px solid var(--onix-border-soft);
+    background: var(--onix-surface);
+  }
+  .thread-auto-hint {
+    margin-left: auto; font-size: 11.5px; color: var(--onix-dim); white-space: nowrap;
+  }
+
+  /* Clientes como tabla: encabezado y filas comparten la misma rejilla, así
+     las columnas quedan alineadas de verdad y no "casi". */
+  .crm-table-head, .crm-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 130px 110px 60px;
+    align-items: center; gap: 14px;
+  }
+  .crm-table-head {
+    padding: 11px 16px;
+    border-bottom: 1px solid var(--onix-border);
+    background: var(--onix-surface-2);
+    font: var(--onix-text-caps); letter-spacing: var(--onix-tracking-caps);
+    text-transform: uppercase; color: var(--onix-dim);
+  }
+  .crm-th-right { text-align: right; }
+  .crm-cell-client { display: flex; align-items: center; gap: 11px; min-width: 0; }
+  .crm-cell-stage { min-width: 0; }
+  .crm-cell-num {
+    text-align: right; font-size: 12px; color: var(--onix-muted);
+    white-space: nowrap;
+  }
+
+  /* Barra de filtros del CRM, fuera de la tarjeta como en el diseño. */
+  .crm-filters {
+    display: flex; gap: 10px; flex-wrap: wrap; align-items: center;
+    margin-bottom: 12px;
+  }
+  .crm-filters input[type="search"] { flex: 1 1 260px; margin: 0; height: var(--onix-h-field); }
+  .crm-filters select { width: auto; min-width: 170px; margin: 0; height: var(--onix-h-field); }
+
+  .tag-manager { padding: 0; margin-bottom: 12px; }
+  .tag-manager summary {
+    display: flex; align-items: center; gap: 8px;
+    padding: 12px 16px; cursor: pointer;
+    font-size: 13px; font-weight: 550; color: var(--onix-ink-2);
+    list-style: none;
+  }
+  .tag-manager summary::-webkit-details-marker { display: none; }
+  .tag-manager[open] summary { border-bottom: 1px solid var(--onix-border-soft); }
+  .tag-manager > div { padding: 0 16px 16px; }
+
+  .panel-header-count { font-size: 12.5px; color: var(--onix-muted); white-space: nowrap; }
+
+  @media (max-width: 860px) {
+    .crm-table-head { display: none; }
+    .crm-row {
+      grid-template-columns: minmax(0, 1fr) auto;
+      row-gap: 6px;
+    }
+    .crm-cell-client { grid-column: 1 / -1; }
+    .crm-cell-num { text-align: left; }
+  }
+
+  /* Composer: campo largo y el envío como botón redondo, sin texto. */
+  .composer-icon-btn, .composer-send-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 38px; height: 38px; flex-shrink: 0; padding: 0;
+    border-radius: 999px; border: 1px solid transparent;
+    cursor: pointer;
+  }
+  .composer-icon-btn { background: transparent; color: var(--onix-muted); }
+  .composer-icon-btn:hover { background: var(--onix-surface-2); color: var(--onix-ink); }
+  .composer-send-btn { background: var(--onix-accent); color: var(--onix-accent-ink); }
+  .composer-send-btn:hover { background: var(--onix-accent-hover); }
+  #modal-composer-input {
+    height: var(--onix-h-field); margin: 0;
+    border-radius: 999px; padding: 0 16px;
+    background: var(--onix-surface-field);
+  }
+
+  /* Fondo plano, como el diseño. El patrón tipo WhatsApp que había acá traía
+     un beige incrustado que no seguía al tema y ensuciaba las burbujas. */
   .chat-split-thread {
     flex: 1; min-width: 0; display: flex; flex-direction: column;
-    background-color: var(--onix-surface-2);
-    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='110' height='110'><g fill='none' stroke='%23d3c8b8' stroke-width='1.3' opacity='0.65'><circle cx='18' cy='22' r='6'/><path d='M50 8 q9 11 0 22 q-9 -11 0 -22z'/><path d='M84 26 l7 7 m-7 0 l7 -7'/><circle cx='22' cy='78' r='3.5'/><path d='M64 68 q11 0 11 11 q-11 0 -11 -11z'/><path d='M92 86 l0 11 m-5.5 -5.5 l11 0'/><circle cx='95' cy='50' r='2.5'/></g></svg>");
-    background-size: 110px 110px;
+    background-color: var(--onix-surface);
   }
   .chat-split-thread .chat-thread { background: transparent; flex: 1; max-height: none; }
   .chat-panel-empty { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 13.5px; }
@@ -564,14 +679,14 @@
   }
 
   .modal-overlay {
-    position: fixed; inset: 0; background: rgba(15,23,42,.5); display: flex; align-items: center;
+    position: fixed; inset: 0; background: var(--onix-scrim); display: flex; align-items: center;
     justify-content: center; z-index: 50; padding: 20px; backdrop-filter: blur(2px);
     animation: overlayIn .15s ease;
   }
   @keyframes overlayIn { from { opacity: 0; } to { opacity: 1; } }
   .modal-card {
     background: var(--onix-surface); border-radius: 20px; max-width: 600px; width: 100%; max-height: 88vh;
-    display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 24px 64px rgba(15,23,42,.28);
+    display: flex; flex-direction: column; overflow: hidden; box-shadow: var(--onix-shadow-lg);
     animation: modalIn .18s cubic-bezier(.2,.8,.3,1);
   }
   @keyframes modalIn { from { opacity: 0; transform: scale(.96) translateY(8px); } to { opacity: 1; transform: none; } }
@@ -602,7 +717,7 @@
   .bubble {
     position: relative; width: fit-content; max-width: 62%; padding: 6px 8px 5px; border-radius: 8px;
     font-size: 14px; line-height: 1.35; word-break: break-word;
-    box-shadow: 0 1px 1px rgba(15,23,42,.1); margin: 5px 12px 1px;
+    box-shadow: var(--onix-shadow-sm); margin: 5px 12px 1px;
   }
   /* <audio controls> has a native minimum width (~240-300px) that doesn't shrink - a normal 62%-wide
      bubble clips it on narrow phone screens, so audio bubbles get more room. */
@@ -610,9 +725,9 @@
   .bubble-has-audio audio { display: block; width: 100%; }
   .bubble-CUSTOMER { align-self: flex-start; background: var(--onix-bubble-in); color: var(--onix-bubble-in-ink); border-bottom-left-radius: 0; }
   .bubble-ASSISTANT { align-self: flex-end; background: var(--onix-bubble-out); color: var(--onix-bubble-out-ink); border-bottom-right-radius: 0; }
-  .bubble-SYSTEM { align-self: center; background: rgba(255,255,255,.85); color: var(--muted); font-size: 11.5px; box-shadow: none; margin: 8px auto; white-space: pre-wrap; }
+  .bubble-SYSTEM { align-self: center; background: var(--onix-surface-2); color: var(--onix-muted); font-size: 11.5px; box-shadow: none; margin: 8px auto; white-space: pre-wrap; }
   .bubble-text { white-space: pre-wrap; }
-  .bubble-time { display: inline-block; font-size: 10.5px; margin-left: 7px; color: rgba(0,0,0,.42); white-space: nowrap; vertical-align: bottom; }
+  .bubble-time { display: inline-block; font-size: 10.5px; margin-left: 7px; color: var(--onix-dim); white-space: nowrap; vertical-align: bottom; }
 
   .bubble-CUSTOMER::after {
     content: ""; position: absolute; bottom: 0; left: -7px; width: 7px; height: 12px;
@@ -761,6 +876,37 @@
   .section-title::after {
     content: ""; flex-grow: 1; height: 1px; background: var(--onix-border-soft);
   }
+  /* Un contador al final del encabezado ("4/4"). Va después del filete, así
+     el filete llega hasta él y no hasta el borde. */
+  .section-count {
+    font-family: var(--onix-font-mono); font-variant-numeric: tabular-nums;
+    font-size: 11px; font-weight: 500; letter-spacing: 0; color: var(--onix-muted);
+    text-transform: none;
+  }
+
+  /* Chequeo de configuración: dos columnas, el ícono dice el estado y la
+     etiqueta lo repite en palabras. */
+  .check-grid {
+    display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px;
+  }
+  .check-item {
+    display: flex; align-items: flex-start; gap: 11px;
+    padding: 14px 16px;
+    border: 1px solid var(--onix-border);
+    border-radius: var(--onix-radius-card);
+    background: var(--onix-surface);
+  }
+  .check-item svg { flex-shrink: 0; margin-top: 1px; }
+  .check-ok svg { color: var(--onix-accent); }
+  .check-warn svg { color: var(--onix-warn); }
+  .check-unknown svg { color: var(--onix-dim); }
+  .check-warn { border-color: var(--onix-warn-soft); background: var(--onix-warn-soft); }
+  .check-label { font-size: 13px; font-weight: 550; color: var(--onix-ink); }
+  .check-detail { font-size: 12px; color: var(--onix-muted); margin-top: 3px; line-height: 1.45; }
+
+  @media (max-width: 760px) {
+    .check-grid { grid-template-columns: 1fr; }
+  }
 
   /* Fila de atención: el número manda, el detalle acompaña, la acción espera
      a la derecha. La urgente se distingue por fondo y filete, no por un borde
@@ -770,10 +916,11 @@
     width: 100%; padding: 13px 16px; margin-bottom: 6px;
     border: 1px solid var(--onix-border); border-radius: var(--onix-radius-card);
     background: var(--onix-surface); text-align: left;
-    font-family: inherit; cursor: pointer;
+    font-family: inherit;
     transition: border-color .15s, background-color .15s;
   }
-  .action-card:hover { border-color: var(--onix-border-strong); background: var(--onix-surface-2); }
+  /* La acción vive en su propio botón a la derecha, no en la fila entera. */
+  .action-cta { flex-shrink: 0; margin-left: auto; }
   .action-card.is-urgent {
     background: var(--onix-danger-soft);
     border-color: var(--onix-danger-line);
@@ -847,7 +994,35 @@
   .crm-row-meta, .crm-row-side { font-weight: 400; }
 
   /* El buscador tenía menos aire del que le sobra en escritorio. */
-  .global-search { max-width: 520px; }
+  /* El buscador es un campo con dos cosas encima: la lupa a la izquierda y el
+     atajo a la derecha. Sin position:relative acá, la lupa se iba arriba del
+     campo en vez de quedar adentro. */
+  .global-search { position: relative; flex: 1; max-width: 520px; }
+  .global-search-icon {
+    position: absolute; top: 50%; left: 13px; transform: translateY(-50%);
+    color: var(--onix-dim); pointer-events: none;
+  }
+  .global-search input {
+    width: 100%; height: var(--onix-h-field); margin: 0;
+    padding: 0 58px 0 36px;
+    border: 1px solid var(--onix-border);
+    border-radius: var(--onix-radius-control);
+    background: var(--onix-surface); color: var(--onix-ink);
+    font-size: 13px;
+  }
+  .global-search input::placeholder { color: var(--onix-dim); }
+  .search-kbd {
+    position: absolute; top: 50%; right: 8px; transform: translateY(-50%);
+    padding: 2px 6px; border-radius: var(--onix-radius-chip);
+    border: 1px solid var(--onix-border);
+    background: var(--onix-surface-2); color: var(--onix-dim);
+    font-family: var(--onix-font-mono); font-size: 10.5px; line-height: 1.5;
+    pointer-events: none;
+  }
+  @media (max-width: 640px) {
+    .search-kbd { display: none; }
+    .global-search input { padding-right: 12px; }
+  }
 
   /* ==========================================================================
      FASES 3-5 · Componentes compartidos del CRM, el Catálogo y el Bot
@@ -889,8 +1064,26 @@
   .btn-secondary:hover { background: var(--onix-surface-2); }
   .btn-danger { background: transparent; border-color: var(--onix-danger-line); color: var(--onix-danger); }
   .btn-danger:hover { background: var(--onix-danger-soft); }
+  .btn-danger-solid {
+    display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+    height: var(--onix-h-btn); padding: 0 15px;
+    border: 1px solid transparent; border-radius: var(--onix-radius-control);
+    background: var(--onix-danger); color: var(--onix-danger-ink);
+    font-family: inherit; font-size: 13px; font-weight: 600;
+    cursor: pointer; white-space: nowrap;
+  }
+  .btn-danger-solid:hover { opacity: .9; }
   .btn-ghost { background: transparent; color: var(--onix-muted); padding: 0 12px; }
   .btn-ghost:hover { color: var(--onix-ink); background: var(--onix-surface-2); }
+
+  .crm-pager {
+    display: flex; align-items: center; justify-content: center; gap: 14px;
+    margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--onix-border-soft);
+  }
+  .crm-page-label {
+    font-family: var(--onix-font-mono); font-variant-numeric: tabular-nums;
+    font-size: 12.5px; color: var(--onix-muted);
+  }
 
   /* --- Etiquetas de estado ------------------------------------------------ */
   .stage-pill, .status-badge, .channel-pill, .category-tag {
@@ -969,8 +1162,106 @@
     font-size: 12.5px; color: var(--onix-ink-2); margin-top: 5px;
   }
 
+  /* Encabezado: quién compró a la izquierda, en qué estado y cuándo a la
+     derecha. El estado nunca es solo color: siempre lleva su etiqueta. */
+  .order-head {
+    display: flex; align-items: center; gap: 11px; flex-wrap: wrap;
+    padding-bottom: 15px; margin-bottom: 15px;
+    border-bottom: 1px solid var(--onix-border-soft);
+  }
+  .order-head-name { font-size: 13.5px; font-weight: 600; color: var(--onix-ink); }
+  .order-head-link {
+    padding: 0; border: none; background: none; cursor: pointer;
+    font-family: inherit; font-size: 12px; font-weight: 550; color: var(--onix-accent);
+  }
+  .order-head-link:hover { color: var(--onix-accent-hover); }
+  .order-head-right {
+    display: flex; align-items: center; gap: 12px; margin-left: auto; flex-wrap: wrap;
+  }
+  .order-status {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 3px 9px; border-radius: var(--onix-radius-chip);
+    font-size: 11.5px; font-weight: 600;
+    background: var(--onix-warn-soft); color: var(--onix-warn);
+  }
+  .order-status-sent { background: var(--onix-accent-soft); color: var(--onix-accent); }
+  .order-status-canceled { background: var(--onix-danger-soft); color: var(--onix-danger); }
+  .order-head-date {
+    font-family: var(--onix-font-mono); font-variant-numeric: tabular-nums;
+    font-size: 11.5px; color: var(--onix-muted); white-space: nowrap;
+  }
+
+  /* Cuerpo: el pedido a la izquierda, la plata a la derecha. */
+  .order-body { display: grid; grid-template-columns: 1fr 260px; gap: 24px; align-items: start; }
+  .order-body-main { min-width: 0; }
+
+  .order-item { display: flex; align-items: baseline; gap: 11px; }
+  .order-qty {
+    flex-shrink: 0; padding: 2px 7px; border-radius: var(--onix-radius-chip);
+    background: var(--onix-surface-2); color: var(--onix-ink-2);
+    font-family: var(--onix-font-mono); font-variant-numeric: tabular-nums;
+    font-size: 11.5px; font-weight: 500;
+  }
+  .order-item-name { font-size: 13.5px; font-weight: 600; color: var(--onix-ink); }
+  .order-item-sub { font-size: 12.5px; color: var(--onix-muted); margin-top: 2px; }
+  .order-item + .order-item { margin-top: 10px; }
+
+  .order-note {
+    display: flex; gap: 10px; margin-top: 14px; padding: 12px 14px;
+    border: 1px solid var(--onix-warn-soft);
+    border-radius: var(--onix-radius-card);
+    background: var(--onix-warn-soft);
+    font-size: 12.5px; line-height: 1.5; color: var(--onix-ink-2);
+  }
+  .order-note svg { flex-shrink: 0; color: var(--onix-warn); margin-top: 1px; }
+
+  .order-meta-grid {
+    display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 9px 24px; margin-top: 15px;
+  }
+  .order-meta-item {
+    display: flex; align-items: center; gap: 9px; min-width: 0;
+    font-size: 12.5px; color: var(--onix-ink-2);
+  }
+  .order-meta-item svg { flex-shrink: 0; color: var(--onix-dim); }
+  .order-meta-item span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* Columna de totales: filete a la izquierda para separarla sin una caja. */
+  .order-side { border-left: 1px solid var(--onix-border-soft); padding-left: 24px; }
+  .order-sum-row {
+    display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+    font-size: 12.5px; color: var(--onix-ink-2); margin-bottom: 8px;
+  }
+  .order-sum-row .onix-num { color: var(--onix-ink); }
+  .order-sum-total {
+    display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+    padding-top: 12px; margin-top: 4px;
+    border-top: 1px solid var(--onix-border);
+    font-size: 13.5px; font-weight: 600; color: var(--onix-ink);
+  }
+  .order-sum-total .onix-num { font-size: 16px; font-weight: 500; color: var(--onix-accent); }
+  .order-side-actions { display: flex; flex-direction: column; gap: 8px; margin-top: 18px; }
+  .order-side-actions button { width: 100%; }
+
+  @media (max-width: 900px) {
+    .order-body { grid-template-columns: 1fr; gap: 16px; }
+    .order-side { border-left: none; padding-left: 0; padding-top: 16px; border-top: 1px solid var(--onix-border-soft); }
+    .order-meta-grid { grid-template-columns: 1fr; }
+  }
+
   /* --- FASE 4 · Catálogo --------------------------------------------------- */
-  .product-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
+  /* El formulario a la izquierda, lo que ya está cargado a la derecha: se
+     agrega un producto mirando los que ya existen, no a ciegas. */
+  .catalog-split {
+    display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 24px; align-items: start;
+  }
+  .catalog-split .section-title:first-child { margin-top: 0; }
+  @media (max-width: 1100px) {
+    .catalog-split { grid-template-columns: 1fr; gap: 8px; }
+  }
+
+  .product-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(258px, 1fr)); gap: 12px; }
   .product-card {
     border: 1px solid var(--onix-border);
     border-radius: var(--onix-radius-panel);
@@ -1025,7 +1316,7 @@
   .variant-stock-input {
     width: 44px; border: none; background: transparent; margin: 0; padding: 0; height: auto;
     font-family: var(--onix-font-mono); font-variant-numeric: tabular-nums;
-    font-size: 12.5px; text-align: right; color: var(--onix-ink);
+    font-size: 12.5px; text-align: center; color: var(--onix-ink);
   }
   .variant-delete-btn {
     display: flex; align-items: center; justify-content: center;
@@ -1039,6 +1330,121 @@
     border: 1px solid var(--onix-border);
     background: var(--onix-surface-2);
   }
+
+  /* --- Personalidad: identidad | comportamiento ---------------------------- */
+  .split-2 {
+    display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 16px; align-items: start;
+  }
+  @media (max-width: 1000px) { .split-2 { grid-template-columns: 1fr; } }
+
+  .card-title {
+    font: var(--onix-text-caps); letter-spacing: var(--onix-tracking-caps);
+    text-transform: uppercase; color: var(--onix-dim);
+    margin-bottom: 14px;
+  }
+
+  /* Un interruptor con su explicación: la caja hace que el par título+texto
+     se lea como una sola decisión y no como dos líneas sueltas. */
+  .toggle-row {
+    display: flex; align-items: flex-start; gap: 12px;
+    margin: 0 0 10px; padding: 13px 15px;
+    border: 1px solid var(--onix-border);
+    border-radius: var(--onix-radius-card);
+    background: var(--onix-surface);
+    cursor: pointer;
+  }
+  .toggle-row:hover { border-color: var(--onix-border-strong); }
+  .toggle-row > div { min-width: 0; }
+  .toggle-title { font-size: 13px; font-weight: 550; color: var(--onix-ink); }
+  .toggle-desc { font-size: 12px; color: var(--onix-muted); margin-top: 3px; line-height: 1.45; }
+  .toggle-row:has(input:checked) { border-color: var(--onix-accent-line); }
+  .toggle-row-check { align-items: center; }
+
+  /* Interruptor: la misma píldora que el resto del panel. */
+  .toggle-row:not(.toggle-row-check) input[type="checkbox"] {
+    appearance: none; -webkit-appearance: none;
+    position: relative; flex-shrink: 0; margin: 1px 0 0;
+    width: 34px; height: 20px; padding: 0;
+    border: none; border-radius: 999px;
+    background: var(--onix-border-strong); cursor: pointer;
+    transition: background-color .15s;
+  }
+  .toggle-row:not(.toggle-row-check) input[type="checkbox"]::after {
+    content: ""; position: absolute; top: 2px; left: 2px;
+    width: 16px; height: 16px; border-radius: 999px;
+    background: var(--onix-surface);
+    transition: transform .15s;
+  }
+  .toggle-row:not(.toggle-row-check) input[type="checkbox"]:checked { background: var(--onix-accent); }
+  .toggle-row:not(.toggle-row-check) input[type="checkbox"]:checked::after {
+    transform: translateX(14px); background: var(--onix-accent-ink);
+  }
+  .toggle-row input[type="checkbox"]:focus-visible {
+    outline: 2px solid var(--onix-accent); outline-offset: 2px;
+  }
+
+  /* La casilla del pago del envío sigue siendo una casilla, no un interruptor:
+     son opciones que se marcan, no algo que se prende. */
+  .toggle-row-check input[type="checkbox"] {
+    appearance: none; -webkit-appearance: none;
+    position: relative; flex-shrink: 0;
+    width: 18px; height: 18px; padding: 0; margin: 0;
+    border: 1.5px solid var(--onix-border-strong); border-radius: 5px;
+    background: var(--onix-surface); cursor: pointer;
+  }
+  .toggle-row-check input[type="checkbox"]:checked {
+    background: var(--onix-accent); border-color: var(--onix-accent);
+  }
+  .toggle-row-check input[type="checkbox"]:checked::after {
+    content: ""; position: absolute; left: 5px; top: 1.5px;
+    width: 5px; height: 9px;
+    border: solid var(--onix-accent-ink); border-width: 0 2px 2px 0;
+    transform: rotate(45deg);
+  }
+
+  /* Aviso de cambios sin guardar, al lado del botón. */
+  .panel-header-actions { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  .dirty-flag { font-size: 12.5px; font-weight: 550; color: var(--onix-warn); }
+
+  /* Control segmentado (7 / 30 / 90 días). Una sola caja, el activo se eleva. */
+  .segmented {
+    display: inline-flex; padding: 3px; gap: 2px;
+    border: 1px solid var(--onix-border);
+    border-radius: var(--onix-radius-control);
+    background: var(--onix-surface-2);
+  }
+  .segmented button {
+    height: var(--onix-h-btn-sm); padding: 0 12px;
+    border: none; border-radius: 6px;
+    background: transparent; color: var(--onix-muted);
+    font-family: inherit; font-size: 12.5px; font-weight: 550;
+    cursor: pointer; white-space: nowrap;
+    transition: background-color .15s, color .15s;
+  }
+  .segmented button:hover { color: var(--onix-ink); }
+  .segmented button.is-active {
+    background: var(--onix-surface); color: var(--onix-ink);
+    box-shadow: var(--onix-shadow-sm);
+  }
+
+  /* Vista previa del saludo. */
+  .greet-preview { display: flex; align-items: center; gap: 14px; margin-top: 16px; flex-wrap: wrap; }
+  .greet-avatar {
+    display: flex; align-items: center; justify-content: center;
+    width: 38px; height: 38px; flex-shrink: 0; border-radius: 999px;
+    background: var(--onix-accent-soft); color: var(--onix-accent);
+  }
+  .greet-copy { min-width: 0; }
+  .greet-title { font-size: 13.5px; font-weight: 550; color: var(--onix-ink); }
+  .greet-sub { font-size: 12.5px; color: var(--onix-muted); margin-top: 2px; }
+  .greet-bubble {
+    margin-left: auto; max-width: 100%; padding: 10px 14px;
+    border-radius: var(--onix-radius-card);
+    background: var(--onix-bubble-out); color: var(--onix-bubble-out-ink);
+    font-size: 13px; line-height: 1.45;
+  }
+  @media (max-width: 760px) { .greet-bubble { margin-left: 0; } }
 
   /* --- FASE 5 · Formularios del Bot ---------------------------------------- */
   label {

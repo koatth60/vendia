@@ -39,6 +39,10 @@ export async function listCustomersForBusiness(businessId: string, filters: Cust
   if (isCustomerStage(filters.stage)) conditions.push({ stage: filters.stage });
   if (filters.tag?.trim()) conditions.push({ tags: { has: filters.tag.trim() } });
 
+  // El cursor va aparte de los filtros: el total tiene que contar TODO lo que
+  // matchea los filtros, no solo lo que queda despues de esta pagina.
+  const cursorConditions: Prisma.CustomerWhereInput[] = [];
+
   if (filters.cursor) {
     const anchor = await prisma.customer.findFirst({
       where: { id: filters.cursor, businessId },
@@ -47,7 +51,7 @@ export async function listCustomersForBusiness(businessId: string, filters: Cust
     // Cursor desconocido (fila borrada entre dos paginas): se ignora y se devuelve la primera pagina,
     // en vez de fallar o devolver vacio.
     if (anchor) {
-      conditions.push(
+      cursorConditions.push(
         anchor.lastContactAt
           ? {
               OR: [
@@ -60,8 +64,13 @@ export async function listCustomersForBusiness(businessId: string, filters: Cust
     }
   }
 
-  const where: Prisma.CustomerWhereInput =
+  const filterWhere: Prisma.CustomerWhereInput =
     conditions.length > 0 ? { businessId, AND: conditions } : { businessId };
+  const pageConditions = [...conditions, ...cursorConditions];
+  const where: Prisma.CustomerWhereInput =
+    pageConditions.length > 0 ? { businessId, AND: pageConditions } : { businessId };
+
+  const total = await prisma.customer.count({ where: filterWhere });
 
   const rows = await prisma.customer.findMany({
     where,
@@ -98,6 +107,7 @@ export async function listCustomersForBusiness(businessId: string, filters: Cust
       orderCount: c._count.orders,
     })),
     nextCursor: hasMore ? page[page.length - 1]?.id ?? null : null,
+    total,
   };
 }
 

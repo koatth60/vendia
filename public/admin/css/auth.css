@@ -53,6 +53,7 @@ body {
 .brand {
   display: flex; align-items: center; justify-content: center; gap: 10px;
   margin-bottom: 22px;
+  text-decoration: none;
 }
 .brand-mark { width: 32px; height: 32px; flex-shrink: 0; }
 .brand-mark svg, .brand-mark img { width: 100%; height: 100%; display: block; }
@@ -155,6 +156,172 @@ button[disabled] {
 /* --- El conmutador de tema vive arriba a la derecha ----------------------- */
 .auth-theme {
   position: fixed; top: 16px; right: 16px; z-index: 2;
+}
+
+/* ===========================================================================
+   Pantalla dividida (login)
+   ---------------------------------------------------------------------------
+   Izquierda el formulario, derecha la muestra del producto. Debajo de 900px
+   la muestra se oculta: en un teléfono lo único que importa es entrar.
+   =========================================================================== */
+
+body.auth-split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  align-items: stretch;
+  justify-content: initial;
+  padding: 0;
+}
+
+.auth-pane {
+  position: relative; z-index: 1;
+  display: flex; flex-direction: column;
+  padding: 34px 40px;
+  min-width: 0;
+}
+.auth-pane-form { border-right: 1px solid var(--onix-border); }
+.auth-pane-show { background: var(--onix-surface-nav); }
+
+/* La marca arriba, el formulario al centro, el pie abajo: tres filas y el
+   centro se queda con el espacio sobrante. */
+.auth-top { flex-shrink: 0; }
+.auth-middle {
+  flex: 1; display: flex; flex-direction: column; justify-content: center;
+  padding: 32px 0;
+}
+.auth-inner { width: 100%; max-width: 430px; }
+.auth-pane-show .auth-inner { max-width: 520px; }
+
+.auth-foot-legal {
+  flex-shrink: 0; display: flex; flex-wrap: wrap; gap: 18px;
+  font-size: 12px; color: var(--onix-dim);
+}
+.auth-foot-legal a { color: var(--onix-dim); text-decoration: none; }
+.auth-foot-legal a:hover { color: var(--onix-ink-2); }
+
+body.auth-split h1 { text-align: left; font-size: 30px; margin-bottom: 7px; }
+body.auth-split .sub { text-align: left; margin-bottom: 26px; }
+
+/* Etiqueta con enlace a la derecha (Contraseña / ¿La olvidaste?) */
+.label-row {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+  margin-top: 16px; margin-bottom: 7px;
+}
+.label-row label { margin: 0; }
+.label-row a { font-size: 12px; color: var(--onix-muted); text-decoration: none; }
+.label-row a:hover { color: var(--onix-accent); }
+
+/* Campo de contraseña con el ojo adentro */
+.field-with-action { position: relative; }
+.field-with-action input { padding-right: 46px; }
+.field-action {
+  position: absolute; top: 50%; right: 6px; transform: translateY(-50%);
+  display: flex; align-items: center; justify-content: center;
+  width: 34px; height: 34px; margin: 0; padding: 0;
+  border: none; border-radius: var(--onix-radius-control);
+  background: transparent; color: var(--onix-dim); cursor: pointer;
+}
+.field-action:hover { color: var(--onix-ink-2); background: var(--onix-surface-2); }
+
+/* Separador con un punto al medio */
+.auth-or {
+  display: flex; align-items: center; gap: 14px;
+  margin: 24px 0;
+}
+.auth-or::before, .auth-or::after {
+  content: ""; flex: 1; height: 1px; background: var(--onix-border);
+}
+.auth-or span {
+  width: 5px; height: 5px; border-radius: 999px;
+  border: 1px solid var(--onix-border-strong);
+}
+
+/* Botón secundario a lo ancho (magic link) */
+.btn-wide-secondary {
+  display: flex; align-items: center; justify-content: center; gap: 9px;
+  width: 100%; height: 48px; margin: 0;
+  border: 1px solid var(--onix-border);
+  border-radius: var(--onix-radius-control);
+  background: var(--onix-surface);
+  color: var(--onix-ink-2);
+  font-family: inherit; font-size: 14px; font-weight: 550;
+  text-decoration: none;
+}
+.btn-wide-secondary:hover { background: var(--onix-surface-2); border-color: var(--onix-border-strong); }
+
+body.auth-split .foot { text-align: left; margin-top: 20px; }
+
+/* --- Panel de muestra ----------------------------------------------------- */
+.show-eyebrow {
+  font: var(--onix-text-caps); letter-spacing: var(--onix-tracking-caps);
+  text-transform: uppercase; color: var(--onix-accent);
+  margin-bottom: 16px;
+}
+.show-headline {
+  font-size: 29px; font-weight: 600; line-height: 1.32;
+  letter-spacing: -0.02em; color: var(--onix-ink);
+  margin: 0 0 30px;
+}
+.show-headline b { font-weight: 600; color: var(--onix-accent); }
+
+.show-chat {
+  padding: 16px;
+  border: 1px solid var(--onix-accent-line);
+  border-radius: var(--onix-radius-panel);
+  background: var(--onix-accent-soft);
+}
+.show-chat-head {
+  display: flex; align-items: center; gap: 10px;
+  padding-bottom: 13px; margin-bottom: 14px;
+  border-bottom: 1px solid var(--onix-accent-line);
+}
+.show-avatar {
+  display: flex; align-items: center; justify-content: center;
+  width: 32px; height: 32px; flex-shrink: 0;
+  border-radius: 999px;
+  background: var(--onix-accent); color: var(--onix-accent-ink);
+  font-size: 11px; font-weight: 650; letter-spacing: 0.02em;
+}
+.show-chat-name { font-size: 13px; font-weight: 600; color: var(--onix-ink); }
+.show-chat-state { font-size: 11.5px; color: var(--onix-muted); margin-top: 1px; }
+
+.show-bubbles { display: flex; flex-direction: column; gap: 9px; }
+.show-bubble {
+  max-width: 88%; padding: 9px 12px;
+  border-radius: var(--onix-radius-card);
+  font-size: 13px; line-height: 1.45;
+}
+.show-bubble-in {
+  align-self: flex-start;
+  background: var(--onix-bubble-in); color: var(--onix-bubble-in-ink);
+}
+.show-bubble-out {
+  align-self: flex-end;
+  background: var(--onix-bubble-out); color: var(--onix-bubble-out-ink);
+}
+.show-bubble .onix-num { font-family: var(--onix-font-mono); font-variant-numeric: tabular-nums; }
+
+.show-order {
+  display: flex; align-items: center; gap: 12px;
+  margin-top: 14px; padding: 14px 16px;
+  border: 1px solid var(--onix-border);
+  border-radius: var(--onix-radius-card);
+  background: var(--onix-surface);
+}
+.show-order svg { color: var(--onix-accent); flex-shrink: 0; }
+.show-order-title { font-size: 13.5px; font-weight: 550; color: var(--onix-ink); }
+.show-order-meta {
+  font-family: var(--onix-font-mono); font-variant-numeric: tabular-nums;
+  font-size: 12px; color: var(--onix-muted); margin-top: 2px;
+}
+
+@media (max-width: 900px) {
+  body.auth-split { grid-template-columns: 1fr; }
+  .auth-pane-show { display: none; }
+  .auth-pane-form { border-right: none; }
+  .auth-pane { padding: 24px 20px; }
+  .auth-inner { max-width: 430px; margin: 0 auto; }
+  body.auth-split h1 { font-size: 25px; }
 }
 
 @media (max-width: 480px) {
