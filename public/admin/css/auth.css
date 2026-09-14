@@ -158,6 +158,22 @@ button[disabled] {
   position: absolute; top: 16px; right: 16px; z-index: 2;
 }
 
+/* Registro y recuperar contraseña ponen "Volver" y el conmutador en la misma
+   fila, dentro del flujo normal - antes el conmutador era position:fixed/absolute
+   respecto al body, sin relación con la altura real de "Volver", así que segun
+   el contenido su borde inferior terminaba mordiendo la esquina de la tarjeta.
+   Esta fila reserva su propia altura (min-height igual al boton en movil) y el
+   conmutador se ancla A ELLA, no al body, así que nunca puede invadir lo de abajo. */
+.auth-top-row {
+  position: relative; z-index: 1;
+  width: 100%; min-height: 44px;
+  display: flex; align-items: center; justify-content: center;
+  margin-bottom: 8px;
+}
+.auth-top-row .auth-theme {
+  position: absolute; top: 0; right: 4px;
+}
+
 /* ===========================================================================
    Pantalla dividida (login)
    ---------------------------------------------------------------------------

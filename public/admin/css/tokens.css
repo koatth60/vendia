@@ -309,6 +309,7 @@ html, body {
   justify-content: center;
   width: 34px;
   height: 34px;
+  margin: 0;
   padding: 0;
   border: 1px solid var(--onix-border);
   border-radius: var(--onix-radius-control);
