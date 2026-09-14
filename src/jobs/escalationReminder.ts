@@ -8,7 +8,18 @@ import {
   markStalledReminderSent,
   recordMessage,
   CUSTOMER_FOLLOWUP_TEXT,
+  getWindowState,
 } from "../conversation/service";
+
+// Real incident (2026-09-14): a customer-facing nudge sent past the 24h window got a real wamid back
+// (looked sent) and only failed hours later via the async status webhook - so "we told the customer"
+// was never true, silently. The reminder thresholds here (ownerReminderMinutes, 24h stage-2) are
+// normally well under 24h from the customer's own last message, but a business configured with an
+// unusually long ownerReminderMinutes, or a job that fell behind and is catching up, can still land
+// past it - checking before sending catches that instead of trusting the threshold math to always hold.
+async function canReachCustomer(conversationId: string): Promise<boolean> {
+  return (await getWindowState(conversationId)).windowOpen;
+}
 
 const STAGE_2_THRESHOLD_MS = 24 * 60 * 60 * 1000;
 
@@ -88,7 +99,7 @@ export async function runEscalationReminderJob(): Promise<void> {
         console.error(`No se pudo enviar recordatorio de escalacion (pending=${pending.questionId}):`, error);
       }
 
-      if (!customerNotifiedThisRun.has(pending.conversationId)) {
+      if (!customerNotifiedThisRun.has(pending.conversationId) && (await canReachCustomer(pending.conversationId))) {
         customerNotifiedThisRun.add(pending.conversationId);
         try {
           const customerWamid = await sendTextMessage(credentials, pending.customer.phoneNumber, CUSTOMER_FOLLOWUP_TEXT);
@@ -132,7 +143,12 @@ export async function runEscalationReminderJob(): Promise<void> {
       // flag_conversation_intent path (bot went silent on a PQR with no explanation), which both leave the
       // customer waiting with no human having said a word - those still get the follow-up.
       const isManualTakeover = !conversation.intent && !conversation.openQuestion;
-      if (conversation.nextStage === 1 && !isManualTakeover && !customerNotifiedThisRun.has(conversation.conversationId)) {
+      if (
+        conversation.nextStage === 1 &&
+        !isManualTakeover &&
+        !customerNotifiedThisRun.has(conversation.conversationId) &&
+        (await canReachCustomer(conversation.conversationId))
+      ) {
         customerNotifiedThisRun.add(conversation.conversationId);
         try {
           const customerWamid = await sendTextMessage(credentials, conversation.customer.phoneNumber, CUSTOMER_FOLLOWUP_TEXT);

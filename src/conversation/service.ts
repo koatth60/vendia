@@ -4,6 +4,53 @@ import { touchCustomerLastContact } from "../crm/customers";
 import { getPresignedMediaUrl } from "../media/s3";
 import { emitNewMessage, emitNewConversation, emitConversationUpdated, type ConversationRow, type CustomerRow } from "../realtime/events";
 
+// WhatsApp only allows free-form text/media within 24h of the customer's last message (Meta's
+// "customer service window") - past that, only an approved template gets through (error 131047
+// otherwise). This is the one place that threshold is defined; everything that needs to know whether a
+// conversation can still take a plain message goes through getWindowState below instead of
+// re-deriving its own 24h constant.
+export const WHATSAPP_WINDOW_HOURS = 24;
+
+export interface WindowState {
+  windowOpen: boolean;
+  hoursSinceLastCustomerMessage: number | null;
+}
+
+// Real incident (2026-09-14): the admin panel composer and the escalation-reminder job both sent
+// free-form text 30+ hours after the customer's last message. WhatsApp accepted both (returned a real
+// wamid) and only reported the failure later via the async status webhook (error 131047) - so the
+// owner saw what looked like two sent messages, and the customer got neither. Checking the window
+// BEFORE attempting to send is the only way to catch this ahead of time instead of after the fact.
+export async function getWindowState(conversationId: string): Promise<WindowState> {
+  const last = await prisma.message.findFirst({
+    where: { conversationId, role: "CUSTOMER" },
+    orderBy: { createdAt: "desc" },
+    select: { createdAt: true },
+  });
+  if (!last) return { windowOpen: false, hoursSinceLastCustomerMessage: null };
+  const hoursSinceLastCustomerMessage = (Date.now() - last.createdAt.getTime()) / (60 * 60 * 1000);
+  return { windowOpen: hoursSinceLastCustomerMessage <= WHATSAPP_WINDOW_HOURS, hoursSinceLastCustomerMessage };
+}
+
+// Cross-references each message against DeliveryFailure by wamid so the thread can show "no llegó"
+// instead of a normal-looking bubble the customer never actually saw - a message can get a real wamid
+// (WhatsApp accepted it) and still fail minutes or hours later via the async status webhook, so a
+// present whatsappMessageId is not proof of delivery.
+async function attachDeliveryFailures<T extends { whatsappMessageId: string | null }>(
+  businessId: string,
+  messages: T[]
+): Promise<(T & { deliveryFailed: boolean; deliveryError: string | null })[]> {
+  const wamids = messages.map((m) => m.whatsappMessageId).filter((w): w is string => Boolean(w));
+  const failures = wamids.length
+    ? await prisma.deliveryFailure.findMany({ where: { businessId, wamid: { in: wamids } } })
+    : [];
+  const failureByWamid = new Map(failures.map((f) => [f.wamid, f]));
+  return messages.map((m) => {
+    const failure = m.whatsappMessageId ? failureByWamid.get(m.whatsappMessageId) : undefined;
+    return { ...m, deliveryFailed: Boolean(failure), deliveryError: failure?.errorMessage ?? null };
+  });
+}
+
 export async function getOrCreateCustomer(businessId: string, phoneNumber: string) {
   return prisma.customer.upsert({
     where: { businessId_phoneNumber: { businessId, phoneNumber } },
@@ -604,6 +651,19 @@ export async function getConversationForBusiness(businessId: string, conversatio
     conversation.unreadCount = 0;
   }
 
+  const windowState = await getWindowState(conversationId);
+  const messagesWithMedia = await Promise.all(
+    conversation.messages.map(async (m) => ({
+      id: m.id,
+      role: m.role,
+      content: m.content,
+      createdAt: m.createdAt,
+      mediaUrl: m.mediaS3Key ? await getPresignedMediaUrl(m.mediaS3Key) : null,
+      mediaType: m.mediaType,
+      whatsappMessageId: m.whatsappMessageId,
+    }))
+  );
+
   return {
     id: conversation.id,
     status: conversation.status,
@@ -611,22 +671,15 @@ export async function getConversationForBusiness(businessId: string, conversatio
     humanControl: conversation.humanControl,
     updatedAt: conversation.updatedAt,
     unreadCount: conversation.unreadCount,
+    windowOpen: windowState.windowOpen,
+    hoursSinceLastCustomerMessage: windowState.hoursSinceLastCustomerMessage,
     customer: {
       id: conversation.customer.id,
       phoneNumber: conversation.customer.phoneNumber,
       name: conversation.customer.name,
       tags: conversation.customer.tags,
     },
-    messages: await Promise.all(
-      conversation.messages.map(async (m) => ({
-        id: m.id,
-        role: m.role,
-        content: m.content,
-        createdAt: m.createdAt,
-        mediaUrl: m.mediaS3Key ? await getPresignedMediaUrl(m.mediaS3Key) : null,
-        mediaType: m.mediaType,
-      }))
-    ),
+    messages: await attachDeliveryFailures(businessId, messagesWithMedia),
   };
 }
 
@@ -746,6 +799,12 @@ export async function getCustomerThreadForBusiness(businessId: string, customerI
     }
   }
 
+  // The composer always sends into activeConversationId regardless of which cycle's messages are on
+  // screen (loadOlderCycle only prepends older history, it never changes what "send" targets) - so the
+  // window has to be checked against that conversation, not whichever `target` this call happens to be
+  // returning messages for.
+  const windowState = await getWindowState(activeConversationId);
+
   if (targetIndex >= conversations.length) {
     // `before` pointed at the oldest cycle already, or at an id this customer doesn't have (stale
     // client state) - nothing older left to show.
@@ -759,6 +818,8 @@ export async function getCustomerThreadForBusiness(businessId: string, customerI
       humanControl: false,
       hasMore: false,
       cycles,
+      windowOpen: windowState.windowOpen,
+      hoursSinceLastCustomerMessage: windowState.hoursSinceLastCustomerMessage,
       messages: [],
     };
   }
@@ -771,6 +832,18 @@ export async function getCustomerThreadForBusiness(businessId: string, customerI
     orderBy: { createdAt: "asc" },
   });
 
+  const messagesWithMedia = await Promise.all(
+    messages.map(async (m) => ({
+      id: m.id,
+      role: m.role,
+      content: m.content,
+      createdAt: m.createdAt,
+      mediaUrl: m.mediaS3Key ? await getPresignedMediaUrl(m.mediaS3Key) : null,
+      mediaType: m.mediaType,
+      whatsappMessageId: m.whatsappMessageId,
+    }))
+  );
+
   return {
     customerId: customer.id,
     customer: customerBasic,
@@ -781,15 +854,8 @@ export async function getCustomerThreadForBusiness(businessId: string, customerI
     humanControl: target.humanControl,
     hasMore,
     cycles,
-    messages: await Promise.all(
-      messages.map(async (m) => ({
-        id: m.id,
-        role: m.role,
-        content: m.content,
-        createdAt: m.createdAt,
-        mediaUrl: m.mediaS3Key ? await getPresignedMediaUrl(m.mediaS3Key) : null,
-        mediaType: m.mediaType,
-      }))
-    ),
+    windowOpen: windowState.windowOpen,
+    hoursSinceLastCustomerMessage: windowState.hoursSinceLastCustomerMessage,
+    messages: await attachDeliveryFailures(businessId, messagesWithMedia),
   };
 }

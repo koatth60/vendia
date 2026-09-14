@@ -1564,7 +1564,13 @@ function messageBubbleHtml(m) {
       ? `<video src="${m.mediaUrl}" controls style="max-width:220px; border-radius:6px; display:block; margin-bottom:4px;"></video>`
       : m.mediaUrl ? `<img src="${m.mediaUrl}" style="max-width:220px; border-radius:6px; display:block; margin-bottom:4px; cursor:zoom-in;" onclick="openImageLightbox('${m.mediaUrl}')" />` : '';
   const time = new Date(m.createdAt).toLocaleString('es-CO', { hour: '2-digit', minute: '2-digit' });
-  return `<div class="bubble bubble-${m.role}${isAudio ? ' bubble-has-audio' : ''}">${img}<span class="bubble-text">${formatMessageText(m.content)}</span><span class="bubble-time">${time}</span></div>`;
+  // Un wamid real (WhatsApp lo acepto) no es prueba de entrega - puede fallar minutos u horas despues
+  // via el webhook de estado async (ver getWindowState en conversation/service.ts). Sin esto la burbuja
+  // se ve identica a una que si llego, que es exactamente lo que paso con David el 2026-09-14.
+  const failedNote = m.deliveryFailed
+    ? ` · <span style="color:var(--onix-danger);" title="${escapeHtml(m.deliveryError || '')}">no se pudo entregar</span>`
+    : '';
+  return `<div class="bubble bubble-${m.role}${isAudio ? ' bubble-has-audio' : ''}">${img}<span class="bubble-text">${formatMessageText(m.content)}</span><span class="bubble-time">${time}${failedNote}</span></div>`;
 }
 
 // A full re-render on every 4s poll was regenerating every image's S3 presigned URL each time (a new
@@ -1595,7 +1601,10 @@ async function pollConversation() {
   try {
     const res = await apiFetch(`/admin/api/conversations/${currentConversationId}`);
     const conversation = await res.json();
+    currentWindowOpen = conversation.windowOpen;
+    currentHoursSinceLastCustomerMessage = conversation.hoursSinceLastCustomerMessage;
     renderHandoffState(conversation.humanControl);
+    updateComposerVisibility();
     updateCloseSaleButtonVisibility(conversation.status);
     renderThreadMessages(document.getElementById('modal-thread'), conversation.messages);
   } catch {
@@ -1795,11 +1804,16 @@ async function openCustomer(customerId) {
     currentConversationId = data.activeConversationId;
     threadCyclesMeta = data.cycles;
     threadHasMore = data.hasMore;
+    currentWindowOpen = data.windowOpen;
+    currentHoursSinceLastCustomerMessage = data.hoursSinceLastCustomerMessage;
     renderHandoffState(data.humanControl);
     updateCloseSaleButtonVisibility(data.status);
     currentCustomerTags = [...(data.customer.tags || [])];
     currentCustomerName = data.customer.name || '';
     currentCustomerPhone = data.customer.phoneNumber;
+    // Despues de currentCustomerName/Phone: el banner de ventana cerrada los usa para decir DE QUIEN
+    // pasaron las 24h, y updateComposerVisibility los leia antes de que se actualizaran.
+    updateComposerVisibility();
     cancelEditCustomerName();
     renderTags();
 
@@ -1929,13 +1943,8 @@ async function confirmCloseSale() {
 
 function renderHandoffState(humanControl) {
   const btn = document.getElementById('modal-handoff-btn');
-  const composer = document.getElementById('modal-composer');
   btn.textContent = humanControl ? 'Devolver a la IA' : 'Tomar control';
   btn.dataset.active = humanControl ? 'true' : 'false';
-  // El composer está siempre a la vista: escribir ES tomar el control (el POST
-  // de /messages hace setHumanControl(true) en el servidor), y el placeholder
-  // lo dice en vez de esconder el campo hasta que se toque un botón.
-  composer.style.display = 'flex';
   const input = document.getElementById('modal-composer-input');
   if (input) {
     input.placeholder = humanControl
@@ -1944,6 +1953,94 @@ function renderHandoffState(humanControl) {
   }
   const hint = document.getElementById('bot-auto-hint');
   if (hint) hint.hidden = humanControl;
+}
+
+// El composer de texto libre solo funciona dentro de las 24h desde el último mensaje del cliente -
+// pasado eso WhatsApp rechaza cualquier cosa que no sea una plantilla aprobada (error 131047), y lo
+// hace tarde: el envío devuelve un wamid real y solo falla horas después por el webhook de estado
+// async. Por eso el composer se REEMPLAZA por el selector de plantillas apenas la ventana cierra, en
+// vez de dejar que el dueño escriba algo que va a fallar en silencio (el bug real detrás del caso de
+// David: dos mensajes que parecían enviados y nunca llegaron).
+let currentWindowOpen = true;
+let currentHoursSinceLastCustomerMessage = null;
+
+function updateComposerVisibility() {
+  const composer = document.getElementById('modal-composer');
+  const banner = document.getElementById('modal-window-banner');
+  if (!composer || !banner) return;
+  if (currentWindowOpen) {
+    composer.style.display = 'flex';
+    banner.style.display = 'none';
+  } else {
+    composer.style.display = 'none';
+    banner.style.display = 'flex';
+    renderWindowBanner();
+  }
+}
+
+function renderWindowBanner() {
+  const hours = currentHoursSinceLastCustomerMessage;
+  const who = escapeHtml(currentCustomerName || currentCustomerPhone || 'este cliente');
+  const situation = hours == null
+    ? `${who} todavía no te ha escrito`
+    : `Pasaron ${Math.floor(hours)}h desde el último mensaje de ${who}`;
+  document.getElementById('modal-window-banner-text').textContent =
+    `${situation} - WhatsApp ya no entrega mensajes libres. Usa una plantilla aprobada para reabrir la conversación.`;
+  loadTemplatesIntoBanner();
+}
+
+// Las plantillas son del negocio, no de la conversación - se cargan una vez y quedan cacheadas para el
+// resto de la sesión en vez de volver a pedirlas cada vez que se abre un chat con la ventana cerrada.
+let templatesForBanner = null;
+
+async function loadTemplatesIntoBanner() {
+  const select = document.getElementById('modal-template-select');
+  if (templatesForBanner) {
+    renderTemplateOptions(select, templatesForBanner);
+    return;
+  }
+  select.innerHTML = '<option>Cargando…</option>';
+  try {
+    const res = await apiFetch('/admin/api/whatsapp-templates');
+    const data = await res.json();
+    templatesForBanner = data.templates || [];
+    renderTemplateOptions(select, templatesForBanner);
+  } catch {
+    select.innerHTML = '<option value="">No se pudieron cargar las plantillas</option>';
+  }
+}
+
+function renderTemplateOptions(select, templates) {
+  if (templates.length === 0) {
+    select.innerHTML = '<option value="">Este negocio no tiene plantillas aprobadas todavía</option>';
+    return;
+  }
+  select.innerHTML = templates
+    .map((t) => `<option value="${escapeHtml(t.name)}|${escapeHtml(t.language)}">${escapeHtml(t.name)} — ${escapeHtml(t.bodyText.slice(0, 70))}</option>`)
+    .join('');
+}
+
+async function sendTemplateToCustomer() {
+  if (!currentConversationId) return;
+  const select = document.getElementById('modal-template-select');
+  const [templateName, language] = (select.value || '').split('|');
+  if (!templateName || !language) {
+    setStatus('Elegí una plantilla para enviar', true);
+    return;
+  }
+  select.disabled = true;
+  try {
+    await apiFetch(`/admin/api/conversations/${currentConversationId}/send-template`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ templateName, language }),
+    });
+    await openCustomer(currentCustomerId);
+  } catch (err) {
+    setStatus(`No se pudo enviar la plantilla: ${err.message}`, true);
+  } finally {
+    select.disabled = false;
+  }
 }
 
 async function toggleHandoff() {

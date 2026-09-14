@@ -10,11 +10,14 @@ import {
   recordMessage,
   saveCustomerContactInfo,
   updateConversationStatus,
+  getWindowState,
 } from "../../conversation/service";
 import {
   sendTextMessage,
   sendImageMessage,
   sendVideoMessage,
+  sendTemplateMessage,
+  listApprovedTemplates,
   formatForWhatsapp,
   type WhatsappCredentials,
 } from "../../whatsapp/client";
@@ -100,6 +103,19 @@ conversationsRouter.post("/api/conversations/:id/messages", upload.single("file"
     return;
   }
 
+  // Real incident (2026-09-14): a manual message sent 33h after the customer's last message got a real
+  // wamid back from WhatsApp (looked sent) and only failed hours later via the async status webhook -
+  // the owner had no way to know until she checked "Salud del bot". Checking the window BEFORE the send
+  // catches this instead of letting it fail invisibly; see getWindowState for why a wamid is not proof.
+  const windowState = await getWindowState(String(req.params.id));
+  if (!windowState.windowOpen) {
+    res.status(409).json({
+      error: "Pasaron mas de 24h desde el ultimo mensaje del cliente - WhatsApp ya no entrega mensajes libres. Usa una plantilla aprobada para reabrir la conversacion.",
+      windowClosed: true,
+    });
+    return;
+  }
+
   const credentials: WhatsappCredentials = {
     phoneNumberId: business.whatsappPhoneNumberId,
     accessToken: business.whatsappAccessToken,
@@ -122,6 +138,57 @@ conversationsRouter.post("/api/conversations/:id/messages", upload.single("file"
     const wamid = await sendTextMessage(credentials, conversation.customer.phoneNumber, formattedText);
     await recordMessage(businessId, String(req.params.id), "ASSISTANT", formattedText, wamid || undefined);
   }
+  await setHumanControl(businessId, String(req.params.id), true);
+  await clearAgentRequestFlag(businessId, String(req.params.id));
+  await clearPendingOwnerQuestionsForConversation(String(req.params.id));
+
+  res.status(201).json({ ok: true });
+});
+
+// The only way to reach a customer once their 24h window has closed (see the check above) - an
+// approved template, same mechanism sendOwnerAlert and runFollowUpJob already use. Re-validates the
+// template against Meta's own approved list instead of trusting the name/language the client sent, so
+// this can't be used to fire an arbitrary/unapproved template through the business's number.
+conversationsRouter.post("/api/conversations/:id/send-template", async (req, res) => {
+  const templateName = String(req.body?.templateName ?? "").trim();
+  const language = String(req.body?.language ?? "").trim();
+  if (!templateName || !language) {
+    res.status(400).json({ error: "Falta el nombre o el idioma de la plantilla" });
+    return;
+  }
+
+  const businessId = businessIdOf(req);
+  const conversation = await getConversationForBusiness(businessId, String(req.params.id));
+  if (!conversation) {
+    res.status(404).json({ error: "Conversación no encontrada" });
+    return;
+  }
+
+  const business = await prisma.business.findUnique({ where: { id: businessId } });
+  if (!business?.whatsappPhoneNumberId || !business.whatsappAccessToken) {
+    res.status(400).json({ error: "Este negocio no tiene WhatsApp conectado" });
+    return;
+  }
+  if (!business.whatsappBusinessAccountId) {
+    res.status(400).json({ error: "Falta configurar el WhatsApp Business Account ID de este negocio" });
+    return;
+  }
+
+  const approved = await listApprovedTemplates(business.whatsappAccessToken, business.whatsappBusinessAccountId);
+  const template = approved.find((t) => t.name === templateName && t.language === language);
+  if (!template) {
+    res.status(400).json({ error: "Esa plantilla no está aprobada para este negocio" });
+    return;
+  }
+
+  const credentials: WhatsappCredentials = {
+    phoneNumberId: business.whatsappPhoneNumberId,
+    accessToken: business.whatsappAccessToken,
+  };
+  const wamid = await sendTemplateMessage(credentials, conversation.customer.phoneNumber, templateName, language);
+  // Records the template's real wording, not just its name - the thread should read like a normal
+  // message the customer actually saw, same as every other outbound bubble.
+  await recordMessage(businessId, String(req.params.id), "ASSISTANT", template.bodyText || `[Plantilla: ${templateName}]`, wamid || undefined);
   await setHumanControl(businessId, String(req.params.id), true);
   await clearAgentRequestFlag(businessId, String(req.params.id));
   await clearPendingOwnerQuestionsForConversation(String(req.params.id));

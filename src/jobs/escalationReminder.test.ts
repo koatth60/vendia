@@ -62,6 +62,12 @@ function restoreFetch() {
 test("runEscalationReminderJob reminds the owner once for an old unanswered question, then never again", async () => {
   stubWhatsappFetch();
   try {
+    // A PendingOwnerQuestion always follows a real customer message in production (ask_owner only ever
+    // fires in response to one) - seeded here so the 24h-window check the customer nudge now goes
+    // through (see canReachCustomer) has something real to find.
+    await prisma.message.create({
+      data: { conversationId, role: "CUSTOMER", content: "¿Tienen envio a Medellin?", createdAt: new Date(Date.now() - 4 * 60 * 60 * 1000) },
+    });
     const pending = await prisma.pendingOwnerQuestion.create({
       data: {
         conversationId,
@@ -253,6 +259,9 @@ test("runEscalationReminderJob sends the customer-facing follow-up only ONCE whe
   const conv = await prisma.conversation.create({ data: { customerId: customer.id, humanControl: true } });
   const oldEnough = new Date(Date.now() - 4 * 60 * 60 * 1000);
   try {
+    await prisma.message.create({
+      data: { conversationId: conv.id, role: "CUSTOMER", content: "Pregunta uno", createdAt: oldEnough },
+    });
     await prisma.pendingOwnerQuestion.create({
       data: { conversationId: conv.id, wamid: `wamid.q1-${randomUUID()}`, question: "Pregunta uno", createdAt: oldEnough },
     });
@@ -306,6 +315,45 @@ test("runEscalationReminderJob stays silent when the owner already replied and i
     assert.equal(updated.stalledReminderStage, 0);
   } finally {
     restoreFetch();
+    await prisma.message.deleteMany({ where: { conversationId: conv.id } });
+    await prisma.conversation.deleteMany({ where: { id: conv.id } });
+    await prisma.customer.deleteMany({ where: { id: customer.id } });
+  }
+});
+
+// Real incident (2026-09-14): the customer-facing nudge sent past WhatsApp's 24h window got a real
+// wamid back (looked sent) and only failed hours later via the async status webhook. The owner alert
+// must still go out either way - she needs to know the customer is unreachable through the panel too.
+test("runEscalationReminderJob alerts the owner but skips the customer nudge once the 24h window is closed", async () => {
+  stubWhatsappFetch();
+  const customer = await prisma.customer.create({ data: { businessId, phoneNumber: `573014${Date.now()}` } });
+  const conv = await prisma.conversation.create({ data: { customerId: customer.id, humanControl: true } });
+  try {
+    await prisma.message.create({
+      data: {
+        conversationId: conv.id,
+        role: "CUSTOMER",
+        content: "¿Cuanto cuesta el envio?",
+        createdAt: new Date(Date.now() - 30 * 60 * 60 * 1000),
+      },
+    });
+    await prisma.pendingOwnerQuestion.create({
+      data: {
+        conversationId: conv.id,
+        wamid: `wamid.stale-${randomUUID()}`,
+        question: "¿Cuanto cuesta el envio?",
+        createdAt: new Date(Date.now() - 4 * 60 * 60 * 1000),
+      },
+    });
+
+    await runEscalationReminderJob();
+
+    assert.equal(sentMessages.length, 1, "owner alert only - the customer's window is already closed");
+    assert.equal(sentMessages[0].to, "573000000000");
+    assert.doesNotMatch(sentMessages[0].body, /revisando/i, "the customer text must not have gone out");
+  } finally {
+    restoreFetch();
+    await prisma.pendingOwnerQuestion.deleteMany({ where: { conversationId: conv.id } });
     await prisma.message.deleteMany({ where: { conversationId: conv.id } });
     await prisma.conversation.deleteMany({ where: { id: conv.id } });
     await prisma.customer.deleteMany({ where: { id: customer.id } });

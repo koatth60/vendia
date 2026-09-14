@@ -15,6 +15,7 @@ import {
   createPendingOwnerQuestion,
   resolvePendingOwnerQuestion,
   findOpenPendingOwnerQuestionsForBusiness,
+  getWindowState,
 } from "./service";
 import { realtimeEvents } from "../realtime/events";
 
@@ -348,5 +349,178 @@ test("resolvePendingOwnerQuestion no deja que un negocio resuelva la pregunta de
     await prisma.pendingOwnerQuestion.deleteMany({ where: { conversationId: conversation.id } });
     await prisma.conversation.delete({ where: { id: conversation.id } });
     await prisma.business.deleteMany({ where: { id: otherBusiness.id } });
+  }
+});
+
+// getWindowState: WhatsApp's 24h customer-service window. Real incident (2026-09-14) - the admin panel
+// composer and the escalation-reminder job both sent free text well past this, WhatsApp accepted both
+// (real wamid) and only failed hours later via the async status webhook. This is the check that has to
+// run BEFORE a send to catch that ahead of time.
+test("getWindowState says closed when the customer has never written", async () => {
+  const conversation = await prisma.conversation.create({ data: { customerId } });
+  try {
+    const state = await getWindowState(conversation.id);
+    assert.equal(state.windowOpen, false);
+    assert.equal(state.hoursSinceLastCustomerMessage, null);
+  } finally {
+    await prisma.conversation.delete({ where: { id: conversation.id } });
+  }
+});
+
+test("getWindowState says open right after the customer writes, closed 33h later", async () => {
+  const conversation = await prisma.conversation.create({ data: { customerId } });
+  try {
+    await prisma.message.create({
+      data: { conversationId: conversation.id, role: "CUSTOMER", content: "hola", createdAt: new Date() },
+    });
+    const fresh = await getWindowState(conversation.id);
+    assert.equal(fresh.windowOpen, true);
+
+    await prisma.message.deleteMany({ where: { conversationId: conversation.id } });
+    await prisma.message.create({
+      data: {
+        conversationId: conversation.id,
+        role: "CUSTOMER",
+        content: "hola",
+        createdAt: new Date(Date.now() - 33 * 60 * 60 * 1000),
+      },
+    });
+    const stale = await getWindowState(conversation.id);
+    assert.equal(stale.windowOpen, false);
+    assert.ok(stale.hoursSinceLastCustomerMessage! > 24);
+  } finally {
+    await prisma.message.deleteMany({ where: { conversationId: conversation.id } });
+    await prisma.conversation.delete({ where: { id: conversation.id } });
+  }
+});
+
+test("getWindowState only looks at the customer's own messages, not the business's replies", async () => {
+  // A business/bot reply after the customer's last message must never look like it reopened the
+  // window - only the CUSTOMER writing again does that.
+  const conversation = await prisma.conversation.create({ data: { customerId } });
+  try {
+    await prisma.message.create({
+      data: {
+        conversationId: conversation.id,
+        role: "CUSTOMER",
+        content: "hola",
+        createdAt: new Date(Date.now() - 30 * 60 * 60 * 1000),
+      },
+    });
+    await prisma.message.create({
+      data: { conversationId: conversation.id, role: "ASSISTANT", content: "seguimos revisando", createdAt: new Date() },
+    });
+    const state = await getWindowState(conversation.id);
+    assert.equal(state.windowOpen, false, "una respuesta del negocio no reabre la ventana");
+  } finally {
+    await prisma.message.deleteMany({ where: { conversationId: conversation.id } });
+    await prisma.conversation.delete({ where: { id: conversation.id } });
+  }
+});
+
+// Real incident (2026-09-14): a message with a real wamid (WhatsApp accepted it) still failed hours
+// later via the async status webhook, and the panel showed it as an ordinary sent bubble - the owner
+// had no way to know without checking "Salud del bot" separately.
+test("getConversationForBusiness marks a message as deliveryFailed when a DeliveryFailure exists for its wamid", async () => {
+  const conversation = await prisma.conversation.create({ data: { customerId } });
+  const wamid = `wamid.ok-${randomUUID()}`;
+  const wamidFailed = `wamid.failed-${randomUUID()}`;
+  try {
+    await recordMessage(businessId, conversation.id, "ASSISTANT", "Hola buen día", wamid);
+    await recordMessage(businessId, conversation.id, "ASSISTANT", "Seguimos revisando", wamidFailed);
+    await prisma.deliveryFailure.create({
+      data: {
+        businessId,
+        wamid: wamidFailed,
+        recipientPhone: "573000000000",
+        errorCode: 131047,
+        errorMessage: "Re-engagement message: Message failed to send because more than 24 hours have passed",
+      },
+    });
+
+    const result = await getConversationForBusiness(businessId, conversation.id);
+    const ok = result!.messages.find((m) => m.content === "Hola buen día");
+    const failed = result!.messages.find((m) => m.content === "Seguimos revisando");
+    assert.equal(ok!.deliveryFailed, false);
+    assert.equal(failed!.deliveryFailed, true);
+    assert.match(failed!.deliveryError!, /24 hours/);
+  } finally {
+    await prisma.deliveryFailure.deleteMany({ where: { businessId, wamid: { in: [wamid, wamidFailed] } } });
+    await prisma.message.deleteMany({ where: { conversationId: conversation.id } });
+    await prisma.conversation.delete({ where: { id: conversation.id } });
+  }
+});
+
+test("getConversationForBusiness never shows another business's delivery failure on a matching wamid", async () => {
+  const conversation = await prisma.conversation.create({ data: { customerId } });
+  const otherBusiness = await prisma.business.create({
+    data: { name: `Other ${randomUUID()}`, email: `other-${randomUUID()}@example.com`, passwordHash: "x" },
+  });
+  const wamid = `wamid.shared-${randomUUID()}`;
+  try {
+    await recordMessage(businessId, conversation.id, "ASSISTANT", "Hola", wamid);
+    await prisma.deliveryFailure.create({
+      data: { businessId: otherBusiness.id, wamid, recipientPhone: "573000000000", errorMessage: "fallo de otro negocio" },
+    });
+
+    const result = await getConversationForBusiness(businessId, conversation.id);
+    assert.equal(result!.messages[0].deliveryFailed, false);
+  } finally {
+    await prisma.deliveryFailure.deleteMany({ where: { wamid } });
+    await prisma.message.deleteMany({ where: { conversationId: conversation.id } });
+    await prisma.conversation.delete({ where: { id: conversation.id } });
+    await prisma.business.deleteMany({ where: { id: otherBusiness.id } });
+  }
+});
+
+test("getConversationForBusiness reports the window state alongside the thread", async () => {
+  const conversation = await prisma.conversation.create({ data: { customerId } });
+  try {
+    await prisma.message.create({
+      data: { conversationId: conversation.id, role: "CUSTOMER", content: "hola", createdAt: new Date() },
+    });
+    const result = await getConversationForBusiness(businessId, conversation.id);
+    assert.equal(result!.windowOpen, true);
+    assert.ok(result!.hoursSinceLastCustomerMessage! < 1);
+  } finally {
+    await prisma.message.deleteMany({ where: { conversationId: conversation.id } });
+    await prisma.conversation.delete({ where: { id: conversation.id } });
+  }
+});
+
+// getCustomerThreadForBusiness (the grouped view the panel actually loads from) must check the window
+// against activeConversationId - the composer always sends there regardless of which cycle's messages
+// happen to be on screen (loadOlderCycle only prepends history, it never changes the send target).
+test("getCustomerThreadForBusiness reports the window state for activeConversationId, and flags failed messages", async () => {
+  const customer = await prisma.customer.create({ data: { businessId, phoneNumber: `573030${Date.now()}` } });
+  const oldConv = await prisma.conversation.create({
+    data: { customerId: customer.id, status: "SOLD", updatedAt: new Date(Date.now() - 60 * 60 * 60 * 1000) },
+  });
+  const activeConv = await prisma.conversation.create({ data: { customerId: customer.id, status: "NEW" } });
+  const wamid = `wamid.thread-${randomUUID()}`;
+  try {
+    await prisma.message.create({
+      data: {
+        conversationId: activeConv.id,
+        role: "CUSTOMER",
+        content: "hola",
+        createdAt: new Date(Date.now() - 30 * 60 * 60 * 1000),
+      },
+    });
+    await recordMessage(businessId, activeConv.id, "ASSISTANT", "Seguimos revisando", wamid);
+    await prisma.deliveryFailure.create({
+      data: { businessId, wamid, recipientPhone: customer.phoneNumber, errorMessage: "ventana cerrada" },
+    });
+
+    const result = await getCustomerThreadForBusiness(businessId, customer.id);
+    assert.equal(result!.activeConversationId, activeConv.id);
+    assert.equal(result!.windowOpen, false, "el ultimo mensaje del cliente en la conversacion activa fue hace 30h");
+    const bubble = result!.messages.find((m) => m.content === "Seguimos revisando");
+    assert.equal(bubble!.deliveryFailed, true);
+  } finally {
+    await prisma.deliveryFailure.deleteMany({ where: { wamid } });
+    await prisma.message.deleteMany({ where: { conversationId: { in: [oldConv.id, activeConv.id] } } });
+    await prisma.conversation.deleteMany({ where: { customerId: customer.id } });
+    await prisma.customer.deleteMany({ where: { id: customer.id } });
   }
 });
