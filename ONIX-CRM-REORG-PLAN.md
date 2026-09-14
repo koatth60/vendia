@@ -1,7 +1,7 @@
 # Onix — Diagnóstico de la aplicación y plan de reorganización hacia un CRM
 
 Fecha: 2026-09-13
-Estado: Fases 0, 1, 2 y 3 implementadas (ver "Estado de ejecución" al final). Faltan 4 y 5.
+Estado: Fases 0-5 implementadas (ver "Estado de ejecución" al final). Nada desplegado todavía.
 Alcance: panel de administración (frontend) + capa de rutas (backend). No toca el agente, los prompts,
 las tools, el webhook de WhatsApp ni la lógica de negocio existente.
 
@@ -350,10 +350,10 @@ columnas opcionales y tablas nuevas). Ningún test existente se edita.
 | 1 — Navegación en 5 secciones | Hecha | `6ede57e` |
 | 2 — CRM: clientes | Hecha | `f100447` |
 | 3 — Inicio y salud del bot | Hecha | `f100447` |
-| 4 — Bot: cerrar huecos de configuración | Pendiente | — |
-| 5 — Escala y pulido | Pendiente | — |
+| 4 — Bot: cerrar huecos de configuración | Hecha | `16608c4` |
+| 5 — Escala y pulido (parcial, ver desvío abajo) | Hecha | `e219db8` |
 
-Nada está desplegado todavía: las cuatro fases están commiteadas en `master` local, a la espera de la
+Nada está desplegado todavía: las seis fases están commiteadas en `master` local, a la espera de la
 orden de despliegue.
 
 ### Desvíos respecto al plan original
@@ -371,6 +371,16 @@ orden de despliegue.
   `PUT /api/business`, donde hoy varios campos usan `x || null` y `Boolean(x)`: con un payload parcial,
   omitir un campo lo pondría en null o en false en vez de dejarlo como está. Queda anotado como trabajo
   de backend, no se tocó a ciegas.
+- **Fase 4**: el catálogo de etiquetas (`CustomerTag`) se construyó dentro de CRM > Clientes en vez de
+  bajo Bot, que es donde el texto original del plan lo agrupaba. Es dato de segmentación de clientes,
+  no de comportamiento del bot - encaja mejor donde se usa (el filtro de la lista) que en la
+  configuración del asistente.
+- **Fase 5**: la paginación por cursor de la Bandeja y el hilo de mensajes **no se hizo**. Los handlers
+  de Socket.IO de esa vista (`conversation:new`/`conversation:updated`) buscan la fila directo en el
+  DOM ya renderizado, no en una caché en memoria - paginar esa lista exige rediseñar esos handlers para
+  el caso "la fila que cambió no está en la página cargada", y es una vista en vivo, de uso diario, que
+  no quise tocar rápido sin la verificación que un cambio así merece. Ver el detalle en "Qué falta"
+  más abajo - queda como el único pendiente real del plan completo.
 
 ### Multicanal (Instagram, Facebook, Mercado Libre)
 
@@ -390,17 +400,22 @@ Lo que queda decidido explícitamente **para después**, cuando exista el segund
 - El envío sigue acoplado a `whatsapp/client.ts`. Cuando entre el segundo canal habrá que meter una
   capa de canal por debajo de `recordMessage`/`sendTextMessage`; el CRM de arriba no debería enterarse.
 
-### Fase 4 — qué falta exactamente
+### Lo único que sigue pendiente: paginación de la Bandeja y el hilo de mensajes
 
-1. Interfaz de tarifas de envío y reglas por ciudad (`ShippingRate`, `ShippingCityRule`): el agente ya
-   las consulta y hoy solo se pueden cargar por script.
-2. Administración del catálogo de etiquetas (`CustomerTag`): el modelo y los endpoints ya existen
-   (Fase 2), falta la pantalla para crear/renombrar/borrar y elegir color.
-3. Separar "Personalidad" de "Reglas e instrucciones" dentro de Bot > Configuración.
+`GET /admin/api/customers` (la Bandeja) sigue trayendo **todas** las conversaciones del negocio en una
+consulta y agrupándolas en memoria (P10 original); `getCustomerThreadForBusiness` sigue cargando **todos**
+los mensajes de un ciclo de conversación de una vez. Con el volumen de las cuentas actuales no es un
+problema real todavía, pero con cientos de clientes activos y miles de mensajes por ciclo va a empezar a
+notarse.
 
-### Fase 5 — qué falta exactamente
+No se hizo en esta pasada porque no es un cambio de una sola capa: `socket.on('conversation:new', ...)`
+y `socket.on('conversation:updated', ...)` en `public/admin/js/admin.js` hoy hacen
+`document.querySelector('.conv-row[data-customer-id=...]')` directo sobre el DOM ya renderizado - si la
+lista pasa a cargar por páginas, esos handlers necesitan decidir qué hacer cuando la fila que cambió no
+está en la página actual (¿ignorarla? ¿mostrar un indicador de "hay actividad más abajo"?). Es una
+decisión de producto tanto como de código, y se prefirió dejarla explícita en vez de resolverla apurado
+en una vista que el dueño usa todo el día.
 
-1. Paginación por cursor en conversaciones y mensajes (la de clientes ya quedó hecha en Fase 2).
-2. Buscador global.
-3. Renombrar `/vendia-admin` a `/zaqi-admin` con redirección, limpiar la clave `vendia-admin-tab` de
-   `localStorage` y actualizar el README a la marca actual.
+Para cuando se retome: el patrón de cursor ya está resuelto y probado dos veces en este mismo
+repo (`listCustomersForBusiness` en `src/crm/customers.ts`, Fase 2; el mismo patrón serviría para
+`listConversationsForBusiness`) - reusar esa forma en vez de inventar una nueva.
