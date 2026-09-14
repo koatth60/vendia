@@ -1,8 +1,13 @@
-# Vendia
+# Onix (Zaqi Solutions)
 
-Asistente de ventas por WhatsApp con IA, en formato SaaS multi-negocio. Un negocio se registra, conecta
-su número de WhatsApp, carga su catálogo (productos, precios, stock, fotos/videos) y sus métodos de pago
-desde un panel web, y Claude responde a sus clientes por WhatsApp usando esos datos reales.
+Asistente de ventas con IA, en formato SaaS multi-negocio. Un negocio se registra, conecta su número de
+WhatsApp (más canales, próximamente), carga su catálogo (productos, precios, stock, fotos/videos) y sus
+métodos de pago desde un panel web con CRM integrado, y el bot Onix responde a sus clientes usando esos
+datos reales.
+
+> El producto y la compañía se llamaban Vendia hasta el rebrand a **Zaqi Solutions** (2026-09-10); el bot
+> se llama **Onix**. Referencias sueltas a "Vendia" que aparezcan en código viejo o en `design/` son de
+> antes del rebrand.
 
 ## Qué hace
 
@@ -29,17 +34,29 @@ desde un panel web, y Claude responde a sus clientes por WhatsApp usando esos da
 src/
   ai/            agente de DeepSeek, herramientas del catálogo, respuestas rápidas
   auth/          hash de contraseñas, middleware de sesión
-  catalog/       productos y métodos de pago (multi-negocio)
+  catalog/       productos, métodos de pago y tarifas de envío (multi-negocio)
   config/        variables de entorno
   conversation/  clientes, conversaciones, mensajes
+  crm/           ficha de cliente, tablero de Inicio (ver panel de administración más abajo)
   db/            cliente de Prisma
   media/         subida y firma de URLs de S3
-  routes/        rutas HTTP (admin, auth, webhook de WhatsApp)
+  routes/
+    admin/       API del panel de administración, un archivo por dominio (negocio, catálogo, CRM,
+                 pedidos, envíos, buscador, ...)
+    whatsapp.ts  webhook de WhatsApp
+    auth.ts      login/registro/sesión
+    platformAdmin.ts  API del panel interno de Zaqi (/zaqi-admin)
   whatsapp/      cliente de la API de WhatsApp
 prisma/          schema y migraciones
-public/          landing, login, registro, panel de administración
+public/
+  admin/         panel de administración del negocio (CRM, catálogo, bot, etc) - index.html + css/ + js/
+  zaqi-admin/    panel interno de Zaqi (gestión de negocios, claves de activación)
+  (resto)        landing, login, registro
 scripts/         utilidades (ej: generar claves de activación)
 ```
+
+El panel de administración (`public/admin/`) está organizado en 5 secciones - Inicio, CRM, Catálogo, Bot
+y Negocio - documentadas en `ONIX-CRM-REORG-PLAN.md` (diagnóstico y plan de la reorganización).
 
 ## Requisitos
 

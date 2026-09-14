@@ -174,7 +174,7 @@
 let currentBusinessId = null;
 
 async function checkAuth() {
-  const res = await fetch('/vendia-admin/api/me');
+  const res = await fetch('/zaqi-admin/api/me');
   if (!res.ok) {
     window.location.href = '/login.html';
     return false;
@@ -242,7 +242,7 @@ function closeModal() {
 }
 
 async function loadBusinesses() {
-  const res = await fetch('/vendia-admin/api/businesses');
+  const res = await fetch('/zaqi-admin/api/businesses');
   if (!res.ok) return;
   const businesses = await res.json();
   renderBusinesses(businesses);
@@ -260,7 +260,7 @@ document.getElementById('whatsapp-form').addEventListener('submit', async (e) =>
   const businessAccountId = document.getElementById('businessAccountId').value.trim();
   const accessToken = document.getElementById('accessToken').value.trim();
 
-  const res = await fetch(`/vendia-admin/api/businesses/${currentBusinessId}/whatsapp`, {
+  const res = await fetch(`/zaqi-admin/api/businesses/${currentBusinessId}/whatsapp`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ phoneNumber, phoneNumberId, accessToken, businessAccountId }),
@@ -278,12 +278,12 @@ document.getElementById('whatsapp-form').addEventListener('submit', async (e) =>
 });
 
 document.getElementById('logout-btn').addEventListener('click', async () => {
-  await fetch('/vendia-admin/api/logout', { method: 'POST' });
+  await fetch('/zaqi-admin/api/logout', { method: 'POST' });
   window.location.href = '/login.html';
 });
 
 async function loadRequests() {
-  const res = await fetch('/vendia-admin/api/key-requests');
+  const res = await fetch('/zaqi-admin/api/key-requests');
   if (!res.ok) return;
   const requests = await res.json();
   const pending = requests.filter((r) => !r.handled);
@@ -319,7 +319,7 @@ async function loadRequests() {
 }
 
 async function toggleRequestHandled(id, handled) {
-  await fetch(`/vendia-admin/api/key-requests/${id}`, {
+  await fetch(`/zaqi-admin/api/key-requests/${id}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ handled }),
@@ -328,7 +328,7 @@ async function toggleRequestHandled(id, handled) {
 }
 
 async function loadKeys() {
-  const res = await fetch('/vendia-admin/api/activation-keys');
+  const res = await fetch('/zaqi-admin/api/activation-keys');
   if (!res.ok) return;
   const keys = await res.json();
   const table = document.getElementById('keys-table');
@@ -351,7 +351,7 @@ async function loadKeys() {
 
 document.getElementById('generate-key-btn').addEventListener('click', async () => {
   const planTier = document.getElementById('new-key-plan').value;
-  const res = await fetch('/vendia-admin/api/activation-keys', {
+  const res = await fetch('/zaqi-admin/api/activation-keys', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ planTier }),
@@ -397,7 +397,7 @@ async function openLogModal(businessId, businessName) {
   list.innerHTML = '<div class="log-empty">Cargando...</div>';
   document.getElementById('log-overlay').style.display = 'flex';
 
-  const res = await fetch(`/vendia-admin/api/businesses/${businessId}/owner-log`);
+  const res = await fetch(`/zaqi-admin/api/businesses/${businessId}/owner-log`);
   if (!res.ok) {
     list.innerHTML = '<div class="log-empty">No se pudo cargar la conversación.</div>';
     return;

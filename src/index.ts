@@ -24,8 +24,15 @@ app.use(whatsappRouter);
 app.use("/auth", authRouter);
 app.use("/admin", adminRouter);
 app.use("/admin", express.static(path.join(__dirname, "..", "public", "admin")));
-app.use("/vendia-admin/api", platformAdminRouter);
-app.use("/vendia-admin", express.static(path.join(__dirname, "..", "public", "vendia-admin")));
+app.use("/zaqi-admin/api", platformAdminRouter);
+app.use("/zaqi-admin", express.static(path.join(__dirname, "..", "public", "zaqi-admin")));
+// Fase 5 (ver ONIX-CRM-REORG-PLAN.md, P12 del diagnostico): el panel interno se llamaba
+// /vendia-admin desde antes del rebrand a Zaqi Solutions (2026-09-10). Redirect, no borrado - un
+// enlace guardado de alguien del equipo sigue funcionando en vez de romperse de un dia para otro.
+app.get("/vendia-admin", (_req, res) => res.redirect(301, "/zaqi-admin"));
+// Express 5 (path-to-regexp v7) exige nombrar el wildcard - un "/*" sin nombre revienta el proceso
+// entero al arrancar (probado en caliente: "Missing parameter name at index 15").
+app.get("/vendia-admin/*rest", (req, res) => res.redirect(301, req.originalUrl.replace("/vendia-admin", "/zaqi-admin")));
 app.use(express.static(path.join(__dirname, "..", "public")));
 
 const server = http.createServer(app);

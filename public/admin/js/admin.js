@@ -83,7 +83,7 @@ function switchTab(name) {
   if (name === 'inicio') loadDashboard();
   if (name === 'health') loadHealth();
   if (name === 'shipping') loadShipping();
-  try { localStorage.setItem('vendia-admin-tab', name); } catch {}
+  try { localStorage.setItem('onix-admin-tab', name); } catch {}
   // replaceState (no pushState) a proposito: refleja la vista actual en la URL para poder compartir
   // el enlace o refrescar sin perder el lugar, sin llenar el historial del navegador con cada click.
   try { history.replaceState(null, '', '#/' + name); } catch {}
@@ -2923,7 +2923,7 @@ async function boot() {
   let initialTab = 'inicio';
   try {
     const fromHash = location.hash.replace(/^#\/?/, '');
-    const saved = localStorage.getItem('vendia-admin-tab');
+    const saved = localStorage.getItem('onix-admin-tab');
     const candidate =
       (fromHash && document.querySelector(`.tab-btn[data-tab="${fromHash}"]`)) ? fromHash
       : (saved && document.querySelector(`.tab-btn[data-tab="${saved}"]`)) ? saved
@@ -3415,9 +3415,15 @@ async function resolveFailure(id) {
   }
 }
 
-// Enlace cruzado Pedidos -> ficha del cliente. Entra a la seccion CRM, cambia a Clientes y abre la
-// ficha directamente, sin que el dueño tenga que buscar a esa persona a mano en la lista.
+// Enlace cruzado Pedidos -> ficha del cliente, y tambien destino del buscador global (Fase 5). Entra
+// a la seccion CRM, cambia a Clientes y abre la ficha directamente, sin que el dueño tenga que
+// buscar a esa persona a mano en la lista.
 function goToCustomerProfile(customerId) {
+  const searchResults = document.getElementById('global-search-results');
+  if (searchResults) {
+    searchResults.hidden = true;
+    document.getElementById('global-search-input').value = '';
+  }
   switchTab('customers');
   openCustomerProfile(customerId);
 }
@@ -3632,3 +3638,114 @@ async function deleteTagFromManager(id) {
     setStatus(`No se pudo eliminar la etiqueta: ${err.message}`, true);
   }
 }
+
+// ==============================================================================================
+// Fase 5 - Buscador global (topbar). Una consulta a /admin/api/search agrupa clientes, productos,
+// pedidos y FAQ. No toca la Bandeja ni el hilo de mensajes (ver nota en src/routes/admin/search.ts).
+// ==============================================================================================
+
+let globalSearchTimer = null;
+let globalSearchLastQuery = '';
+
+function onGlobalSearchInput() {
+  const q = document.getElementById('global-search-input').value.trim();
+  if (globalSearchTimer) clearTimeout(globalSearchTimer);
+  if (q.length < 2) {
+    hideGlobalSearchResults();
+    return;
+  }
+  globalSearchTimer = setTimeout(() => runGlobalSearch(q), 250);
+}
+
+function hideGlobalSearchResults() {
+  document.getElementById('global-search-results').hidden = true;
+}
+
+async function runGlobalSearch(q) {
+  globalSearchLastQuery = q;
+  try {
+    const res = await apiFetch(`/admin/api/search?q=${encodeURIComponent(q)}`);
+    const data = await res.json();
+    // La búsqueda pudo tardar más que la siguiente letra tecleada - si esta respuesta ya no
+    // corresponde al texto actual del campo, se descarta en vez de pintar resultados viejos.
+    if (document.getElementById('global-search-input').value.trim() !== q) return;
+    renderGlobalSearchResults(data);
+  } catch (err) {
+    // Silencioso a propósito: un buscador global que interrumpe con un error por cada tipeo de
+    // más sería peor que no mostrar nada.
+  }
+}
+
+function renderGlobalSearchResults(data) {
+  const box = document.getElementById('global-search-results');
+  const groups = [
+    { label: 'Clientes', items: data.customers, render: (c) => ({
+        title: c.name || c.phoneNumber, meta: c.phoneNumber, action: `goToCustomerProfile('${c.id}')`,
+      }) },
+    { label: 'Productos', items: data.products, render: (p) => ({
+        title: p.name, meta: formatMoney(p.price, p.currency), action: `goToProductInCatalog('${p.id}')`,
+      }) },
+    { label: 'Pedidos', items: data.orders, render: (o) => ({
+        title: o.summary, meta: `${o.customer.name || o.customer.phoneNumber} · ${formatMoney(o.totalAmount, o.currency)}`, action: `goToOrderInList('${o.id}', '${o.fulfillmentStatus}')`,
+      }) },
+    { label: 'FAQ', items: data.faq, render: (f) => ({
+        title: f.question, meta: '', action: `switchTab('faq'); hideGlobalSearchResults();`,
+      }) },
+  ];
+
+  const nonEmpty = groups.filter((g) => g.items.length > 0);
+  if (nonEmpty.length === 0) {
+    box.innerHTML = '<div class="global-search-empty">Sin resultados</div>';
+  } else {
+    box.innerHTML = nonEmpty.map((g) => `
+      <div class="global-search-group-label">${escapeHtml(g.label)}</div>
+      ${g.items.map((item) => {
+        const r = g.render(item);
+        return `<button type="button" class="global-search-item" onclick="${r.action}">
+          <div>${escapeHtml(r.title)}</div>
+          ${r.meta ? `<div class="meta">${escapeHtml(r.meta)}</div>` : ''}
+        </button>`;
+      }).join('')}
+    `).join('');
+  }
+  box.hidden = false;
+}
+
+function goToProductInCatalog(productId) {
+  hideGlobalSearchResults();
+  document.getElementById('global-search-input').value = '';
+  switchTab('catalog');
+  setTimeout(() => {
+    const card = document.querySelector(`.product-card[data-product-id="${productId}"]`);
+    if (card) {
+      card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      card.style.outline = '2px solid var(--brand)';
+      setTimeout(() => { card.style.outline = ''; }, 2000);
+    }
+  }, 150);
+}
+
+function goToOrderInList(orderId, status) {
+  hideGlobalSearchResults();
+  document.getElementById('global-search-input').value = '';
+  switchTab('orders');
+  setTimeout(() => {
+    switchOrdersTab(status);
+    setTimeout(() => {
+      const card = document.querySelector(`[data-order-id="${orderId}"]`);
+      if (card) {
+        card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        card.style.outline = '2px solid var(--brand)';
+        setTimeout(() => { card.style.outline = ''; }, 2000);
+      }
+    }, 150);
+  }, 150);
+}
+
+document.addEventListener('click', (e) => {
+  const wrap = document.getElementById('global-search-wrap');
+  if (wrap && !wrap.contains(e.target)) hideGlobalSearchResults();
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') hideGlobalSearchResults();
+});

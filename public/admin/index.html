@@ -23,6 +23,18 @@
         <div class="brand-sub">Panel de administración</div>
       </div>
     </div>
+    <!-- Fase 5: buscador global (P10 del diagnóstico) - un cuadro, cuatro fuentes (clientes,
+         productos, pedidos, FAQ). No pagina la Bandeja ni el hilo de mensajes, ver ONIX-CRM-REORG-PLAN.md. -->
+    <div class="global-search" id="global-search-wrap">
+      <input
+        id="global-search-input"
+        type="search"
+        placeholder="Buscar cliente, producto, pedido, FAQ…"
+        oninput="onGlobalSearchInput()"
+        onfocus="onGlobalSearchInput()"
+      />
+      <div id="global-search-results" class="global-search-results" hidden></div>
+    </div>
     <div style="display:flex; align-items:center; gap:12px;">
       <div id="session-badge" style="font-size:12.5px; color:var(--muted); text-align:right; line-height:1.3;"></div>
       <button class="logout-btn" onclick="logout()">Cerrar sesión</button>
