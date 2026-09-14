@@ -16,6 +16,11 @@ import {
   resolvePendingOwnerQuestion,
   findOpenPendingOwnerQuestionsForBusiness,
   getWindowState,
+  setHumanControl,
+  queueOutboundMessage,
+  listQueuedOutbound,
+  cancelQueuedOutbound,
+  countConversationsWithQueuedOutbound,
 } from "./service";
 import { realtimeEvents } from "../realtime/events";
 
@@ -37,6 +42,7 @@ before(async () => {
 });
 
 after(async () => {
+  await prisma.queuedOutboundMessage.deleteMany({ where: { businessId } });
   await prisma.message.deleteMany({ where: { conversation: { customerId } } });
   await prisma.conversation.deleteMany({ where: { customerId } });
   await prisma.customer.deleteMany({ where: { id: customerId } });
@@ -523,4 +529,55 @@ test("getCustomerThreadForBusiness reports the window state for activeConversati
     await prisma.conversation.deleteMany({ where: { customerId: customer.id } });
     await prisma.customer.deleteMany({ where: { id: customer.id } });
   }
+});
+
+// Incidente real 2026-09-14 (conversacion 573133260330): la duena estaba contestando a mano desde el
+// panel y el bot le metia "Ya te leimos, en un momento te contesta el equipo directamente" entre sus
+// propios mensajes. Cada mensaje del panel llama a setHumanControl(true), que limpiaba
+// humanControlAckSent siempre - asi que el acuse, que debia ser uno por PAUSA, se re-armaba por MENSAJE.
+test("setHumanControl solo reinicia el acuse en una transicion real a control humano", async () => {
+  const conversation = await prisma.conversation.create({ data: { customerId, humanControl: false } });
+
+  await setHumanControl(businessId, conversation.id, true);
+  let fresh = await prisma.conversation.findUniqueOrThrow({ where: { id: conversation.id } });
+  assert.equal(fresh.humanControlAckSent, false, "una pausa nueva arranca con su propio acuse pendiente");
+
+  // El bot manda el acuse una vez.
+  await prisma.conversation.update({ where: { id: conversation.id }, data: { humanControlAckSent: true } });
+
+  // La duena sigue contestando desde el panel: cada mensaje vuelve a llamar a setHumanControl(true).
+  await setHumanControl(businessId, conversation.id, true);
+  await setHumanControl(businessId, conversation.id, true);
+  fresh = await prisma.conversation.findUniqueOrThrow({ where: { id: conversation.id } });
+  assert.equal(fresh.humanControlAckSent, true, "el acuse ya se mando en esta pausa, no se re-arma por mensaje");
+  assert.notEqual(fresh.humanControlSince, null, "el reloj del watchdog SI se re-arma en cada mensaje");
+
+  // Devolverle el control al bot cierra la pausa: la proxima tiene su propio acuse.
+  await setHumanControl(businessId, conversation.id, false);
+  await setHumanControl(businessId, conversation.id, true);
+  fresh = await prisma.conversation.findUniqueOrThrow({ where: { id: conversation.id } });
+  assert.equal(fresh.humanControlAckSent, false, "una pausa nueva vuelve a tener acuse pendiente");
+});
+
+// La ventana de 24h cerrada dejaba de ser un mensaje perdido: lo que el equipo quiso decir queda en cola
+// hasta que el cliente escribe (ese mensaje entrante es lo que reabre la ventana).
+test("la cola de salida guarda, lista, cancela y se cuenta por conversacion", async () => {
+  const conversation = await prisma.conversation.create({ data: { customerId, humanControl: true } });
+
+  const first = await queueOutboundMessage(businessId, conversation.id, "Tu pedido sale el lunes", "PANEL");
+  await queueOutboundMessage(businessId, conversation.id, "Confirmame la direccion", "OWNER_ANSWER");
+
+  let pending = await listQueuedOutbound(conversation.id);
+  assert.deepEqual(
+    pending.map((q) => q.body),
+    ["Tu pedido sale el lunes", "Confirmame la direccion"],
+    "se entregan en el orden en que se escribieron"
+  );
+  assert.equal(await countConversationsWithQueuedOutbound(businessId), 1, "cuenta conversaciones, no mensajes");
+
+  assert.equal(await cancelQueuedOutbound(businessId, first.id), true);
+  pending = await listQueuedOutbound(conversation.id);
+  assert.deepEqual(pending.map((q) => q.body), ["Confirmame la direccion"], "lo cancelado no se entrega nunca");
+
+  assert.equal(await cancelQueuedOutbound(businessId, first.id), false, "cancelar dos veces no hace nada");
 });

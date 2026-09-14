@@ -11,6 +11,9 @@ import {
   saveCustomerContactInfo,
   updateConversationStatus,
   getWindowState,
+  queueOutboundMessage,
+  listQueuedOutbound,
+  cancelQueuedOutbound,
 } from "../../conversation/service";
 import {
   sendTextMessage,
@@ -109,6 +112,17 @@ conversationsRouter.post("/api/conversations/:id/messages", upload.single("file"
   // catches this instead of letting it fail invisibly; see getWindowState for why a wamid is not proof.
   const windowState = await getWindowState(String(req.params.id));
   if (!windowState.windowOpen) {
+    // Con `queue: true` el panel no pierde lo que el dueno ya escribio: queda guardado y el webhook lo
+    // entrega solo en cuanto el cliente conteste (ver QueuedOutboundMessage). Sin eso, la unica salida
+    // era mandar una plantilla generica y acordarse de reescribir el mensaje a mano mas tarde - que es
+    // justo lo que no paso en el caso de David (2026-09-14).
+    if (String(req.body?.queue ?? "") === "true" && text && !file) {
+      const queued = await queueOutboundMessage(businessId, String(req.params.id), formatForWhatsapp(text), "PANEL");
+      await setHumanControl(businessId, String(req.params.id), true);
+      await clearAgentRequestFlag(businessId, String(req.params.id));
+      res.status(202).json({ ok: true, queued: true, id: queued.id });
+      return;
+    }
     res.status(409).json({
       error: "Pasaron mas de 24h desde el ultimo mensaje del cliente - WhatsApp ya no entrega mensajes libres. Usa una plantilla aprobada para reabrir la conversacion.",
       windowClosed: true,
@@ -120,6 +134,13 @@ conversationsRouter.post("/api/conversations/:id/messages", upload.single("file"
     phoneNumberId: business.whatsappPhoneNumberId,
     accessToken: business.whatsappAccessToken,
   };
+
+  // Antes esto corria DESPUES del envio: durante esos segundos la conversacion seguia en automatico, y
+  // un mensaje del cliente que entrara justo ahi recibia respuesta del bot encima de la del dueno.
+  // Tomar el control primero cierra esa ventana; si el envio falla, la conversacion queda en manos del
+  // humano, que es el lado seguro del error.
+  await setHumanControl(businessId, String(req.params.id), true);
+  await clearAgentRequestFlag(businessId, String(req.params.id));
 
   const formattedText = formatForWhatsapp(text);
   if (file) {
@@ -138,11 +159,21 @@ conversationsRouter.post("/api/conversations/:id/messages", upload.single("file"
     const wamid = await sendTextMessage(credentials, conversation.customer.phoneNumber, formattedText);
     await recordMessage(businessId, String(req.params.id), "ASSISTANT", formattedText, wamid || undefined);
   }
-  await setHumanControl(businessId, String(req.params.id), true);
-  await clearAgentRequestFlag(businessId, String(req.params.id));
   await clearPendingOwnerQuestionsForConversation(String(req.params.id));
 
   res.status(201).json({ ok: true });
+});
+
+// Deja al dueno sacar de la cola algo que ya no quiere mandar (se arrepintio, o el tema se resolvio por
+// telefono) - si no, el mensaje se entregaria solo semanas despues, cuando el cliente vuelva a escribir
+// por cualquier otra cosa.
+conversationsRouter.delete("/api/conversations/:id/queued/:queuedId", async (req, res) => {
+  const cancelled = await cancelQueuedOutbound(businessIdOf(req), String(req.params.queuedId));
+  if (!cancelled) {
+    res.status(404).json({ error: "Ese mensaje en cola ya no existe" });
+    return;
+  }
+  res.json({ ok: true, queuedOutbound: await listQueuedOutbound(String(req.params.id)) });
 });
 
 // The only way to reach a customer once their 24h window has closed (see the check above) - an

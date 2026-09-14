@@ -17,6 +17,9 @@ import {
   setHumanControl,
   updateConversationStatus,
   getRelatedProductNameForMessage,
+  queueOutboundMessage,
+  listQueuedOutboundForCustomer,
+  markQueuedOutboundSent,
 } from "../conversation/service";
 import { generateReply, generateClosingMessage } from "../ai/agent";
 import { analyzeCustomerImage } from "../ai/vision";
@@ -26,6 +29,7 @@ import { createOrder, askForCsat, recordCsatReply, type ResolvedOrderItem } from
 import { recordAskOwnerResolution } from "../catalog/learnedFaq";
 import { getCatalogHintText, findConfidentProductMatch } from "../catalog/products";
 import { recordDeliveryFailure } from "../delivery/failures";
+import { recordAgentIncident } from "../ai/incidents";
 
 // The owner's answer is free-form text - unlike sendOwnerAlert (always the SAME fixed wrapper phrase to
 // the owner, so one approved template covers every call), an arbitrary customer-facing answer can't be
@@ -41,6 +45,44 @@ import { extractFrame } from "../media/videoFrame";
 
 export const whatsappRouter = Router();
 
+// Minutos que tiene que llevar callado este lado del chat para que valga la pena mandar el acuse de
+// "ya te leimos". Dentro de esa ventana, o la duena esta escribiendo ahora mismo o el bot acaba de
+// avisar que escala: en los dos casos el cliente ya tiene un mensaje reciente y el acuse solo molesta.
+const ACK_QUIET_MINUTES = 15;
+
+// Minutos desde que el cliente mando su mensaje a partir de los cuales la respuesta ya no se manda. Con
+// el proveedor de IA degradado la generacion se apila: el 2026-09-14, con DeepSeek caido, una respuesta
+// salio 30 minutos tarde, cuando el cliente ya habia seguido escribiendo y la duena ya habia contestado
+// a mano. A esa altura la respuesta no contesta nada, confunde. Se descarta y pasa a un humano.
+const STALE_REPLY_MINUTES = 10;
+
+// El cliente acaba de escribir, asi que la ventana de 24h esta abierta de nuevo: se entrega lo que el
+// equipo habia dejado pendiente cuando estaba cerrada (ver QueuedOutboundMessage). Nunca deja caer el
+// webhook - si esto falla, el mensaje del cliente igual tiene que seguir su curso.
+async function flushQueuedOutbound(
+  businessId: string,
+  customerId: string,
+  conversationId: string,
+  credentials: WhatsappCredentials,
+  customerPhone: string
+): Promise<void> {
+  try {
+    const queued = await listQueuedOutboundForCustomer(businessId, customerId);
+    for (const item of queued) {
+      try {
+        const wamid = await sendTextMessage(credentials, customerPhone, item.body);
+        await recordMessage(businessId, conversationId, "ASSISTANT", item.body, wamid || undefined);
+        await markQueuedOutboundSent(item.id);
+      } catch (error) {
+        console.error(`No se pudo entregar el mensaje en cola ${item.id}:`, error);
+        return;
+      }
+    }
+  } catch (error) {
+    console.error("No se pudo revisar la cola de salida:", error);
+  }
+}
+
 const CONFIRM_WORDS = ["si", "sí", "confirmado", "confirmo", "listo", "ok", "dale", "correcto", "confirm_yes"];
 const DENY_WORDS = ["no", "confirm_no"];
 
@@ -53,15 +95,26 @@ interface OwnerReplyMessage {
 
 async function deliverOwnerAnswerToCustomer(
   businessId: string,
+  conversationId: string,
   credentials: WhatsappCredentials,
   customerPhone: string,
   text: string
-): Promise<{ delivered: boolean; nudged: boolean }> {
+): Promise<{ delivered: boolean; nudged: boolean; queued: boolean }> {
   try {
     await sendTextMessage(credentials, customerPhone, text);
-    return { delivered: true, nudged: false };
+    return { delivered: true, nudged: false, queued: false };
   } catch (error) {
     console.error("No se pudo entregar la respuesta del dueno al cliente (posible ventana de 24h cerrada):", error);
+    // La plantilla de reenganche sola no alcanzaba: el cliente volvia a escribir y la respuesta real ya
+    // se habia perdido, asi que el dueno tenia que acordarse de reescribirla. Se encola y el webhook la
+    // entrega sola apenas el cliente conteste (ese mensaje entrante reabre la ventana).
+    let queued = false;
+    try {
+      await queueOutboundMessage(businessId, conversationId, text, "OWNER_ANSWER");
+      queued = true;
+    } catch (queueError) {
+      console.error("No se pudo dejar la respuesta del dueno en cola:", queueError);
+    }
     let nudged = false;
     const business = await prisma.business.findUnique({
       where: { id: businessId },
@@ -82,16 +135,19 @@ async function deliverOwnerAnswerToCustomer(
       errorMessage: error instanceof Error ? error.message : String(error),
       critical: false,
     });
-    return { delivered: false, nudged };
+    return { delivered: false, nudged, queued };
   }
 }
 
-function ownerConfirmationText(outcome: { delivered: boolean; nudged: boolean }, successText: string): string {
+function ownerConfirmationText(outcome: { delivered: boolean; nudged: boolean; queued: boolean }, successText: string): string {
   if (outcome.delivered) return successText;
+  const queuedNote = outcome.queued
+    ? " Tu respuesta quedo guardada y se le manda sola apenas el cliente escriba."
+    : " Tu respuesta NO quedo guardada, vas a tener que volver a escribirla.";
   if (outcome.nudged) {
-    return "No se pudo entregar tu respuesta directamente (probablemente pasaron mas de 24h desde el ultimo mensaje del cliente) - le mandamos un aviso para que vuelva a escribir, respondele de nuevo apenas lo haga.";
+    return `No se pudo entregar tu respuesta directamente (pasaron mas de 24h desde el ultimo mensaje del cliente) - le mandamos un aviso para que vuelva a escribir.${queuedNote}`;
   }
-  return "No se pudo entregar tu respuesta al cliente de ninguna forma (probablemente pasaron mas de 24h desde su ultimo mensaje). Pedile que te escriba de nuevo para poder responderle.";
+  return `No se pudo entregar tu respuesta al cliente (pasaron mas de 24h desde su ultimo mensaje) y este negocio no tiene plantilla de reenganche configurada.${queuedNote}`;
 }
 
 export async function handleOwnerReply(
@@ -150,11 +206,11 @@ export async function handleOwnerReply(
     // raw words. Falls back to forwarding the raw text (still prefixed) when it doesn't match anything.
     if (pendingQuestion.kind === "PHOTO_PRODUCT") {
       const match = await findConfidentProductMatch(businessId, answerText);
-      let outcome: { delivered: boolean; nudged: boolean };
+      let outcome: { delivered: boolean; nudged: boolean; queued: boolean };
       if (match.product) {
         const price = `$${match.product.price.toString()} ${match.product.currency}`;
         const productText = formatForWhatsapp(`Según nuestro equipo, el producto que buscas es: *${match.product.name}* - ${price}`);
-        outcome = await deliverOwnerAnswerToCustomer(businessId, credentials, pendingQuestion.customer.phoneNumber, productText);
+        outcome = await deliverOwnerAnswerToCustomer(businessId, pendingQuestion.conversationId, credentials, pendingQuestion.customer.phoneNumber, productText);
         await recordMessage(businessId, pendingQuestion.conversationId, "ASSISTANT", productText);
         if (outcome.delivered && match.product.media.length > 0) {
           try {
@@ -165,7 +221,7 @@ export async function handleOwnerReply(
         }
       } else {
         const fallbackText = formatForWhatsapp(`Según nuestro equipo: ${answerText}`);
-        outcome = await deliverOwnerAnswerToCustomer(businessId, credentials, pendingQuestion.customer.phoneNumber, fallbackText);
+        outcome = await deliverOwnerAnswerToCustomer(businessId, pendingQuestion.conversationId, credentials, pendingQuestion.customer.phoneNumber, fallbackText);
         await recordMessage(businessId, pendingQuestion.conversationId, "ASSISTANT", fallbackText);
       }
       await clearPendingOwnerQuestion(pendingQuestion.questionId);
@@ -176,7 +232,7 @@ export async function handleOwnerReply(
     }
 
     const formattedAnswer = formatForWhatsapp(answerText);
-    const answerOutcome = await deliverOwnerAnswerToCustomer(businessId, credentials, pendingQuestion.customer.phoneNumber, formattedAnswer);
+    const answerOutcome = await deliverOwnerAnswerToCustomer(businessId, pendingQuestion.conversationId, credentials, pendingQuestion.customer.phoneNumber, formattedAnswer);
     await recordMessage(businessId, pendingQuestion.conversationId, "ASSISTANT", formattedAnswer);
     await clearPendingOwnerQuestion(pendingQuestion.questionId);
     await setHumanControl(businessId, pendingQuestion.conversationId, false);
@@ -273,6 +329,7 @@ whatsappRouter.get("/webhook", (req, res) => {
 
 whatsappRouter.post("/webhook", async (req, res) => {
   res.sendStatus(200);
+  const webhookReceivedAt = Date.now();
 
   try {
     const entry = req.body?.entry?.[0];
@@ -453,7 +510,21 @@ whatsappRouter.post("/webhook", async (req, res) => {
       throw error;
     }
 
-    if (conversation.humanControl) {
+    // Todo lo que el equipo dejo pendiente cuando la ventana de 24h estaba cerrada se entrega ACA: este
+    // mensaje entrante es lo que la reabre. Va antes del gate de control humano a proposito - lo que hay
+    // en cola lo escribio un humano, no depende de quien tenga el control ahora.
+    await flushQueuedOutbound(business.id, customer.id, conversation.id, credentials, from);
+
+    // Releer el estado en vez de confiar en el objeto `conversation` leido arriba: entre esa lectura y
+    // este punto corren la descarga del media, la vision y la transcripcion, que tardan segundos o
+    // decenas de segundos. Si la duena toco "Tomar control" o contesto desde el panel en ese rato, el
+    // valor viejo decia false y el bot respondia igual, encima de ella. Caso real 2026-09-14.
+    const gate = await prisma.conversation.findUnique({
+      where: { id: conversation.id },
+      select: { humanControl: true, humanControlAckSent: true },
+    });
+
+    if (gate?.humanControl) {
       console.log("Conversacion en control humano, el bot no responde:", conversation.id);
       // Silence with zero acknowledgment reads as the bot being broken to the customer, and the owner
       // ends up having to jump in just to say "we got your message". Send one heads-up per pause period,
@@ -462,7 +533,19 @@ whatsappRouter.post("/webhook", async (req, res) => {
       // message re-fired the ack after every manual reply that wasn't itself the ack. Stay quiet until the
       // owner/admin actually resumes it, which resets the flag.
       const HUMAN_CONTROL_ACK = "Ya te leimos, en un momento te contesta el equipo directamente 🙏";
-      if (!conversation.humanControlAckSent) {
+      // Segunda condicion, ademas del flag: si de este lado se dijo algo hace muy poco, el humano esta
+      // presente (o el bot acaba de avisar que escala) y el acuse solo agrega ruido encima de un mensaje
+      // que el cliente ya vio. El flag solo se limpia en una transicion real a control humano
+      // (ver setHumanControl), esto cubre ademas la ventana en que la duena esta tipeando ahora mismo.
+      const recentlySpoken = await prisma.message.findFirst({
+        where: {
+          conversationId: conversation.id,
+          role: "ASSISTANT",
+          createdAt: { gte: new Date(Date.now() - ACK_QUIET_MINUTES * 60 * 1000) },
+        },
+        select: { id: true },
+      });
+      if (!gate.humanControlAckSent && !recentlySpoken) {
         try {
           const wamid = await sendTextMessage(credentials, from, HUMAN_CONTROL_ACK);
           await recordMessage(business.id, conversation.id, "ASSISTANT", HUMAN_CONTROL_ACK, wamid || undefined);
@@ -498,6 +581,12 @@ whatsappRouter.post("/webhook", async (req, res) => {
       return;
     }
 
+    // Cuando el CLIENTE mando el mensaje, no cuando nosotros terminamos de procesarlo: la descarga del
+    // media y la vision ya se comieron parte del reloj antes de llegar aca. Meta manda su timestamp en
+    // segundos; si viene raro, se cae a la hora en que entro el webhook.
+    const metaTimestampMs = Number(message.timestamp) * 1000;
+    const customerSentAt = Number.isFinite(metaTimestampMs) && metaTimestampMs > 0 ? metaTimestampMs : webhookReceivedAt;
+
     const shippingRatesConfigured = (await prisma.shippingRate.count({ where: { businessId: business.id } })) > 0;
 
     const reply = await generateReply(
@@ -528,6 +617,36 @@ whatsappRouter.post("/webhook", async (req, res) => {
       },
       rawText
     );
+    // generateReply puede tardar desde segundos hasta minutos (el 2026-09-14, con DeepSeek degradado,
+    // una respuesta salio 30 minutos despues del mensaje del cliente). En todo ese rato la duena puede
+    // haber tomado el control y contestado a mano - mandar igual la respuesta vieja la contradice
+    // delante del cliente. Se descarta: lo que un humano ya contesto vale mas que un borrador viejo.
+    const stillAutomatic = await prisma.conversation.findUnique({
+      where: { id: conversation.id },
+      select: { humanControl: true },
+    });
+    if (stillAutomatic?.humanControl) {
+      console.log("El equipo tomo el control mientras se generaba la respuesta, se descarta:", conversation.id);
+      return;
+    }
+
+    // Misma idea, sin que nadie haya tomado el control: si la respuesta tardo demasiado ya no contesta
+    // la pregunta que el cliente hizo, asi que se tira y la conversacion pasa a un humano - dejarla en
+    // automatico significaria que el cliente se queda sin nada.
+    const waitedMinutes = (Date.now() - customerSentAt) / (60 * 1000);
+    if (waitedMinutes > STALE_REPLY_MINUTES) {
+      const detail = `La respuesta tardo ${Math.round(waitedMinutes)} minutos en generarse (limite ${STALE_REPLY_MINUTES}) y se descarto sin mandarla.`;
+      console.error(`${detail} conversation=${conversation.id}`);
+      await recordAgentIncident(business.id, "STALE_REPLY_DISCARDED", detail, conversation.id);
+      await setHumanControl(business.id, conversation.id, true);
+      if (business.contactPhone) {
+        const customerLabel = customer.name || from;
+        const staleAlertText = `El bot tardo ${Math.round(waitedMinutes)} minutos en responderle a ${customerLabel} y la respuesta se descarto por vieja. Esa conversacion quedo esperandote en el panel.`;
+        await trackOwnerSend(business.id, staleAlertText, () => sendOwnerAlert(credentials, business.contactPhone!, staleAlertText));
+      }
+      return;
+    }
+
     const formattedReply = formatForWhatsapp(reply);
     await sendTextMessage(credentials, from, formattedReply);
     await recordMessage(business.id, conversation.id, "ASSISTANT", formattedReply);

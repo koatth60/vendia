@@ -266,6 +266,32 @@ model LearnedFaqCandidate {
   @@index([businessId, status])
 }
 
+// Lo que el equipo quiso decirle al cliente cuando la ventana de 24h de WhatsApp ya estaba cerrada.
+// Sin esto el texto real se perdia: se mandaba una plantilla generica de reenganche y el dueno tenia
+// que acordarse de volver a escribir la respuesta cuando el cliente contestara (caso real 2026-09-14:
+// la respuesta a David nunca se entrego y nadie la reenvio). Se encola aca y el webhook la entrega
+// sola en cuanto el cliente escribe, porque ese mensaje entrante vuelve a abrir la ventana.
+model QueuedOutboundMessage {
+  id             String       @id @default(cuid())
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  conversationId String
+  businessId     String
+  body           String
+  // Quien dejo el mensaje en cola, solo para poder explicarlo en el panel.
+  origin         QueuedOutboundOrigin @default(PANEL)
+  createdAt      DateTime     @default(now())
+  sentAt         DateTime?
+  cancelledAt    DateTime?
+
+  @@index([conversationId, sentAt])
+  @@index([businessId, sentAt])
+}
+
+enum QueuedOutboundOrigin {
+  PANEL
+  OWNER_ANSWER
+}
+
 // Meta's delivery-status webhook reports failures asynchronously, after the send call already
 // returned a wamid looking successful (src/routes/whatsapp.ts) - previously that only hit
 // console.error, invisible unless someone went looking in the droplet's pm2 logs over SSH. This
@@ -511,6 +537,7 @@ model Conversation {
   unreadCount                  Int                    @default(0)
   order                        Order?
   messages                     Message[]
+  queuedOutbound               QueuedOutboundMessage[]
   createdAt                    DateTime               @default(now())
   updatedAt                    DateTime               @updatedAt
 }
@@ -625,4 +652,9 @@ enum AgentIncidentKind {
   // y permanente se ve identico a "esta funcion nunca hizo falta". Ver la llave de Anthropic sin
   // workspace, que dejo la escalacion de vision muerta semanas sin que nadie se enterara.
   EXTERNAL_API_FAILURE
+  // La respuesta del bot tardo mas de STALE_REPLY_MINUTES en generarse y se descarto sin mandarla.
+  // Pasa cuando el proveedor de IA esta degradado: el 2026-09-14, con DeepSeek caido, una respuesta
+  // salio 30 minutos despues del mensaje del cliente, ya fuera de contexto. La conversacion pasa a
+  // control humano en vez de mandar algo viejo.
+  STALE_REPLY_DISCARDED
 }

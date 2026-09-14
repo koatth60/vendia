@@ -40,6 +40,14 @@ payload to DeepSeek on every customer message. Keep this lean going forward:
   `agent.categoryColorScopePaid.ts`, `agent.ambiguousRequestsPaid.ts`, `contextSummaryPaid.ts`). All 4
   `*Paid.ts` files are wired into `npm run test:paid`. Before adding any new test that calls
   `generateReply`/DeepSeek for real, name it `*Paid.ts` from the start and add it to that script.
+- Third occurrence, 2026-09-14: renaming the source file is NOT enough. `dist/` still held
+  `dist/routes/whatsapp.webhook.test.js` from an old `npm run build`, and `npm test` had no path
+  filter, so it discovered the stale COMPILED copy and billed DeepSeek on every plain `npm test`
+  (that run hung for 10 minutes with zero output). The `test` script is now scoped to a glob
+  (`node --import tsx --test "src/**/*.test.ts"`) - never remove that argument. A bare directory
+  (`--test src`) does NOT work on Node 22: it also runs `src/index.ts` and dies on EADDRINUSE :3000. `dist/` is build output that
+  production does not use (prod runs the source through tsx); if it ever gets rebuilt, the compiled
+  `*.test.js` files under it are dead weight, not a test suite.
 
 # Rediseño del panel (dirección A) — reglas de estilo
 

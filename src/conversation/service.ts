@@ -32,6 +32,62 @@ export async function getWindowState(conversationId: string): Promise<WindowStat
   return { windowOpen: hoursSinceLastCustomerMessage <= WHATSAPP_WINDOW_HOURS, hoursSinceLastCustomerMessage };
 }
 
+// Cola de salida para la ventana cerrada (ver QueuedOutboundMessage en schema.prisma). Antes, cuando la
+// ventana de 24h ya estaba cerrada, el texto real que el equipo queria mandar se descartaba: se mandaba
+// una plantilla generica y listo. Aca queda guardado y flushQueuedOutbound lo entrega en cuanto el
+// cliente vuelve a escribir, que es exactamente el instante en que WhatsApp reabre la ventana.
+export async function queueOutboundMessage(
+  businessId: string,
+  conversationId: string,
+  body: string,
+  origin: "PANEL" | "OWNER_ANSWER"
+) {
+  return prisma.queuedOutboundMessage.create({
+    data: { businessId, conversationId, body, origin },
+  });
+}
+
+export async function listQueuedOutbound(conversationId: string) {
+  return prisma.queuedOutboundMessage.findMany({
+    where: { conversationId, sentAt: null, cancelledAt: null },
+    orderBy: { createdAt: "asc" },
+  });
+}
+
+// El flush del webhook busca por CLIENTE, no por conversacion: si el dueno deja un mensaje en cola y la
+// venta se cierra antes de que el cliente conteste, el siguiente mensaje entrante abre una conversacion
+// nueva (getOrCreateOpenConversation excluye SOLD/LOST) y lo encolado quedaria huerfano para siempre.
+export async function listQueuedOutboundForCustomer(businessId: string, customerId: string) {
+  return prisma.queuedOutboundMessage.findMany({
+    where: { businessId, sentAt: null, cancelledAt: null, conversation: { customerId } },
+    orderBy: { createdAt: "asc" },
+  });
+}
+
+export async function cancelQueuedOutbound(businessId: string, id: string) {
+  const { count } = await prisma.queuedOutboundMessage.updateMany({
+    where: { id, businessId, sentAt: null, cancelledAt: null },
+    data: { cancelledAt: new Date() },
+  });
+  return count > 0;
+}
+
+export async function markQueuedOutboundSent(id: string) {
+  await prisma.queuedOutboundMessage.update({ where: { id }, data: { sentAt: new Date() } });
+}
+
+// Cuantas conversaciones de este negocio tienen algo esperando a que el cliente vuelva a escribir -
+// alimenta el contador de "Salud del bot" para que esto no sea otra cosa que solo se ve entrando chat
+// por chat.
+export async function countConversationsWithQueuedOutbound(businessId: string): Promise<number> {
+  const rows = await prisma.queuedOutboundMessage.findMany({
+    where: { businessId, sentAt: null, cancelledAt: null },
+    select: { conversationId: true },
+    distinct: ["conversationId"],
+  });
+  return rows.length;
+}
+
 // Cross-references each message against DeliveryFailure by wamid so the thread can show "no llegó"
 // instead of a normal-looking bubble the customer never actually saw - a message can get a real wamid
 // (WhatsApp accepted it) and still fail minutes or hours later via the async status webhook, so a
@@ -287,16 +343,23 @@ export async function setHumanControl(businessId: string, conversationId: string
     where: { id: conversationId, customer: { businessId } },
   });
   if (!existing) return null;
+  // Real incident 2026-09-14 (conversacion 573133260330): la duena estaba chateando a mano con el
+  // cliente y el bot le metia "Ya te leimos, en un momento te contesta el equipo directamente" entre
+  // sus propios mensajes, una y otra vez. Cada mensaje manual del panel llama a setHumanControl(true),
+  // y esto limpiaba humanControlAckSent SIEMPRE - asi que una duena que estaba demostrablemente ahi,
+  // respondiendo, re-armaba el aviso de "ya te contestamos" en cada turno. El acuse es uno solo por
+  // PAUSA, no por mensaje: solo se reinicia en una transicion real false->true (o al devolverle el
+  // control al bot, para que la proxima pausa tenga el suyo).
+  //
+  // El reloj del watchdog (humanControlSince/stalledReminder*) SI se re-arma en cada llamada, y eso es
+  // deliberado - ver findStalledConversationsDueForReminder: mide desde el ultimo mensaje del cliente,
+  // no desde aca, y necesita saber que el humano volvio a engancharse.
+  const keepAck = active && existing.humanControl;
   const conversation = await prisma.conversation.update({
     where: { id: conversationId },
-    // Reset the one-time ack flag whenever a pause starts, so the next takeover gets its own single
-    // heads-up instead of inheriting "already acked" from a previous pause period. Same idea for the
-    // stalled-conversation watchdog clock: every flip (bot pauses OR resumes) re-arms it from scratch -
-    // active:true marks "the clock starts now" (covers a fresh escalation AND an owner re-engaging after
-    // already having replied once), active:false marks "no longer stalled, nothing to watch".
     data: {
       humanControl: active,
-      humanControlAckSent: false,
+      humanControlAckSent: keepAck ? existing.humanControlAckSent : false,
       humanControlSince: active ? new Date() : null,
       stalledReminderStage: 0,
       stalledReminderSentAt: null,
@@ -673,6 +736,7 @@ export async function getConversationForBusiness(businessId: string, conversatio
     unreadCount: conversation.unreadCount,
     windowOpen: windowState.windowOpen,
     hoursSinceLastCustomerMessage: windowState.hoursSinceLastCustomerMessage,
+    queuedOutbound: await listQueuedOutbound(conversationId),
     customer: {
       id: conversation.customer.id,
       phoneNumber: conversation.customer.phoneNumber,
@@ -820,6 +884,7 @@ export async function getCustomerThreadForBusiness(businessId: string, customerI
       cycles,
       windowOpen: windowState.windowOpen,
       hoursSinceLastCustomerMessage: windowState.hoursSinceLastCustomerMessage,
+      queuedOutbound: [],
       messages: [],
     };
   }
@@ -856,6 +921,7 @@ export async function getCustomerThreadForBusiness(businessId: string, customerI
     cycles,
     windowOpen: windowState.windowOpen,
     hoursSinceLastCustomerMessage: windowState.hoursSinceLastCustomerMessage,
+    queuedOutbound: await listQueuedOutbound(activeConversationId),
     messages: await attachDeliveryFailures(businessId, messagesWithMedia),
   };
 }

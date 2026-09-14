@@ -21,6 +21,13 @@ async function canReachCustomer(conversationId: string): Promise<boolean> {
   return (await getWindowState(conversationId)).windowOpen;
 }
 
+// Que la ventana este cerrada no puede seguir siendo un `return` silencioso: antes el job simplemente no
+// le avisaba al cliente y nadie se enteraba de que ese cliente ya era inalcanzable por texto libre. El
+// dueno es el unico que puede desbloquearlo (mandando una plantilla desde el panel), asi que tiene que
+// decirlo el mismo recordatorio. Una sola linea: la plantilla onix_owner_alert rechaza saltos de linea.
+const WINDOW_CLOSED_NOTE =
+  " OJO: pasaron mas de 24h desde el ultimo mensaje de este cliente, WhatsApp ya no deja mandarle texto libre - entra al panel y mandale una plantilla aprobada para reabrir el chat.";
+
 const STAGE_2_THRESHOLD_MS = 24 * 60 * 60 * 1000;
 
 // Customer never gets told anything while a question is escalated - the bot's own note ("estoy
@@ -83,9 +90,10 @@ export async function runEscalationReminderJob(): Promise<void> {
 
     const dueQuestions = await findPendingOwnerQuestionsDueForReminder(business.id, stage1Before);
     for (const pending of dueQuestions) {
+      const reachable = await canReachCustomer(pending.conversationId);
       // No newlines - the onix_owner_alert template rejects them (WhatsApp error 132018), so a
       // multi-line body always fell through to the plain-text fallback instead of the real template.
-      const text = `Recordatorio: todavia no respondiste esta pregunta de ${pending.customer.name || pending.customer.phoneNumber}, sigue sin poder hablar con el bot: "${pending.question}"`;
+      const text = `Recordatorio: todavia no respondiste esta pregunta de ${pending.customer.name || pending.customer.phoneNumber}, sigue sin poder hablar con el bot: "${pending.question}"${reachable ? "" : WINDOW_CLOSED_NOTE}`;
       try {
         const wamid = await sendOwnerAlert(credentials, business.contactPhone, text);
         await recordOwnerMessage(business.id, { direction: "OUT", body: text, success: Boolean(wamid) });
@@ -99,7 +107,7 @@ export async function runEscalationReminderJob(): Promise<void> {
         console.error(`No se pudo enviar recordatorio de escalacion (pending=${pending.questionId}):`, error);
       }
 
-      if (!customerNotifiedThisRun.has(pending.conversationId) && (await canReachCustomer(pending.conversationId))) {
+      if (reachable && !customerNotifiedThisRun.has(pending.conversationId)) {
         customerNotifiedThisRun.add(pending.conversationId);
         try {
           const customerWamid = await sendTextMessage(credentials, pending.customer.phoneNumber, CUSTOMER_FOLLOWUP_TEXT);
@@ -116,10 +124,12 @@ export async function runEscalationReminderJob(): Promise<void> {
     for (const conversation of stalled) {
       const customerLabel = conversation.customer.name || conversation.customer.phoneNumber;
       const reason = describeStalledOrigin(conversation);
-      const text =
+      const reachable = await canReachCustomer(conversation.conversationId);
+      const base =
         conversation.nextStage === 2
           ? `Ultimo recordatorio: la conversacion con ${customerLabel} lleva mas de 24 horas sin respuesta tuya (${reason}). No se manda ningun otro aviso despues de este.`
           : `Recordatorio: la conversacion con ${customerLabel} ${reason}.`;
+      const text = reachable ? base : `${base}${WINDOW_CLOSED_NOTE}`;
       try {
         const wamid = await sendOwnerAlert(credentials, business.contactPhone, text);
         await recordOwnerMessage(business.id, { direction: "OUT", body: text, success: Boolean(wamid) });
@@ -146,8 +156,8 @@ export async function runEscalationReminderJob(): Promise<void> {
       if (
         conversation.nextStage === 1 &&
         !isManualTakeover &&
-        !customerNotifiedThisRun.has(conversation.conversationId) &&
-        (await canReachCustomer(conversation.conversationId))
+        reachable &&
+        !customerNotifiedThisRun.has(conversation.conversationId)
       ) {
         customerNotifiedThisRun.add(conversation.conversationId);
         try {

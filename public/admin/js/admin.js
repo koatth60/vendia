@@ -914,7 +914,7 @@ function escapeHtml(str) {
 // que la cuarta tarjeta se veía bien en una y rompía la grilla de 3 columnas en la otra. Una sola función
 // para las dos: metric-grid es auto-fit, así que acomoda cuantas tarjetas haya sin tocar nada más.
 function botHealthCardsHtml(incidents, extraStyle = '') {
-  const degraded = incidents.degradedReplies + incidents.loopExhausted;
+  const degraded = incidents.degradedReplies + incidents.loopExhausted + incidents.staleRepliesDiscarded;
   const lastFailure = incidents.lastExternalApiFailure;
   return `
     <div class="metric-grid"${extraStyle ? ` style="${extraStyle}"` : ''}>
@@ -924,9 +924,16 @@ function botHealthCardsHtml(incidents, extraStyle = '') {
         <div class="sub">Pausadas esperando a un humano</div>
       </div>
       <div class="metric-card">
+        <div class="label">Fuera de la ventana de 24h</div>
+        <div class="value"${incidents.unreachableConversations > 0 ? ' style="color:var(--onix-warn);"' : ''}>${incidents.unreachableConversations}</div>
+        <div class="sub">${incidents.conversationsWithQueuedOutbound > 0
+          ? `${incidents.conversationsWithQueuedOutbound} con mensaje listo para cuando escriban`
+          : 'WhatsApp solo acepta plantillas en estas'}</div>
+      </div>
+      <div class="metric-card">
         <div class="label">Respuestas degradadas (7 días)</div>
         <div class="value"${degraded > 0 ? ' style="color:var(--onix-danger);"' : ''}>${degraded}</div>
-        <div class="sub">${incidents.loopExhausted} por agotar herramientas · ${incidents.degradedReplies} genéricas</div>
+        <div class="sub">${incidents.loopExhausted} por agotar herramientas · ${incidents.degradedReplies} genéricas · ${incidents.staleRepliesDiscarded} descartadas por viejas</div>
       </div>
       <div class="metric-card">
         <div class="label">Intervenciones de respaldo</div>
@@ -1603,6 +1610,7 @@ async function pollConversation() {
     const conversation = await res.json();
     currentWindowOpen = conversation.windowOpen;
     currentHoursSinceLastCustomerMessage = conversation.hoursSinceLastCustomerMessage;
+    currentQueuedOutbound = conversation.queuedOutbound || [];
     renderHandoffState(conversation.humanControl);
     updateComposerVisibility();
     updateCloseSaleButtonVisibility(conversation.status);
@@ -1806,6 +1814,7 @@ async function openCustomer(customerId) {
     threadHasMore = data.hasMore;
     currentWindowOpen = data.windowOpen;
     currentHoursSinceLastCustomerMessage = data.hoursSinceLastCustomerMessage;
+    currentQueuedOutbound = data.queuedOutbound || [];
     renderHandoffState(data.humanControl);
     updateCloseSaleButtonVisibility(data.status);
     currentCustomerTags = [...(data.customer.tags || [])];
@@ -1963,6 +1972,9 @@ function renderHandoffState(humanControl) {
 // David: dos mensajes que parecían enviados y nunca llegaron).
 let currentWindowOpen = true;
 let currentHoursSinceLastCustomerMessage = null;
+// Lo que el equipo dejo escrito mientras la ventana estaba cerrada y todavia no se entrego. Se muestra
+// arriba del composer para que nadie lo escriba dos veces ni se olvide de que existe.
+let currentQueuedOutbound = [];
 
 function updateComposerVisibility() {
   const composer = document.getElementById('modal-composer');
@@ -1975,6 +1987,60 @@ function updateComposerVisibility() {
     composer.style.display = 'none';
     banner.style.display = 'flex';
     renderWindowBanner();
+  }
+  renderQueuedStrip();
+}
+
+function renderQueuedStrip() {
+  const strip = document.getElementById('modal-queued-strip');
+  if (!strip) return;
+  if (!currentQueuedOutbound || currentQueuedOutbound.length === 0) {
+    strip.style.display = 'none';
+    strip.innerHTML = '';
+    return;
+  }
+  strip.style.display = 'flex';
+  strip.innerHTML = currentQueuedOutbound
+    .map(
+      (q) => `<div style="display:flex; align-items:flex-start; gap:8px; font-size:12.5px; color:var(--onix-muted); line-height:1.4;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex:none; margin-top:1px;"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 1.8"/></svg>
+        <span style="flex:1;">En espera de que el cliente escriba: "${escapeHtml(q.body)}"</span>
+        <button type="button" class="btn-ghost" onclick="cancelQueuedMessage('${escapeHtml(q.id)}')">Cancelar</button>
+      </div>`
+    )
+    .join('');
+}
+
+async function queueMessageForCustomer() {
+  if (!currentConversationId) return;
+  const input = document.getElementById('modal-queue-input');
+  const text = (input.value || '').trim();
+  if (!text) {
+    setStatus('Escribí el mensaje que querés dejar listo', true);
+    return;
+  }
+  const body = new FormData();
+  body.append('text', text);
+  body.append('queue', 'true');
+  try {
+    await apiFetch(`/admin/api/conversations/${currentConversationId}/messages`, { method: 'POST', body });
+    input.value = '';
+    setStatus('Listo, se le manda solo apenas el cliente escriba');
+    await openCustomer(currentCustomerId);
+  } catch (err) {
+    setStatus(`No se pudo dejar el mensaje en cola: ${err.message}`, true);
+  }
+}
+
+async function cancelQueuedMessage(queuedId) {
+  if (!currentConversationId) return;
+  try {
+    const res = await apiFetch(`/admin/api/conversations/${currentConversationId}/queued/${queuedId}`, { method: 'DELETE' });
+    const data = await res.json();
+    currentQueuedOutbound = data.queuedOutbound || [];
+    renderQueuedStrip();
+  } catch (err) {
+    setStatus(`No se pudo cancelar: ${err.message}`, true);
   }
 }
 
@@ -3264,6 +3330,14 @@ function initRealtime() {
       // Keep the thread DOM current regardless of visibility, so it's already correct whenever they
       // do look - just don't treat it as read yet unless they're actually looking right now.
       renderThreadMessages(document.getElementById('modal-thread'), [message]);
+    }
+    // Un mensaje del cliente reabre la ventana de 24h en ese mismo instante. Sin esto el panel seguia
+    // mostrando el selector de plantillas hasta el siguiente poll de 30s, y el dueno mandaba una
+    // plantilla que ya no hacia falta.
+    if (conversationId === currentConversationId && message.role === 'CUSTOMER' && !currentWindowOpen) {
+      currentWindowOpen = true;
+      currentHoursSinceLastCustomerMessage = 0;
+      updateComposerVisibility();
     }
     if (isActivelyViewingConversation(conversationId)) {
       setRowUnreadCount(customerId, 0);
