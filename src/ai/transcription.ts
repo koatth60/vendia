@@ -3,9 +3,13 @@ import { env } from "../config/env";
 
 // Exported so tests can monkeypatch groq.audio.transcriptions.create to exercise the retry-on-error
 // path without spending real Groq API calls.
+// Mismo razonamiento que el timeout de DeepSeek (ver src/ai/client.ts): sin esto, un proveedor que
+// acepta la conexion y no responde deja al cliente esperando 10 minutos por intento.
 export const groq = new OpenAI({
   apiKey: env.groqApiKey,
   baseURL: "https://api.groq.com/openai/v1",
+  timeout: 60_000,
+  maxRetries: 1,
 });
 
 const GROQ_WHISPER_MODEL = "whisper-large-v3-turbo";

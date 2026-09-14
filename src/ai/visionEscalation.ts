@@ -13,7 +13,11 @@ export const ANTHROPIC_VISION_MODEL = "claude-sonnet-5";
 // como un error. Asi el bot sigue andando normal en negocios/entornos sin ANTHROPIC_API_KEY.
 // Exportado (no una const privada) para poder monkeypatchear anthropic.messages.create en tests,
 // mismo patron que "export const groq" en src/ai/transcription.ts.
-export const anthropic = env.anthropicApiKey ? new Anthropic({ apiKey: env.anthropicApiKey }) : null;
+// timeout/maxRetries por el mismo motivo que DeepSeek (ver src/ai/client.ts) - esta llamada corre en
+// medio del turno de un cliente esperando respuesta, no en background.
+export const anthropic = env.anthropicApiKey
+  ? new Anthropic({ apiKey: env.anthropicApiKey, timeout: 60_000, maxRetries: 1 })
+  : null;
 
 const SUPPORTED_MEDIA_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
 type SupportedMediaType = "image/jpeg" | "image/png" | "image/gif" | "image/webp";
