@@ -122,10 +122,13 @@ test("analyzeCustomerImage escalates to Anthropic when DeepSeek can't tell, and 
   assert.ok(log, "expected the Anthropic escalation call to be logged separately for cost tracking");
 });
 
-test("analyzeCustomerImage does NOT escalate when DeepSeek already gives a clear answer", { skip: !hasAnthropic }, async () => {
+test("analyzeCustomerImage does NOT escalate when DeepSeek's description already matches the catalog", { skip: !hasAnthropic }, async () => {
+  const product = await prisma.product.create({
+    data: { businessId, name: "Reloj inteligente negro", description: "x", price: 145000, currency: "COP", stock: 3 },
+  });
   // @ts-expect-error stubbing for the test
   deepseek.chat.completions.create = async () => ({
-    choices: [{ message: { content: "PRODUCTO: reloj negro" } }],
+    choices: [{ message: { content: "PRODUCTO: reloj inteligente negro" } }],
     usage: { completion_tokens: 5 },
   });
   let anthropicCalls = 0;
@@ -135,9 +138,72 @@ test("analyzeCustomerImage does NOT escalate when DeepSeek already gives a clear
     return { content: [{ type: "text", text: "PRODUCTO: no deberia llegar aca" }], usage: { input_tokens: 1, output_tokens: 1 } };
   };
 
-  const result = await analyzeCustomerImage(businessId, randomUUID(), "https://example.com/img.jpg", "");
-  assert.equal(result, "PRODUCTO: reloj negro");
-  assert.equal(anthropicCalls, 0, "escalation must only trigger on PRODUCTO_POCO_CLARO, never on a clear result");
+  try {
+    const result = await analyzeCustomerImage(businessId, randomUUID(), "https://example.com/img.jpg", "");
+    assert.equal(result, "PRODUCTO: reloj inteligente negro");
+    assert.equal(anthropicCalls, 0, "a description the catalog can already find must never spend the Anthropic call");
+  } finally {
+    await prisma.product.deleteMany({ where: { id: product.id } });
+  }
+});
+
+// Incidente real (2026-09-14): una clienta mando la captura de un live con el producto en la caja.
+// DeepSeek la vio bien y la describio, pero en terminos tan genericos que el catalogo no encontro nada,
+// y el bot termino pidiendole a ella el nombre/referencia. Como el resultado no empezaba con
+// PRODUCTO_POCO_CLARO, la escalacion nunca se intentaba: solo cubria fotos borrosas.
+test("analyzeCustomerImage escalates a clear description that the catalog cannot match, and takes the better one", { skip: !hasAnthropic }, async () => {
+  const product = await prisma.product.create({
+    data: { businessId, name: "Smartwatch Serie 12", description: "x", price: 145000, currency: "COP", stock: 3 },
+  });
+  // @ts-expect-error stubbing for the test
+  deepseek.chat.completions.create = async () => ({
+    choices: [{ message: { content: "PRODUCTO: una caja blanca abierta con un dispositivo adentro" } }],
+    usage: { completion_tokens: 5 },
+  });
+  let anthropicCalls = 0;
+  // @ts-expect-error stubbing for the test
+  anthropic!.messages.create = async () => {
+    anthropicCalls++;
+    return {
+      content: [{ type: "text", text: "PRODUCTO: smartwatch serie 12, caja blanca con la referencia impresa" }],
+      usage: { input_tokens: 100, output_tokens: 10 },
+    };
+  };
+
+  try {
+    const result = await analyzeCustomerImage(businessId, randomUUID(), "https://example.com/img.jpg", "");
+    assert.equal(result, "PRODUCTO: smartwatch serie 12, caja blanca con la referencia impresa");
+    assert.equal(anthropicCalls, 1);
+  } finally {
+    await prisma.product.deleteMany({ where: { id: product.id } });
+  }
+});
+
+test("analyzeCustomerImage keeps DeepSeek's description when the escalated one is just as unusable", { skip: !hasAnthropic }, async () => {
+  const product = await prisma.product.create({
+    data: { businessId, name: "Smartwatch Serie 12", description: "x", price: 145000, currency: "COP", stock: 3 },
+  });
+  // @ts-expect-error stubbing for the test
+  deepseek.chat.completions.create = async () => ({
+    choices: [{ message: { content: "PRODUCTO: una caja blanca abierta con un dispositivo adentro" } }],
+    usage: { completion_tokens: 5 },
+  });
+  // @ts-expect-error stubbing for the test
+  anthropic!.messages.create = async () => ({
+    content: [{ type: "text", text: "PRODUCTO: una caja de carton clara sobre una mesa" }],
+    usage: { input_tokens: 100, output_tokens: 10 },
+  });
+
+  try {
+    const result = await analyzeCustomerImage(businessId, randomUUID(), "https://example.com/img.jpg", "");
+    assert.equal(
+      result,
+      "PRODUCTO: una caja blanca abierta con un dispositivo adentro",
+      "a second description the catalog also cannot match is not an improvement - keep DeepSeek's"
+    );
+  } finally {
+    await prisma.product.deleteMany({ where: { id: product.id } });
+  }
 });
 
 test("analyzeCustomerImage keeps DeepSeek's original unclear result when Anthropic also can't tell", { skip: !hasAnthropic }, async () => {
