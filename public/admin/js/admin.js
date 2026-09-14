@@ -63,6 +63,47 @@ function switchSection(section) {
   switchTab(SECTION_DEFAULT[section] || section);
 }
 
+// Se removieron los botones "Actualizar" de Inicio/Clientes/Salud/Analytics/Consumo IA - esas
+// vistas se refrescan solas mientras están abiertas, sin que el dueño tenga que pedirlo. Un solo
+// timer activo a la vez (switchTab reinicia el de la pestaña nueva y cancela el de la anterior),
+// y se salta el refresh si la pestaña del navegador está en segundo plano (document.hidden).
+// "Actualizar lista de plantillas" (WhatsApp) queda aparte a propósito: sincroniza con la API de
+// Meta, no con datos propios - no tiene sentido pollearla sola.
+const AUTO_REFRESH = {
+  inicio: { load: () => loadDashboard(), intervalMs: 20000 },
+  customers: { load: () => refreshCustomerListIfVisible(), intervalMs: 30000 },
+  health: { load: () => loadHealth(), intervalMs: 30000 },
+  analytics: { load: () => loadAnalytics(), intervalMs: 45000 },
+  'ai-usage': { load: () => loadAiUsage(), intervalMs: 45000 },
+};
+let autoRefreshTimer = null;
+
+function startAutoRefresh(name) {
+  stopAutoRefresh();
+  const cfg = AUTO_REFRESH[name];
+  if (!cfg) return;
+  autoRefreshTimer = setInterval(() => {
+    if (document.visibilityState !== 'visible') return;
+    cfg.load();
+  }, cfg.intervalMs);
+}
+
+function stopAutoRefresh() {
+  if (autoRefreshTimer) {
+    clearInterval(autoRefreshTimer);
+    autoRefreshTimer = null;
+  }
+}
+
+// No refresca la lista de Clientes mientras el dueño tiene una ficha abierta editando - perdería
+// lo que esté escribiendo. La ficha en sí no necesita poll: sus propios datos no cambian tan
+// seguido, y abrir/cerrar ya la vuelve a traer fresca.
+function refreshCustomerListIfVisible() {
+  const detail = document.getElementById('customer-detail-view');
+  if (detail && !detail.hidden) return;
+  loadCustomerList(true);
+}
+
 function switchTab(name) {
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.dataset.tabPanel === name));
@@ -73,8 +114,6 @@ function switchTab(name) {
     markConversationReadIfViewing();
   }
   // Carga perezosa de las vistas nuevas: nada de esto se pide hasta que el dueño entra a la seccion.
-  // La lista de clientes se trae una sola vez (tiene su propio boton de actualizar); el tablero y la
-  // salud se refrescan en cada visita porque son justamente "que esta pasando ahora".
   if (name === 'customers' && !crmLoadedOnce) {
     loadCrmTagOptions();
     loadTagManager();
@@ -83,6 +122,9 @@ function switchTab(name) {
   if (name === 'inicio') loadDashboard();
   if (name === 'health') loadHealth();
   if (name === 'shipping') loadShipping();
+  // Sin boton "Actualizar": la vista se refresca sola mientras está abierta (ver AUTO_REFRESH). Se
+  // reinicia en cada cambio de pestaña, así que entrar de nuevo a la misma vista no acumula timers.
+  startAutoRefresh(name);
   try { localStorage.setItem('onix-admin-tab', name); } catch {}
   // replaceState (no pushState) a proposito: refleja la vista actual en la URL para poder compartir
   // el enlace o refrescar sin perder el lugar, sin llenar el historial del navegador con cada click.
@@ -2969,7 +3011,13 @@ const CHANNEL_LABELS = {
   MERCADOLIBRE: '🛒 Mercado Libre',
 };
 
-let crmCursor = null;
+// Paginación real por ventanas (feedback del dueño, 2026-09-13: "cargar más" apilaba todo en una
+// fila interminable). crmCursorHistory[i] = el cursor que trae la página i+1 (índice 0 = página 1,
+// sin cursor) - "Anterior" hace pop y vuelve a pedir esa página, en vez de guardar los clientes ya
+// vistos en memoria. Orden fijo: por último mensaje (lastContactAt desc), no alfabético - ya es lo
+// que devuelve /api/crm/customers desde la Fase 2, no hace falta tocar el backend.
+let crmCursorHistory = [undefined];
+let crmNextCursor = null;
 let crmSearchTimer = null;
 let crmLoadedOnce = false;
 let currentCrmProfile = null;
@@ -2990,9 +3038,13 @@ function onCrmSearchInput() {
   crmSearchTimer = setTimeout(() => loadCustomerList(true), 300);
 }
 
-async function loadCustomerList(reset) {
+function loadCustomerList(reset) {
+  if (reset) crmCursorHistory = [undefined];
+  return fetchCustomerPage(crmCursorHistory[crmCursorHistory.length - 1]);
+}
+
+async function fetchCustomerPage(cursor) {
   const container = document.getElementById('customers-rows');
-  if (reset) crmCursor = null;
 
   const params = new URLSearchParams();
   const q = document.getElementById('crm-search').value.trim();
@@ -3001,14 +3053,14 @@ async function loadCustomerList(reset) {
   if (q) params.set('q', q);
   if (stage) params.set('stage', stage);
   if (tag) params.set('tag', tag);
-  if (!reset && crmCursor) params.set('cursor', crmCursor);
+  if (cursor) params.set('cursor', cursor);
 
-  if (reset) container.innerHTML = '<div class="empty-state">Cargando…</div>';
+  container.innerHTML = '<div class="empty-state">Cargando…</div>';
 
   try {
     const res = await apiFetch(`/admin/api/crm/customers?${params.toString()}`);
     const data = await res.json();
-    crmCursor = data.nextCursor;
+    crmNextCursor = data.nextCursor;
     crmLoadedOnce = true;
 
     const rows = data.customers.map((c) => `
@@ -3029,15 +3081,30 @@ async function loadCustomerList(reset) {
       </button>
     `).join('');
 
-    if (reset) {
-      container.innerHTML = rows || '<div class="empty-state"><div class="big">👤</div>No hay clientes que coincidan.</div>';
-    } else {
-      container.insertAdjacentHTML('beforeend', rows);
-    }
-    document.getElementById('customers-load-more-wrap').hidden = !data.nextCursor;
+    container.innerHTML = rows || '<div class="empty-state"><div class="big">👤</div>No hay clientes que coincidan.</div>';
+    updateCrmPagerUi();
   } catch (err) {
     container.innerHTML = `<div class="empty-state" style="color:var(--danger);">No se pudieron cargar los clientes: ${escapeHtml(err.message)}</div>`;
   }
+}
+
+function updateCrmPagerUi() {
+  const page = crmCursorHistory.length;
+  document.getElementById('crm-page-label').textContent = `Página ${page}`;
+  document.getElementById('crm-prev-btn').disabled = page <= 1;
+  document.getElementById('crm-next-btn').disabled = !crmNextCursor;
+}
+
+async function goToNextCrmPage() {
+  if (!crmNextCursor) return;
+  crmCursorHistory.push(crmNextCursor);
+  await fetchCustomerPage(crmCursorHistory[crmCursorHistory.length - 1]);
+}
+
+async function goToPrevCrmPage() {
+  if (crmCursorHistory.length <= 1) return;
+  crmCursorHistory.pop();
+  await fetchCustomerPage(crmCursorHistory[crmCursorHistory.length - 1]);
 }
 
 async function loadCrmTagOptions() {
@@ -3260,7 +3327,7 @@ async function deleteCrmNote(noteId) {
 
 const ACTION_META = {
   HUMAN_WAITING: { title: 'Conversaciones esperando a un humano', go: () => switchTab('conversations') },
-  OWNER_QUESTION: { title: 'Preguntas del bot sin responder', go: () => switchTab('conversations') },
+  OWNER_QUESTION: { title: 'Preguntas del bot sin responder', go: () => switchTab('health') },
   ORDER_PENDING: { title: 'Pedidos pendientes de envío', go: () => switchTab('orders') },
   DELIVERY_FAILURE: { title: 'Mensajes que no le llegaron a nadie', go: () => switchTab('health') },
   FAQ_CANDIDATE: { title: 'Sugerencias de FAQ por revisar', go: () => switchTab('faq') },
@@ -3336,14 +3403,31 @@ async function loadHealth() {
   if (!container) return;
   container.innerHTML = '<div class="card empty-state">Cargando…</div>';
   try {
-    const [failuresRes, logRes, incidentsRes] = await Promise.all([
+    const [pendingRes, failuresRes, logRes, incidentsRes] = await Promise.all([
+      apiFetch('/admin/api/pending-questions'),
       apiFetch('/admin/api/delivery-failures'),
       apiFetch('/admin/api/owner-log'),
       apiFetch('/admin/api/agent-incidents'),
     ]);
+    const pending = await pendingRes.json();
     const failures = await failuresRes.json();
     const log = await logRes.json();
     const incidents = await incidentsRes.json();
+
+    const pendingRows = pending.length === 0
+      ? '<div class="empty-state" style="padding:18px;">Nada esperando respuesta. Al día.</div>'
+      : pending.map((p) => `
+          <div style="display:flex; justify-content:space-between; gap:10px; align-items:flex-start; padding:11px 0; border-bottom:1px solid var(--border-soft);">
+            <div style="min-width:0;">
+              <div style="font-size:13px; font-weight:600;">${escapeHtml(p.customer.name || p.customer.phoneNumber)}</div>
+              <div style="font-size:12.5px; color:var(--muted); margin-top:3px; white-space:pre-wrap;">${escapeHtml(p.kind === 'PHOTO_PRODUCT' ? '📷 Pidió identificar una foto' : p.question)}</div>
+            </div>
+            <div style="display:flex; gap:6px; flex-shrink:0;">
+              <button class="btn-secondary" onclick="goToCustomerChat('${p.customer.id}')">Ver chat</button>
+              <button class="btn-secondary" onclick="resolvePendingQuestion('${p.questionId}')">Marcar resuelta</button>
+            </div>
+          </div>
+        `).join('');
 
     const failureRows = failures.length === 0
       ? '<div class="empty-state" style="padding:18px;">Ningún mensaje falló. Todo llegó.</div>'
@@ -3389,6 +3473,15 @@ async function loadHealth() {
         </div>
       </div>
 
+      <div class="section-title">Preguntas del bot sin responder</div>
+      <div class="card">
+        <div style="font-size:12.5px; color:var(--muted); margin-bottom:6px;">
+          El bot no supo qué contestar y te escaló esto. Si ya lo resolviste por fuera (por WhatsApp
+          citando el mensaje, por teléfono, en persona), marcalo como resuelto para sacarlo de la lista.
+        </div>
+        ${pendingRows}
+      </div>
+
       <div class="section-title">Mensajes que no llegaron</div>
       <div class="card">
         <div style="font-size:12.5px; color:var(--muted); margin-bottom:6px;">
@@ -3409,6 +3502,23 @@ async function resolveFailure(id) {
   try {
     await apiFetch(`/admin/api/delivery-failures/${id}/resolve`, { method: 'POST' });
     setStatus('Marcado como resuelto');
+    loadHealth();
+  } catch (err) {
+    setStatus(`No se pudo marcar: ${err.message}`, true);
+  }
+}
+
+// "Ver chat" de una pregunta pendiente en Bot > Salud: abre la Bandeja directo en esa conversación,
+// en vez de dejar al dueño en una pestaña general sin saber a quién responderle.
+function goToCustomerChat(customerId) {
+  switchTab('conversations');
+  openCustomer(customerId);
+}
+
+async function resolvePendingQuestion(questionId) {
+  try {
+    await apiFetch(`/admin/api/pending-questions/${questionId}/resolve`, { method: 'POST' });
+    setStatus('Marcada como resuelta');
     loadHealth();
   } catch (err) {
     setStatus(`No se pudo marcar: ${err.message}`, true);

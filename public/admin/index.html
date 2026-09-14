@@ -122,7 +122,6 @@
           <div class="panel-title">Inicio</div>
           <div class="panel-subtitle">Lo que necesita tu atención hoy.</div>
         </div>
-        <button class="btn-ghost" onclick="loadDashboard()">↻ Actualizar</button>
       </div>
       <div id="dashboard-container"></div>
       <div class="section-title">Ir a</div>
@@ -336,7 +335,6 @@
             <div class="panel-title">Clientes</div>
             <div class="panel-subtitle">Cada persona que le escribió a tu bot, con su historial y sus compras.</div>
           </div>
-          <button class="btn-ghost" onclick="loadCustomerList(true)">↻ Actualizar</button>
         </div>
         <div class="card">
           <div class="crm-filters">
@@ -373,8 +371,10 @@
         </details>
         <div class="card" style="padding:0; overflow:hidden;">
           <div id="customers-rows"></div>
-          <div class="order-list-footer" id="customers-load-more-wrap" hidden>
-            <button class="btn-ghost" onclick="loadCustomerList(false)">Cargar más</button>
+          <div class="crm-pager">
+            <button class="btn-secondary" id="crm-prev-btn" onclick="goToPrevCrmPage()" disabled>‹ Anterior</button>
+            <span id="crm-page-label" class="crm-page-label">Página 1</span>
+            <button class="btn-secondary" id="crm-next-btn" onclick="goToNextCrmPage()" disabled>Siguiente ›</button>
           </div>
         </div>
       </div>
@@ -405,7 +405,6 @@
           <div class="panel-title">Salud del bot</div>
           <div class="panel-subtitle">Incidentes, mensajes que no llegaron y la conversación entre el bot y vos.</div>
         </div>
-        <button class="btn-ghost" onclick="loadHealth()">↻ Actualizar</button>
       </div>
       <div id="health-container"></div>
     </div>
@@ -783,7 +782,6 @@
           <div class="panel-title">Analytics</div>
           <div class="panel-subtitle">Conversiones, volumen de mensajes y productos más consultados, últimos 30 días.</div>
         </div>
-        <button class="btn-ghost" onclick="loadAnalytics()">↻ Actualizar</button>
       </div>
       <div id="analytics-container"></div>
     </div>
@@ -794,7 +792,6 @@
           <div class="panel-title">Consumo de IA</div>
           <div class="panel-subtitle">Cuánto está gastando tu bot en DeepSeek, últimos 14 días.</div>
         </div>
-        <button class="btn-ghost" onclick="loadAiUsage()">↻ Actualizar</button>
       </div>
       <div id="ai-usage-container"></div>
     </div>

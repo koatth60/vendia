@@ -126,6 +126,11 @@
   /* Fase 2/3: CRM de clientes y tablero de Inicio */
   .crm-filters { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 10px; }
   .crm-filters input, .crm-filters select { margin: 0; }
+  /* Paginación de la lista de Clientes (feedback del dueño, 2026-09-13): páginas fijas de 30,
+     ordenadas por último mensaje, en vez de un "cargar más" que apilaba todo en una sola fila. */
+  .crm-pager { display: flex; align-items: center; justify-content: center; gap: 16px; padding: 14px; }
+  .crm-pager button:disabled { opacity: .4; cursor: default; }
+  .crm-page-label { font-size: 12.5px; color: var(--muted); font-weight: 600; min-width: 70px; text-align: center; }
   .crm-row {
     display: flex; align-items: center; gap: 12px; padding: 12px 16px; cursor: pointer;
     border-bottom: 1px solid var(--border-soft); background: transparent; width: 100%; text-align: left;
@@ -252,6 +257,9 @@
   @keyframes realtime-pulse { 0%, 100% { box-shadow: 0 0 0 3px rgba(31,168,85,.18); } 50% { box-shadow: 0 0 0 6px rgba(31,168,85,.08); } }
 
   .unread-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--brand); color: #fff; font-size: 11px; font-weight: 700; line-height: 1; }
+  /* display:inline-flex de arriba le gana al display:none de [hidden] (mismo bug que
+     .order-list-footer) - el JS pone hidden=true con total 0 pero seguia viendose el "0". */
+  .unread-badge[hidden] { display: none; }
   .tab-btn .unread-badge { margin-left: 6px; background: var(--danger); }
 
   .tpl-status { display: inline-flex; align-items: center; gap: 4px; padding: 2px 9px; border-radius: 999px; font-size: 11px; font-weight: 700; }

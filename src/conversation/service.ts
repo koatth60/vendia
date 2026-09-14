@@ -316,6 +316,19 @@ export async function clearPendingOwnerQuestion(questionId: string) {
   await prisma.pendingOwnerQuestion.delete({ where: { id: questionId } });
 }
 
+// Marcar resuelta a mano desde el panel (Bot > Salud), para el caso que clearPendingOwnerQuestion
+// no cubre: el dueño ya resolvió la pregunta por fuera del panel (por telefono, en persona) y solo
+// quiere sacarla de la lista, sin tener que escribirle algo al cliente para que se limpie sola.
+// Scoped por businessId - a diferencia de clearPendingOwnerQuestion (uso interno, ya confia en el
+// llamador), este lo expone un endpoint HTTP y necesita el chequeo de que la pregunta es de este
+// negocio antes de borrarla.
+export async function resolvePendingOwnerQuestion(businessId: string, questionId: string): Promise<boolean> {
+  const result = await prisma.pendingOwnerQuestion.deleteMany({
+    where: { id: questionId, conversation: { customer: { businessId } } },
+  });
+  return result.count > 0;
+}
+
 // Only the WhatsApp-reply path (quoting the alert, or the single-pending fallback) ever cleared a
 // PendingOwnerQuestion - an owner who instead resolves it by typing directly into the admin panel's
 // conversation view left the row open indefinitely, remindedAt still null. Harmless while the reminder

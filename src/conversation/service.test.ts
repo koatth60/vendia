@@ -12,6 +12,9 @@ import {
   getCustomerThreadForBusiness,
   setConversationIntent,
   clearConversationIntent,
+  createPendingOwnerQuestion,
+  resolvePendingOwnerQuestion,
+  findOpenPendingOwnerQuestionsForBusiness,
 } from "./service";
 import { realtimeEvents } from "../realtime/events";
 
@@ -303,5 +306,47 @@ test("clearConversationIntent removes an intent badge without touching status/hu
   } finally {
     await prisma.conversation.deleteMany({ where: { customerId: customer.id } });
     await prisma.customer.deleteMany({ where: { id: customer.id } });
+  }
+});
+
+// resolvePendingOwnerQuestion: marcar resuelta a mano desde Bot > Salud (feedback del dueño,
+// 2026-09-13 - el card del dashboard llevaba a la Bandeja sin forma de sacar la pregunta de la
+// lista sin contestarle al cliente).
+test("resolvePendingOwnerQuestion borra la pregunta y no aparece mas en la lista del negocio", async () => {
+  const conversation = await prisma.conversation.create({ data: { customerId } });
+  try {
+    await createPendingOwnerQuestion(conversation.id, `wamid-${randomUUID()}`, "¿Hacen envíos a Leticia?");
+    const before = await findOpenPendingOwnerQuestionsForBusiness(businessId);
+    assert.equal(before.length, 1);
+
+    const resolved = await resolvePendingOwnerQuestion(businessId, before[0].questionId);
+    assert.equal(resolved, true);
+
+    const after = await findOpenPendingOwnerQuestionsForBusiness(businessId);
+    assert.equal(after.length, 0);
+  } finally {
+    await prisma.pendingOwnerQuestion.deleteMany({ where: { conversationId: conversation.id } });
+    await prisma.conversation.delete({ where: { id: conversation.id } });
+  }
+});
+
+test("resolvePendingOwnerQuestion no deja que un negocio resuelva la pregunta de otro", async () => {
+  const conversation = await prisma.conversation.create({ data: { customerId } });
+  const otherBusiness = await prisma.business.create({
+    data: { name: `Other ${randomUUID()}`, email: `other-${randomUUID()}@example.com`, passwordHash: "x" },
+  });
+  try {
+    await createPendingOwnerQuestion(conversation.id, `wamid-${randomUUID()}`, "¿Tienen talla M?");
+    const [pending] = await findOpenPendingOwnerQuestionsForBusiness(businessId);
+
+    const resolved = await resolvePendingOwnerQuestion(otherBusiness.id, pending.questionId);
+    assert.equal(resolved, false, "un negocio ajeno no puede resolver esta pregunta");
+
+    const stillThere = await findOpenPendingOwnerQuestionsForBusiness(businessId);
+    assert.equal(stillThere.length, 1, "la pregunta sigue intacta");
+  } finally {
+    await prisma.pendingOwnerQuestion.deleteMany({ where: { conversationId: conversation.id } });
+    await prisma.conversation.delete({ where: { id: conversation.id } });
+    await prisma.business.deleteMany({ where: { id: otherBusiness.id } });
   }
 });
