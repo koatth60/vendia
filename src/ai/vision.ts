@@ -2,13 +2,6 @@ import { deepseek, DEEPSEEK_VISION_MODEL } from "./client";
 import { logAiUsage } from "./usage";
 import { escalateToAnthropicVision } from "./visionEscalation";
 import { buildVisionPrompt } from "./visionPrompt";
-import { hasConfidentCatalogMatch } from "../catalog/products";
-
-// El texto que se busca en el catalogo es la descripcion, sin el prefijo de formato: "PRODUCTO:" deja
-// suelto el token "producto", que puede puntuar solo contra la descripcion de un producto cualquiera.
-function describedProduct(visionResult: string): string {
-  return visionResult.slice(visionResult.indexOf(":") + 1).trim();
-}
 
 async function analyzeOnce(imageUrl: string, caption: string, catalogHint: string) {
   const prompt = buildVisionPrompt(catalogHint);
@@ -50,31 +43,22 @@ export async function analyzeCustomerImage(
       await logAiUsage({ businessId, conversationId, kind: "VISION", model: DEEPSEEK_VISION_MODEL, usage });
       const result = text || "No se pudo analizar la imagen.";
 
-      // DeepSeek ya se rindio con esta imagen especifica (borrosa/oscura/lejos) - antes de aceptar
-      // eso como respuesta final, le damos una segunda opinion a un modelo de vision mas fuerte. Esto
-      // es lo unico que dispara la llamada a Anthropic (nunca en el caso normal/claro) para no gastar
-      // esa API mas de lo estrictamente necesario.
-      if (result.startsWith("PRODUCTO_POCO_CLARO:")) {
+      // Toda foto de producto pasa por un modelo de vision mas fuerte, no solo las que DeepSeek marca
+      // como poco claras. Medido contra la foto real del incidente del 2026-09-14: DeepSeek acerto en 2
+      // de 3 corridas y en la tercera invento "una bateria portatil o power bank" con total seguridad -
+      // y ese negocio vende una "Bateria portatil power bank 12000 mah", asi que la descripcion
+      // equivocada enganchaba fuerte con el producto equivocado. Una descripcion segura y equivocada no
+      // se distingue por texto de una correcta, ni por coincidencia con el catalogo: la unica defensa
+      // es preguntarle siempre al modelo que ve mejor. A ~4.4 fotos de producto por dia y ~USD 0.01 por
+      // llamada, son centavos al mes por negocio.
+      if (result.startsWith("PRODUCTO_POCO_CLARO:") || result.startsWith("PRODUCTO:")) {
         const escalated = await escalateToAnthropicVision(businessId, conversationId, imageUrl, caption, catalogHint);
+        // Si el modelo fuerte tambien pudo identificarlo, su respuesta manda. Si no pudo (devuelve
+        // POCO_CLARO) o la llamada fallo (null), nos quedamos con la de DeepSeek: nunca se pierde
+        // informacion por escalar.
         if (escalated?.startsWith("PRODUCTO:")) {
-          console.log(`Vision escalada a Anthropic resolvio una imagen que DeepSeek no pudo (conversacion ${conversationId}).`);
+          console.log(`Vision escalada a Anthropic (conversacion ${conversationId}).`);
           return escalated;
-        }
-      } else if (result.startsWith("PRODUCTO:")) {
-        // Segundo caso de "DeepSeek no resolvio": vio bien la imagen, pero la descripcion que devolvio no
-        // le sirve al catalogo - ni el nombre ni la categoria de ningun producto coinciden. Pasa cuando la
-        // descripcion es demasiado generica ("una caja blanca con un dispositivo") y el modelo no leyo el
-        // texto/modelo impreso, que es justo lo que haria falta para encontrarlo. Un modelo de vision mas
-        // fuerte suele sacar ese dato de la misma foto. Solo se escala cuando el catalogo no puede hacer
-        // nada con lo que dio DeepSeek: si hay coincidencia, no se gasta la llamada.
-        if (!(await hasConfidentCatalogMatch(businessId, describedProduct(result)))) {
-          const escalated = await escalateToAnthropicVision(businessId, conversationId, imageUrl, caption, catalogHint);
-          // Solo se reemplaza si la segunda opinion de verdad mejora: una descripcion que el catalogo
-          // tampoco reconoce no es mejor que la de DeepSeek, es otra igual de inservible.
-          if (escalated?.startsWith("PRODUCTO:") && (await hasConfidentCatalogMatch(businessId, describedProduct(escalated)))) {
-            console.log(`Vision escalada a Anthropic describio un producto que si esta en el catalogo (conversacion ${conversationId}).`);
-            return escalated;
-          }
         }
       }
 

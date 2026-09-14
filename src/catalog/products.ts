@@ -242,25 +242,6 @@ export async function findConfidentProductMatch(
   return { product: withMedia, ambiguous: false };
 }
 
-// Yes/no version of findConfidentProductMatch's bar (a name or category hit, never a single incidental
-// description word), without resolving media URLs - the caller only needs to know whether the catalog can
-// do anything with this text. Used by the vision layer to decide if a description is worth escalating to a
-// stronger model: a description nothing in the catalog matches is usually too generic to search with.
-export async function hasConfidentCatalogMatch(businessId: string, query: string): Promise<boolean> {
-  const tokens = tokenize(query);
-  if (tokens.length === 0) return false;
-
-  const [products, categoryAliasMap] = await Promise.all([
-    prisma.product.findMany({
-      where: { businessId, active: true },
-      select: { name: true, description: true, category: true },
-    }),
-    loadCategoryAliasMap(businessId),
-  ]);
-
-  return products.some((product) => relevanceScore(tokens, product, categoryAliasMap) >= MIN_CONFIDENT_SCORE);
-}
-
 export interface AttributeMatch {
   productId: string;
   productName: string;
