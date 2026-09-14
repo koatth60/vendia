@@ -26,10 +26,12 @@ producto, color(es), forma, material aparente, y cualquier texto/marca/modelo vi
 especifico (ej: "reloj inteligente negro, pantalla rectangular, correa de silicona" en vez de "un
 reloj").
 
-3. PRODUCTO, imagen POCO CLARA (se nota que es un producto pero esta borrosa, muy oscura, muy lejos,
-cortada, o con movimiento - no podes describir los detalles con confianza): decilo explicitamente y en
-que consiste el problema (ej: "esta borrosa", "esta muy oscuro", "esta muy lejos para distinguir
-detalles"). No inventes ni adivines detalles que no se ven bien.
+3. PRODUCTO que NO PODES IDENTIFICAR, por cualquiera de estas dos razones: (a) la imagen no lo deja ver
+- borrosa, muy oscura, muy lejos, cortada, con movimiento; o (b) se ve nitida, pero no hay marca, modelo
+ni detalle distintivo legible que permita decir CUAL producto es (empaque generico, varios articulos
+sueltos dentro de una caja). Decilo explicitamente y en que consiste el problema. Nunca adivines el tipo
+de articulo para llenar el hueco: si no podes confirmar que es, "no se identifica" es la respuesta
+correcta, y una descripcion inventada es peor que ninguna - manda a buscar el producto equivocado.
 
 4. OTRA COSA (persona sin ningun producto relacionado al negocio, paisaje, meme, etc): decilo en una
 frase corta.
