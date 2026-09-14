@@ -16,13 +16,15 @@ export const deepseek = new OpenAI({
   maxRetries: 1,
 });
 
-// 2026-09-14: DeepSeek retiro "deepseek-v4-flash" el mismo dia que anuncio V4.1-Flash. El modelo
-// desaparecio de GET /models (hoy solo quedan "deepseek-flash" y "deepseek-v4-pro") y las llamadas a
-// /chat/completions con el id viejo se quedaban COLGADAS - sin error, sin respuesta - lo que dejo al bot
-// mudo durante horas. "deepseek-flash" tampoco responde todavia (parece en despliegue del lado de ellos),
-// asi que el unico id que funciona ahora mismo es v4-pro. Verificar si conviene volver a un flash cuando
-// DeepSeek lo estabilice: v4-pro es mas caro.
-export const DEEPSEEK_MODEL = "deepseek-v4-pro";
+// 2026-09-14: DeepSeek retiro "deepseek-v4-flash" el mismo dia que anuncio V4.1-Flash, y pedir un modelo
+// inexistente deja la peticion colgada en vez de dar error - el bot quedo mudo horas. Por eso ahora hay
+// un preferido y un respaldo, y quien decide cual se usa es src/ai/modelFailover.ts, no estas constantes.
+//
+// El preferido es el barato: medido sobre trafico real de produccion, flash sale ~4.4x mas barato que pro
+// (USD 1.64 vs 7.28 al mes para el negocio piloto). Con el plan Emprendedor a ~USD 15/mes, eso es 11% del
+// ingreso contra 48% - pro no se sostiene como default, solo como red de seguridad.
+export const DEEPSEEK_MODEL = "deepseek-flash";
+export const DEEPSEEK_FALLBACK_MODEL = "deepseek-v4-pro";
 
 // Modelo experimental separado, unico que acepta imagenes (deepseek-v4-flash no tiene vision).
 export const DEEPSEEK_VISION_MODEL = "deepseek-v4-flash-vision-exp";

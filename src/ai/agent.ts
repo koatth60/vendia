@@ -1,5 +1,6 @@
 import type OpenAI from "openai";
 import { deepseek, DEEPSEEK_MODEL } from "./client";
+import { createChatCompletion } from "./modelFailover";
 import { catalogTools, runCatalogTool, type ToolContext } from "./tools";
 import { getRecentHistory } from "../conversation/service";
 import { logAiUsage } from "./usage";
@@ -101,8 +102,7 @@ export async function getOrRefreshContextSummary(conversationId: string, busines
   const transcript = newlyAgedMessages.map((m) => `${roleLabel[m.role]}: ${m.content}`).join("\n");
 
   try {
-    const response = await deepseek.chat.completions.create({
-      model: DEEPSEEK_MODEL,
+    const response = await createChatCompletion({
       max_tokens: 220,
       messages: [
         {
@@ -120,13 +120,15 @@ export async function getOrRefreshContextSummary(conversationId: string, busines
       ],
       // @ts-expect-error DeepSeek-specific param, not in the OpenAI SDK types.
       thinking: { type: "disabled" },
-    });
+    }, { businessId, conversationId });
 
     await logAiUsage({
       businessId,
       conversationId,
       kind: "CHAT",
-      model: DEEPSEEK_MODEL,
+      // El modelo REAL que respondio, no el preferido - si el failover cayo al de respaldo, el precio por
+      // token es otro y registrar el preferido subestimaria el costo.
+      model: response.model || DEEPSEEK_MODEL,
       usage: response.usage,
     });
 
@@ -312,8 +314,7 @@ Datos reales de este pedido:
 - Total: ${order.totalAmount} ${order.currency}`;
 
   try {
-    const response = await deepseek.chat.completions.create({
-      model: DEEPSEEK_MODEL,
+    const response = await createChatCompletion({
       max_tokens: 400,
       messages: [
         { role: "system", content: CLOSING_MESSAGE_PROMPT },
@@ -322,8 +323,8 @@ Datos reales de este pedido:
       // @ts-expect-error DeepSeek-specific param, not in the OpenAI SDK types. Disabled: reasoning tokens
       // leave message.content empty for a short generation task like this one.
       thinking: { type: "disabled" },
-    });
-    await logAiUsage({ businessId, conversationId, kind: "CHAT", model: DEEPSEEK_MODEL, usage: response.usage });
+    }, { businessId, conversationId });
+    await logAiUsage({ businessId, conversationId, kind: "CHAT", model: response.model || DEEPSEEK_MODEL, usage: response.usage });
     const text = response.choices[0]?.message?.content?.trim();
     return text || buildOrderClosedMessage(business);
   } catch (error) {
@@ -1020,8 +1021,7 @@ export async function generateReply(
 
   try {
     for (let iteration = 0; iteration < 5; iteration++) {
-      const response = await deepseek.chat.completions.create({
-        model: DEEPSEEK_MODEL,
+      const response = await createChatCompletion({
         max_tokens: 1024,
         messages,
         tools: catalogTools,
@@ -1031,13 +1031,13 @@ export async function generateReply(
         // @ts-expect-error DeepSeek-specific param, not in the OpenAI SDK types. Disabled: reasoning
         // tokens add latency/cost we don't need for a WhatsApp sales reply.
         thinking: { type: "disabled" },
-      });
+      }, { businessId: context.businessId, conversationId });
 
       await logAiUsage({
         businessId: context.businessId,
         conversationId,
         kind: "CHAT",
-        model: DEEPSEEK_MODEL,
+        model: response.model || DEEPSEEK_MODEL,
         usage: response.usage,
       });
 
@@ -1220,15 +1220,14 @@ export async function generateReply(
   await recordAgentIncident(context.businessId, "LOOP_EXHAUSTED", "Loop de tool-calling agotado (5 iteraciones) sin respuesta final", conversationId);
   let finalText = lastText;
   try {
-    const finalCompletion = await deepseek.chat.completions.create({
-      model: DEEPSEEK_MODEL,
+    const finalCompletion = await createChatCompletion({
       max_tokens: 1024,
       messages,
       // No `tools` here on purpose - forces a plain-text answer instead of yet another tool request.
       // @ts-expect-error DeepSeek-specific param, not in the OpenAI SDK types.
       thinking: { type: "disabled" },
-    });
-    await logAiUsage({ businessId: context.businessId, conversationId, kind: "CHAT", model: DEEPSEEK_MODEL, usage: finalCompletion.usage });
+    }, { businessId: context.businessId, conversationId });
+    await logAiUsage({ businessId: context.businessId, conversationId, kind: "CHAT", model: finalCompletion.model || DEEPSEEK_MODEL, usage: finalCompletion.usage });
     finalText = finalCompletion.choices[0]?.message?.content?.trim() || lastText;
   } catch (error) {
     console.error("Fallo la llamada final (sin herramientas) tras agotar el loop de tool-calling:", error);

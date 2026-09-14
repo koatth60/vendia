@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "test": "node --import tsx --test",
-    "test:paid": "node --import tsx --test src/ai/agent.escalationPaid.ts src/ai/agent.categoryColorScopePaid.ts src/ai/agent.ambiguousRequestsPaid.ts src/ai/contextSummaryPaid.ts",
+    "test:paid": "node --import tsx --test src/ai/agent.escalationPaid.ts src/ai/agent.categoryColorScopePaid.ts src/ai/agent.ambiguousRequestsPaid.ts src/ai/contextSummaryPaid.ts src/routes/whatsapp.webhookPaid.ts",
     "regression": "tsx scripts/run-regression-suite.ts",
     "build": "tsc",
     "start": "node dist/index.js",

@@ -46,6 +46,9 @@ export async function getPlanUsage(businessId: string) {
 // claude-sonnet-5: $2/$10 por 1M tokens input/output (sin cache hit distinto, se usa el mismo precio
 // de cacheMiss para el input - Anthropic no tiene peak pricing como DeepSeek).
 const PRICING = {
+  // "deepseek-flash" es el id vigente desde que DeepSeek retiro "deepseek-v4-flash" el 2026-09-14; el
+  // viejo se deja en la tabla para que los registros historicos sigan costeandose bien.
+  "deepseek-flash": { cacheHit: 0.003, cacheMiss: 0.15, output: 0.6 },
   "deepseek-v4-flash": { cacheHit: 0.003, cacheMiss: 0.15, output: 0.6 },
   "deepseek-v4-flash-vision-exp": { cacheHit: 0.003, cacheMiss: 0.15, output: 0.6 },
   "deepseek-v4-pro": { cacheHit: 0.022, cacheMiss: 0.66, output: 1.98 },
@@ -65,11 +68,18 @@ interface DeepSeekUsage {
   completion_tokens?: number;
 }
 
+// El modelo que se registra es el que REALMENTE respondio (response.model), no el que pedimos: con el
+// failover puede ser el de respaldo, y los proveedores tambien renombran ids sin avisar (DeepSeek retiro
+// "deepseek-v4-flash" el 2026-09-14). Por eso el tipo es string y no la union de PRICING - un id que no
+// conocemos debe quedar registrado igual, con el precio mas caro que conocemos, en vez de romper la
+// llamada o subestimar el gasto en silencio.
+const UNKNOWN_MODEL_PRICING = { cacheHit: 0.022, cacheMiss: 0.66, output: 1.98 };
+
 export async function logAiUsage(params: {
   businessId: string;
   conversationId?: string;
   kind: "CHAT" | "VISION" | "VISION_ESCALATION";
-  model: keyof typeof PRICING;
+  model: string;
   usage: DeepSeekUsage | undefined;
 }): Promise<void> {
   const { businessId, conversationId, kind, model, usage } = params;
@@ -83,7 +93,7 @@ export async function logAiUsage(params: {
   // modelos deepseek-*, nunca a claude-*.
   const now = new Date();
   const multiplier = model.startsWith("deepseek-") && isPeakHour(now) ? 2 : 1;
-  const prices = PRICING[model];
+  const prices = PRICING[model as keyof typeof PRICING] ?? UNKNOWN_MODEL_PRICING;
 
   const costUsd =
     multiplier *
