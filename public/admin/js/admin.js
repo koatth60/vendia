@@ -82,9 +82,24 @@ function startAutoRefresh(name) {
   stopAutoRefresh();
   const cfg = AUTO_REFRESH[name];
   if (!cfg) return;
-  autoRefreshTimer = setInterval(() => {
+  autoRefreshTimer = setInterval(async () => {
     if (document.visibilityState !== 'visible') return;
-    cfg.load();
+    // El dueño reportó que Bot > Salud "se recarga" cada tanto mientras leía la conversación con el
+    // bot (2026-09-13): loadHealth() reemplaza el innerHTML entero en cada tick, así que el scroll
+    // (el de la página y el del cuadro de chat, que tiene su propio overflow-y) volvía a cero. Se
+    // guarda antes del refresh y se restaura después, para cualquier vista con auto-refresh, no solo
+    // Salud - Inicio y Clientes tienen el mismo problema de fondo si la lista es larga.
+    const pageScrollY = window.scrollY;
+    const scrollEl = document.querySelector('.tab-panel.active .chat-thread, .tab-panel.active [data-scroll-preserve]');
+    const innerScrollTop = scrollEl ? scrollEl.scrollTop : null;
+
+    await cfg.load();
+
+    window.scrollTo(0, pageScrollY);
+    if (innerScrollTop !== null) {
+      const freshScrollEl = document.querySelector('.tab-panel.active .chat-thread, .tab-panel.active [data-scroll-preserve]');
+      if (freshScrollEl) freshScrollEl.scrollTop = innerScrollTop;
+    }
   }, cfg.intervalMs);
 }
 
@@ -97,11 +112,14 @@ function stopAutoRefresh() {
 
 // No refresca la lista de Clientes mientras el dueño tiene una ficha abierta editando - perdería
 // lo que esté escribiendo. La ficha en sí no necesita poll: sus propios datos no cambian tan
-// seguido, y abrir/cerrar ya la vuelve a traer fresca.
+// seguido, y abrir/cerrar ya la vuelve a traer fresca. Tampoco refresca si el dueño ya avanzó a la
+// página 2+: forzarlo de vuelta a la página 1 cada 30s sería peor que el "se recarga" que se está
+// arreglando - se salta el tick en vez de arrancarlo de la página en la que está.
 function refreshCustomerListIfVisible() {
   const detail = document.getElementById('customer-detail-view');
   if (detail && !detail.hidden) return;
-  loadCustomerList(true);
+  if (crmCursorHistory.length > 1) return;
+  return fetchCustomerPage(undefined, true);
 }
 
 function switchTab(name) {
@@ -3040,10 +3058,16 @@ function onCrmSearchInput() {
 
 function loadCustomerList(reset) {
   if (reset) crmCursorHistory = [undefined];
-  return fetchCustomerPage(crmCursorHistory[crmCursorHistory.length - 1]);
+  return fetchCustomerPage(crmCursorHistory[crmCursorHistory.length - 1], false);
 }
 
-async function fetchCustomerPage(cursor) {
+// Guarda el último JSON pintado para esta página, mismo motivo que lastHealthSnapshot: un refresh
+// de fondo que trae exactamente lo mismo no debe tocar el DOM ni mostrar "Cargando…" (el dueño
+// reportó que Salud "se recargaba" sola - Clientes tenía el mismo bug de fondo, aunque nadie lo
+// hubiera notado todavía porque la lista es corta por ahora).
+let lastCrmListSnapshot = null;
+
+async function fetchCustomerPage(cursor, isBackgroundRefresh) {
   const container = document.getElementById('customers-rows');
 
   const params = new URLSearchParams();
@@ -3055,11 +3079,18 @@ async function fetchCustomerPage(cursor) {
   if (tag) params.set('tag', tag);
   if (cursor) params.set('cursor', cursor);
 
-  container.innerHTML = '<div class="empty-state">Cargando…</div>';
+  if (!isBackgroundRefresh) {
+    container.innerHTML = '<div class="empty-state">Cargando…</div>';
+  }
 
   try {
     const res = await apiFetch(`/admin/api/crm/customers?${params.toString()}`);
     const data = await res.json();
+
+    const snapshot = JSON.stringify(data);
+    if (isBackgroundRefresh && snapshot === lastCrmListSnapshot) return;
+    lastCrmListSnapshot = snapshot;
+
     crmNextCursor = data.nextCursor;
     crmLoadedOnce = true;
 
@@ -3084,7 +3115,10 @@ async function fetchCustomerPage(cursor) {
     container.innerHTML = rows || '<div class="empty-state"><div class="big">👤</div>No hay clientes que coincidan.</div>';
     updateCrmPagerUi();
   } catch (err) {
-    container.innerHTML = `<div class="empty-state" style="color:var(--danger);">No se pudieron cargar los clientes: ${escapeHtml(err.message)}</div>`;
+    // Un refresh de fondo fallido no debe borrar una lista buena que ya estaba en pantalla.
+    if (!isBackgroundRefresh) {
+      container.innerHTML = `<div class="empty-state" style="color:var(--danger);">No se pudieron cargar los clientes: ${escapeHtml(err.message)}</div>`;
+    }
   }
 }
 
@@ -3398,10 +3432,19 @@ function runDashboardAction(kind) {
   if (meta && meta.go) meta.go();
 }
 
+// Guarda el último JSON ya pintado - si el auto-refresh (cada 30s) trae exactamente lo mismo, no se
+// toca el DOM. El dueño reportó que esta vista "se recargaba" sola mientras leía la conversación con
+// el bot (2026-09-13): container.innerHTML se reescribía en cada tick aunque nada hubiera cambiado,
+// lo que además arrancaba con un "Cargando…" que hacía parpadear toda la sección. Ahora "Cargando…"
+// solo se muestra la primera vez (lastHealthSnapshot todavía null); un refresh de fondo que sí trae
+// datos nuevos re-renderiza, pero el scroll ya lo restaura startAutoRefresh() por fuera.
+let lastHealthSnapshot = null;
+
 async function loadHealth() {
   const container = document.getElementById('health-container');
   if (!container) return;
-  container.innerHTML = '<div class="card empty-state">Cargando…</div>';
+  const isFirstLoad = lastHealthSnapshot === null;
+  if (isFirstLoad) container.innerHTML = '<div class="card empty-state">Cargando…</div>';
   try {
     const [pendingRes, failuresRes, logRes, incidentsRes] = await Promise.all([
       apiFetch('/admin/api/pending-questions'),
@@ -3413,6 +3456,10 @@ async function loadHealth() {
     const failures = await failuresRes.json();
     const log = await logRes.json();
     const incidents = await incidentsRes.json();
+
+    const snapshot = JSON.stringify({ pending, failures, log, incidents });
+    if (snapshot === lastHealthSnapshot) return;
+    lastHealthSnapshot = snapshot;
 
     const pendingRows = pending.length === 0
       ? '<div class="empty-state" style="padding:18px;">Nada esperando respuesta. Al día.</div>'
@@ -3494,7 +3541,11 @@ async function loadHealth() {
       <div class="card chat-thread" style="max-height:420px; overflow-y:auto;">${logRows}</div>
     `;
   } catch (err) {
-    container.innerHTML = `<div class="card empty-state" style="color:var(--danger);">No se pudo cargar la salud del bot: ${escapeHtml(err.message)}</div>`;
+    // En un refresh de fondo, un error de red no debe borrar contenido bueno que ya estaba en
+    // pantalla y reemplazarlo por una caja de error - eso sería peor que no hacer nada.
+    if (isFirstLoad) {
+      container.innerHTML = `<div class="card empty-state" style="color:var(--danger);">No se pudo cargar la salud del bot: ${escapeHtml(err.message)}</div>`;
+    }
   }
 }
 
