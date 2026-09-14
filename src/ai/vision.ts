@@ -2,6 +2,7 @@ import { deepseek, DEEPSEEK_VISION_MODEL } from "./client";
 import { logAiUsage } from "./usage";
 import { escalateToAnthropicVision } from "./visionEscalation";
 import { buildVisionPrompt } from "./visionPrompt";
+import { recordAgentIncident } from "./incidents";
 
 async function analyzeOnce(imageUrl: string, caption: string, catalogHint: string) {
   const prompt = buildVisionPrompt(catalogHint);
@@ -66,6 +67,14 @@ export async function analyzeCustomerImage(
     } catch (error) {
       console.error(`Error analizando imagen con DeepSeek vision (intento ${attempt}):`, error);
       if (attempt === 2) {
+        // Se agotaron los dos intentos: el cliente mando una foto y el bot se quedo sin poder verla.
+        // Queda registrado para que se vea en "Salud del bot" y no solo en los logs de produccion.
+        await recordAgentIncident(
+          businessId,
+          "EXTERNAL_API_FAILURE",
+          `DeepSeek vision fallo dos veces seguidas: ${error instanceof Error ? error.message : String(error)}`,
+          conversationId
+        );
         return "No se pudo analizar la imagen (error tecnico). Pedile al cliente que confirme el monto por texto.";
       }
     }

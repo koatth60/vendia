@@ -620,4 +620,9 @@ enum AgentIncidentKind {
   LOOP_EXHAUSTED
   BACKSTOP_INTERVENTION
   DEGRADED_REPLY
+  // Una API externa (Anthropic, DeepSeek, Groq) rechazo o fallo una llamada. Existe porque esos
+  // caminos atrapan el error y siguen sin romper la conversacion: sin una fila aca, un fallo total
+  // y permanente se ve identico a "esta funcion nunca hizo falta". Ver la llave de Anthropic sin
+  // workspace, que dejo la escalacion de vision muerta semanas sin que nadie se enterara.
+  EXTERNAL_API_FAILURE
 }

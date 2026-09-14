@@ -2897,6 +2897,13 @@ async function loadAiUsage() {
           <div style="font-size:24px; font-weight:700;">${incidents.backstopInterventions}</div>
           <div style="font-size:12px; color:var(--muted);">Veces que el bot prometió algo y el sistema lo completó</div>
         </div>
+        <div class="card">
+          <div style="font-size:12px; color:var(--muted);">Fallos de servicios externos</div>
+          <div style="font-size:24px; font-weight:700; ${incidents.externalApiFailures > 0 ? 'color:var(--danger);' : ''}">${incidents.externalApiFailures}</div>
+          <div style="font-size:12px; color:var(--muted);">${incidents.lastExternalApiFailure
+            ? escapeHtml(incidents.lastExternalApiFailure.detail).slice(0, 140)
+            : 'Análisis de fotos y otros servicios respondiendo bien'}</div>
+        </div>
       </div>
       <div class="section-title" style="margin-top:24px;">Chequeo de configuración<span class="section-count onix-num">${configHealthScore(health)}</span></div>
       ${configHealthChecklistHtml(health)}
@@ -3802,6 +3809,13 @@ async function loadHealth() {
           <div class="label">Intervenciones de respaldo</div>
           <div class="value">${incidents.backstopInterventions}</div>
           <div class="sub">El bot prometió algo y el sistema lo completó</div>
+        </div>
+        <div class="metric-card">
+          <div class="label">Fallos de servicios externos (7 días)</div>
+          <div class="value" ${incidents.externalApiFailures > 0 ? 'style="color:var(--danger);"' : ''}>${incidents.externalApiFailures}</div>
+          <div class="sub">${incidents.lastExternalApiFailure
+            ? escapeHtml(incidents.lastExternalApiFailure.detail).slice(0, 120)
+            : 'Análisis de fotos y otros servicios respondiendo bien'}</div>
         </div>
       </div>
 

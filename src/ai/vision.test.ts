@@ -22,6 +22,7 @@ before(async () => {
 
 after(async () => {
   await prisma.aiUsageLog.deleteMany({ where: { businessId } });
+  await prisma.agentIncident.deleteMany({ where: { businessId } });
   await prisma.business.deleteMany({ where: { id: businessId } });
 });
 
@@ -158,6 +159,31 @@ test("analyzeCustomerImage escalates every product photo, even one whose descrip
   } finally {
     await prisma.product.deleteMany({ where: { id: product.id } });
   }
+});
+
+// La llave de Anthropic estuvo mal configurada (sin workspace) desde que se construyo la escalacion
+// hasta el 2026-09-14: cada llamada fallaba, el catch devolvia null y la conversacion seguia normal, asi
+// que nadie se entero por semanas. "0 escalaciones" se veia igual que "nunca hizo falta escalar".
+test("analyzeCustomerImage records an incident when the Anthropic call fails, instead of failing silently", { skip: !hasAnthropic }, async () => {
+  // @ts-expect-error stubbing for the test
+  deepseek.chat.completions.create = async () => ({
+    choices: [{ message: { content: "PRODUCTO: reloj negro" } }],
+    usage: { completion_tokens: 5 },
+  });
+  // @ts-expect-error stubbing for the test
+  anthropic!.messages.create = async () => {
+    throw new Error("This API key is not scoped to a workspace");
+  };
+
+  const conversationId = randomUUID();
+  const result = await analyzeCustomerImage(businessId, conversationId, "https://example.com/img.jpg", "");
+  assert.equal(result, "PRODUCTO: reloj negro", "a failed escalation must never break the customer's reply");
+
+  const incident = await prisma.agentIncident.findFirst({
+    where: { businessId, conversationId, kind: "EXTERNAL_API_FAILURE" },
+  });
+  assert.ok(incident, "the failure must leave a queryable trace, not just a console.error");
+  assert.match(incident.detail, /workspace/, "the incident must say what actually broke");
 });
 
 test("analyzeCustomerImage keeps DeepSeek's description when the escalated model cannot identify it either", { skip: !hasAnthropic }, async () => {

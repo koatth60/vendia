@@ -2,6 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { env } from "../config/env";
 import { logAiUsage } from "./usage";
 import { buildVisionPrompt } from "./visionPrompt";
+import { recordAgentIncident } from "./incidents";
 
 // Sonnet 5, no Haiku: este llamado ya es el ultimo recurso (solo dispara cuando DeepSeek se rindio),
 // volumen bajo - la diferencia de costo real es chica (2x, no 10x) y la precision extra en detalle
@@ -37,7 +38,17 @@ export async function escalateToAnthropicVision(
 
   try {
     const imageResponse = await fetch(imageUrl);
-    if (!imageResponse.ok) return null;
+    if (!imageResponse.ok) {
+      // Mismo razonamiento que el catch de abajo: una URL de S3 vencida rompe la escalacion de forma
+      // permanente y silenciosa, sin ni siquiera llegar a Anthropic.
+      await recordAgentIncident(
+        businessId,
+        "EXTERNAL_API_FAILURE",
+        `No se pudo descargar la imagen para escalar vision (HTTP ${imageResponse.status})`,
+        conversationId
+      );
+      return null;
+    }
     const mediaType = normalizeMediaType(imageResponse.headers.get("content-type"));
     const base64 = Buffer.from(await imageResponse.arrayBuffer()).toString("base64");
 
@@ -73,6 +84,15 @@ export async function escalateToAnthropicVision(
     return text || null;
   } catch (error) {
     console.error("Error escalando vision a Anthropic:", error);
+    // Sin esta fila el fallo es invisible: el caller se queda con lo de DeepSeek y la conversacion
+    // sigue normal. Una llave mal configurada dejo esta funcion muerta semanas sin que nadie lo
+    // notara, porque "0 escalaciones" se ve igual que "nunca hizo falta escalar".
+    await recordAgentIncident(
+      businessId,
+      "EXTERNAL_API_FAILURE",
+      `Anthropic (vision, ${ANTHROPIC_VISION_MODEL}): ${error instanceof Error ? error.message : String(error)}`,
+      conversationId
+    );
     return null;
   }
 }
