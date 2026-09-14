@@ -140,6 +140,7 @@ function switchTab(name) {
   if (name === 'inicio') loadDashboard();
   if (name === 'health') loadHealth();
   if (name === 'shipping') loadShipping();
+  if (name === 'whatsapp') loadWhatsappConnection();
   // Sin boton "Actualizar": la vista se refresca sola mientras está abierta (ver AUTO_REFRESH). Se
   // reinicia en cada cambio de pestaña, así que entrar de nuevo a la misma vista no acumula timers.
   startAutoRefresh(name);
@@ -4417,3 +4418,126 @@ document.addEventListener('click', (e) => {
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') hideGlobalSearchResults();
 });
+
+// ---------------------------------------------------------------------------
+// Conexión de WhatsApp por Embedded Signup (ver src/whatsapp/embeddedSignup.ts).
+//
+// Antes, conectar un negocio era pegar a mano un phoneNumberId y un access token en la consola de
+// plataforma. Ahora el dueño hace clic, elige su número en el popup de Facebook, y el servidor cambia
+// el `code` por un token. El secret nunca baja al navegador: lo único que viaja acá son el appId y el
+// configId, que el SDK de Facebook expone igual.
+// ---------------------------------------------------------------------------
+
+let waConnectConfig = null;
+// El popup manda el phone_number_id y el waba_id por postMessage, ANTES de que FB.login llame de
+// vuelta con el code. Se guardan acá porque los tres tienen que viajar juntos al servidor.
+let waSignupAssets = null;
+
+window.addEventListener('message', (event) => {
+  // Sin este filtro, cualquier iframe de cualquier origen podría inyectar un waba_id falso y hacer que
+  // el negocio quede apuntando a una cuenta ajena.
+  if (event.origin !== 'https://www.facebook.com' && event.origin !== 'https://web.facebook.com') return;
+  try {
+    const data = JSON.parse(event.data);
+    if (data.type === 'WA_EMBEDDED_SIGNUP' && data.event === 'FINISH') {
+      waSignupAssets = { phoneNumberId: data.data.phone_number_id, wabaId: data.data.waba_id };
+    }
+  } catch {
+    // El popup manda también mensajes que no son JSON - no es un error, se ignoran.
+  }
+});
+
+async function loadWhatsappConnection() {
+  const stateEl = document.getElementById('wa-connect-state');
+  if (!stateEl) return;
+  try {
+    const [cfgRes, connRes] = await Promise.all([
+      apiFetch('/admin/api/whatsapp/connect-config'),
+      apiFetch('/admin/api/whatsapp/connection'),
+    ]);
+    waConnectConfig = await cfgRes.json();
+    const conn = await connRes.json();
+    renderWhatsappConnection(conn);
+  } catch (err) {
+    stateEl.innerHTML = `<span class="hint">No se pudo leer el estado de la conexión: ${escapeHtml(err.message)}</span>`;
+  }
+}
+
+function renderWhatsappConnection(conn) {
+  const stateEl = document.getElementById('wa-connect-state');
+  if (!stateEl) return;
+
+  if (conn.connected) {
+    const label = conn.phoneNumber ? escapeHtml(conn.phoneNumber) : `ID ${escapeHtml(conn.phoneNumberId || '')}`;
+    stateEl.innerHTML = `
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--onix-success)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="m8.5 12 2.5 2.5 4.5-5"/></svg>
+      <span>Conectado — <strong>${label}</strong></span>
+      <button class="btn-secondary" type="button" onclick="startWhatsappSignup()">Reconectar</button>`;
+    return;
+  }
+
+  if (!waConnectConfig || !waConnectConfig.ready) {
+    stateEl.innerHTML = '<span class="hint">La conexión automática todavía no está configurada en el servidor. Avisale al equipo de Zaqi.</span>';
+    return;
+  }
+
+  stateEl.innerHTML = '<button class="btn-primary" type="button" onclick="startWhatsappSignup()">Conectar WhatsApp</button>';
+}
+
+function startWhatsappSignup() {
+  if (!waConnectConfig || !waConnectConfig.ready) {
+    setStatus('La conexión automática no está configurada en el servidor todavía', true);
+    return;
+  }
+  if (typeof FB === 'undefined') {
+    setStatus('No se pudo cargar el SDK de Facebook. Revisa tu conexión y recarga la página.', true);
+    return;
+  }
+
+  waSignupAssets = null;
+  FB.init({ appId: waConnectConfig.appId, cookie: true, xfbml: false, version: 'v21.0' });
+
+  FB.login((response) => {
+    const code = response && response.authResponse && response.authResponse.code;
+    if (!code) {
+      setStatus('Cancelaste la conexión de WhatsApp', true);
+      return;
+    }
+    if (!waSignupAssets) {
+      setStatus('Facebook no devolvió qué número elegiste. Intentá de nuevo.', true);
+      return;
+    }
+    finishWhatsappSignup(code);
+  }, {
+    config_id: waConnectConfig.configId,
+    // Sin override_default_response_type el SDK devuelve un token de usuario en vez del `code` que el
+    // servidor necesita para pedir el token de negocio.
+    response_type: 'code',
+    override_default_response_type: true,
+    extras: { setup: {}, featureType: '', sessionInfoVersion: '3' },
+  });
+}
+
+async function finishWhatsappSignup(code) {
+  setStatus('Conectando WhatsApp…');
+  try {
+    const res = await apiFetch('/admin/api/whatsapp/connect', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code, ...waSignupAssets }),
+    });
+    const data = await res.json();
+    renderWhatsappConnection({ connected: true, phoneNumber: data.phoneNumber, phoneNumberId: waSignupAssets.phoneNumberId });
+    // El número quedó conectado pero sin registrar en Cloud API: manda igual el aviso, porque hasta
+    // que eso se resuelva el bot no puede enviar mensajes y el síntoma sería silencio total.
+    if (data.registered === false) {
+      setStatus('WhatsApp quedó conectado, pero falta registrar el número (ese número ya tenía un PIN de verificación en dos pasos). Escribinos para terminarlo.', true);
+    } else {
+      setStatus('WhatsApp conectado ✅');
+    }
+  } catch (err) {
+    setStatus(`No se pudo conectar WhatsApp: ${err.message}`, true);
+  } finally {
+    waSignupAssets = null;
+  }
+}

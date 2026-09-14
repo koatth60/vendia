@@ -16,6 +16,15 @@ export const env = {
   whatsapp: {
     verifyToken: process.env.WHATSAPP_VERIFY_TOKEN ?? "",
   },
+  // Embedded Signup (Tech Provider). appId y configId son PUBLICOS: viajan al navegador del cliente
+  // dentro del SDK de Facebook, asi que no son secreto. appSecret NO: solo se usa del lado del
+  // servidor para cambiar el `code` que devuelve el popup por un access token, y nunca se manda al
+  // front ni se guarda por negocio. Ver [[zaqi-meta-tech-provider-setup]].
+  facebook: {
+    appId: process.env.FACEBOOK_APP_ID ?? "",
+    appSecret: process.env.FACEBOOK_APP_SECRET ?? "",
+    configId: process.env.FACEBOOK_CONFIG_ID ?? "",
+  },
   platformAdmin: {
     email: process.env.PLATFORM_ADMIN_EMAIL ?? "",
     password: process.env.PLATFORM_ADMIN_PASSWORD ?? "",

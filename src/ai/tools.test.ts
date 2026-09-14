@@ -52,7 +52,7 @@ function stubWhatsappFetch() {
     if (body.type === "text") {
       sentMessages.push({ to, body: body.text?.body ?? "" });
     } else if (body.type === "template") {
-      // sendOwnerAlert tries the vendia_owner_alert template first - the dynamic text lives in the
+      // sendOwnerAlert tries the onix_owner_alert template first - the dynamic text lives in the
       // template's body component parameters, not a plain text.body field.
       const paramText = body.template?.components?.[0]?.parameters?.[0]?.text ?? "";
       sentMessages.push({ to, body: paramText });

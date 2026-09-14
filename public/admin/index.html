@@ -642,6 +642,11 @@
           <div class="panel-subtitle">Hoy: WhatsApp. Seguimiento automático post-venta y plantillas aprobadas por Meta. (Instagram, Facebook y Mercado Libre - próximamente.)</div>
         </div>
       </div>
+      <div class="card" id="wa-connect-card">
+        <div class="settings-group-title" style="margin-top:0;">Conexión de WhatsApp</div>
+        <p class="settings-desc">Conecta el número de WhatsApp del negocio. Se abre una ventana de Facebook donde eliges el número; el resto queda configurado solo.</p>
+        <div id="wa-connect-state" style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;"></div>
+      </div>
       <div class="card">
         <div class="settings-group-title" style="margin-top:0;">Seguimiento post-venta</div>
         <p class="settings-desc">Le manda automáticamente una plantilla de WhatsApp a los clientes X horas después de cerrar la venta (ej: "¿cómo te fue con tu compra?"). Requiere que la plantilla ya esté <strong>aprobada por Meta</strong> (categoría Utility, se aprueba en minutos/días, no necesita Tech Provider). Dejá el nombre vacío para desactivarlo.</p>
@@ -978,6 +983,7 @@
     </div>
   </div>
 
+<script async defer crossorigin="anonymous" src="https://connect.facebook.net/en_US/sdk.js"></script>
 <script src="/socket.io/socket.io.js"></script>
 <script src="/admin/js/admin.js?v=2"></script>
 </body>

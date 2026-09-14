@@ -12,6 +12,7 @@ import { conversationsRouter } from "./conversations";
 import { dashboardRouter } from "./dashboard";
 import { shippingRouter } from "./shipping";
 import { searchRouter } from "./search";
+import { whatsappConnectRouter } from "./whatsappConnect";
 
 export const adminRouter = Router();
 
@@ -29,3 +30,4 @@ adminRouter.use(conversationsRouter);
 adminRouter.use(dashboardRouter);
 adminRouter.use(shippingRouter);
 adminRouter.use(searchRouter);
+adminRouter.use(whatsappConnectRouter);
