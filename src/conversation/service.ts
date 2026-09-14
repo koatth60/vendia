@@ -403,6 +403,11 @@ export async function markPendingOwnerQuestionReminded(questionId: string) {
   });
 }
 
+// Lives here, not next to the job that sends it, because the stalled-conversation query below has to be
+// able to tell it apart from a real reply: it's an ASSISTANT message like any other, but it answers
+// nothing, so it must not count as "the business already responded".
+export const CUSTOMER_FOLLOWUP_TEXT = "Seguimos revisando tu consulta con el equipo, en un momento te confirmamos por aqui 🙏";
+
 export type StalledConversation = {
   conversationId: string;
   customer: { id: string; name: string | null; phoneNumber: string };
@@ -414,10 +419,10 @@ export type StalledConversation = {
 // Generalizes escalation reminders beyond ask_owner/ask_owner_about_photo (the only two paths that create
 // a PendingOwnerQuestion): flag_conversation_intent and a manual panel takeover both set humanControl:true
 // with no question row at all, so findPendingOwnerQuestionsDueForReminder above never sees them - a
-// conversation escalated that way could go silent forever with nobody reminded. This watches
-// humanControlSince directly instead, and stages the escalation (fires once at stage1Before, once more at
-// stage2Before, then caps) so a still-unanswered conversation gets progressively louder instead of exactly
-// one reminder for its entire life.
+// conversation escalated that way could go silent forever with nobody reminded. This watches the last
+// message instead (the customer must be the one waiting - see the loop below), and stages the escalation
+// (fires once at stage1Before, once more at stage2Before, then caps) so a still-unanswered conversation
+// gets progressively louder instead of exactly one reminder for its entire life.
 //
 // A conversation that DOES have a PendingOwnerQuestion is deliberately left to that dedicated mechanism for
 // its first reminder (same 3h-class threshold, already reminds with the actual question text) - only
@@ -434,21 +439,38 @@ export async function findStalledConversationsDueForReminder(
       humanControl: true,
       status: { notIn: ["SOLD", "LOST"] },
       humanControlSince: { not: null },
-      OR: [
-        { stalledReminderStage: 0, humanControlSince: { lte: stage1Before } },
-        { stalledReminderStage: 1, stalledReminderSentAt: { lte: stage1Before } },
-      ],
+      OR: [{ stalledReminderStage: 0 }, { stalledReminderStage: 1, stalledReminderSentAt: { lte: stage1Before } }],
     },
-    include: { customer: true, pendingOwnerQuestions: true },
+    // 5 is enough to walk back past our own follow-ups (deduped to one per conversation per run) to the
+    // last thing that was actually said.
+    include: { customer: true, pendingOwnerQuestions: true, messages: { orderBy: { createdAt: "desc" }, take: 5 } },
   });
 
   const result: StalledConversation[] = [];
   for (const c of candidates) {
+    // Nobody is waiting on the business unless the CUSTOMER spoke last, and the wait starts at that
+    // message - not at humanControlSince. Real incident 2026-09-14: the owner answered from the panel and
+    // asked the customer a question back; every panel message calls setHumanControl(true), which re-armed
+    // humanControlSince, so her own reply is what scheduled a "seguimos revisando" to the customer minutes
+    // later - while the conversation was actually waiting on HIM.
+    let waitingSince: Date | null = null;
+    for (const m of c.messages) {
+      if (m.role === "CUSTOMER") {
+        waitingSince = m.createdAt;
+        break;
+      }
+      // Our own nudge answers nothing, so it must not read as a reply - otherwise it would silence the
+      // 24h stage-2 reminder for exactly the conversations that need it most (owner never answered, and
+      // the customer has been sitting on that canned line ever since).
+      if (m.role === "ASSISTANT" && m.content !== CUSTOMER_FOLLOWUP_TEXT) break;
+    }
+    if (!waitingSince) continue;
+
     const hasQuestionThisEscalation = c.pendingOwnerQuestions.some((q) => q.createdAt >= c.humanControlSince!);
     if (c.stalledReminderStage === 0) {
-      if (!hasQuestionThisEscalation && c.humanControlSince! <= stage1Before) {
+      if (!hasQuestionThisEscalation && waitingSince <= stage1Before) {
         result.push({ conversationId: c.id, customer: c.customer, intent: c.intent, nextStage: 1, openQuestion: null });
-      } else if (c.humanControlSince! <= stage2Before) {
+      } else if (waitingSince <= stage2Before) {
         const openQuestion = c.pendingOwnerQuestions.find((q) => !q.remindedAt)?.question ?? c.pendingOwnerQuestions[0]?.question ?? null;
         result.push({ conversationId: c.id, customer: c.customer, intent: c.intent, nextStage: 2, openQuestion });
       }

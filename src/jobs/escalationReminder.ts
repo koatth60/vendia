@@ -7,6 +7,7 @@ import {
   findStalledConversationsDueForReminder,
   markStalledReminderSent,
   recordMessage,
+  CUSTOMER_FOLLOWUP_TEXT,
 } from "../conversation/service";
 
 const STAGE_2_THRESHOLD_MS = 24 * 60 * 60 * 1000;
@@ -16,7 +17,7 @@ const STAGE_2_THRESHOLD_MS = 24 * 60 * 60 * 1000;
 // business's own script (MAGByLizN) promises this exact proactive follow-up ("seguimos revisando tu
 // consulta") and it never fired because nothing in code ever sent it - confirmed against production data
 // on 2026-09-12. Generic wording (not tied to one business's script) so every business gets it for free.
-const CUSTOMER_FOLLOWUP_TEXT = "Seguimos revisando tu consulta con el equipo, en un momento te confirmamos por aqui 🙏";
+// The text itself lives in conversation/service (the stalled query has to recognize it).
 
 const INTENT_LABELS: Record<string, string> = {
   PQR: "una PQR",
@@ -30,7 +31,7 @@ function describeStalledOrigin(conversation: { intent: string | null; openQuesti
   if (conversation.intent && INTENT_LABELS[conversation.intent]) {
     return `reporto ${INTENT_LABELS[conversation.intent]} y el bot dejo de responderle, quedo esperando por vos`;
   }
-  return "tomaste el control manual de esta conversacion y todavia no le respondiste";
+  return "escribio y sigue esperando respuesta tuya";
 }
 
 // A PendingOwnerQuestion (ask_owner / ask_owner_about_photo) leaves a real question unanswered until the
@@ -123,7 +124,15 @@ export async function runEscalationReminderJob(): Promise<void> {
 
       // Only the first nudge tells the customer anything - repeating the same canned line a second time
       // (24h later, still no reply) would just be noise on top of noise for someone already waiting.
-      if (conversation.nextStage === 1 && !customerNotifiedThisRun.has(conversation.conversationId)) {
+      //
+      // And never on a plain manual takeover (no intent, no question): there the owner is personally
+      // chatting with the customer from the panel, so dropping a canned bot line into the middle of that
+      // contradicts whatever she just wrote and gives away that a bot is still in the loop. The bot
+      // promised nothing here, unlike the ask_owner path ("te aviso apenas este listo") and the
+      // flag_conversation_intent path (bot went silent on a PQR with no explanation), which both leave the
+      // customer waiting with no human having said a word - those still get the follow-up.
+      const isManualTakeover = !conversation.intent && !conversation.openQuestion;
+      if (conversation.nextStage === 1 && !isManualTakeover && !customerNotifiedThisRun.has(conversation.conversationId)) {
         customerNotifiedThisRun.add(conversation.conversationId);
         try {
           const customerWamid = await sendTextMessage(credentials, conversation.customer.phoneNumber, CUSTOMER_FOLLOWUP_TEXT);

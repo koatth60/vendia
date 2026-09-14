@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { prisma } from "../db/client";
 import { runEscalationReminderJob } from "./escalationReminder";
+import { CUSTOMER_FOLLOWUP_TEXT } from "../conversation/service";
 
 let businessId: string;
 let conversationId: string;
@@ -148,6 +149,10 @@ test("runEscalationReminderJob reminds about a stalled conversation with no Pend
     },
   });
   try {
+    await prisma.message.create({
+      data: { conversationId: conv.id, role: "CUSTOMER", content: "Necesito hablar con alguien", createdAt: new Date(Date.now() - 4 * 60 * 60 * 1000) },
+    });
+
     await runEscalationReminderJob();
 
     assert.equal(sentMessages.length, 2, "owner reminder + customer follow-up");
@@ -181,6 +186,15 @@ test("runEscalationReminderJob sends a final stage-2 reminder 24h after stage 1,
     },
   });
   try {
+    // The stage-1 run already left its own "seguimos revisando" as the last thing in the thread. That
+    // must not read as a reply, or the final reminder would never fire for the conversations that need it.
+    await prisma.message.create({
+      data: { conversationId: conv.id, role: "CUSTOMER", content: "¿Alguna novedad?", createdAt: new Date(Date.now() - 30 * 60 * 60 * 1000) },
+    });
+    await prisma.message.create({
+      data: { conversationId: conv.id, role: "ASSISTANT", content: CUSTOMER_FOLLOWUP_TEXT, createdAt: new Date(Date.now() - 25 * 60 * 60 * 1000) },
+    });
+
     await runEscalationReminderJob();
 
     assert.equal(sentMessages.length, 1, "stage 2 only alerts the owner, no repeat customer message");
@@ -194,6 +208,7 @@ test("runEscalationReminderJob sends a final stage-2 reminder 24h after stage 1,
     assert.equal(sentMessages.length, 0, "stage 2 is the cap - no further reminders ever");
   } finally {
     restoreFetch();
+    await prisma.message.deleteMany({ where: { conversationId: conv.id } });
     await prisma.conversation.deleteMany({ where: { id: conv.id } });
     await prisma.customer.deleteMany({ where: { id: customer.id } });
   }
@@ -207,6 +222,9 @@ test("runEscalationReminderJob does not double-fire the watchdog for a conversat
   try {
     await prisma.pendingOwnerQuestion.create({
       data: { conversationId: conv.id, wamid: `wamid.photo-${randomUUID()}`, question: "Identificar producto", createdAt: since, kind: "PHOTO_PRODUCT" },
+    });
+    await prisma.message.create({
+      data: { conversationId: conv.id, role: "CUSTOMER", content: "[Foto]", createdAt: since },
     });
 
     await runEscalationReminderJob();
@@ -251,6 +269,71 @@ test("runEscalationReminderJob sends the customer-facing follow-up only ONCE whe
   } finally {
     restoreFetch();
     await prisma.pendingOwnerQuestion.deleteMany({ where: { conversationId: conv.id } });
+    await prisma.message.deleteMany({ where: { conversationId: conv.id } });
+    await prisma.conversation.deleteMany({ where: { id: conv.id } });
+    await prisma.customer.deleteMany({ where: { id: customer.id } });
+  }
+});
+
+// Real production incident (2026-09-14): the owner took over from the panel, answered the customer and
+// asked him a question back ("¿lo quieres hoy o mañana?"). Every panel message calls setHumanControl(true),
+// which re-armed humanControlSince - so her own reply scheduled a "seguimos revisando tu consulta" to the
+// customer minutes later, contradicting her while the conversation was actually waiting on HIM.
+test("runEscalationReminderJob stays silent when the owner already replied and is the one waiting", async () => {
+  stubWhatsappFetch();
+  const customer = await prisma.customer.create({ data: { businessId, phoneNumber: `573012${Date.now()}` } });
+  // humanControlSince deliberately past the reminder threshold: that alone used to be enough to fire.
+  const conv = await prisma.conversation.create({
+    data: { customerId: customer.id, humanControl: true, humanControlSince: new Date(Date.now() - 4 * 60 * 60 * 1000) },
+  });
+  try {
+    await prisma.message.create({
+      data: { conversationId: conv.id, role: "CUSTOMER", content: "Si todo esta bien", createdAt: new Date(Date.now() - 9 * 60 * 60 * 1000) },
+    });
+    await prisma.message.create({
+      data: {
+        conversationId: conv.id,
+        role: "ASSISTANT",
+        content: "Hola buen día, ¿me confirmas el pedido? ¿Deseas recibirlo hoy o mañana?",
+        createdAt: new Date(Date.now() - 30 * 60 * 1000),
+      },
+    });
+
+    await runEscalationReminderJob();
+
+    assert.equal(sentMessages.length, 0, "the business answered last - nothing is stalled, nobody gets pinged");
+    const updated = await prisma.conversation.findUniqueOrThrow({ where: { id: conv.id } });
+    assert.equal(updated.stalledReminderStage, 0);
+  } finally {
+    restoreFetch();
+    await prisma.message.deleteMany({ where: { conversationId: conv.id } });
+    await prisma.conversation.deleteMany({ where: { id: conv.id } });
+    await prisma.customer.deleteMany({ where: { id: customer.id } });
+  }
+});
+
+test("runEscalationReminderJob alerts the owner but never the customer on a plain manual takeover", async () => {
+  // The owner is personally chatting from the panel here - the bot promised the customer nothing, so a
+  // canned "seguimos revisando" dropped into that thread would contradict whatever she last wrote.
+  stubWhatsappFetch();
+  const customer = await prisma.customer.create({ data: { businessId, phoneNumber: `573013${Date.now()}` } });
+  const since = new Date(Date.now() - 4 * 60 * 60 * 1000);
+  const conv = await prisma.conversation.create({ data: { customerId: customer.id, humanControl: true, humanControlSince: since } });
+  try {
+    await prisma.message.create({
+      data: { conversationId: conv.id, role: "CUSTOMER", content: "¿Entonces me lo despachan hoy?", createdAt: since },
+    });
+
+    await runEscalationReminderJob();
+
+    assert.equal(sentMessages.length, 1, "owner alert only");
+    assert.equal(sentMessages[0].to, "573000000000");
+    assert.doesNotMatch(sentMessages[0].body, /revisando/i);
+
+    const updated = await prisma.conversation.findUniqueOrThrow({ where: { id: conv.id } });
+    assert.equal(updated.stalledReminderStage, 1, "the watchdog still tracks it, it just does not write to the customer");
+  } finally {
+    restoreFetch();
     await prisma.message.deleteMany({ where: { conversationId: conv.id } });
     await prisma.conversation.deleteMany({ where: { id: conv.id } });
     await prisma.customer.deleteMany({ where: { id: customer.id } });
