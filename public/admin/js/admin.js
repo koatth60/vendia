@@ -2462,80 +2462,124 @@ async function loadAnalytics() {
     const res = await apiFetch('/admin/api/analytics');
     const s = await res.json();
 
-    const statusRows = Object.entries(s.byStatus).map(([status, count]) => `
-      <tr>
-        <td style="padding:10px 16px; border-top:1px solid var(--border);"><span class="status-badge status-${status}">${STATUS_LABELS[status] || status}</span></td>
-        <td style="padding:10px 16px; border-top:1px solid var(--border); text-align:right;">${count}</td>
-      </tr>
-    `).join('');
+    // --- Embudo por estado -------------------------------------------------
+    // Vendido y Perdido llevan color de estado; el resto es "en curso" y va en
+    // gris: son etapas, no resultados, y pintarlas de colores solo hace ruido.
+    const statusEntries = Object.entries(s.byStatus);
+    const statusMax = Math.max(1, ...statusEntries.map(([, c]) => c));
+    const statusBars = statusEntries.map(([status, count]) => {
+      const tone = status === 'SOLD' ? 'var(--onix-series-bot)'
+        : status === 'LOST' ? 'var(--onix-series-lost)'
+        : 'var(--onix-series-open)';
+      const pct = (count / statusMax) * 100;
+      return `
+        <div class="bar-row" title="${escapeHtml(STATUS_LABELS[status] || status)}: ${count}">
+          <span class="bar-label">${escapeHtml(STATUS_LABELS[status] || status)}</span>
+          <span class="bar-track">${count === 0
+            ? '<span class="bar-zero"></span>'
+            : `<span class="bar-fill" style="width:${pct}%; background:${tone};"></span>`}</span>
+          <span class="bar-value onix-num${count === 0 ? ' is-zero' : ''}">${count}</span>
+        </div>`;
+    }).join('');
 
-    const dayRows = [...s.messagesByDay].reverse().map(d => `
-      <tr>
-        <td style="padding:10px 16px; border-top:1px solid var(--border);">${d.date}</td>
-        <td style="padding:10px 16px; border-top:1px solid var(--border); text-align:right;">${d.customer}</td>
-        <td style="padding:10px 16px; border-top:1px solid var(--border); text-align:right;">${d.assistant}</td>
-      </tr>
-    `).join('');
+    // --- Productos más consultados ----------------------------------------
+    const prodMax = Math.max(1, ...s.topProducts.map(p => p.inquiryCount));
+    const productBars = s.topProducts.map(p => `
+      <div class="bar-row" title="${escapeHtml(p.name)}: ${p.inquiryCount} consultas">
+        <span class="bar-label bar-label-wide">${escapeHtml(p.name)}</span>
+        <span class="bar-track">${p.inquiryCount === 0
+          ? '<span class="bar-zero"></span>'
+          : `<span class="bar-fill" style="width:${(p.inquiryCount / prodMax) * 100}%; background:var(--onix-series-clients);"></span>`}</span>
+        <span class="bar-value onix-num">${p.inquiryCount}</span>
+      </div>`).join('');
 
-    const productRows = s.topProducts.map(p => `
-      <tr>
-        <td style="padding:10px 16px; border-top:1px solid var(--border);">${escapeHtml(p.name)}</td>
-        <td style="padding:10px 16px; border-top:1px solid var(--border); text-align:right;">${p.inquiryCount}</td>
-      </tr>
-    `).join('');
+    // --- Mensajes por día: dos series, una escala, leyenda obligatoria ------
+    const days = [...s.messagesByDay].reverse();
+    const dayMax = Math.max(1, ...days.map(d => Math.max(d.customer, d.assistant)));
+    const dayCols = days.map(d => {
+      const fmt = (n) => `${Math.round((n / dayMax) * 100)}%`;
+      const label = new Date(d.date + 'T12:00:00').toLocaleDateString('es-CO', { day: 'numeric', month: 'short' });
+      return `
+        <div class="col-group">
+          <div class="col-pair">
+            <span class="col" title="Clientes el ${escapeHtml(d.date)}: ${d.customer}">
+              <span class="col-value onix-num">${d.customer}</span>
+              <span class="col-fill" style="height:${fmt(d.customer)}; background:var(--onix-series-clients);"></span>
+            </span>
+            <span class="col" title="Bot el ${escapeHtml(d.date)}: ${d.assistant}">
+              <span class="col-value onix-num">${d.assistant}</span>
+              <span class="col-fill" style="height:${fmt(d.assistant)}; background:var(--onix-series-bot);"></span>
+            </span>
+          </div>
+          <span class="col-label onix-num">${escapeHtml(label)}</span>
+        </div>`;
+    }).join('');
+
+    const inProgress = s.byStatus.NEW + s.byStatus.INTERESTED + s.byStatus.QUOTED + s.byStatus.NEGOTIATING;
 
     container.innerHTML = `
-      <div class="grid-3" style="margin-bottom:16px;">
-        <div class="card">
-          <div style="font-size:12px; color:var(--muted);">Conversaciones (30 días)</div>
-          <div style="font-size:24px; font-weight:700;">${s.totalConversations}</div>
+      <div class="metric-grid" style="margin-bottom:16px;">
+        <div class="metric-card">
+          <div class="label">Conversaciones (30 días)</div>
+          <div class="value">${s.totalConversations}</div>
         </div>
-        <div class="card">
-          <div style="font-size:12px; color:var(--muted);">Tasa de conversión</div>
-          <div style="font-size:24px; font-weight:700;">${(s.conversionRate * 100).toFixed(1)}%</div>
-          <div style="font-size:12px; color:var(--muted);">${s.byStatus.SOLD} vendidas / ${s.byStatus.LOST} perdidas</div>
+        <div class="metric-card">
+          <div class="label">Tasa de conversión</div>
+          <div class="value" style="color:var(--onix-accent);">${(s.conversionRate * 100).toFixed(1)}%</div>
+          <div class="sub">${s.byStatus.SOLD} vendidas / ${s.byStatus.LOST} perdidas</div>
         </div>
-        <div class="card">
-          <div style="font-size:12px; color:var(--muted);">En curso</div>
-          <div style="font-size:24px; font-weight:700;">${s.byStatus.NEW + s.byStatus.INTERESTED + s.byStatus.QUOTED + s.byStatus.NEGOTIATING}</div>
-          <div style="font-size:12px; color:var(--muted);">nuevo / interesado / cotizado / negociando</div>
+        <div class="metric-card">
+          <div class="label">En curso</div>
+          <div class="value">${inProgress}</div>
+          <div class="sub">nuevo · interesado · cotizado · negociando</div>
         </div>
-        <div class="card">
-          <div style="font-size:12px; color:var(--muted);">Satisfacción (CSAT)</div>
-          <div style="font-size:24px; font-weight:700;">${s.avgCsat !== null ? `${CSAT_EMOJI[Math.round(s.avgCsat)] || ''} ${s.avgCsat.toFixed(1)}/3` : '—'}</div>
-          <div style="font-size:12px; color:var(--muted);">${s.csatCount} respuesta${s.csatCount === 1 ? '' : 's'}</div>
+        <div class="metric-card">
+          <div class="label">Satisfacción (CSAT)</div>
+          <div class="value">${s.avgCsat !== null ? `${s.avgCsat.toFixed(1)}<span style="font-size:15px; color:var(--onix-dim);">/3</span>` : '—'}</div>
+          <div class="sub">${s.csatCount} respuesta${s.csatCount === 1 ? '' : 's'}</div>
         </div>
       </div>
 
-      <div class="section-title">Conversaciones por estado</div>
-      <div class="card" style="padding:0; overflow:hidden; margin-bottom:16px;">
-        <table style="width:100%; border-collapse:collapse;">
-          <tbody>${statusRows}</tbody>
-        </table>
+      <div class="chart-grid">
+        <section class="card chart-card">
+          <div class="chart-head">
+            <h3 class="chart-title">Conversaciones por estado</h3>
+            <span class="chart-note onix-num">${s.totalConversations} totales</span>
+          </div>
+          <div class="bar-list">${statusBars}</div>
+          <div class="chart-legend">
+            <span class="legend-item"><span class="legend-dot" style="background:var(--onix-series-bot);"></span>Vendido</span>
+            <span class="legend-item"><span class="legend-dot" style="background:var(--onix-series-lost);"></span>Perdido</span>
+            <span class="legend-item"><span class="legend-dot" style="background:var(--onix-series-open);"></span>En curso</span>
+          </div>
+        </section>
+
+        <section class="card chart-card">
+          <div class="chart-head">
+            <h3 class="chart-title">Mensajes por día</h3>
+            <div class="chart-legend">
+              <span class="legend-item"><span class="legend-dot" style="background:var(--onix-series-clients);"></span>Clientes</span>
+              <span class="legend-item"><span class="legend-dot" style="background:var(--onix-series-bot);"></span>Bot</span>
+            </div>
+          </div>
+          ${days.length === 0
+            ? '<div class="empty-state">Todavía no hay mensajes registrados.</div>'
+            : `<div class="col-chart">${dayCols}</div>`}
+        </section>
       </div>
 
-      <div class="section-title">Productos más consultados</div>
-      <div class="card" style="padding:0; overflow:hidden; margin-bottom:16px;">
+      <section class="card chart-card" style="margin-top:12px;">
+        <div class="chart-head">
+          <h3 class="chart-title">Productos más consultados</h3>
+          <span class="chart-note">consultas en 30 días</span>
+        </div>
         ${s.topProducts.length === 0
-          ? '<div class="empty-state"><div class="big">📦</div>Todavía no hay consultas de productos registradas.</div>'
-          : `<table style="width:100%; border-collapse:collapse;">
-              <thead><tr><th style="text-align:left; padding:10px 16px; font-size:12px; color:var(--muted);">Producto</th><th style="text-align:right; padding:10px 16px; font-size:12px; color:var(--muted);">Consultas</th></tr></thead>
-              <tbody>${productRows}</tbody>
-            </table>`}
-      </div>
-
-      <div class="section-title">Mensajes por día</div>
-      <div class="card" style="padding:0; overflow:hidden;">
-        ${s.messagesByDay.length === 0
-          ? '<div class="empty-state"><div class="big">💬</div>Todavía no hay mensajes registrados.</div>'
-          : `<table style="width:100%; border-collapse:collapse;">
-              <thead><tr><th style="text-align:left; padding:10px 16px; font-size:12px; color:var(--muted);">Fecha</th><th style="text-align:right; padding:10px 16px; font-size:12px; color:var(--muted);">Clientes</th><th style="text-align:right; padding:10px 16px; font-size:12px; color:var(--muted);">Bot</th></tr></thead>
-              <tbody>${dayRows}</tbody>
-            </table>`}
-      </div>
+          ? '<div class="empty-state">Todavía no hay consultas de productos registradas.</div>'
+          : `<div class="bar-list">${productBars}</div>`}
+      </section>
     `;
   } catch (err) {
-    container.innerHTML = `<div class="card empty-state" style="color:var(--danger);">No se pudo cargar el analytics: ${escapeHtml(err.message)}</div>`;
+    container.innerHTML = `<div class="card empty-state" style="color:var(--onix-danger);">No se pudo cargar el analytics: ${escapeHtml(err.message)}</div>`;
   }
 }
 

@@ -1,0 +1,316 @@
+/* ===========================================================================
+   Onix — sistema de color, tipografía y espacio (dirección A)
+   ---------------------------------------------------------------------------
+   Un solo conjunto de tokens, dos temas. NADA en el resto del CSS debe usar
+   un hex literal: todo pasa por var(--onix-*). Así light y dark no son dos
+   diseños, son el mismo diseño con otro valor de token.
+
+   Cómo se resuelve el tema:
+     - sin atributo  -> sigue al sistema operativo (prefers-color-scheme)
+     - <html data-theme="light">  -> fuerza claro
+     - <html data-theme="dark">   -> fuerza oscuro
+   El selector :root:not([data-theme="light"]) dentro del media query evita
+   que el sistema le gane a la elección explícita del usuario.
+   =========================================================================== */
+
+:root {
+  /* --- Tipografía --------------------------------------------------------- */
+  --onix-font-sans: 'Instrument Sans', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --onix-font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  /* Escala tipográfica: tamaño / peso / tracking */
+  --onix-text-title: 600 25px/1.2 var(--onix-font-sans);
+  --onix-text-h2: 600 19px/1.25 var(--onix-font-sans);
+  --onix-text-row: 550 13.5px/1.4 var(--onix-font-sans);
+  --onix-text-body: 400 13px/1.5 var(--onix-font-sans);
+  --onix-text-meta: 400 12px/1.45 var(--onix-font-sans);
+  --onix-text-caps: 600 11px/1.3 var(--onix-font-sans);
+  --onix-tracking-title: -0.025em;
+  --onix-tracking-caps: 0.1em;
+
+  /* --- Radios ------------------------------------------------------------- */
+  --onix-radius-chip: 6px;   /* chips, badges, celdas de tabla */
+  --onix-radius-control: 8px; /* botones, campos, pestañas */
+  --onix-radius-card: 11px;  /* filas, tarjetas */
+  --onix-radius-panel: 12px; /* paneles y secciones */
+
+  /* --- Alturas de control (mínimo táctil 44px en móvil) -------------------- */
+  --onix-h-btn: 36px;
+  --onix-h-btn-sm: 30px;
+  --onix-h-field: 40px;
+  --onix-h-field-lg: 46px; /* login */
+  --onix-h-row: 52px;
+
+  /* --- Espacio ------------------------------------------------------------ */
+  --onix-gap-xs: 6px;
+  --onix-gap-sm: 10px;
+  --onix-gap-md: 14px;
+  --onix-gap-lg: 18px;
+  --onix-gap-xl: 26px;
+
+  /* --- Ancho de la barra lateral ------------------------------------------ */
+  --onix-sidebar-w: 248px;
+
+  /* =========================================================================
+     TEMA CLARO (por defecto)
+     ========================================================================= */
+
+  /* Superficies */
+  --onix-bg: #F4F6F4;
+  --onix-surface: #FFFFFF;
+  --onix-surface-nav: #F9FBFA;
+  --onix-surface-2: #EDF2EE;     /* hover / fila seleccionada */
+  --onix-surface-field: #FBFCFB;
+  --onix-surface-mute: #F0F3F1;  /* deshabilitado */
+
+  /* Bordes */
+  --onix-border: #E2E8E4;
+  --onix-border-strong: #D3DCD7;
+  --onix-border-soft: #EEF2EF;
+
+  /* Texto — todos ≥ 4.3:1 sobre --onix-surface */
+  --onix-ink: #0F1A15;      /* 17.8:1 */
+  --onix-ink-2: #2E3B35;    /* 11.7:1 */
+  --onix-ink-3: #45534C;    /*  8.0:1 */
+  --onix-muted: #5C6B63;    /*  5.6:1 */
+  --onix-dim: #707E77;      /*  4.3:1 — metadatos, nunca texto esencial */
+  --onix-faint: #8C9992;    /* decorativo: separadores, iconos vacíos */
+
+  /* Acento */
+  --onix-accent: #0E7A44;        /* 5.4:1 sobre blanco */
+  --onix-accent-hover: #0A5C33;
+  --onix-accent-ink: #FFFFFF;    /* texto sobre el botón de acento */
+  --onix-accent-soft: #E3F3EA;
+  --onix-accent-line: rgba(14, 122, 68, 0.22);
+  --onix-accent-ring: rgba(14, 122, 68, 0.14);
+
+  /* Estado */
+  --onix-danger: #B03A26;        /* 6.0:1 */
+  --onix-danger-ink: #FFFFFF;
+  --onix-danger-soft: #FDF2EF;
+  --onix-danger-line: #F0D4CC;
+  --onix-warn: #9A650A;          /* 5.0:1 */
+  --onix-warn-soft: #FBF1DC;
+  --onix-info: #2F55B8;
+  --onix-info-soft: #E8EDFA;
+  --onix-stage-negotiating: #A8501C;
+  --onix-stage-negotiating-soft: #FBEDE4;
+
+  /* Series de gráficos — validadas para daltonismo sobre --onix-surface */
+  --onix-series-clients: #3D6BD6;
+  --onix-series-bot: #0E7C5A;
+  --onix-series-lost: #B03A26;
+  --onix-series-open: #9AA8A2;
+
+  /* Burbujas de conversación */
+  --onix-bubble-in: #EDF2EE;
+  --onix-bubble-in-ink: #2E3B35;
+  --onix-bubble-out: #DFF3E7;
+  --onix-bubble-out-ink: #0F3D28;
+
+  /* Bloques oscuros a propósito (mock de conversación, banda del CTA).
+     No siguen al tema: son un contraste deliberado. En oscuro se elevan
+     un punto para no fundirse con el fondo de la página. */
+  --onix-invert: #0C1F16;
+  --onix-invert-surface: #132A1F;
+  --onix-invert-border: #20402F;
+  --onix-invert-muted: #9DB3A7;
+  --onix-invert-ink: #F2F7F4;
+
+  /* Marca */
+  --onix-logo-disc: #1FA855;
+  --onix-logo-leaf: #FFFFFF;
+
+  /* Sombra: en claro hay elevación, en oscuro el borde hace ese trabajo */
+  --onix-shadow-sm: 0 1px 2px rgba(15, 26, 21, 0.05);
+  --onix-shadow-md: 0 8px 24px rgba(15, 26, 21, 0.07);
+}
+
+/* =========================================================================
+   TEMA OSCURO
+   Se redefinen SOLO los tokens de color. Tipografía, radios, alturas y
+   espacios no cambian entre temas — si cambian, es un bug.
+   ========================================================================= */
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --onix-bg: #0B0E0D;
+    --onix-surface: #131817;
+    --onix-surface-nav: #101413;
+    --onix-surface-2: #18201D;
+    --onix-surface-field: #0F1413;
+    --onix-surface-mute: #1A1F1D;
+
+    --onix-border: #1E2523;
+    --onix-border-strong: #2A332F;
+    --onix-border-soft: #1A201E;
+
+    --onix-ink: #E8EDEA;
+    --onix-ink-2: #C3CCC7;
+    --onix-ink-3: #A9B5AF;
+    --onix-muted: #8A968F;
+    --onix-dim: #6B7873;
+    --onix-faint: #4C5652;
+
+    --onix-accent: #35D07F;
+    --onix-accent-hover: #5FE3A0;
+    --onix-accent-ink: #06170E;
+    --onix-accent-soft: rgba(53, 208, 127, 0.16);
+    --onix-accent-line: rgba(53, 208, 127, 0.24);
+    --onix-accent-ring: rgba(53, 208, 127, 0.12);
+
+    --onix-danger: #F87171;
+    --onix-danger-ink: #1A0D0C;
+    --onix-danger-soft: #14100F;
+    --onix-danger-line: #3A211D;
+    --onix-warn: #E0A33C;
+    --onix-warn-soft: rgba(224, 163, 60, 0.16);
+    --onix-info: #8FAEF0;
+    --onix-info-soft: rgba(92, 131, 224, 0.16);
+    --onix-stage-negotiating: #E0783C;
+    --onix-stage-negotiating-soft: rgba(224, 120, 60, 0.16);
+
+    --onix-series-clients: #5C83E0;
+    --onix-series-bot: #1EA162;
+    --onix-series-lost: #C9503A;
+    --onix-series-open: #4A5A54;
+
+    --onix-bubble-in: #1E2523;
+    --onix-bubble-in-ink: #C3CCC7;
+    --onix-bubble-out: #204A34;
+    --onix-bubble-out-ink: #DDF3E6;
+
+    --onix-invert: #16211B;
+    --onix-invert-surface: #1B2A22;
+    --onix-invert-border: #28402F;
+    --onix-invert-muted: #9DB3A7;
+    --onix-invert-ink: #F2F7F4;
+  --onix-invert-ink: #F2F7F4;
+
+    --onix-logo-disc: #35D07F;
+    --onix-logo-leaf: #0B0E0D;
+
+    --onix-shadow-sm: none;
+    --onix-shadow-md: none;
+  }
+}
+
+/* La elección explícita del usuario gana en las dos direcciones. */
+:root[data-theme="dark"] {
+  --onix-bg: #0B0E0D;
+  --onix-surface: #131817;
+  --onix-surface-nav: #101413;
+  --onix-surface-2: #18201D;
+  --onix-surface-field: #0F1413;
+  --onix-surface-mute: #1A1F1D;
+
+  --onix-border: #1E2523;
+  --onix-border-strong: #2A332F;
+  --onix-border-soft: #1A201E;
+
+  --onix-ink: #E8EDEA;
+  --onix-ink-2: #C3CCC7;
+  --onix-ink-3: #A9B5AF;
+  --onix-muted: #8A968F;
+  --onix-dim: #6B7873;
+  --onix-faint: #4C5652;
+
+  --onix-accent: #35D07F;
+  --onix-accent-hover: #5FE3A0;
+  --onix-accent-ink: #06170E;
+  --onix-accent-soft: rgba(53, 208, 127, 0.16);
+  --onix-accent-line: rgba(53, 208, 127, 0.24);
+  --onix-accent-ring: rgba(53, 208, 127, 0.12);
+
+  --onix-danger: #F87171;
+  --onix-danger-ink: #1A0D0C;
+  --onix-danger-soft: #14100F;
+  --onix-danger-line: #3A211D;
+  --onix-warn: #E0A33C;
+  --onix-warn-soft: rgba(224, 163, 60, 0.16);
+  --onix-info: #8FAEF0;
+  --onix-info-soft: rgba(92, 131, 224, 0.16);
+
+  --onix-series-clients: #5C83E0;
+  --onix-series-bot: #1EA162;
+  --onix-series-lost: #C9503A;
+  --onix-series-open: #4A5A54;
+
+  --onix-bubble-in: #1E2523;
+  --onix-bubble-in-ink: #C3CCC7;
+  --onix-bubble-out: #204A34;
+  --onix-bubble-out-ink: #DDF3E6;
+
+  --onix-logo-disc: #35D07F;
+  --onix-logo-leaf: #0B0E0D;
+
+  --onix-shadow-sm: none;
+  --onix-shadow-md: none;
+}
+
+/* =========================================================================
+   Base
+   ========================================================================= */
+
+:root { color-scheme: light dark; }
+
+html, body {
+  background: var(--onix-bg);
+  color: var(--onix-ink);
+  font-family: var(--onix-font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Números: siempre monoespaciada con cifras de ancho fijo, para que las
+   columnas de precios y conteos no bailen al actualizarse. */
+.onix-num {
+  font-family: var(--onix-font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* El cambio de tema no debe animarse elemento por elemento: una sola
+   transición corta en las superficies evita el parpadeo al alternar. */
+@media (prefers-reduced-motion: no-preference) {
+  body, .onix-surface, .onix-panel {
+    transition: background-color 120ms ease, border-color 120ms ease;
+  }
+}
+
+/* ===========================================================================
+   El conmutador de tema
+   ---------------------------------------------------------------------------
+   Único componente que vive en este archivo, y por una razón: tiene que
+   funcionar DESDE LA FASE 0, cuando admin.css todavía es el viejo. Cuando el
+   rediseño esté completo puede mudarse a admin.css sin cambiar una línea.
+   =========================================================================== */
+
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid var(--onix-border);
+  border-radius: var(--onix-radius-control);
+  background: transparent;
+  color: var(--onix-muted);
+  cursor: pointer;
+  transition: color 120ms ease, border-color 120ms ease, background-color 120ms ease;
+}
+
+.theme-toggle:hover {
+  color: var(--onix-ink);
+  border-color: var(--onix-border-strong);
+  background: var(--onix-surface-2);
+}
+
+.theme-toggle:focus-visible {
+  outline: 2px solid var(--onix-accent);
+  outline-offset: 2px;
+}
+
+/* En móvil el botón crece al mínimo táctil sin mover el resto de la barra. */
+@media (max-width: 640px) {
+  .theme-toggle { width: 44px; height: 44px; }
+}

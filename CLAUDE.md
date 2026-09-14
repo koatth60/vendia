@@ -40,3 +40,26 @@ payload to DeepSeek on every customer message. Keep this lean going forward:
   `agent.categoryColorScopePaid.ts`, `agent.ambiguousRequestsPaid.ts`, `contextSummaryPaid.ts`). All 4
   `*Paid.ts` files are wired into `npm run test:paid`. Before adding any new test that calls
   `generateReply`/DeepSeek for real, name it `*Paid.ts` from the start and add it to that script.
+
+# Rediseño del panel (dirección A) — reglas de estilo
+
+El sistema vive en `public/admin/css/tokens.css`. El plan y el estado de cada
+fase están en `design/ONIX-REDESIGN-PLAN.md`.
+
+- **Ningún color literal fuera de `tokens.css`.** Ni un hex, ni un `rgba()`, ni
+  `white`. Siempre `var(--onix-*)`. Esta es la regla que hace que claro y oscuro
+  sean el mismo CSS y no dos hojas de estilo.
+- Si una regla parece necesitar `[data-theme]` fuera de `tokens.css`, el problema
+  es que falta un token: agregalo ahí, no bifurques la regla.
+- El chrome (barra lateral, barra superior, subnavegación) se escribe una vez y
+  se reutiliza. Nunca copiar y pegar entre secciones.
+- Iconos: SVG inline, trazo 1.6px, grilla de 18px. **Nunca emoji.**
+- Números y cifras: clase `.onix-num` (monoespaciada, `tabular-nums`).
+- Gráficos: series desde `--onix-series-*` (validadas para daltonismo en los dos
+  temas). Un valor de 0 no dibuja barra. Dos o más series llevan leyenda siempre.
+  Nunca dos ejes Y.
+- No redondear paddings, radios ni tamaños del diseño a múltiplos de 4.
+- Antes de cada commit de CSS:
+  `grep -nEi '#[0-9a-f]{3,8}\b|rgba?\(' public/admin/css/admin.css` debe salir vacío.
+- Un cambio de CSS nunca justifica correr `npm run regression` ni `npm run test:paid`
+  (llaman a DeepSeek de verdad y cuestan plata). `src/ai/*` no se toca en ninguna fase.
