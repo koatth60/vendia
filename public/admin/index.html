@@ -448,8 +448,8 @@
         </button>
       </div>
 
-      <div class="catalog-split">
-      <div class="catalog-col-form">
+      <div class="catalog-forms">
+      <div>
       <div class="section-title">Agregar producto</div>
       <div class="card" id="new-product-card">
         <div class="grid-2">
@@ -515,7 +515,28 @@
       </div>
       </div>
 
-      <div class="catalog-col-list">
+      <div>
+        <div class="section-title">Sinónimos de categoría</div>
+        <div class="card">
+          <p class="hint" style="margin-top:0;">Si un cliente pide una categoría con una palabra distinta a la que usas en tu catálogo (ej. pide "reloj" pero tus productos dicen "smartwatch"; o pide "guineo" y tus productos dicen "banano"), agrega el sinónimo acá para que el bot los relacione. No hace falta para colores, esos ya los reconoce el bot solo.</p>
+          <div class="grid-2">
+            <div>
+              <label>Palabra que usas en tu catálogo</label>
+              <input id="ca-canonical" placeholder="Ej: smartwatch" />
+            </div>
+            <div>
+              <label>Palabra que puede usar el cliente</label>
+              <input id="ca-synonym" placeholder="Ej: reloj" />
+            </div>
+          </div>
+          <div class="actions-row">
+            <button class="btn-primary owner-only" onclick="addCategoryAlias()">+ Agregar sinónimo</button>
+          </div>
+          <div id="category-aliases-list" style="margin-top:16px; display:flex; flex-direction:column; gap:8px;"></div>
+        </div>
+      </div>
+      </div>
+
       <div class="section-title">Productos cargados<span class="section-count onix-num" id="products-total-count"></span></div>
       <input id="products-search" type="search" placeholder="Buscar por nombre o categoría" oninput="onProductsSearchInput()" style="margin-bottom:12px;" />
       <div id="products-container"></div>
@@ -523,27 +544,6 @@
         <button class="btn-secondary" id="products-prev-btn" onclick="goToPrevProductsPage()" disabled>‹ Anterior</button>
         <span id="products-page-label" class="crm-page-label">Página 1</span>
         <button class="btn-secondary" id="products-next-btn" onclick="goToNextProductsPage()" disabled>Siguiente ›</button>
-      </div>
-      </div>
-      </div>
-
-      <div class="section-title">Sinónimos de categoría</div>
-      <div class="card">
-        <p style="font-size:13px; color:var(--muted); margin-top:0;">Si un cliente pide una categoría con una palabra distinta a la que usas en tu catálogo (ej. pide "reloj" pero tus productos dicen "smartwatch"; o pide "guineo" y tus productos dicen "banano"), agrega el sinónimo acá para que el bot los relacione. No hace falta para colores, esos ya los reconoce el bot solo.</p>
-        <div class="grid-2">
-          <div>
-            <label>Palabra que usas en tu catálogo</label>
-            <input id="ca-canonical" placeholder="Ej: smartwatch" />
-          </div>
-          <div>
-            <label>Palabra que puede usar el cliente</label>
-            <input id="ca-synonym" placeholder="Ej: reloj" />
-          </div>
-        </div>
-        <div class="actions-row">
-          <button class="btn-primary owner-only" onclick="addCategoryAlias()">+ Agregar sinónimo</button>
-        </div>
-        <div id="category-aliases-list" style="margin-top:16px; display:flex; flex-direction:column; gap:8px;"></div>
       </div>
     </div>
 

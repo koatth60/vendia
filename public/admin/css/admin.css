@@ -46,15 +46,21 @@
      Se escribe una vez y lo usan las cinco secciones. Si alguna pantalla
      necesita "su" versión del sidebar, el problema es la pantalla. */
 
-  .app { display: flex; min-height: 100vh; }
+  /* El panel es una app, no un documento: alto exacto de la ventana y el
+     scroll adentro del contenido. Antes la página entera crecía, así que la
+     barra lateral se "terminaba" a mitad de camino y quedaba flotando. */
+  .app { display: flex; height: 100vh; overflow: hidden; }
 
   .sidebar {
     display: flex; flex-direction: column;
     width: var(--onix-sidebar-w); flex-shrink: 0;
-    height: 100vh; position: sticky; top: 0;
+    height: 100%; min-height: 0;
     background: var(--onix-surface-nav);
     border-right: 1px solid var(--onix-border);
   }
+  /* Si la navegación no cabe (pantalla baja), scrollea ella sola y el pie
+     de la barra sigue pegado abajo. */
+  .sidebar .tabbar { overflow-y: auto; min-height: 0; }
   .sidebar-brand {
     display: flex; align-items: center; gap: 10px;
     height: 60px; padding: 0 20px;
@@ -123,13 +129,16 @@
     background: var(--onix-surface-2);
   }
 
-  .app-main { display: flex; flex-direction: column; flex-grow: 1; min-width: 0; }
+  .app-main {
+    display: flex; flex-direction: column; flex-grow: 1;
+    min-width: 0; min-height: 0; overflow: hidden;
+  }
 
   .topbar {
     display: flex; align-items: center; gap: 16px;
     height: 60px; flex-shrink: 0; padding: 0 28px;
     background: var(--onix-bg); border-bottom: 1px solid var(--onix-border-soft);
-    position: sticky; top: 0; z-index: 20;
+    z-index: 20;
   }
   .bot-status {
     display: flex; align-items: center; gap: 7px; flex-shrink: 0;
@@ -143,7 +152,7 @@
      solo son ruido. */
   .subnav {
     display: none; align-items: center; gap: 4px;
-    height: 50px; padding: 0 28px;
+    height: 50px; flex-shrink: 0; padding: 0 28px;
     border-bottom: 1px solid var(--onix-border-soft);
   }
   .subnav.active { display: flex; overflow-x: auto; }
@@ -159,7 +168,11 @@
   /* En pantallas angostas la barra lateral se acuesta arriba: misma marca,
      mismos botones, sin columna fija que se coma el ancho. */
   @media (max-width: 900px) {
-    .app { flex-direction: column; }
+    /* Con la barra acostada arriba, el shell de alto fijo no sirve: acá manda
+       el scroll normal de la página, como en cualquier sitio en el celular. */
+    .app { flex-direction: column; height: auto; overflow: visible; }
+    .app-main { overflow: visible; min-height: 0; }
+    main { overflow: visible; }
     /* La lateral se acuesta: marca y usuario comparten la primera fila, la
        navegación toma la segunda a lo ancho. Sin huecos muertos. */
     .sidebar {
@@ -168,6 +181,7 @@
       width: 100%; height: auto; position: static;
       border-right: none; border-bottom: 1px solid var(--onix-border);
     }
+    .sidebar .tabbar { overflow-y: visible; }
     .sidebar-brand { grid-area: brand; height: auto; border-bottom: none; padding: 12px 16px; }
     .sidebar-foot {
       grid-area: foot; margin-top: 0;
@@ -249,8 +263,14 @@
   .note-item { border: 1px solid var(--border); border-radius: var(--radius-md); padding: 10px 12px; margin-bottom: 8px; background: var(--card); }
   .note-meta { font-size: 11px; color: var(--muted-soft); margin-top: 6px; }
 
-  main { max-width: 1180px; margin: 0 auto; padding: 26px 28px 64px; transition: max-width .15s ease; }
-  main.wide { max-width: none; padding-bottom: 16px; }
+  /* El contenido llena el ancho disponible, como en el diseño, y es el único
+     que scrollea. Sin max-width: con una barra lateral fija, volver a
+     centrar una columna angosta deja dos franjas muertas a los costados. */
+  main {
+    flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden;
+    padding: 26px 28px 40px;
+  }
+  main.wide { padding-bottom: 16px; }
 
   .tab-panel { display: none; animation: fadeIn .18s ease; }
   .tab-panel .card + .card { margin-top: 18px; }
@@ -790,7 +810,6 @@
   .table-scroll > table { min-width: 560px; }
 
   @media (max-width: 1240px) {
-    main { max-width: none; }
     .chat-split { height: clamp(420px, calc(100vh - 280px), 680px); }
   }
 
@@ -1250,18 +1269,19 @@
   }
 
   /* --- FASE 4 · Catálogo --------------------------------------------------- */
-  /* El formulario a la izquierda, lo que ya está cargado a la derecha: se
-     agrega un producto mirando los que ya existen, no a ciegas. */
-  .catalog-split {
+  /* Los dos formularios arriba, uno al lado del otro; las tarjetas debajo, a
+     todo lo ancho. Ponerlos en columnas paralelas dejaba un hueco muerto del
+     alto de la lista al lado del formulario corto. */
+  .catalog-forms {
     display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    gap: 24px; align-items: start;
+    gap: 24px; align-items: start; margin-bottom: 6px;
   }
-  .catalog-split .section-title:first-child { margin-top: 0; }
+  .catalog-forms > div > .section-title:first-child { margin-top: 0; }
   @media (max-width: 1100px) {
-    .catalog-split { grid-template-columns: 1fr; gap: 8px; }
+    .catalog-forms { grid-template-columns: 1fr; gap: 4px; }
   }
 
-  .product-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(258px, 1fr)); gap: 12px; }
+  .product-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
   .product-card {
     border: 1px solid var(--onix-border);
     border-radius: var(--onix-radius-panel);
