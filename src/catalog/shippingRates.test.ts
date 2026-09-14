@@ -8,6 +8,7 @@ import {
   deleteShippingRate,
   createShippingCityRule,
   deleteShippingCityRule,
+  listShippingCityRulesPage,
   resolveShippingRateForCity,
 } from "./shippingRates";
 
@@ -101,4 +102,51 @@ test("deleteShippingCityRule borra la regla y falla sobre un id de otro negocio"
   await deleteShippingCityRule(businessId, rule.id);
   assert.equal(await prisma.shippingCityRule.findUnique({ where: { id: rule.id } }), null);
   await prisma.business.delete({ where: { id: other.id } });
+});
+
+// listShippingCityRulesPage: paginacion del panel (Bot > Envíos > Reglas por ciudad), feedback del
+// dueño 2026-09-13 - una sola ciudad ambigua de Colombia puede terminar en cientos de filas.
+test("listShippingCityRulesPage pagina sin repetir ni saltar filas", async () => {
+  const business = await prisma.business.create({
+    data: { name: `CityPaging ${randomUUID()}`, email: `citypaging-${randomUUID()}@example.com`, passwordHash: "x" },
+  });
+  try {
+    for (const city of ["Bogota", "Medellin", "Cali", "Barranquilla", "Cartagena"]) {
+      await createShippingCityRule(business.id, { city, label: "Nacional" });
+    }
+    const page1 = await listShippingCityRulesPage(business.id, 0, 2);
+    assert.equal(page1.items.length, 2);
+    assert.equal(page1.total, 5);
+
+    const page2 = await listShippingCityRulesPage(business.id, 2, 2);
+    assert.equal(page2.items.length, 2);
+
+    const page1Ids = page1.items.map((r) => r.id);
+    const page2Ids = page2.items.map((r) => r.id);
+    assert.equal(page1Ids.some((id) => page2Ids.includes(id)), false);
+  } finally {
+    await prisma.shippingCityRule.deleteMany({ where: { businessId: business.id } });
+    await prisma.business.delete({ where: { id: business.id } });
+  }
+});
+
+test("listShippingCityRulesPage filtra por nombre de ciudad sin cruzar negocios", async () => {
+  const business = await prisma.business.create({
+    data: { name: `CitySearch ${randomUUID()}`, email: `citysearch-${randomUUID()}@example.com`, passwordHash: "x" },
+  });
+  const other = await prisma.business.create({
+    data: { name: `Other ${randomUUID()}`, email: `csother-${randomUUID()}@example.com`, passwordHash: "x" },
+  });
+  try {
+    await createShippingCityRule(business.id, { city: "Bogota", label: "Nacional" });
+    await createShippingCityRule(business.id, { city: "Bogota Norte", label: "Nacional" });
+    await createShippingCityRule(other.id, { city: "Bogota de otro negocio", label: "Nacional" });
+
+    const result = await listShippingCityRulesPage(business.id, 0, 20, "bogota");
+    assert.equal(result.total, 2);
+    assert.ok(result.items.every((r) => r.city.toLowerCase().includes("bogota")));
+  } finally {
+    await prisma.shippingCityRule.deleteMany({ where: { businessId: { in: [business.id, other.id] } } });
+    await prisma.business.deleteMany({ where: { id: { in: [business.id, other.id] } } });
+  }
 });

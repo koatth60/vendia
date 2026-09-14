@@ -10,6 +10,7 @@ import {
   updateProductVariant,
   deleteProductVariant,
   listActiveProducts,
+  listAllProductsPage,
   findProductsByAttributes,
   textMentionsConfiguredCategory,
 } from "./products";
@@ -607,5 +608,60 @@ test("textMentionsConfiguredCategory: a word from only ONE product's name does n
   } finally {
     await prisma.product.deleteMany({ where: { businessId: business.id } });
     await prisma.business.delete({ where: { id: business.id } });
+  }
+});
+
+// listAllProductsPage: paginacion del panel (Catálogo > Productos cargados), feedback del dueño
+// 2026-09-13 - un catálogo real puede pasar de cientos de SKUs. listAllProducts (sin paginar) queda
+// intacta para cualquier otro llamador; esta es la nueva, solo para la lista paginada.
+test("listAllProductsPage pagina en orden estable y el total no cambia entre páginas", async () => {
+  const business = await prisma.business.create({
+    data: { name: `Paging Test ${randomUUID()}`, email: `paging-${randomUUID()}@example.com`, passwordHash: "x" },
+  });
+  try {
+    for (let i = 0; i < 5; i++) {
+      await prisma.product.create({
+        data: { businessId: business.id, name: `Producto ${i}`, description: "x", price: 1000, currency: "COP" },
+      });
+    }
+    const page1 = await listAllProductsPage(business.id, 0, 2);
+    assert.equal(page1.items.length, 2);
+    assert.equal(page1.total, 5);
+    assert.equal(page1.items[0].name, "Producto 4", "orden por createdAt desc, el mas nuevo primero");
+
+    const page2 = await listAllProductsPage(business.id, 2, 2);
+    assert.equal(page2.items.length, 2);
+    assert.equal(page2.total, 5);
+
+    const page1Ids = page1.items.map((p) => p.id);
+    const page2Ids = page2.items.map((p) => p.id);
+    assert.equal(page1Ids.some((id) => page2Ids.includes(id)), false, "las páginas no se repiten filas");
+  } finally {
+    await prisma.product.deleteMany({ where: { businessId: business.id } });
+    await prisma.business.delete({ where: { id: business.id } });
+  }
+});
+
+test("listAllProductsPage filtra por nombre o categoría sin cruzar negocios", async () => {
+  const business = await prisma.business.create({
+    data: { name: `Search Test ${randomUUID()}`, email: `psearch-${randomUUID()}@example.com`, passwordHash: "x" },
+  });
+  const other = await prisma.business.create({
+    data: { name: `Other ${randomUUID()}`, email: `pother-${randomUUID()}@example.com`, passwordHash: "x" },
+  });
+  try {
+    await prisma.product.create({ data: { businessId: business.id, name: "Smartwatch V20", description: "x", price: 1000, currency: "COP", category: "Tecnología" } });
+    await prisma.product.create({ data: { businessId: business.id, name: "Diadema Roja", description: "x", price: 1000, currency: "COP" } });
+    await prisma.product.create({ data: { businessId: other.id, name: "Smartwatch de otro negocio", description: "x", price: 1000, currency: "COP" } });
+
+    const byName = await listAllProductsPage(business.id, 0, 20, "smartwatch");
+    assert.equal(byName.total, 1);
+    assert.equal(byName.items[0].name, "Smartwatch V20");
+
+    const byCategory = await listAllProductsPage(business.id, 0, 20, "tecnolog");
+    assert.equal(byCategory.total, 1);
+  } finally {
+    await prisma.product.deleteMany({ where: { businessId: { in: [business.id, other.id] } } });
+    await prisma.business.deleteMany({ where: { id: { in: [business.id, other.id] } } });
   }
 });

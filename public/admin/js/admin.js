@@ -477,21 +477,48 @@ async function resetTestData() {
 
 let editingId = null;
 let productsCache = [];
+// Paginación (feedback del dueño, 2026-09-13: un catálogo real puede pasar de cientos de SKUs).
+let productsPage = 1;
+let productsSearchTimer = null;
+
+function onProductsSearchInput() {
+  if (productsSearchTimer) clearTimeout(productsSearchTimer);
+  productsSearchTimer = setTimeout(() => { productsPage = 1; loadProducts(); }, 300);
+}
+
+async function goToNextProductsPage() {
+  productsPage++;
+  await loadProducts();
+}
+
+async function goToPrevProductsPage() {
+  if (productsPage <= 1) return;
+  productsPage--;
+  await loadProducts();
+}
 
 async function loadProducts() {
   const container = document.getElementById('products-container');
+  const searchInput = document.getElementById('products-search');
+  const q = searchInput ? searchInput.value.trim() : '';
+  const params = new URLSearchParams({ page: String(productsPage) });
+  if (q) params.set('q', q);
   try {
-    const res = await apiFetch('/admin/api/products');
-    const products = await res.json();
-    productsCache = products;
-    document.getElementById('tab-count-catalog').textContent = products.length;
+    const res = await apiFetch(`/admin/api/products?${params.toString()}`);
+    const { items, total, pageSize } = await res.json();
+    productsCache = items;
+    // El badge de la pestaña Catálogo debe mostrar el total real del negocio, no el tamaño de la
+    // página actual - por eso usa `total` (del servidor) en vez de items.length.
+    document.getElementById('tab-count-catalog').textContent = total;
 
-    if (products.length === 0) {
-      container.innerHTML = `<div class="card empty-state"><div class="big">🗂️</div>Todavía no cargaste productos.<br/>Agregá el primero arriba.</div>`;
-      return;
-    }
+    container.innerHTML = items.length === 0
+      ? `<div class="card empty-state"><div class="big">🗂️</div>${q ? 'Ningún producto coincide con la búsqueda.' : 'Todavía no cargaste productos.<br/>Agregá el primero arriba.'}</div>`
+      : `<div class="product-grid">${items.map(renderCard).join('')}</div>`;
 
-    container.innerHTML = `<div class="product-grid">${products.map(renderCard).join('')}</div>`;
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+    document.getElementById('products-page-label').textContent = `Página ${productsPage} de ${totalPages} (${total})`;
+    document.getElementById('products-prev-btn').disabled = productsPage <= 1;
+    document.getElementById('products-next-btn').disabled = productsPage >= totalPages;
   } catch (err) {
     container.innerHTML = `<div class="card empty-state" style="color:var(--danger);">No se pudo cargar el catálogo: ${escapeHtml(err.message)}</div>`;
   }
@@ -1049,6 +1076,12 @@ async function addProduct() {
   renderDraftVariants();
 
   setStatus(`Producto agregado ✓${created?.variants?.length ? ` con ${created.variants.length} variante(s)` : ''}`);
+  // Un producto nuevo aparece primero (orden createdAt desc) - sin volver a la página 1 y limpiar la
+  // búsqueda, podría quedar fuera de la página/filtro actual y scrollToAndHighlightProduct no
+  // encontraría la tarjeta para resaltarla.
+  productsPage = 1;
+  const searchInputEl = document.getElementById('products-search');
+  if (searchInputEl) searchInputEl.value = '';
   await loadProducts();
   // Jump straight to the new card - if it still needs variant photos, or more variants, they're right
   // there instead of making the owner scroll down to find it.
@@ -3696,19 +3729,50 @@ async function deleteShippingRate(id) {
   }
 }
 
+// Paginación (feedback del dueño, 2026-09-13: "en bot envíos está extremadamente larga" - una sola
+// ciudad ambigua de Colombia puede terminar en cientos de reglas). page/pageSize simple en vez de
+// cursor: acá no hace falta lo que Clientes sí necesitaba (orden por actividad reciente que se
+// mueve todo el tiempo) - createdAt es estable, un número de página normal alcanza.
+let shipCityRulesPage = 1;
+let shipCityRulesSearchTimer = null;
+
+function onShipCityRulesSearchInput() {
+  if (shipCityRulesSearchTimer) clearTimeout(shipCityRulesSearchTimer);
+  shipCityRulesSearchTimer = setTimeout(() => { shipCityRulesPage = 1; loadShippingCityRules(); }, 300);
+}
+
+async function goToNextShipCityRulesPage() {
+  shipCityRulesPage++;
+  await loadShippingCityRules();
+}
+
+async function goToPrevShipCityRulesPage() {
+  if (shipCityRulesPage <= 1) return;
+  shipCityRulesPage--;
+  await loadShippingCityRules();
+}
+
 async function loadShippingCityRules() {
   const container = document.getElementById('shipping-city-rules-list');
+  const q = document.getElementById('ship-city-rules-search').value.trim();
+  const params = new URLSearchParams({ page: String(shipCityRulesPage) });
+  if (q) params.set('q', q);
   try {
-    const res = await apiFetch('/admin/api/shipping-city-rules');
-    const rules = await res.json();
-    container.innerHTML = rules.length === 0
+    const res = await apiFetch(`/admin/api/shipping-city-rules?${params.toString()}`);
+    const { items, total, pageSize } = await res.json();
+    container.innerHTML = items.length === 0
       ? '<div style="font-size:13px; color:var(--muted);">Todavía no agregaste ninguna regla de ciudad.</div>'
-      : rules.map((r) => `
+      : items.map((r) => `
           <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px 12px; border:1px solid var(--border); border-radius:var(--radius-md);">
             <div style="font-size:13.5px;"><strong>${escapeHtml(r.city)}</strong> → ${escapeHtml(r.label)}</div>
             <button class="btn-danger" onclick="deleteShippingCityRule('${r.id}')">Eliminar</button>
           </div>
         `).join('');
+
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+    document.getElementById('ship-city-rules-page-label').textContent = `Página ${shipCityRulesPage} de ${totalPages} (${total})`;
+    document.getElementById('ship-city-rules-prev-btn').disabled = shipCityRulesPage <= 1;
+    document.getElementById('ship-city-rules-next-btn').disabled = shipCityRulesPage >= totalPages;
   } catch (err) {
     container.innerHTML = `<div style="font-size:13px; color:var(--danger);">No se pudieron cargar: ${escapeHtml(err.message)}</div>`;
   }
@@ -3729,6 +3793,7 @@ async function addShippingCityRule() {
     });
     setStatus('Regla agregada');
     document.getElementById('ship-city-name').value = '';
+    shipCityRulesPage = 1;
     loadShippingCityRules();
   } catch (err) {
     setStatus(`No se pudo agregar: ${err.message}`, true);
@@ -3837,8 +3902,16 @@ async function runGlobalSearch(q) {
   }
 }
 
+// Mapa id -> nombre de los productos del último resultado de búsqueda, para que
+// goToProductInCatalog pueda buscar por nombre (el catálogo ahora pagina - el producto puede no
+// estar en la página que cargue primero). Se guarda acá en vez de meter el nombre en el atributo
+// onclick para no tener que escapar comillas/backticks de un nombre de producto arbitrario dentro
+// de una cadena JS embebida en HTML.
+let lastSearchProductNames = {};
+
 function renderGlobalSearchResults(data) {
   const box = document.getElementById('global-search-results');
+  lastSearchProductNames = Object.fromEntries(data.products.map((p) => [p.id, p.name]));
   const groups = [
     { label: 'Clientes', items: data.customers, render: (c) => ({
         title: c.name || c.phoneNumber, meta: c.phoneNumber, action: `goToCustomerProfile('${c.id}')`,
@@ -3872,10 +3945,19 @@ function renderGlobalSearchResults(data) {
   box.hidden = false;
 }
 
-function goToProductInCatalog(productId) {
+async function goToProductInCatalog(productId) {
   hideGlobalSearchResults();
   document.getElementById('global-search-input').value = '';
   switchTab('catalog');
+  // El catálogo pagina (Fase "revisar dónde falta paginación", 2026-09-13) - el producto puede no
+  // estar en la primera página, así que se busca por nombre en vez de asumir que ya está en el DOM.
+  const name = lastSearchProductNames[productId];
+  if (name) {
+    const searchInput = document.getElementById('products-search');
+    searchInput.value = name;
+    productsPage = 1;
+    await loadProducts();
+  }
   setTimeout(() => {
     const card = document.querySelector(`.product-card[data-product-id="${productId}"]`);
     if (card) {

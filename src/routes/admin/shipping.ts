@@ -4,7 +4,7 @@ import {
   createShippingRate,
   updateShippingRate,
   deleteShippingRate,
-  listShippingCityRules,
+  listShippingCityRulesPage,
   createShippingCityRule,
   deleteShippingCityRule,
 } from "../../catalog/shippingRates";
@@ -57,8 +57,22 @@ shippingRouter.delete("/api/shipping-rates/:id", requireOwner, async (req, res) 
   }
 });
 
+// Paginado (feedback del dueño, 2026-09-13: una sola ciudad ambigua puede llevar a cientos de
+// reglas). page/pageSize en vez de cursor: a diferencia de Clientes, acá no hay un campo de
+// "actividad reciente" con el que ordenar de forma estable - createdAt asc alcanza, y con
+// pageSize fijo no hace falta el manejo de cursor-repetido-por-insert que Clientes sí necesitaba.
+const SHIPPING_CITY_RULES_PAGE_SIZE = 20;
+
 shippingRouter.get("/api/shipping-city-rules", async (req, res) => {
-  res.json(await listShippingCityRules(businessIdOf(req)));
+  const page = Math.max(1, Number(req.query.page) || 1);
+  const q = typeof req.query.q === "string" ? req.query.q.trim() : undefined;
+  const { items, total } = await listShippingCityRulesPage(
+    businessIdOf(req),
+    (page - 1) * SHIPPING_CITY_RULES_PAGE_SIZE,
+    SHIPPING_CITY_RULES_PAGE_SIZE,
+    q
+  );
+  res.json({ items, total, page, pageSize: SHIPPING_CITY_RULES_PAGE_SIZE });
 });
 
 shippingRouter.post("/api/shipping-city-rules", requireOwner, async (req, res) => {

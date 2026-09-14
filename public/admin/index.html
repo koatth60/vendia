@@ -500,7 +500,13 @@
       </div>
 
       <div class="section-title">Productos cargados</div>
+      <input id="products-search" type="search" placeholder="Buscar por nombre o categoría" oninput="onProductsSearchInput()" style="margin-bottom:12px;" />
       <div id="products-container"></div>
+      <div class="crm-pager">
+        <button class="btn-secondary" id="products-prev-btn" onclick="goToPrevProductsPage()" disabled>‹ Anterior</button>
+        <span id="products-page-label" class="crm-page-label">Página 1</span>
+        <button class="btn-secondary" id="products-next-btn" onclick="goToNextProductsPage()" disabled>Siguiente ›</button>
+      </div>
     </div>
 
     <div class="tab-panel" data-tab-panel="payments">
@@ -581,7 +587,13 @@
         <div class="actions-row">
           <button class="btn-primary" onclick="addShippingCityRule()">+ Agregar regla</button>
         </div>
-        <div id="shipping-city-rules-list" style="margin-top:16px; display:flex; flex-direction:column; gap:8px;"></div>
+        <input id="ship-city-rules-search" type="search" placeholder="Buscar ciudad" oninput="onShipCityRulesSearchInput()" style="margin-top:16px;" />
+        <div id="shipping-city-rules-list" style="margin-top:12px; display:flex; flex-direction:column; gap:8px;"></div>
+        <div class="crm-pager">
+          <button class="btn-secondary" id="ship-city-rules-prev-btn" onclick="goToPrevShipCityRulesPage()" disabled>‹ Anterior</button>
+          <span id="ship-city-rules-page-label" class="crm-page-label">Página 1</span>
+          <button class="btn-secondary" id="ship-city-rules-next-btn" onclick="goToNextShipCityRulesPage()" disabled>Siguiente ›</button>
+        </div>
       </div>
     </div>
 

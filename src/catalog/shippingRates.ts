@@ -35,6 +35,24 @@ export async function listShippingCityRules(businessId: string) {
   return prisma.shippingCityRule.findMany({ where: { businessId }, orderBy: { createdAt: "asc" } });
 }
 
+// Paginada, para la lista del panel (Bot > Envíos > Reglas por ciudad) - una sola ciudad ambigua de
+// Colombia son ~1.122 municipios posibles y un negocio real puede terminar con cientos de filas acá
+// (feedback del dueño, 2026-09-13: la lista sin paginar quedaba "extremadamente larga"). Funcion
+// NUEVA y separada de listShippingCityRules de arriba a proposito: esa la sigue usando solo el
+// panel en ningun otro lado hoy, pero mantenerlas separadas evita que un cambio futuro que SI la
+// comparta con el agente herede un limite por accidente.
+export async function listShippingCityRulesPage(businessId: string, skip: number, take: number, q?: string) {
+  const where = q ? { businessId, city: { contains: q, mode: "insensitive" as const } } : { businessId };
+  const [items, total] = await Promise.all([
+    // id asc como desempate, mismo motivo que listAllProductsPage: createdAt puede empatar entre
+    // filas cargadas rapido seguidas (ej. una carga masiva de ciudades) y sin desempate el orden
+    // entre esas filas no es estable de una pagina a la siguiente.
+    prisma.shippingCityRule.findMany({ where, orderBy: [{ createdAt: "asc" }, { id: "asc" }], skip, take }),
+    prisma.shippingCityRule.count({ where }),
+  ]);
+  return { items, total };
+}
+
 export async function createShippingCityRule(businessId: string, data: { city: string; label: string }) {
   return prisma.shippingCityRule.create({
     data: { businessId, city: data.city.trim(), normalizedCity: normalizeForMatch(data.city.trim()), label: data.label },

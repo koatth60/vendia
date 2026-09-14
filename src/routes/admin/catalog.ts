@@ -4,7 +4,7 @@ import {
   deleteProduct,
   deleteProductMedia,
   assignProductMedia,
-  listAllProducts,
+  listAllProductsPage,
   updateProduct,
   addProductMedia,
   createProductVariant,
@@ -19,9 +19,14 @@ import { upload, businessIdOf, isUnsupportedImageType } from "./shared";
 
 export const catalogRouter = Router();
 
+// Paginado (feedback del dueño, 2026-09-13: un catálogo real puede pasar de cientos de SKUs).
+const PRODUCTS_PAGE_SIZE = 20;
+
 catalogRouter.get("/api/products", async (req, res) => {
-  const products = await listAllProducts(businessIdOf(req));
-  res.json(products);
+  const page = Math.max(1, Number(req.query.page) || 1);
+  const q = typeof req.query.q === "string" ? req.query.q.trim() : undefined;
+  const { items, total } = await listAllProductsPage(businessIdOf(req), (page - 1) * PRODUCTS_PAGE_SIZE, PRODUCTS_PAGE_SIZE, q);
+  res.json({ items, total, page, pageSize: PRODUCTS_PAGE_SIZE });
 });
 
 catalogRouter.post("/api/products", async (req, res) => {

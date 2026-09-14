@@ -59,6 +59,27 @@ export async function listAllProducts(businessId: string) {
   return withFreshMediaUrls(products);
 }
 
+// Paginada, para el panel (Catálogo > Productos cargados) - un catálogo real puede pasar de cientos
+// de SKUs (feedback del dueño, 2026-09-13: paginar donde una lista pueda crecer mucho, no solo
+// Clientes/Envíos). listAllProducts de arriba queda intacta y sigue siendo la que usa cualquier otra
+// cosa que necesite el catálogo completo de una - esta es nueva, solo para la lista paginada.
+export async function listAllProductsPage(businessId: string, skip: number, take: number, q?: string) {
+  const where = q
+    ? { businessId, OR: [{ name: { contains: q, mode: "insensitive" as const } }, { category: { contains: q, mode: "insensitive" as const } }] }
+    : { businessId };
+  const [products, total] = await Promise.all([
+    // id desc como desempate: createdAt puede empatar en inserciones rapidas seguidas (ej. una carga
+    // masiva), y sin un segundo criterio el orden entre esas filas empatadas no es estable - una
+    // misma fila podria aparecer en dos páginas seguidas o saltarse una, el mismo problema de fondo
+    // que la paginacion por cursor de Clientes (Fase 2) ya evitaba con su propio desempate por id.
+    prisma.product.findMany({ where, include: PRODUCT_INCLUDE, orderBy: [{ createdAt: "desc" }, { id: "desc" }], skip, take }),
+    prisma.product.count({ where }),
+  ]);
+  await withFreshVariantMediaUrls(products);
+  const items = await withFreshMediaUrls(products);
+  return { items, total };
+}
+
 export async function getProductById(businessId: string, id: string) {
   const product = await prisma.product.findFirst({
     where: { id, businessId },
