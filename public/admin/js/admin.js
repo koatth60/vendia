@@ -909,6 +909,40 @@ function escapeHtml(str) {
   return String(str ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
+// Las tarjetas de "Salud del bot" salen en dos vistas (Bot > Salud, y el detalle de uso/costos). Estaban
+// escritas dos veces con marcado distinto - una con .metric-card y otra con .card y tamaños en línea - así
+// que la cuarta tarjeta se veía bien en una y rompía la grilla de 3 columnas en la otra. Una sola función
+// para las dos: metric-grid es auto-fit, así que acomoda cuantas tarjetas haya sin tocar nada más.
+function botHealthCardsHtml(incidents, extraStyle = '') {
+  const degraded = incidents.degradedReplies + incidents.loopExhausted;
+  const lastFailure = incidents.lastExternalApiFailure;
+  return `
+    <div class="metric-grid"${extraStyle ? ` style="${extraStyle}"` : ''}>
+      <div class="metric-card">
+        <div class="label">Conversaciones estancadas</div>
+        <div class="value"${incidents.stalledConversations > 0 ? ' style="color:var(--onix-warn);"' : ''}>${incidents.stalledConversations}</div>
+        <div class="sub">Pausadas esperando a un humano</div>
+      </div>
+      <div class="metric-card">
+        <div class="label">Respuestas degradadas (7 días)</div>
+        <div class="value"${degraded > 0 ? ' style="color:var(--onix-danger);"' : ''}>${degraded}</div>
+        <div class="sub">${incidents.loopExhausted} por agotar herramientas · ${incidents.degradedReplies} genéricas</div>
+      </div>
+      <div class="metric-card">
+        <div class="label">Intervenciones de respaldo</div>
+        <div class="value">${incidents.backstopInterventions}</div>
+        <div class="sub">El bot prometió algo y el sistema lo completó</div>
+      </div>
+      <div class="metric-card">
+        <div class="label">Fallos de servicios externos (7 días)</div>
+        <div class="value"${incidents.externalApiFailures > 0 ? ' style="color:var(--onix-danger);"' : ''}>${incidents.externalApiFailures}</div>
+        <div class="sub${lastFailure ? ' sub-clamp' : ''}"${lastFailure ? ` title="${escapeHtml(lastFailure.detail)}"` : ''}>${lastFailure
+          ? escapeHtml(lastFailure.detail)
+          : 'Análisis de fotos y otros servicios respondiendo bien'}</div>
+      </div>
+    </div>`;
+}
+
 // WhatsApp bold is *text* (single asterisk); older messages sent before the formatting fix may still
 // have **text** (Markdown-style). Render both as <strong> so history looks right either way.
 function formatMessageText(str) {
@@ -2881,30 +2915,7 @@ async function loadAiUsage() {
             </table>`}
       </div>
       <div class="section-title" style="margin-top:24px;">Salud del bot (últimos 7 días)</div>
-      <div class="grid-3">
-        <div class="card">
-          <div style="font-size:12px; color:var(--muted);">Conversaciones estancadas ahora</div>
-          <div style="font-size:24px; font-weight:700; ${incidents.stalledConversations > 0 ? 'color:var(--onix-warn);' : ''}">${incidents.stalledConversations}</div>
-          <div style="font-size:12px; color:var(--muted);">Pausadas (humano) esperando respuesta</div>
-        </div>
-        <div class="card">
-          <div style="font-size:12px; color:var(--muted);">Respuestas degradadas</div>
-          <div style="font-size:24px; font-weight:700; ${incidents.degradedReplies > 0 ? 'color:var(--danger);' : ''}">${incidents.degradedReplies + incidents.loopExhausted}</div>
-          <div style="font-size:12px; color:var(--muted);">${incidents.loopExhausted} agotamiento de herramientas · ${incidents.degradedReplies} genéricas</div>
-        </div>
-        <div class="card">
-          <div style="font-size:12px; color:var(--muted);">Intervenciones de respaldo</div>
-          <div style="font-size:24px; font-weight:700;">${incidents.backstopInterventions}</div>
-          <div style="font-size:12px; color:var(--muted);">Veces que el bot prometió algo y el sistema lo completó</div>
-        </div>
-        <div class="card">
-          <div style="font-size:12px; color:var(--muted);">Fallos de servicios externos</div>
-          <div style="font-size:24px; font-weight:700; ${incidents.externalApiFailures > 0 ? 'color:var(--danger);' : ''}">${incidents.externalApiFailures}</div>
-          <div style="font-size:12px; color:var(--muted);">${incidents.lastExternalApiFailure
-            ? escapeHtml(incidents.lastExternalApiFailure.detail).slice(0, 140)
-            : 'Análisis de fotos y otros servicios respondiendo bien'}</div>
-        </div>
-      </div>
+      ${botHealthCardsHtml(incidents)}
       <div class="section-title" style="margin-top:24px;">Chequeo de configuración<span class="section-count onix-num">${configHealthScore(health)}</span></div>
       ${configHealthChecklistHtml(health)}
     `;
@@ -3794,30 +3805,7 @@ async function loadHealth() {
         `).join('');
 
     container.innerHTML = `
-      <div class="metric-grid" style="margin-bottom:16px;">
-        <div class="metric-card">
-          <div class="label">Conversaciones estancadas</div>
-          <div class="value" ${incidents.stalledConversations > 0 ? 'style="color:var(--warn);"' : ''}>${incidents.stalledConversations}</div>
-          <div class="sub">Pausadas esperando a un humano</div>
-        </div>
-        <div class="metric-card">
-          <div class="label">Respuestas degradadas (7 días)</div>
-          <div class="value" ${incidents.degradedReplies + incidents.loopExhausted > 0 ? 'style="color:var(--danger);"' : ''}>${incidents.degradedReplies + incidents.loopExhausted}</div>
-          <div class="sub">${incidents.loopExhausted} por agotar herramientas · ${incidents.degradedReplies} genéricas</div>
-        </div>
-        <div class="metric-card">
-          <div class="label">Intervenciones de respaldo</div>
-          <div class="value">${incidents.backstopInterventions}</div>
-          <div class="sub">El bot prometió algo y el sistema lo completó</div>
-        </div>
-        <div class="metric-card">
-          <div class="label">Fallos de servicios externos (7 días)</div>
-          <div class="value" ${incidents.externalApiFailures > 0 ? 'style="color:var(--danger);"' : ''}>${incidents.externalApiFailures}</div>
-          <div class="sub">${incidents.lastExternalApiFailure
-            ? escapeHtml(incidents.lastExternalApiFailure.detail).slice(0, 120)
-            : 'Análisis de fotos y otros servicios respondiendo bien'}</div>
-        </div>
-      </div>
+      ${botHealthCardsHtml(incidents, 'margin-bottom:16px;')}
 
       <div class="section-title">Preguntas del bot sin responder</div>
       <div class="card">
