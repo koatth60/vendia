@@ -55,6 +55,26 @@ whatsappConnectRouter.post("/api/whatsapp/connect", async (req, res) => {
 
   const businessId = businessIdOf(req);
 
+  // Un negocio YA conectado no se puede pisar por accidente. MAG.IMP corre en produccion con clientes
+  // reales: si alguien completa este flujo desde su panel con otro numero, le cambia el token y el
+  // phoneNumberId, y su bot deja de contestar SIN ningun error visible - el peor modo de falla que
+  // existe, porque nadie se entera hasta que un cliente reclama. Sobrescribir tiene que ser una
+  // decision explicita (replace:"true"), nunca el resultado de un clic de mas. La guarda vive en el
+  // servidor y no en un dialogo del navegador a proposito: un confirm() se pasa de un enter sin leer,
+  // y no protege nada si el request llega de otro lado.
+  const existing = await prisma.business.findUnique({
+    where: { id: businessId },
+    select: { whatsappPhoneNumberId: true, whatsappAccessToken: true, whatsappPhoneNumber: true },
+  });
+  if (existing?.whatsappPhoneNumberId && existing?.whatsappAccessToken && String(req.body?.replace ?? "") !== "true") {
+    const label = existing.whatsappPhoneNumber ?? existing.whatsappPhoneNumberId;
+    res.status(409).json({
+      error: `Este negocio ya tiene WhatsApp conectado (${label}). No se sobrescribe solo: hay que desconectarlo a proposito primero.`,
+      alreadyConnected: true,
+    });
+    return;
+  }
+
   try {
     const { accessToken, expiresInSeconds } = await exchangeCodeForToken(code);
 

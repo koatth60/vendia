@@ -4469,10 +4469,13 @@ function renderWhatsappConnection(conn) {
 
   if (conn.connected) {
     const label = conn.phoneNumber ? escapeHtml(conn.phoneNumber) : `ID ${escapeHtml(conn.phoneNumberId || '')}`;
+    // A proposito SIN boton de reconectar. Un negocio conectado y funcionando no tiene ninguna razon
+    // de rutina para volver a pasar por este flujo, y el unico resultado posible de un clic de mas es
+    // dejarlo apuntando a otro numero - o sea, romperle el bot a un cliente que estaba bien. Cambiar
+    // de numero es una operacion rara y deliberada: se hace desde la consola de plataforma.
     stateEl.innerHTML = `
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--onix-success)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="m8.5 12 2.5 2.5 4.5-5"/></svg>
-      <span>Conectado — <strong>${label}</strong></span>
-      <button class="btn-secondary" type="button" onclick="startWhatsappSignup()">Reconectar</button>`;
+      <span>Conectado — <strong>${label}</strong></span>`;
     return;
   }
 
