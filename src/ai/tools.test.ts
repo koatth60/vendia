@@ -191,6 +191,37 @@ test("flag_conversation_intent escalates when the customer asks for a human agen
   }
 });
 
+// Fase 9 del plan maestro (2026-09-15): defecto real - "Cerrar conversation" se escalo como
+// SOLICITA_AGENTE sin que el cliente hubiera pedido un humano. El dueno necesita ver, desde la propia
+// alerta, si fue el modelo el que dedujo el intent o si el cliente lo pidio con sus palabras.
+test("flag_conversation_intent marks the owner alert when the model inferred the intent instead of the customer stating it", async () => {
+  stubWhatsappFetch();
+  try {
+    const context = await freshContext();
+    await runCatalogTool(context, "flag_conversation_intent", { intent: "SOLICITA_AGENTE", explicit: false });
+
+    const conversation = await prisma.conversation.findUniqueOrThrow({ where: { id: context.conversationId } });
+    assert.equal(conversation.intentExplicit, false);
+    assert.match(sentMessages[0].body, /dedujo del contexto/i);
+  } finally {
+    restoreFetch();
+  }
+});
+
+test("flag_conversation_intent does not flag the owner alert when the customer explicitly asked for it", async () => {
+  stubWhatsappFetch();
+  try {
+    const context = await freshContext();
+    await runCatalogTool(context, "flag_conversation_intent", { intent: "SOLICITA_AGENTE", explicit: true });
+
+    const conversation = await prisma.conversation.findUniqueOrThrow({ where: { id: context.conversationId } });
+    assert.equal(conversation.intentExplicit, true);
+    assert.doesNotMatch(sentMessages[0].body, /dedujo del contexto/i);
+  } finally {
+    restoreFetch();
+  }
+});
+
 test("show_order_summary computes the real subtotal/total from the catalog, never from the caller's own math", async () => {
   const product = await prisma.product.create({
     data: { businessId, name: `Producto Resumen ${randomUUID()}`, description: "x", price: 45000, currency: "COP", stock: 10 },

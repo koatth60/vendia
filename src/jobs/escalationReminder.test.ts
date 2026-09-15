@@ -387,3 +387,67 @@ test("runEscalationReminderJob alerts the owner but never the customer on a plai
     await prisma.customer.deleteMany({ where: { id: customer.id } });
   }
 });
+
+// Fase 9 del plan maestro (2026-09-15): defecto real - flag_conversation_intent escalo SOLICITA_AGENTE
+// porque el cliente escribio "Cerrar conversation" (nunca pidio un asesor), y sin este escape la
+// conversacion quedaba muda para siempre porque el dueno nunca la iba a responder. Business.intentEscalationTimeoutHours
+// default es 48h (ver schema.prisma), asi que humanControlSince 50h atras ya la vence.
+test("runEscalationReminderJob returns control to the bot when a flag_conversation_intent escalation times out, and flags when it was inferred", async () => {
+  stubWhatsappFetch();
+  const customer = await prisma.customer.create({ data: { businessId, phoneNumber: `573014${Date.now()}` } });
+  const since = new Date(Date.now() - 50 * 60 * 60 * 1000);
+  const conv = await prisma.conversation.create({
+    data: { customerId: customer.id, humanControl: true, intent: "SOLICITA_AGENTE", intentExplicit: false, humanControlSince: since },
+  });
+  try {
+    await prisma.message.create({
+      data: { conversationId: conv.id, role: "CUSTOMER", content: "Cerrar conversation", createdAt: since },
+    });
+
+    await runEscalationReminderJob();
+
+    const ownerAlert = sentMessages.find((m) => /devolvimos al bot/i.test(m.body));
+    assert.ok(ownerAlert, "must send an alert telling the owner control went back to the bot");
+    assert.match(ownerAlert!.body, /dedujo del contexto/i, "must flag that this was the model's own guess, not the customer's words");
+
+    const updated = await prisma.conversation.findUniqueOrThrow({ where: { id: conv.id } });
+    assert.equal(updated.humanControl, false, "the bot must recover control instead of staying muted forever");
+    assert.equal(updated.intent, null);
+    assert.equal(updated.intentExplicit, null);
+
+    const incident = await prisma.agentIncident.findFirst({ where: { conversationId: conv.id, kind: "INTENT_ESCALATION_TIMEOUT" } });
+    assert.ok(incident, "must leave a queryable trace on the panel");
+  } finally {
+    restoreFetch();
+    await prisma.agentIncident.deleteMany({ where: { conversationId: conv.id } });
+    await prisma.message.deleteMany({ where: { conversationId: conv.id } });
+    await prisma.conversation.deleteMany({ where: { id: conv.id } });
+    await prisma.customer.deleteMany({ where: { id: customer.id } });
+  }
+});
+
+test("runEscalationReminderJob does not flag the owner note when the customer explicitly asked for an agent", async () => {
+  stubWhatsappFetch();
+  const customer = await prisma.customer.create({ data: { businessId, phoneNumber: `573015${Date.now()}` } });
+  const since = new Date(Date.now() - 50 * 60 * 60 * 1000);
+  const conv = await prisma.conversation.create({
+    data: { customerId: customer.id, humanControl: true, intent: "SOLICITA_AGENTE", intentExplicit: true, humanControlSince: since },
+  });
+  try {
+    await prisma.message.create({
+      data: { conversationId: conv.id, role: "CUSTOMER", content: "Quiero hablar con un asesor", createdAt: since },
+    });
+
+    await runEscalationReminderJob();
+
+    const ownerAlert = sentMessages.find((m) => /devolvimos al bot/i.test(m.body));
+    assert.ok(ownerAlert);
+    assert.doesNotMatch(ownerAlert!.body, /dedujo del contexto/i, "a real customer request must not be flagged as a guess");
+  } finally {
+    restoreFetch();
+    await prisma.agentIncident.deleteMany({ where: { conversationId: conv.id } });
+    await prisma.message.deleteMany({ where: { conversationId: conv.id } });
+    await prisma.conversation.deleteMany({ where: { id: conv.id } });
+    await prisma.customer.deleteMany({ where: { id: customer.id } });
+  }
+});

@@ -24,6 +24,7 @@ import {
   customerDisplayName,
   getOrCreateCustomer,
   recordMessageDeliveryStatus,
+  getOrCreateOpenConversation,
 } from "./service";
 import { realtimeEvents } from "../realtime/events";
 
@@ -686,5 +687,34 @@ test("recordMessageDeliveryStatus ignora un wamid desconocido o un status que no
   assert.equal(updated.deliveryStatus, null);
 
   await prisma.message.deleteMany({ where: { conversationId: conversation.id } });
+  await prisma.conversation.deleteMany({ where: { id: conversation.id } });
+});
+
+// Fase 9 del plan maestro (2026-09-15): ABANDONED no es un rechazo como LOST - si el cliente vuelve a
+// escribir despues de irse en silencio, la conversacion se reabre (no se crea una nueva) para no perder
+// el SaleState/carrito que ya tenia armado.
+test("getOrCreateOpenConversation reopens an ABANDONED conversation (back to NEW) instead of creating a new one", async () => {
+  const conversation = await prisma.conversation.create({
+    data: { customerId, status: "ABANDONED", cartRecoverySentAt: new Date() },
+  });
+
+  const reopened = await getOrCreateOpenConversation(businessId, customerId);
+
+  assert.equal(reopened.id, conversation.id, "must reuse the same conversation, not create a new one");
+  assert.equal(reopened.status, "NEW");
+  assert.equal(reopened.cartRecoverySentAt, null, "a later abandonment must be able to send the template again");
+
+  await prisma.conversation.deleteMany({ where: { id: conversation.id } });
+});
+
+test("getOrCreateOpenConversation never reopens a LOST conversation - it starts a fresh one, same as always", async () => {
+  const conversation = await prisma.conversation.create({ data: { customerId, status: "LOST" } });
+
+  const result = await getOrCreateOpenConversation(businessId, customerId);
+
+  assert.notEqual(result.id, conversation.id);
+  assert.equal(result.status, "NEW");
+
+  await prisma.conversation.deleteMany({ where: { id: result.id } });
   await prisma.conversation.deleteMany({ where: { id: conversation.id } });
 });
