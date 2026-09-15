@@ -11,7 +11,7 @@ import { recordAgentIncident } from "./incidents";
 import { listActiveProducts, textMentionsConfiguredCategory } from "../catalog/products";
 import { listActivePaymentMethods } from "../catalog/paymentMethods";
 import { buildCheckoutState } from "../orders/checkoutStateFromDb";
-import { getSaleState, formatSaleStateForPrompt } from "../orders/saleState";
+import { getSaleState, formatSaleStateForPrompt, getBlockedBy } from "../orders/saleState";
 import { canonicalColors } from "../catalog/attributeTaxonomy";
 import { tokenize, normalizeForMatch } from "../search/text";
 import { buildSystemPrompt, type BotPersonality } from "./prompts/systemPrompt";
@@ -212,57 +212,22 @@ export const NON_PRODUCT_PHOTO_PATTERN =
 export const FAKE_MEDIA_TAG_PATTERN = /\[[^\]]{0,60}\b(?:fotos?|videos?)\b[^\]]{0,60}\]/i;
 export const MEDIA_TAG_STRIP_PATTERN = /\[[^\]]{0,60}\b(?:fotos?|videos?)\b[^\]]{0,60}\]/gi;
 
-// Shared guard for the three claim-patterns below: each was built to catch a dropped-promise bug (model
-// says it'll do something, never calls the real tool), but the same claim wording also shows up inside a
-// conditional OFFER still awaiting the customer's go-ahead ("¿Quieres que consulte con el equipo?", "Si
-// prefieres te comparto las opciones de pago", "...en cuanto confirmes el pedido") - not a claim that the
-// action already happened. Confirmed same bug class as PHOTO_CLAIM_PATTERN/OPEN_CLARIFYING_QUESTION_PATTERN
-// above (2026-09-12 photo regression): without this, ask_owner/get_payment_methods/search_products fire on
-// an unresolved offer, before the customer agreed to it - worst case is ESCALATION, which pings the real
-// owner with no customer consent. Verified against both the offer phrasings above and the original
-// dropped-promise phrasings each pattern was built for (see agent.claimBackstopGuards.test.ts) - the guard
-// doesn't suppress the real cases, only the conditional-offer ones.
+// Guard for the media claim patterns below: catches a dropped-promise bug (model says it'll do
+// something, never calls the real tool), but the same claim wording also shows up inside a conditional
+// OFFER still awaiting the customer's go-ahead ("Dime el numero y te paso fotos", "...en cuanto
+// confirmes el pedido") - not a claim that the action already happened. The escalation/payment/catalog/
+// shipping-modality siblings this guard used to also cover were deleted in Fase 4 of the plan maestro
+// (2026-09-15): escalation is now a real state (PendingOwnerQuestion + SaleState.blockedBy, see
+// finalizeTurn) instead of prose the model could claim without ever calling the tool, so there is no
+// claim text left to guard against for those three.
 export const OFFER_OR_PENDING_CONFIRMATION_PATTERN =
   /\b(si (quieres|prefieres|gustas|deseas)|(quieres|prefieres|gustar[ií]as?|gustas|deseas)\b.{0,15}\bque\b|en cuanto (confirmes|me digas|decidas|me cuentes))/i;
-
-// Same failure mode as the photo claim above, for escalation: the model says "ya consulto con el
-// equipo" / "dejame confirmar con el equipo" without actually calling ask_owner - confirmed against a
-// real conversation where a customer's shipping-cost question got this exact non-answer and the owner
-// never received anything, because no tool call ever fired. The system prompt already tells it not to
-// do this (see PROMETER NO ES HACER) - this is the code-level backstop for when that's not enough.
-export const ESCALATION_CLAIM_PATTERN =
-  /\b(equipo|due[ñn][oa]s?)\b.{0,25}\b(consult|confirm|pregunt|revis)|\b(consult|confirm|pregunt|revis)\w*\b.{0,25}\b(equipo|due[ñn][oa]s?)\b/i;
-
-// Same failure mode once more, this time for get_payment_methods: the bot asks "que medio prefieres
-// usar? te comparto las opciones disponibles" and ends the turn right there without ever calling the
-// tool or listing anything - confirmed against a real conversation where the customer had to ask
-// "opciones de pago" again before getting an actual answer. No digit run at all in the text is the tell
-// that nothing real was attached (a message that actually lists payment methods always has numbers in
-// it).
-export const PAYMENT_OPTIONS_CLAIM_PATTERN = /\b(te comparto|te paso|aqu[ií] (est[aá]n|tenes)|estas son)\b.{0,20}\bopciones\b/i;
-
-// Same dropped-promise family, for shipping-PAYMENT-MODALITY (who pays shipping and when - see
-// Business.shippingPaymentModalities in schema.prisma) - a different axis from PAYMENT_OPTIONS_CLAIM_PATTERN
-// above (which channel: Nequi/tarjeta/etc). Only relevant for businesses that configured this concept at
-// all - gated separately in finalizeTurn, not by this pattern alone.
-export const SHIPPING_MODALITY_CLAIM_PATTERN =
-  /\b(anticipado|contraentrega|contra entrega)\b.{0,25}\b(opciones|modalidad(es)?|prefer[ií]s?|prefier(es|e)?|elegir)\b|\b(opciones|modalidad(es)?)\b.{0,25}\b(anticipado|contraentrega|contra entrega)\b/i;
-
-// Same failure mode once more, this time for the catalog: the bot says "dejame revisar el catalogo para
-// confirmarte bien" (or similar) and stops there without ever calling search_products/list_all_products -
-// confirmed against a real conversation where the customer had no idea the bot was waiting on anything and
-// the owner had to take over manually just to get the bot to continue. Fires only when no catalog tool ran
-// this turn - re-runs search_products with the customer's own message as the query (search_products
-// already falls back to the full catalog on no keyword match, see CATALOGO above) and appends a plain list
-// so the customer gets something real instead of a dropped promise.
-export const CATALOG_CHECK_CLAIM_PATTERN =
-  /\bcat[aá]logo\b.{0,25}\b(revis|confirm|consult|chequ|mir[ao])|\b(revis|confirm|consult|chequ|mir[ao])\w*\b.{0,25}\bcat[aá]logo\b/i;
 
 // Real production bug (2026-09-15): the model told a customer "Ese modelo... no tiene variantes de
 // color cargadas" for a product that had 3 real active color variants with stock, seconds after
 // get_product_details itself returned that data. Not a dropped-promise pattern like the ones above (no
 // tool call is missing here), so this is checked separately in finalizeTurn against hasVariantsThisTurn
-// - the real, just-fetched answer - not repaired through applyClaimBackstops's registry.
+// - the real, just-fetched answer.
 export const VARIANT_DENIAL_PATTERN =
   /no tiene variantes|no maneja(mos)? variantes|no hay variantes|una sola presentaci[oó]n|no viene en (otros? )?colores?|no tenemos (otros? )?colores?/i;
 
@@ -872,43 +837,6 @@ function lastAssistantText(history: { role: string; content: string }[]): string
   return "";
 }
 
-// The "model claimed X happened but never called the real tool" backstops (payment options, shipping
-// modality, catalog check, escalation) all repeat the exact same shape: skip if the real tool already ran
-// this turn, skip unless some extra per-guard condition holds, then check CLAIM_PATTERN vs the shared
-// OFFER_OR_PENDING_CONFIRMATION_PATTERN suppressor. This registry replaces four copy-pasted if-blocks with
-// one loop (reliability plan Phase 1, 2026-09-13) - pure refactor, no behavior change. Verified against
-// agent.claimBackstopGuards.test.ts and agent.corePersonality.test.ts.
-type ClaimBackstopGuard = {
-  name: string;
-  pattern: RegExp;
-  suppressor: RegExp;
-  alreadyHandled: boolean;
-  extraCondition: boolean;
-  // Match against a markdown-stripped copy of the CURRENT turn's text, not the real text - closes the
-  // same gap stripMarkdownEmphasis already closed for lastAssistantText/history (see that function's
-  // comment): the model's own bolded "*te comparto* las opciones" would otherwise silently disarm this
-  // backstop, since the pattern expects the key phrase as contiguous plain text.
-  matchAgainstStrippedText?: boolean;
-  repair: (text: string) => Promise<string>;
-};
-
-async function applyClaimBackstops(
-  text: string,
-  guards: ClaimBackstopGuard[],
-  businessId: string,
-  conversationId: string
-): Promise<string> {
-  for (const guard of guards) {
-    if (guard.alreadyHandled || !guard.extraCondition) continue;
-    const testText = guard.matchAgainstStrippedText ? stripMarkdownEmphasis(text) : text;
-    if (guard.pattern.test(testText) && !guard.suppressor.test(testText)) {
-      text = await guard.repair(text);
-      await recordAgentIncident(businessId, "BACKSTOP_INTERVENTION", `Guard "${guard.name}" reparo una promesa incumplida`, conversationId, guard.name);
-    }
-  }
-  return text;
-}
-
 // B4 (2026-09-13 audit): when finalizeTurn ends up sending the generic FALLBACK_TEXT apology, or the
 // tool-calling loop exhausts all 5 iterations without a real answer, the customer gets a dead end and
 // nobody - not even the owner - ever finds out unless they happen to read server logs. This surfaces it
@@ -937,8 +865,7 @@ async function alertOwnerOfDegradedReply(context: ToolContext, reason: string): 
 // alert, no trace except the customer eventually asking a human to send them by hand). Both media
 // backstop branches above call this whenever they tried to send (or had a real candidate to send) and
 // still ended the turn with zero actual sends - the model's own text already claims photos went out, so
-// leaving it as-is would ship a dropped promise with no record and no honest correction. Unlike the
-// claim backstops in applyClaimBackstops (which repair a claim by actually doing the thing), there is no
+// leaving it as-is would ship a dropped promise with no record and no honest correction. There is no
 // "just call the tool again" fix here - the tool already ran and failed/found nothing - so this alerts
 // the owner for real (the text below only says "avise al equipo" because it's about to be true) and
 // appends an honest, non-promising line instead of leaving the false claim standing alone.
@@ -978,6 +905,12 @@ export async function generateReply(
   // paga el costo de tokens de un tool que no puede usar.
   const tools = personality?.saleStateEnabled ? [...catalogTools, ...saleStateTools] : catalogTools;
 
+  // Fase 4 del plan maestro (2026-09-15), causa raiz C2: si esta conversacion ya tiene una pregunta sin
+  // responder del dueno AL EMPEZAR este turno, finalizeTurn fuerza el bloque fijo de espera en vez de
+  // dejar que el modelo prometa una consulta nueva - independiente de saleStateEnabled (ver
+  // getBlockedBy), la escalacion real es Core, no una funcion de seguimiento de pedido.
+  const blockedByAtTurnStart = await getBlockedBy(conversationId);
+
   const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
     { role: "system", content: buildSystemPrompt(personality) },
     ...(contextSummary
@@ -1011,9 +944,6 @@ export async function generateReply(
   let nameSavedThisTurn = 0;
   let contactSavedThisTurn = 0;
   let intentFlaggedThisTurn = 0;
-  let catalogCheckedThisTurn = 0;
-  // Cuenta las consultas a get_faq de este turno: la primera se fuerza antes de dejar escalar (ver abajo).
-  let faqCheckedThisTurn = 0;
   let paymentMethodsThisTurn: { type: string; label: string; details: string }[] | null = null;
   // Fase 3 del plan maestro (2026-09-15): dos fuentes posibles para {{BLOQUE_ENVIO}}. get_shipping_rate_for_city
   // ya devuelve una tarifa unica resuelta para la ciudad del cliente - siempre gana si corrio este turno.
@@ -1038,7 +968,6 @@ export async function generateReply(
   // instead of trusting the model to have read its own tool result correctly.
   let hasVariantsThisTurn: boolean | null = null;
   let variantColorsThisTurn: string[] = [];
-  let shippingModalitiesThisTurn: { code: string; label: string }[] | null = null;
   // Fase 3: resultado completo de show_order_summary de ESTE turno (no solo el total) - fuente de
   // {{BLOQUE_TOTAL}} y {{BLOQUE_RESUMEN}}. null si no corrio o si todavia no esta ready.
   let orderSummaryThisTurn: FixedBlockData["orderSummary"] = null;
@@ -1091,71 +1020,18 @@ export async function generateReply(
       text = text.replace(VARIANT_DENIAL_PATTERN, `sí viene en estos colores: ${colorList}`);
     }
 
-    text = await applyClaimBackstops(text, [
-      {
-        name: "payment_options",
-        pattern: PAYMENT_OPTIONS_CLAIM_PATTERN,
-        suppressor: OFFER_OR_PENDING_CONFIRMATION_PATTERN,
-        alreadyHandled: !!paymentMethodsThisTurn,
-        extraCondition: !/\d{6,}/.test(text),
-        matchAgainstStrippedText: true,
-        repair: async (t) => {
-          const result = (await runCatalogTool(context, "get_payment_methods", {})) as {
-            methods?: { label: string; details: string }[];
-          };
-          if (!result?.methods?.length) return t;
-          return `${t}\n\n${result.methods.map((m) => `*${m.label}*\n${m.details}`).join("\n\n")}`;
-        },
-      },
-      {
-        // Same dropped-promise family, for shipping-payment-modality - only fires for a business that
-        // actually configured this concept (empty for most businesses, see
-        // Business.shippingPaymentModalities).
-        name: "shipping_modality",
-        pattern: SHIPPING_MODALITY_CLAIM_PATTERN,
-        suppressor: OFFER_OR_PENDING_CONFIRMATION_PATTERN,
-        alreadyHandled: !!shippingModalitiesThisTurn,
-        extraCondition: !!(personality?.shippingPaymentModalities && personality.shippingPaymentModalities.length > 0),
-        repair: async (t) => {
-          const result = (await runCatalogTool(context, "get_shipping_payment_modalities", {})) as {
-            modalities?: { code: string; label: string }[];
-          };
-          if (!result?.modalities?.length) return t;
-          return `${t}\n\n${result.modalities.map((m, i) => `${i + 1}. ${m.label}`).join("\n")}`;
-        },
-      },
-      {
-        name: "catalog_check",
-        pattern: CATALOG_CHECK_CLAIM_PATTERN,
-        suppressor: OFFER_OR_PENDING_CONFIRMATION_PATTERN,
-        alreadyHandled: catalogCheckedThisTurn !== 0,
-        extraCondition: !!customerText,
-        matchAgainstStrippedText: true,
-        repair: async (t) => {
-          const result = (await runCatalogTool(context, "search_products", { query: customerText })) as
-            | { id: string; name: string; price: string; currency: string }[]
-            | { results?: { id: string; name: string; price: string; currency: string }[] };
-          const products = Array.isArray(result) ? result : result?.results ?? [];
-          if (products.length === 0) return t;
-          return `${t}\n\n${products
-            .slice(0, 8)
-            .map((p) => `*${p.name}* — $${p.price} ${p.currency}`)
-            .join("\n")}`;
-        },
-      },
-      {
-        name: "escalation",
-        pattern: ESCALATION_CLAIM_PATTERN,
-        suppressor: OFFER_OR_PENDING_CONFIRMATION_PATTERN,
-        alreadyHandled: ownerAskedThisTurn !== 0,
-        extraCondition: !!customerText,
-        matchAgainstStrippedText: true,
-        repair: async (t) => {
-          await runCatalogTool(context, "ask_owner", { question: customerText });
-          return t;
-        },
-      },
-    ], context.businessId, conversationId);
+    // Fase 4 del plan maestro (2026-09-15), causa raiz C2: mientras la conversacion siga bloqueada por
+    // una pregunta al dueno que ya estaba pendiente ANTES de este turno, el modelo no puede prometer
+    // "voy a consultar"/"le avise al equipo" de nuevo - esa promesa ya existe como PendingOwnerQuestion
+    // real (ver ask_owner en tools.ts) y whatsapp.ts la resuelve aparte, como mensaje propio, apenas el
+    // dueno responda. Si el modelo SI llamo ask_owner este mismo turno (ownerAskedThisTurn !== 0, otra
+    // pregunta nueva o la escalacion que recien desbloqueo/bloqueo la conversacion), su texto es real y
+    // se deja pasar. Reemplaza los cuatro guards de applyClaimBackstops (payment_options, shipping_
+    // modality, catalog_check, escalation): esos reparaban una promesa despues de dicha leyendo el texto
+    // del modelo; esto directamente no deja que la promesa vieja se repita, sin necesidad de detectarla.
+    if (blockedByAtTurnStart && ownerAskedThisTurn === 0) {
+      text = "Ya le pregunté eso al equipo y todavía estoy esperando la respuesta - apenas me confirmen te aviso 🙏";
+    }
 
     if (intentFlaggedThisTurn === 0 && customerText && customerRequestsHuman(customerText)) {
       await runCatalogTool(context, "flag_conversation_intent", { intent: "SOLICITA_AGENTE" });
@@ -1525,27 +1401,6 @@ export async function generateReply(
             : searchScopedThisTurn && searchScopedThisTurn.length > 0
               ? searchScopedThisTurn
               : null;
-        // Real (2026-09-15): una clienta pregunto "¿de qué ciudad son ustedes?" y el bot lo escalo al
-        // dueno - pero la respuesta YA estaba en una FAQ escrita a mano, redactada como "Tienen punto
-        // fisico". No fue falta de informacion, fue que no la busco. Minutos despues le contesto lo mismo
-        // a otro cliente sin escalar. Escalar le cuesta tiempo real al dueno y deja al cliente esperando,
-        // asi que antes de molestarlo se le devuelven las FAQ al modelo una vez. Si despues de verlas
-        // sigue necesitando escalar, la segunda llamada pasa derecho.
-        if (call.function.name === "ask_owner" && faqCheckedThisTurn === 0) {
-          faqCheckedThisTurn++;
-          const faqs = await runCatalogTool(context, "get_faq", {});
-          messages.push({
-            role: "tool",
-            tool_call_id: call.id,
-            content: JSON.stringify({
-              asked: false,
-              note: "Antes de escalar: estas son las preguntas frecuentes de este negocio. Si alguna responde lo que pregunto el cliente (aunque este redactada distinto), contestale vos con eso y no escales. Si de verdad ninguna sirve, volve a llamar ask_owner y esta vez si se le manda al dueno.",
-              faq: faqs,
-            }),
-          });
-          continue;
-        }
-
         if (call.function.name === "send_product_media" && scopedProductsThisTurn) {
           const inputProductId = input.productId ? String(input.productId) : null;
           const inputProductName = input.productName ? normalizeForMatch(String(input.productName)) : null;
@@ -1607,10 +1462,6 @@ export async function generateReply(
         if (call.function.name === "save_customer_name") nameSavedThisTurn++;
         if (call.function.name === "save_customer_contact_info") contactSavedThisTurn++;
         if (call.function.name === "flag_conversation_intent") intentFlaggedThisTurn++;
-        if (call.function.name === "get_faq") faqCheckedThisTurn++;
-        if (["search_products", "get_product_details", "list_all_products"].includes(call.function.name)) {
-          catalogCheckedThisTurn++;
-        }
         if (call.function.name === "search_products" && Array.isArray(result) && result.length === 1) {
           const onlyMatch = result[0] as { id?: unknown; name?: unknown };
           if (typeof onlyMatch.id === "string" && typeof onlyMatch.name === "string") {
@@ -1642,9 +1493,6 @@ export async function generateReply(
         ) {
           orderSummaryThisTurn = { items: result.items, shippingCost: result.shippingCost ?? 0, total: result.total };
         }
-        if (call.function.name === "get_shipping_payment_modalities" && Array.isArray(result?.modalities) && result.modalities.length > 0) {
-          shippingModalitiesThisTurn = result.modalities;
-        }
         messages.push({
           role: "tool",
           tool_call_id: call.id,
@@ -1666,9 +1514,8 @@ export async function generateReply(
   // Reached only when the model kept requesting tools through all 5 iterations without ever returning
   // plain text - F2 from the 2026-09-13 audit. Returning `lastText` here used to often be literally the
   // intermediate "dame un momento, reviso el catalogo" the model wrote ALONGSIDE a tool call, not a real
-  // answer - and none of the applyClaimBackstops guards above catch it, because the tools DID run this
-  // turn (their `alreadyHandled` is true), so the customer got the raw dangling promise with nothing
-  // after it. One extra untooled completion (this rare path only, never the normal turn) asks the model
+  // answer, so the customer got the raw dangling promise with nothing after it. One extra untooled
+  // completion (this rare path only, never the normal turn) asks the model
   // to write the actual final answer using everything already gathered in `messages` instead of just
   // returning whatever text happened to come along with the last tool call.
   console.warn(`generateReply: loop de tool-calling agotado (5 iteraciones) sin respuesta final, conversation=${conversationId}`);

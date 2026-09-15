@@ -3,6 +3,7 @@ import { prisma } from "../db/client";
 import { touchCustomerLastContact } from "../crm/customers";
 import { getPresignedMediaUrl } from "../media/s3";
 import { emitNewMessage, emitNewConversation, emitConversationUpdated, type ConversationRow, type CustomerRow } from "../realtime/events";
+import { clearBlockedByIfNoPendingQuestions } from "../orders/saleState";
 
 // WhatsApp only allows free-form text/media within 24h of the customer's last message (Meta's
 // "customer service window") - past that, only an approved template gets through (error 131047
@@ -469,7 +470,8 @@ export async function findConversationByPendingOwnerQuestion(wamid: string) {
 }
 
 export async function clearPendingOwnerQuestion(questionId: string) {
-  await prisma.pendingOwnerQuestion.delete({ where: { id: questionId } });
+  const pending = await prisma.pendingOwnerQuestion.delete({ where: { id: questionId } });
+  await clearBlockedByIfNoPendingQuestions(pending.conversationId);
 }
 
 // Marcar resuelta a mano desde el panel (Bot > Salud), para el caso que clearPendingOwnerQuestion
@@ -479,10 +481,14 @@ export async function clearPendingOwnerQuestion(questionId: string) {
 // llamador), este lo expone un endpoint HTTP y necesita el chequeo de que la pregunta es de este
 // negocio antes de borrarla.
 export async function resolvePendingOwnerQuestion(businessId: string, questionId: string): Promise<boolean> {
-  const result = await prisma.pendingOwnerQuestion.deleteMany({
+  const pending = await prisma.pendingOwnerQuestion.findFirst({
     where: { id: questionId, conversation: { customer: { businessId } } },
+    select: { id: true, conversationId: true },
   });
-  return result.count > 0;
+  if (!pending) return false;
+  await prisma.pendingOwnerQuestion.delete({ where: { id: pending.id } });
+  await clearBlockedByIfNoPendingQuestions(pending.conversationId);
+  return true;
 }
 
 // Only the WhatsApp-reply path (quoting the alert, or the single-pending fallback) ever cleared a
@@ -494,6 +500,7 @@ export async function resolvePendingOwnerQuestion(businessId: string, questionId
 // through the admin panel instead of WhatsApp.
 export async function clearPendingOwnerQuestionsForConversation(conversationId: string) {
   await prisma.pendingOwnerQuestion.deleteMany({ where: { conversationId } });
+  await clearBlockedByIfNoPendingQuestions(conversationId);
 }
 
 // Used when the owner replies WITHOUT quoting a specific message (common on mobile, where long-pressing

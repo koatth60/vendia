@@ -50,6 +50,7 @@ import {
   setPaymentMethod as setSaleStatePaymentMethod,
   saveDeliveryDataToSaleState,
   isSaleStateEnabled,
+  setBlockedBy,
 } from "../orders/saleState";
 import {
   sendImageMessage,
@@ -1263,6 +1264,11 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
       }
 
       await createPendingOwnerQuestion(context.conversationId, wamid, question);
+      // Fase 4 del plan maestro: la escalacion es un estado real, no una frase - mientras esta pregunta
+      // siga sin respuesta, generateReply (agent.ts) fuerza un bloque fijo en vez de dejar que el modelo
+      // prometa consultas de nuevo. Se desbloquea solo cuando conversation/service.ts borra la ultima
+      // PendingOwnerQuestion abierta de esta conversacion.
+      await setBlockedBy(context.conversationId, "PENDING_OWNER_QUESTION");
 
       return {
         asked: true,

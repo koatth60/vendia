@@ -325,4 +325,26 @@ export async function saveDeliveryDataToSaleState(
   await upsertSaleState(conversationId, payload);
 }
 
+// Fase 4 del plan maestro (2026-09-15), causa raiz C2: la escalacion al dueno pasa a ser un estado real
+// en vez de una frase que el modelo inventa. blockedBy es deliberadamente independiente de
+// saleStateEnabled (a diferencia del resto de este archivo) - no llevar el pedido no es motivo para
+// dejar que el bot prometa consultas que nunca hace, asi que esto corre para cualquier negocio.
+export async function getBlockedBy(conversationId: string): Promise<string | null> {
+  const state = await prisma.saleState.findUnique({ where: { conversationId }, select: { blockedBy: true } });
+  return state?.blockedBy ?? null;
+}
+
+export async function setBlockedBy(conversationId: string, reason: string): Promise<void> {
+  await upsertSaleState(conversationId, { blockedBy: reason });
+}
+
+// Llamado desde conversation/service.ts cada vez que se borra una PendingOwnerQuestion (respuesta del
+// dueno por WhatsApp, resolucion manual desde el panel, o limpieza masiva) - solo desbloquea si no queda
+// ninguna otra pregunta pendiente en la misma conversacion.
+export async function clearBlockedByIfNoPendingQuestions(conversationId: string): Promise<void> {
+  const stillPending = await prisma.pendingOwnerQuestion.count({ where: { conversationId } });
+  if (stillPending > 0) return;
+  await prisma.saleState.updateMany({ where: { conversationId, blockedBy: { not: null } }, data: { blockedBy: null } });
+}
+
 export { isEnabled as isSaleStateEnabled };

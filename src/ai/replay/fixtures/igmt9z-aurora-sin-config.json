@@ -353,6 +353,5 @@
         }
       ]
     }
-  ],
-  "knownFailing": "C2/F1: el bot reclama haber avisado al equipo (turnos 10,11,12,15) sobre preguntas que nunca escalo con un ask_owner real - solo hubo una escalacion real, en el turno 7, sobre el envio. Lo arregla la Fase 4 (la escalacion es un estado, no una frase)."
+  ]
 }
