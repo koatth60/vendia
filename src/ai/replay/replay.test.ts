@@ -18,6 +18,6 @@ for (const file of fixtureFiles) {
   // TODO como fallo visible pero no le pega al exit code.
   test(`replay: ${fixture.name}`, { todo: fixture.knownFailing }, async () => {
     const result = await runFixture(fixture);
-    fixture.turns.forEach((turn, i) => assertTurn(fixture.name, i, turn.expect, result.turns[i]));
+    fixture.turns.forEach((turn, i) => assertTurn(fixture.name, i, turn.expect, result.turns[i], result.catalog));
   });
 }

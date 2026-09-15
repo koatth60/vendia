@@ -7,6 +7,8 @@ import { generateReply } from "../agent";
 import type { ToolContext } from "../tools";
 import { seedReplayBusiness, teardownReplayBusiness } from "./seed";
 import { getSaleState } from "../../orders/saleState";
+import { getBusinessLocale } from "../../config/businessConfig";
+import { formatPrice } from "../../config/money";
 
 // Fase 1 del plan maestro (2026-09-15). Motor de reproduccion determinista: mockea el modelo
 // (deepseek.chat.completions.create) con respuestas YA GRABADAS y deja correr generateReply de
@@ -38,6 +40,11 @@ export interface FixtureTurnExpectation {
   // Texto que NO puede aparecer en la respuesta final del bot (comparacion literal, sin regex - la
   // regla de esta fase es no agregar expresiones regulares nuevas).
   textMustNotContain?: string[];
+  // Bloqueador de produccion (2026-09-15): este turno le lista productos al cliente, asi que la
+  // respuesta final tiene que salir entera del catalogo sembrado - ver assertCatalogFidelity. Solo para
+  // turnos de listado: un turno que ademas muestre un costo de envio o un total traeria cifras que no
+  // son del catalogo y esta asercion las marcaria como inventadas.
+  catalogFidelity?: boolean;
   textMustContain?: string[];
   // Efectos laterales reales contados via el fetch mockeado (envios a la Graph API de WhatsApp) y la
   // base (PendingOwnerQuestion). No incluye la respuesta principal del turno - esa siempre es 1 y la
@@ -165,7 +172,16 @@ export interface TurnResult {
   state: TurnState;
 }
 
+// Catalogo real del negocio sembrado, con el precio ya formateado igual que lo formatea el motor
+// (misma moneda y locale) - es contra esto que se mide si el bot invento un nombre o una cifra.
+export interface SeededCatalogProduct {
+  name: string;
+  price: string;
+  stock: number;
+}
+
 export interface ReplayResult {
+  catalog: SeededCatalogProduct[];
   businessId: string;
   conversationId: string;
   customerId: string;
@@ -191,6 +207,7 @@ export async function runFixture(fixture: ConversationFixture): Promise<ReplayRe
     recipientPhone: customer.phoneNumber,
   };
 
+  const catalog = await readSeededCatalog(businessId);
   const idPlaceholders = await buildIdPlaceholders(businessId);
   const originalCreate = deepseek.chat.completions.create.bind(deepseek.chat.completions);
   const originalFetch = globalThis.fetch;
@@ -268,14 +285,117 @@ export async function runFixture(fixture: ConversationFixture): Promise<ReplayRe
     await teardownReplayBusiness(businessId);
   }
 
-  return { businessId, conversationId: conversation.id, customerId: customer.id, turns };
+  return { catalog, businessId, conversationId: conversation.id, customerId: customer.id, turns };
+}
+
+// Mismo calculo de stock que formatProduct/totalStock en tools.ts: con variantes, el stock real es la
+// suma de las activas (product.stock queda congelado apenas existen variantes).
+async function readSeededCatalog(businessId: string): Promise<SeededCatalogProduct[]> {
+  const { locale } = await getBusinessLocale(businessId);
+  const products = await prisma.product.findMany({
+    where: { businessId, active: true },
+    select: { name: true, price: true, currency: true, stock: true, variants: { select: { stock: true, active: true } } },
+  });
+  return products.map((p) => ({
+    name: p.name,
+    price: formatPrice(p.price, p.currency, locale),
+    stock: p.variants.length === 0 ? p.stock : p.variants.filter((v) => v.active).reduce((sum, v) => sum + v.stock, 0),
+  }));
 }
 
 // Asserciones reusables para que replay.test.ts quede corto y legible - una linea por fixture, no un
 // bloque de asserts repetido por archivo.
-export function assertTurn(fixtureName: string, turnIndex: number, expect_: FixtureTurnExpectation | undefined, result: TurnResult): void {
+// Bloqueador de produccion (2026-09-15): el bot le listo 18 productos a un cliente real de los cuales
+// 11 no existian, cotizo AIRPODS SERIE 4 a $105.000 (vale $65.000) y AIRPODS PRO 2 a $110.000 (vale
+// $55.000), y dejo afuera cinco productos con stock. Esta funcion mide la respuesta final contra el
+// catalogo sembrado, no contra un texto esperado: falla si aparece una cifra que no es de ningun
+// producto, si una linea con precio nombra algo que no esta en el catalogo, o si falta un producto.
+//
+// Sin expresiones regulares a proposito (regla del repositorio): los numeros se recortan con un barrido
+// de caracteres, y los nombres se comparan con includes literal.
+function numericTokens(text: string): string[] {
+  const tokens: string[] = [];
+  let current = "";
+  for (const char of text) {
+    const isDigit = char >= "0" && char <= "9";
+    const isSeparator = (char === "." || char === ",") && current.length > 0;
+    if (isDigit || isSeparator) {
+      current += char;
+    } else {
+      if (current) tokens.push(current);
+      current = "";
+    }
+  }
+  if (current) tokens.push(current);
+  return tokens.map((token) => {
+    let trimmed = token;
+    while (trimmed.endsWith(".") || trimmed.endsWith(",")) trimmed = trimmed.slice(0, -1);
+    return trimmed;
+  });
+}
+
+function digitCount(token: string): number {
+  let count = 0;
+  for (const char of token) if (char >= "0" && char <= "9") count++;
+  return count;
+}
+
+function withoutSeparators(token: string): string {
+  return token.split(".").join("").split(",").join("");
+}
+
+export function assertCatalogFidelity(label: string, reply: string, catalog: SeededCatalogProduct[]): void {
+  assert.ok(catalog.length > 0, `${label}: el negocio sembrado no tiene productos activos que comparar`);
+
+  // Cifras que SI pueden aparecer: los precios reales (con y sin separador de miles), el stock real, y
+  // los numeros que forman parte del nombre de un producto ("Bateria portatil power bank 12000 mah").
+  const allowedNumbers = new Set<string>();
+  for (const product of catalog) {
+    allowedNumbers.add(product.price);
+    allowedNumbers.add(withoutSeparators(product.price));
+    allowedNumbers.add(String(product.stock));
+    for (const token of numericTokens(product.name)) allowedNumbers.add(token);
+  }
+
+  // Solo se miran los numeros de 3 digitos o mas: los de uno o dos son posiciones de la lista,
+  // cantidades y numeros sueltos de la redaccion, nunca un precio.
+  for (const token of numericTokens(reply)) {
+    if (digitCount(token) < 3) continue;
+    assert.ok(
+      allowedNumbers.has(token) || allowedNumbers.has(withoutSeparators(token)),
+      `${label}: la respuesta trae la cifra "${token}", que no es ningun precio ni stock del catalogo sembrado. Respuesta: "${reply}"`
+    );
+  }
+
+  // Una linea que lleva precio esta listando un producto: tiene que ser uno real.
+  for (const line of reply.split("\n")) {
+    if (!line.includes("$")) continue;
+    assert.ok(
+      catalog.some((product) => line.includes(product.name)),
+      `${label}: la linea "${line.trim()}" muestra un precio de un producto que no esta en el catalogo sembrado`
+    );
+  }
+
+  // Y no se le puede esconder al cliente un producto que si existe.
+  for (const product of catalog) {
+    assert.ok(
+      reply.includes(product.name),
+      `${label}: falta el producto "${product.name}" en la lista que recibio el cliente. Respuesta: "${reply}"`
+    );
+  }
+}
+
+export function assertTurn(
+  fixtureName: string,
+  turnIndex: number,
+  expect_: FixtureTurnExpectation | undefined,
+  result: TurnResult,
+  catalog: SeededCatalogProduct[]
+): void {
   if (!expect_) return;
   const label = `${fixtureName} turno ${turnIndex}`;
+
+  if (expect_.catalogFidelity) assertCatalogFidelity(label, result.reply, catalog);
 
   if (expect_.toolSequence) {
     assert.deepEqual(result.toolSequence, expect_.toolSequence, `${label}: secuencia de herramientas no coincide`);

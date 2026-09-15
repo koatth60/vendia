@@ -25,6 +25,7 @@ test("sustituye la marca de pago por los datos reales configurados", () => {
     paymentMethods: REAL_METHODS,
     shippingRate: null,
     orderSummary: null,
+    catalog: null,
     saleBlocked: null,
   });
   assert.match(text, /3022168936/);
@@ -40,6 +41,7 @@ test("borra la marca de pago sin dejar rastro si get_payment_methods no corrio e
     paymentMethods: null,
     shippingRate: null,
     orderSummary: null,
+    catalog: null,
     saleBlocked: null,
   });
   assert.equal(text, "Aca los datos: ");
@@ -53,6 +55,7 @@ test("sustituye la marca de envio por la tarifa real", () => {
     paymentMethods: null,
     shippingRate: { label: "Estandar", cost: "15000" },
     orderSummary: null,
+    catalog: null,
     saleBlocked: null,
   });
   assert.equal(text, "El envio cuesta $15.000 y llega pronto.");
@@ -66,6 +69,7 @@ test("no inventa una tarifa de envio ambigua (2+ tarifas, ninguna resuelta por c
     paymentMethods: null,
     shippingRate: null,
     orderSummary: null,
+    catalog: null,
     saleBlocked: null,
   });
   assert.equal(text, "El envio cuesta .");
@@ -79,6 +83,7 @@ test("sustituye la marca de total por el total real de show_order_summary", () =
     paymentMethods: null,
     shippingRate: null,
     orderSummary: { items: [], shippingCost: 20900, total: 165900 },
+    catalog: null,
     saleBlocked: null,
   });
   assert.equal(text, "Tu total es $165.900. Confirmame para cerrar.");
@@ -92,6 +97,7 @@ test("borra la marca de total si show_order_summary no corrio este turno - nunca
     paymentMethods: null,
     shippingRate: null,
     orderSummary: null,
+    catalog: null,
     saleBlocked: null,
   });
   assert.equal(text, "Tu total es .");
@@ -109,6 +115,7 @@ test("arma el resumen completo con items, envio y total", () => {
       shippingCost: 20900,
       total: 165900,
     },
+    catalog: null,
     saleBlocked: null,
   });
   assert.equal(
@@ -128,6 +135,7 @@ test("el resumen dice envio gratis cuando el costo es 0", () => {
       shippingCost: 0,
       total: 39000,
     },
+    catalog: null,
     saleBlocked: null,
   });
   assert.match(text, /Envío: gratis/);
@@ -140,6 +148,7 @@ test("sustituye la marca de venta bloqueada por el ofrecimiento fijo con lo que 
     paymentMethods: null,
     shippingRate: null,
     orderSummary: null,
+    catalog: null,
     saleBlocked: ["métodos de pago", "teléfono de contacto"],
   });
   assert.match(text, /métodos de pago, teléfono de contacto/);
@@ -154,6 +163,7 @@ test("borra la marca de venta bloqueada si ninguna herramienta quedo bloqueada e
     paymentMethods: null,
     shippingRate: null,
     orderSummary: null,
+    catalog: null,
     saleBlocked: null,
   });
   assert.equal(text, "Antes de seguir: ");
@@ -167,6 +177,7 @@ test("texto sin ninguna marca queda intacto", () => {
     paymentMethods: null,
     shippingRate: null,
     orderSummary: null,
+    catalog: null,
     saleBlocked: null,
   });
   assert.equal(text, "Hola, ¿en que te ayudo?");

@@ -12,3 +12,13 @@ export const ORDER_SUMMARY_BLOCK_MARKER = "{{BLOQUE_RESUMEN}}";
 // incompleta - agent.ts la sustituye por el ofrecimiento fijo de dejar el pedido anotado, nunca por una
 // cifra o dato de pago inventado.
 export const SALE_BLOCKED_BLOCK_MARKER = "{{BLOQUE_VENTA_BLOQUEADA}}";
+
+// Bloqueador de produccion (2026-09-15): la Fase 3 hizo deterministas el total, el pago y el envio,
+// pero la LISTA de productos quedo como prosa libre del modelo. Medido contra la base de produccion:
+// de 18 productos listados a un cliente, 11 no existian, dos precios reales salieron inflados (AIRPODS
+// SERIE 4 a $105.000 cuando vale $65.000, AIRPODS PRO 2 a $110.000 cuando vale $55.000) y cinco
+// productos con stock quedaron afuera. Mismo patron que los otros bloques: el modelo pone esta marca
+// donde quiera que aparezca la lista y agent.ts la sustituye por el catalogo real de ESTE turno
+// (nombre exacto, precio exacto y stock), renderizada desde lo que devolvio list_all_products o
+// search_products.
+export const CATALOG_BLOCK_MARKER = "{{BLOQUE_CATALOGO}}";

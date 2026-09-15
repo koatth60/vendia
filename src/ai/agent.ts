@@ -35,6 +35,7 @@ import {
   TOTAL_BLOCK_MARKER,
   ORDER_SUMMARY_BLOCK_MARKER,
   SALE_BLOCKED_BLOCK_MARKER,
+  CATALOG_BLOCK_MARKER,
 } from "./fixedBlockMarkers";
 
 export {
@@ -43,6 +44,7 @@ export {
   TOTAL_BLOCK_MARKER,
   ORDER_SUMMARY_BLOCK_MARKER,
   SALE_BLOCKED_BLOCK_MARKER,
+  CATALOG_BLOCK_MARKER,
 };
 
 // Track C item 1 (ONIX-RELIABILITY-PLAN.md): prompt template literals (BASE_SYSTEM_PROMPT and its
@@ -577,6 +579,12 @@ export interface FixedBlockData {
     shippingCost: number;
     total: number;
   } | null;
+  // Bloqueador de produccion (2026-09-15): productos reales que devolvio list_all_products o
+  // search_products ESTE turno - fuente de {{BLOQUE_CATALOGO}}. `price` ya viene formateado por
+  // formatProduct con la moneda y el locale del negocio, asi que no se vuelve a formatear aca. null
+  // cuando ninguna de las dos herramientas corrio, o corrio y devolvio un solo producto (ahi no hay
+  // lista que renderizar).
+  catalog: { name: string; price: string; stock: number }[] | null;
   // Fase 6 del plan maestro (2026-09-15): lista de lo que falta configurar, solo si una de
   // show_order_summary/set_payment_method/close_conversation quedo bloqueada ESTE turno por la
   // compuerta de configHealth.getSaleGate. null cuando ninguna corrio bloqueada.
@@ -629,6 +637,21 @@ export function renderFixedBlocks(text: string, data: FixedBlockData): { text: s
     } else {
       missingBlocks.push("venta_bloqueada");
       text = text.split(SALE_BLOCKED_BLOCK_MARKER).join("");
+    }
+  }
+
+  // La lista va NUMERADA a proposito: la directiva SELECCION POR NUMERO del prompt depende de que el
+  // ultimo mensaje del bot sea una lista numerada para resolver "el 2" a un producto real. Un bloque con
+  // viñetas rompería ese flujo.
+  if (text.includes(CATALOG_BLOCK_MARKER)) {
+    if (data.catalog?.length) {
+      const lines = data.catalog.map(
+        (p, i) => `${i + 1}. *${p.name}* — $${p.price}${p.stock > 0 ? ` (${p.stock} disponibles)` : " (sin stock)"}`
+      );
+      text = text.split(CATALOG_BLOCK_MARKER).join(lines.join("\n"));
+    } else {
+      missingBlocks.push("catalogo");
+      text = text.split(CATALOG_BLOCK_MARKER).join("");
     }
   }
 
@@ -865,6 +888,10 @@ export async function generateReply(
   // Fase 3: resultado completo de show_order_summary de ESTE turno (no solo el total) - fuente de
   // {{BLOQUE_TOTAL}} y {{BLOQUE_RESUMEN}}. null si no corrio o si todavia no esta ready.
   let orderSummaryThisTurn: FixedBlockData["orderSummary"] = null;
+  // Bloqueador de produccion (2026-09-15): catalogo real devuelto por list_all_products/search_products
+  // este turno - fuente de {{BLOQUE_CATALOGO}}. Se queda con el ULTIMO llamado que devolvio una lista,
+  // que es el que el modelo tiene fresco cuando redacta.
+  let catalogListThisTurn: FixedBlockData["catalog"] = null;
   // Fase 6: lo que falta configurar, si show_order_summary/set_payment_method/close_conversation
   // quedaron bloqueadas por getSaleGate en algun llamado de este turno - fuente de
   // {{BLOQUE_VENTA_BLOQUEADA}}.
@@ -893,6 +920,7 @@ export async function generateReply(
       paymentMethods: paymentMethodsThisTurn,
       shippingRate: resolvedShippingRate,
       orderSummary: orderSummaryThisTurn,
+      catalog: catalogListThisTurn,
       saleBlocked: saleBlockedThisTurn,
     });
     text = renderedText;
@@ -1204,6 +1232,7 @@ export async function generateReply(
           items?: { productName: string; variantLabel?: string | null; quantity: number; lineTotal: number }[];
           blocked?: boolean;
           missing?: string[];
+          products?: { name?: unknown; price?: unknown; stock?: unknown }[];
         };
         if (result?.blocked && Array.isArray(result.missing)) saleBlockedThisTurn = result.missing;
         if (result?.mediaJustSent || result?.sent) mediaSentThisTurn++;
@@ -1215,6 +1244,22 @@ export async function generateReply(
           const onlyMatch = result[0] as { id?: unknown; name?: unknown };
           if (typeof onlyMatch.id === "string" && typeof onlyMatch.name === "string") {
             searchScopedThisTurn = [{ productId: onlyMatch.id, productName: onlyMatch.name, variantId: null }];
+          }
+        }
+        // Bloqueador de produccion (2026-09-15): la lista de productos deja de ser prosa del modelo.
+        // Solo con 2+ productos - un resultado de un solo producto se sigue redactando en prosa (no es
+        // una lista, y get_product_details ya cubre la ficha individual).
+        if (
+          (call.function.name === "list_all_products" || call.function.name === "search_products") &&
+          Array.isArray(result?.products) &&
+          result.products.length > 1
+        ) {
+          const rows = result.products.filter(
+            (p): p is { name: string; price: string; stock: number } =>
+              typeof p?.name === "string" && typeof p?.price === "string" && typeof p?.stock === "number"
+          );
+          if (rows.length > 1) {
+            catalogListThisTurn = rows.map((p) => ({ name: p.name, price: p.price, stock: p.stock }));
           }
         }
         if (call.function.name === "get_payment_methods" && Array.isArray(result?.methods)) {

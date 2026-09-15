@@ -360,11 +360,11 @@ test("search_products falls back to the full catalog (with a note) when no keywo
 
   const context = await freshContext();
   const result = (await runCatalogTool(context, "search_products", { query: "algo para hacer ejercicio" })) as {
-    results: { name: string }[];
+    products: { name: string }[];
     note: string;
   };
-  assert.ok(Array.isArray(result.results));
-  assert.ok(result.results.length > 0);
+  assert.ok(Array.isArray(result.products));
+  assert.ok(result.products.length > 0);
   assert.match(result.note, /catalogo completo/i);
 });
 
@@ -391,17 +391,17 @@ test("catalog list views (search_products fallback, list_all_products) never lea
     const context = await freshContext();
 
     const searchFallback = (await runCatalogTool(context, "search_products", { query: "consulta sin match" })) as {
-      results: Record<string, unknown>[];
+      products: Record<string, unknown>[];
     };
-    for (const item of searchFallback.results) {
+    for (const item of searchFallback.products) {
       assert.ok(
         JSON.stringify(item).length <= MAX_LIST_ITEM_JSON_CHARS,
         `search_products fallback item exceeds ${MAX_LIST_ITEM_JSON_CHARS} chars: ${JSON.stringify(item).slice(0, 120)}...`
       );
     }
 
-    const listAll = (await runCatalogTool(context, "list_all_products", {})) as Record<string, unknown>[];
-    for (const item of listAll) {
+    const listAll = (await runCatalogTool(context, "list_all_products", {})) as { products: Record<string, unknown>[] };
+    for (const item of listAll.products) {
       assert.ok(
         JSON.stringify(item).length <= MAX_LIST_ITEM_JSON_CHARS,
         `list_all_products item exceeds ${MAX_LIST_ITEM_JSON_CHARS} chars: ${JSON.stringify(item).slice(0, 120)}...`

@@ -13,6 +13,7 @@ import {
   TOTAL_BLOCK_MARKER,
   ORDER_SUMMARY_BLOCK_MARKER,
   SALE_BLOCKED_BLOCK_MARKER,
+  CATALOG_BLOCK_MARKER,
 } from "./fixedBlockMarkers";
 import { listActivePaymentMethods } from "../catalog/paymentMethods";
 import { listShippingRates, resolveShippingRateForCity } from "../catalog/shippingRates";
@@ -724,6 +725,13 @@ function totalStock(product: { stock: number; variants: { stock: number; active:
 // 6.0b.
 const LIST_DESCRIPTION_MAX_CHARS = 150;
 
+// Bloqueador de produccion (2026-09-15): el modelo escribia la lista de productos de memoria - le
+// invento 11 de 18 nombres a un cliente real, inflo dos precios reales y omitio cinco productos con
+// stock. Mismo patron que los otros bloques fijos: la lista la renderiza agent.ts desde estos mismos
+// datos, el modelo solo redacta alrededor. `products` de aca es lo que agent.ts lee para llenar la
+// marca (ver catalogListThisTurn).
+const CATALOG_LIST_NOTE = `No escribas vos los nombres, los precios ni el stock de estos productos: pone la marca ${CATALOG_BLOCK_MARKER} donde quieras que aparezca la lista y el sistema la reemplaza por el catalogo real (numerado) antes de enviar. Redacta solo alrededor. Los datos de esta lista igual te sirven para decidir y para responder sobre un producto puntual.`;
+
 function truncateForList(description: string): string {
   return description.length > LIST_DESCRIPTION_MAX_CHARS
     ? `${description.slice(0, LIST_DESCRIPTION_MAX_CHARS)}…`
@@ -923,18 +931,24 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
     }
     case "search_products": {
       const results = await searchProducts(businessId, String(input.query ?? ""));
-      if (results.length > 0) return results.map((p) => formatProduct(p, locale, { forList: true }));
+      // Un solo resultado no es una lista: se sigue redactando en prosa, igual que get_product_details.
+      if (results.length === 1) return results.map((p) => formatProduct(p, locale, { forList: true }));
+      if (results.length > 1) {
+        return { products: results.map((p) => formatProduct(p, locale, { forList: true })), note: CATALOG_LIST_NOTE };
+      }
 
       // No hubo coincidencia por palabra clave - el catalogo suele ser chico por negocio, asi que en
       // vez de decir "no existe" le mostramos todo lo activo para que lo revise por significado (el
       // cliente puede estar describiendo el producto con otras palabras que las del catalogo).
       const all = await listActiveProducts(businessId);
       return {
-        results: all.map((p) => formatProduct(p, locale, { forList: true })),
+        products: all.map((p) => formatProduct(p, locale, { forList: true })),
         note:
-          all.length > 0
-            ? "No hubo coincidencia exacta por palabra clave. Revisa este catalogo completo por significado antes de decir que no tenes el producto."
-            : "Este negocio todavia no tiene productos activos en el catalogo.",
+          all.length > 1
+            ? `No hubo coincidencia exacta por palabra clave. Revisa este catalogo completo por significado antes de decir que no tenes el producto. ${CATALOG_LIST_NOTE}`
+            : all.length === 1
+              ? "No hubo coincidencia exacta por palabra clave. Revisa este catalogo completo por significado antes de decir que no tenes el producto."
+              : "Este negocio todavia no tiene productos activos en el catalogo.",
       };
     }
     case "get_product_details": {
@@ -989,7 +1003,8 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
     }
     case "list_all_products": {
       const results = await listActiveProducts(businessId);
-      return results.map((p) => formatProduct(p, locale, { forList: true }));
+      if (results.length < 2) return results.map((p) => formatProduct(p, locale, { forList: true }));
+      return { products: results.map((p) => formatProduct(p, locale, { forList: true })), note: CATALOG_LIST_NOTE };
     }
     case "send_product_media": {
       // Internal-only, never in the JSON schema the model sees (zero prompt-token cost) - set ONLY by

@@ -1,0 +1,43 @@
+{
+  "name": "catalogo listado sin inventar productos",
+  "note": "Bloqueador de produccion (2026-09-15): contra la base de produccion el bot le listo 18 productos a un cliente de los cuales 11 no existian (Cargador iPhone, Cable Tipo C, Control PS4, Control PS5, Camara de Seguridad WiFi, Audifonos Xiaomi, entre otros), cotizo AIRPODS SERIE 4 a $105.000 cuando vale $65.000 y AIRPODS PRO 2 a $110.000 cuando vale $55.000, y omitio cinco productos con stock. La lista era prosa libre del modelo: la Fase 3 habia hecho deterministas el total, el pago y el envio, pero no el catalogo. Este fixture NO es una grabacion contra el modelo real (la marca {{BLOQUE_CATALOGO}} no existia cuando paso el incidente): es la redaccion minima que el modelo puede escribir con la marca, y lo que prueba es el motor - la lista que recibe el cliente sale entera de la base, no del modelo. Sin el arreglo la marca queda literal en el texto y todos los nombres del catalogo faltan, asi que el turno falla.",
+  "seed": {
+    "catalogName": "MAGByLizN"
+  },
+  "turns": [
+    {
+      "customer": "hola, que productos tienen disponibles?",
+      "modelResponses": [
+        {
+          "toolCalls": [
+            {
+              "name": "list_all_products",
+              "arguments": {}
+            }
+          ]
+        },
+        {
+          "content": "¡Hola! 😊 Esto es todo lo que tenemos disponible ahora mismo:\n\n{{BLOQUE_CATALOGO}}\n\n¿De cuál te gustaría ver fotos o saber más?"
+        }
+      ],
+      "expect": {
+        "toolSequence": [
+          "list_all_products"
+        ],
+        "catalogFidelity": true,
+        "textMustNotContain": [
+          "{{BLOQUE_CATALOGO}}",
+          "Cargador iPhone",
+          "Cable Tipo C",
+          "Control PS4",
+          "Control PS5",
+          "Cámara de Seguridad WiFi",
+          "Audífonos Xiaomi",
+          "105.000",
+          "110.000"
+        ]
+      },
+      "note": "El turno del incidente: el cliente pide el catalogo completo y el bot responde con la lista."
+    }
+  ]
+}
