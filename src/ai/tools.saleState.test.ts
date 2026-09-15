@@ -20,9 +20,14 @@ before(async () => {
       email: `test-salestate-tools-${randomUUID()}@example.com`,
       passwordHash: "x",
       saleStateEnabled: true,
+      // Fase 6 del plan maestro (2026-09-15): show_order_summary/set_payment_method/close_conversation
+      // pasan por getSaleGate.canSell antes que nada - el metodo de pago llega mas abajo, del propio test
+      // de set_payment_method (que lo necesita crear el explicitamente para validar contra un id real).
+      contactPhone: "573000000000",
     },
   });
   businessId = business.id;
+  await prisma.shippingRate.create({ data: { businessId, label: "Estandar", cost: 9000 } });
   const customer = await prisma.customer.create({ data: { businessId, phoneNumber: `573002${Date.now()}` } });
   customerId = customer.id;
   const product = await prisma.product.create({
@@ -37,6 +42,7 @@ after(async () => {
   await prisma.conversation.deleteMany({ where: { customerId } });
   await prisma.product.deleteMany({ where: { businessId } });
   await prisma.paymentMethod.deleteMany({ where: { businessId } });
+  await prisma.shippingRate.deleteMany({ where: { businessId } });
   await prisma.customer.deleteMany({ where: { id: customerId } });
   await prisma.business.deleteMany({ where: { id: businessId } });
 });
@@ -119,22 +125,43 @@ test("show_order_summary con la bandera activa lee SaleState e ignora el items d
   assert.equal(result.subtotal, 60000);
 });
 
-test("close_conversation SOLD con la bandera activa cierra con los items de SaleState y borra el estado en curso", async () => {
+// Fase 6 del plan maestro (2026-09-15): este negocio ahora tiene contactPhone real (lo exige
+// getSaleGate.canSell) - requestSaleConfirmation (tools.ts) SIEMPRE pide confirmacion al dueno cuando hay
+// contactPhone, asi que close_conversation SOLD ya no cierra de forma sincronica aca. Lo que este test
+// prueba en realidad (que el pedido armado sale de SaleState, no de lo que el modelo mande) sigue siendo
+// real: se ve en el draft (pendingOrderItems) que queda armado para la confirmacion, con SaleState todavia
+// vivo porque la venta no es final hasta que el dueno confirme.
+test("close_conversation SOLD con la bandera activa arma el pedido pendiente desde SaleState (pide confirmacion del dueno, no cierra de una)", async () => {
   const context = await freshContext();
   await runCatalogTool(context, "set_order_item", { productId, quantity: 1 });
 
-  const result = (await runCatalogTool(context, "close_conversation", {
-    outcome: "SOLD",
-    summary: "Venta de prueba SaleState",
-  })) as { closed: boolean };
-  assert.equal(result.closed, true);
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => ({
+    ok: true,
+    json: async () => ({ messages: [{ id: `wamid.test-${randomUUID()}` }] }),
+  })) as unknown as typeof fetch;
 
-  const order = await prisma.order.findUniqueOrThrow({ where: { conversationId: context.conversationId }, include: { items: true } });
-  assert.equal(order.items.length, 1);
-  assert.equal(Number(order.totalAmount), 30000);
+  try {
+    const result = (await runCatalogTool(context, "close_conversation", {
+      outcome: "SOLD",
+      summary: "Venta de prueba SaleState",
+    })) as { closed: boolean; pending?: boolean };
+    assert.equal(result.closed, false);
+    assert.equal(result.pending, true);
 
-  const state = await prisma.saleState.findUnique({ where: { conversationId: context.conversationId } });
-  assert.equal(state, null);
+    const order = await prisma.order.findUnique({ where: { conversationId: context.conversationId } });
+    assert.equal(order, null, "no se crea ningun pedido hasta que el dueno confirme");
+
+    const conversation = await prisma.conversation.findUniqueOrThrow({ where: { id: context.conversationId } });
+    const draft = conversation.pendingOrderItems as { items?: { productId: string; quantity: number }[] } | null;
+    assert.equal(draft?.items?.length, 1, "el draft pendiente de confirmacion debe salir de SaleState");
+    assert.equal(draft?.items?.[0].productId, productId);
+
+    const state = await prisma.saleState.findUnique({ where: { conversationId: context.conversationId } });
+    assert.ok(state, "SaleState sigue vivo - la venta todavia no es final");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("close_conversation SOLD con la bandera activa bloquea si todavia no hay productos", async () => {

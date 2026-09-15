@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { prisma } from "../db/client";
 import { runCatalogTool, type ToolContext } from "./tools";
+import { resolveOrderItems, createOrder } from "../orders/service";
 
 // Direct tool-function tests - no DeepSeek calls, so these stay fast and cheap even as the suite
 // grows. Reserve real-model calls (see agent.escalationPaid.ts, `npm run test:paid`) for testing whether the model
@@ -26,6 +27,14 @@ before(async () => {
   });
   businessId = business.id;
 
+  // Fase 6 del plan maestro (2026-09-15): getSaleGate.canSell tambien exige al menos una tarifa de envio
+  // real - sin esto, cada show_order_summary/close_conversation SOLD de este archivo quedaria bloqueado
+  // por la compuerta antes de llegar a lo que en realidad prueban. El metodo de pago llega mas abajo, del
+  // test "get_payment_methods returns only active methods" (que corre antes de cualquier test bloqueado
+  // por la compuerta) - se deja asi a proposito para no romper "get_payment_methods reports when none are
+  // configured", que si necesita businessId sin ningun metodo de pago.
+  await prisma.shippingRate.create({ data: { businessId, label: "Estandar", cost: 9000 } });
+
   const customer = await prisma.customer.create({
     data: { businessId, phoneNumber: `573001${Date.now()}` },
   });
@@ -37,10 +46,22 @@ after(async () => {
   await prisma.order.deleteMany({ where: { customerId } });
   await prisma.conversation.deleteMany({ where: { customerId } });
   await prisma.paymentMethod.deleteMany({ where: { businessId } });
+  await prisma.shippingRate.deleteMany({ where: { businessId } });
   await prisma.product.deleteMany({ where: { businessId } });
   await prisma.customer.deleteMany({ where: { id: customerId } });
   await prisma.business.deleteMany({ where: { id: businessId } });
 });
+
+// Fase 6: cada test de close_conversation SOLD de mas abajo que arma su propio "business2" ad-hoc (para
+// no compartir Order/stock con el resto del archivo) necesita tambien pasar la compuerta si lo que prueba
+// no es la compuerta en si - la seccion "Fase 6 - compuerta de configuracion" mas abajo prueba la
+// compuerta sola, sin esto.
+async function seedSaleGateRequirements(targetBusinessId: string): Promise<void> {
+  await prisma.paymentMethod.create({
+    data: { businessId: targetBusinessId, type: "TRANSFERENCIA", label: "Nequi", details: "300", active: true },
+  });
+  await prisma.shippingRate.create({ data: { businessId: targetBusinessId, label: "Estandar", cost: 9000 } });
+}
 
 function stubWhatsappFetch() {
   originalFetch = globalThis.fetch;
@@ -225,8 +246,12 @@ test("close_conversation with outcome LOST updates status without creating an or
   assert.equal(order, null);
 });
 
-test("close_conversation with outcome SOLD creates a real order when no owner confirmation is needed", async () => {
-  stubWhatsappFetch();
+// Fase 6 del plan maestro (2026-09-15): antes de la compuerta, un negocio sin contactPhone auto-cerraba
+// la venta directo (nadie a quien pedirle confirmacion) - ver requestSaleConfirmation en tools.ts. Ahora
+// falta el telefono de contacto BLOQUEA la venta antes de siquiera llegar ahi, asi que ese camino queda
+// sin forma de alcanzarse via close_conversation. Este test reemplaza al que probaba ese comportamiento
+// viejo.
+test("close_conversation SOLD is blocked when the business has no payment methods, shipping rates or contact phone configured", async () => {
   const businessNoContact = await prisma.business.create({
     data: { name: `Test ${randomUUID()}`, email: `test-${randomUUID()}@example.com`, passwordHash: "x" },
   });
@@ -247,15 +272,14 @@ test("close_conversation with outcome SOLD creates a real order when no owner co
     const result = (await runCatalogTool(context, "close_conversation", {
       outcome: "SOLD",
       summary: "Compra sin productos del catalogo",
-    })) as { closed: boolean; outcome: string; note?: string };
-    assert.equal(result.closed, true);
-    assert.equal(result.outcome, "SOLD");
-    assert.ok(result.note, "a direct close (no owner confirmation needed) should still nudge the model to close warmly");
+    })) as { closed: boolean; blocked?: boolean; missing?: string[] };
+    assert.equal(result.closed, false);
+    assert.equal(result.blocked, true);
+    assert.deepEqual(result.missing, ["métodos de pago", "tarifas de envío", "teléfono de contacto"]);
 
-    const order = await prisma.order.findUniqueOrThrow({ where: { conversationId: conversation2.id } });
-    assert.equal(order.summary, "Compra sin productos del catalogo");
+    const order = await prisma.order.findUnique({ where: { conversationId: conversation2.id } });
+    assert.equal(order, null, "la compuerta debe bloquear la venta antes de crear ningun pedido");
   } finally {
-    restoreFetch();
     await prisma.order.deleteMany({ where: { conversationId: conversation2.id } });
     await prisma.conversation.deleteMany({ where: { id: conversation2.id } });
     await prisma.customer.deleteMany({ where: { id: customer2.id } });
@@ -573,8 +597,14 @@ test("send_product_media returns an ambiguous error listing both candidates on a
 // Regression tests for stock never decrementing on a sale, and duplicate order-item lines never being
 // merged (both found in the same review as the photo-mismatch bug).
 
+// Fase 6 del plan maestro (2026-09-15): estos tres pruebas ya no pueden pasar por
+// runCatalogTool(..., "close_conversation", ...) - con un contactPhone real (obligatorio para pasar
+// getSaleGate), requestSaleConfirmation SIEMPRE exige confirmacion del dueno antes de crear el pedido, asi
+// que close_conversation nunca llega a createOrder de forma sincronica. Lo que estos tres en realidad
+// prueban (decremento de stock, fusion de lineas duplicadas, un item no resuelto no tumba el pedido
+// entero) vive en resolveOrderItems/createOrder (src/orders/service.ts) - se prueba ahi directo, sin pasar
+// por la compuerta ni por la confirmacion del dueno.
 test("close_conversation SOLD decrements stock by the quantity sold", async () => {
-  stubWhatsappFetch();
   const business2 = await prisma.business.create({
     data: { name: `Test ${randomUUID()}`, email: `test-${randomUUID()}@example.com`, passwordHash: "x" },
   });
@@ -585,24 +615,18 @@ test("close_conversation SOLD decrements stock by the quantity sold", async () =
   });
 
   try {
-    const context: ToolContext = {
+    const { items } = await resolveOrderItems(business2.id, [{ productName: "Stock Test Product", quantity: 2 }]);
+    await createOrder({
       businessId: business2.id,
-      conversationId: conversation2.id,
       customerId: customer2.id,
-      credentials: { phoneNumberId: "test-id", accessToken: "test-token" },
-      recipientPhone: "573009998877",
-    };
-
-    await runCatalogTool(context, "close_conversation", {
-      outcome: "SOLD",
+      conversationId: conversation2.id,
       summary: "2x Stock Test Product",
-      items: [{ productName: "Stock Test Product", quantity: 2 }],
+      items,
     });
 
     const fresh = await prisma.product.findUniqueOrThrow({ where: { id: product.id } });
     assert.equal(fresh.stock, 3);
   } finally {
-    restoreFetch();
     await prisma.order.deleteMany({ where: { conversationId: conversation2.id } });
     await prisma.conversation.deleteMany({ where: { id: conversation2.id } });
     await prisma.product.deleteMany({ where: { businessId: business2.id } });
@@ -612,7 +636,6 @@ test("close_conversation SOLD decrements stock by the quantity sold", async () =
 });
 
 test("close_conversation SOLD with one unresolvable item still creates the order with only the resolved items", async () => {
-  stubWhatsappFetch();
   const business2 = await prisma.business.create({
     data: { name: `Test ${randomUUID()}`, email: `test-${randomUUID()}@example.com`, passwordHash: "x" },
   });
@@ -623,31 +646,24 @@ test("close_conversation SOLD with one unresolvable item still creates the order
   });
 
   try {
-    const context: ToolContext = {
-      businessId: business2.id,
-      conversationId: conversation2.id,
-      customerId: customer2.id,
-      credentials: { phoneNumberId: "test-id", accessToken: "test-token" },
-      recipientPhone: "573009998877",
-    };
-
     // "Producto Inventado" doesn't exist in this business's catalog at all - resolveOrderItems must not
     // crash or silently drop the whole order, just the one line it genuinely can't resolve.
-    const result = (await runCatalogTool(context, "close_conversation", {
-      outcome: "SOLD",
+    const { items } = await resolveOrderItems(business2.id, [
+      { productName: "Producto Real", quantity: 1 },
+      { productName: "Producto Inventado", quantity: 1 },
+    ]);
+    await createOrder({
+      businessId: business2.id,
+      customerId: customer2.id,
+      conversationId: conversation2.id,
       summary: "1x Producto Real + 1x Producto Inventado",
-      items: [
-        { productName: "Producto Real", quantity: 1 },
-        { productName: "Producto Inventado", quantity: 1 },
-      ],
-    })) as { closed: boolean };
-    assert.equal(result.closed, true);
+      items,
+    });
 
     const order = await prisma.order.findUniqueOrThrow({ where: { conversationId: conversation2.id }, include: { items: true } });
     assert.equal(order.items.length, 1);
     assert.equal(order.items[0].productName, "Producto Real");
   } finally {
-    restoreFetch();
     await prisma.order.deleteMany({ where: { conversationId: conversation2.id } });
     await prisma.conversation.deleteMany({ where: { id: conversation2.id } });
     await prisma.product.deleteMany({ where: { businessId: business2.id } });
@@ -657,7 +673,6 @@ test("close_conversation SOLD with one unresolvable item still creates the order
 });
 
 test("close_conversation SOLD merges two item lines for the same product into one line with summed quantity", async () => {
-  stubWhatsappFetch();
   const business2 = await prisma.business.create({
     data: { name: `Test ${randomUUID()}`, email: `test-${randomUUID()}@example.com`, passwordHash: "x" },
   });
@@ -668,31 +683,27 @@ test("close_conversation SOLD merges two item lines for the same product into on
   });
 
   try {
-    const context: ToolContext = {
+    const { items } = await resolveOrderItems(business2.id, [
+      { productName: "Dedupe Test Product", quantity: 1 },
+      { productName: "Dedupe Test Product", quantity: 2 },
+    ]);
+    await createOrder({
       businessId: business2.id,
-      conversationId: conversation2.id,
       customerId: customer2.id,
-      credentials: { phoneNumberId: "test-id", accessToken: "test-token" },
-      recipientPhone: "573009998877",
-    };
-
-    await runCatalogTool(context, "close_conversation", {
-      outcome: "SOLD",
+      conversationId: conversation2.id,
       summary: "3x Dedupe Test Product",
-      items: [
-        { productName: "Dedupe Test Product", quantity: 1 },
-        { productName: "Dedupe Test Product", quantity: 2 },
-      ],
+      items,
     });
 
     const order = await prisma.order.findUniqueOrThrow({ where: { conversationId: conversation2.id }, include: { items: true } });
     assert.equal(order.items.length, 1);
     assert.equal(order.items[0].quantity, 3);
   } finally {
-    restoreFetch();
     await prisma.order.deleteMany({ where: { conversationId: conversation2.id } });
     await prisma.conversation.deleteMany({ where: { id: conversation2.id } });
     await prisma.product.deleteMany({ where: { businessId: business2.id } });
+    await prisma.paymentMethod.deleteMany({ where: { businessId: business2.id } });
+    await prisma.shippingRate.deleteMany({ where: { businessId: business2.id } });
     await prisma.customer.deleteMany({ where: { id: customer2.id } });
     await prisma.business.deleteMany({ where: { id: business2.id } });
   }
@@ -708,6 +719,7 @@ test("close_conversation SOLD with a payment-confirmation gate: falls back to pl
       contactName: "Owner2",
     },
   });
+  await seedSaleGateRequirements(business2.id);
   const customer2 = await prisma.customer.create({ data: { businessId: business2.id, phoneNumber: `573005${Date.now()}` } });
   const conversation2 = await prisma.conversation.create({ data: { customerId: customer2.id } });
 
@@ -753,6 +765,8 @@ test("close_conversation SOLD with a payment-confirmation gate: falls back to pl
     globalThis.fetch = originalFetch2;
     await prisma.order.deleteMany({ where: { conversationId: conversation2.id } });
     await prisma.conversation.deleteMany({ where: { id: conversation2.id } });
+    await prisma.paymentMethod.deleteMany({ where: { businessId: business2.id } });
+    await prisma.shippingRate.deleteMany({ where: { businessId: business2.id } });
     await prisma.customer.deleteMany({ where: { id: customer2.id } });
     await prisma.business.deleteMany({ where: { id: business2.id } });
   }
@@ -1050,10 +1064,15 @@ test("close_conversation SOLD with unresolvable items notifies the owner about t
   }
 });
 
-test("close_conversation SOLD auto-confirms without a contactPhone but logs it for the platform admin", async () => {
+// Fase 6: antes de la compuerta, "sin contactPhone" auto-confirmaba la venta igual (requestSaleConfirmation
+// no tenia a quien pedirle confirmacion) y solo quedaba un OwnerMessageLog fallido como rastro. Ahora falta
+// SOLO el telefono de contacto (con metodo de pago y tarifa de envio reales) ya alcanza para bloquear -
+// requestSaleConfirmation ni se llega a invocar, asi que no queda ningun OwnerMessageLog.
+test("close_conversation SOLD is blocked when only the contact phone is missing, even with payment methods and shipping configured", async () => {
   const businessNoContact = await prisma.business.create({
     data: { name: `Test ${randomUUID()}`, email: `test-${randomUUID()}@example.com`, passwordHash: "x" },
   });
+  await seedSaleGateRequirements(businessNoContact.id);
   const customer2 = await prisma.customer.create({ data: { businessId: businessNoContact.id, phoneNumber: `573003${Date.now()}` } });
   const conversation2 = await prisma.conversation.create({ data: { customerId: customer2.id } });
 
@@ -1065,15 +1084,21 @@ test("close_conversation SOLD auto-confirms without a contactPhone but logs it f
       credentials: { phoneNumberId: "test-id", accessToken: "test-token" },
       recipientPhone: "573009998877",
     };
-    await runCatalogTool(context, "close_conversation", { outcome: "SOLD", summary: "Compra sin telefono de contacto configurado" });
+    const result = (await runCatalogTool(context, "close_conversation", {
+      outcome: "SOLD",
+      summary: "Compra sin telefono de contacto configurado",
+    })) as { closed: boolean; blocked?: boolean; missing?: string[] };
+    assert.equal(result.closed, false);
+    assert.equal(result.blocked, true);
+    assert.deepEqual(result.missing, ["teléfono de contacto"]);
 
     const logs = await prisma.ownerMessageLog.findMany({ where: { businessId: businessNoContact.id } });
-    assert.equal(logs.length, 1);
-    assert.equal(logs[0].success, false);
-    assert.match(logs[0].body, /sin aviso/i);
+    assert.equal(logs.length, 0, "la compuerta bloquea antes de que requestSaleConfirmation llegue a registrar nada");
   } finally {
     await prisma.order.deleteMany({ where: { conversationId: conversation2.id } });
     await prisma.ownerMessageLog.deleteMany({ where: { businessId: businessNoContact.id } });
+    await prisma.paymentMethod.deleteMany({ where: { businessId: businessNoContact.id } });
+    await prisma.shippingRate.deleteMany({ where: { businessId: businessNoContact.id } });
     await prisma.conversation.deleteMany({ where: { id: conversation2.id } });
     await prisma.customer.deleteMany({ where: { id: customer2.id } });
     await prisma.business.deleteMany({ where: { id: businessNoContact.id } });
@@ -1274,4 +1299,100 @@ test("a tool with no declared schema is unaffected by the validation gate", asyn
   const context = await freshContext();
   const result = await runCatalogTool(context, "get_faq", {});
   assert.ok(result && typeof result === "object" && "results" in result);
+});
+
+// ==============================================================================================
+// Fase 6 del plan maestro (2026-09-15) - compuerta de configuracion (getSaleGate.canSell)
+// ==============================================================================================
+
+test("show_order_summary is blocked (never resolves items) when the business cannot sell yet", async () => {
+  const businessUnconfigured = await prisma.business.create({
+    data: { name: `Test ${randomUUID()}`, email: `test-${randomUUID()}@example.com`, passwordHash: "x" },
+  });
+  const customer2 = await prisma.customer.create({ data: { businessId: businessUnconfigured.id, phoneNumber: `573007${Date.now()}` } });
+  const conversation2 = await prisma.conversation.create({ data: { customerId: customer2.id } });
+
+  try {
+    const context: ToolContext = {
+      businessId: businessUnconfigured.id,
+      conversationId: conversation2.id,
+      customerId: customer2.id,
+      credentials: { phoneNumberId: "test-id", accessToken: "test-token" },
+      recipientPhone: "573009998877",
+    };
+    const result = (await runCatalogTool(context, "show_order_summary", { items: [] })) as {
+      ready?: boolean;
+      blocked?: boolean;
+      missing?: string[];
+      note?: string;
+    };
+    assert.equal(result.ready, false);
+    assert.equal(result.blocked, true);
+    assert.deepEqual(result.missing, ["métodos de pago", "tarifas de envío", "teléfono de contacto"]);
+    assert.match(result.note ?? "", /BLOQUE_VENTA_BLOQUEADA/);
+  } finally {
+    await prisma.conversation.deleteMany({ where: { id: conversation2.id } });
+    await prisma.customer.deleteMany({ where: { id: customer2.id } });
+    await prisma.business.deleteMany({ where: { id: businessUnconfigured.id } });
+  }
+});
+
+test("set_payment_method is blocked when the business cannot sell yet, even naming a real active payment method", async () => {
+  const businessUnconfigured = await prisma.business.create({
+    data: { name: `Test ${randomUUID()}`, email: `test-${randomUUID()}@example.com`, passwordHash: "x", contactPhone: "573005550009" },
+  });
+  const method = await prisma.paymentMethod.create({
+    data: { businessId: businessUnconfigured.id, type: "TRANSFERENCIA", label: "Nequi", details: "300", active: true },
+  });
+  const customer2 = await prisma.customer.create({ data: { businessId: businessUnconfigured.id, phoneNumber: `573008${Date.now()}` } });
+  const conversation2 = await prisma.conversation.create({ data: { customerId: customer2.id } });
+
+  try {
+    const context: ToolContext = {
+      businessId: businessUnconfigured.id,
+      conversationId: conversation2.id,
+      customerId: customer2.id,
+      credentials: { phoneNumberId: "test-id", accessToken: "test-token" },
+      recipientPhone: "573009998877",
+    };
+    // Falta tarifa de envio - un metodo de pago real por si solo no alcanza para vender.
+    const result = (await runCatalogTool(context, "set_payment_method", { paymentMethodId: method.id })) as {
+      ok?: boolean;
+      blocked?: boolean;
+      missing?: string[];
+    };
+    assert.equal(result.ok, false);
+    assert.equal(result.blocked, true);
+    assert.deepEqual(result.missing, ["tarifas de envío"]);
+  } finally {
+    await prisma.paymentMethod.deleteMany({ where: { businessId: businessUnconfigured.id } });
+    await prisma.conversation.deleteMany({ where: { id: conversation2.id } });
+    await prisma.customer.deleteMany({ where: { id: customer2.id } });
+    await prisma.business.deleteMany({ where: { id: businessUnconfigured.id } });
+  }
+});
+
+test("close_conversation with outcome LOST is never gated by the sale-capability check", async () => {
+  const businessUnconfigured = await prisma.business.create({
+    data: { name: `Test ${randomUUID()}`, email: `test-${randomUUID()}@example.com`, passwordHash: "x" },
+  });
+  const customer2 = await prisma.customer.create({ data: { businessId: businessUnconfigured.id, phoneNumber: `573009${Date.now()}` } });
+  const conversation2 = await prisma.conversation.create({ data: { customerId: customer2.id } });
+
+  try {
+    const context: ToolContext = {
+      businessId: businessUnconfigured.id,
+      conversationId: conversation2.id,
+      customerId: customer2.id,
+      credentials: { phoneNumberId: "test-id", accessToken: "test-token" },
+      recipientPhone: "573009998877",
+    };
+    const result = (await runCatalogTool(context, "close_conversation", { outcome: "LOST" })) as { closed: boolean; blocked?: boolean };
+    assert.equal(result.closed, true);
+    assert.equal(result.blocked, undefined);
+  } finally {
+    await prisma.conversation.deleteMany({ where: { id: conversation2.id } });
+    await prisma.customer.deleteMany({ where: { id: customer2.id } });
+    await prisma.business.deleteMany({ where: { id: businessUnconfigured.id } });
+  }
 });
