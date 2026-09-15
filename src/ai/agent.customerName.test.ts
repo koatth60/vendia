@@ -58,3 +58,30 @@ test("extractNameFromAnswer still returns null for a real sentence with no name 
   assert.equal(extractNameFromAnswer("Hola, cuanto cuesta el envio?"), null);
   assert.equal(extractNameFromAnswer("no se, dime tu vos"), null);
 });
+
+// Real, repeated production incident (2026-09-14/15): three separate customers ended up with their
+// saved name overwritten by "Plateado", "Negro", and "Pero Negro Sale Todo" - all real answers to a
+// DIFFERENT part of a compound bot message that also happened to ask for the name ("Cuál color
+// prefieres? Y ya que estamos, me confirmas tu nombre...", or a numbered list ending in "...nombre
+// completo, cedula..."). ASK_NAME_PATTERN matches that whole message, so whatever the customer replied
+// got tried as a name candidate, and these short, all-alphabetic answers had nothing to disqualify them.
+test("extractNameFromAnswer rejects a color answered to a compound color+name question", () => {
+  assert.equal(extractNameFromAnswer("Plateado"), null);
+  assert.equal(extractNameFromAnswer("Negro"), null);
+  assert.equal(extractNameFromAnswer("Rosado"), null);
+  assert.equal(extractNameFromAnswer("negro"), null, "case-insensitive");
+});
+
+test("extractNameFromAnswer rejects a short sentence that merely happens to fit the word-count/shape check", () => {
+  assert.equal(extractNameFromAnswer("Pero negro sale con todo"), null);
+});
+
+test("extractSelfIntroducedName also rejects a color/non-name candidate after the trigger word", () => {
+  assert.equal(extractSelfIntroducedName("soy negro"), null);
+  assert.equal(extractSelfIntroducedName("me llamo plateado"), null);
+});
+
+test("extractNameFromAnswer still accepts a real name that is not a color/reserved word", () => {
+  assert.equal(extractNameFromAnswer("Angie"), "Angie");
+  assert.equal(extractNameFromAnswer("Maria Camila"), "Maria Camila");
+});

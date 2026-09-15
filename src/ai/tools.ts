@@ -6,10 +6,12 @@ import {
   searchProducts,
   findConfidentProductMatch,
   findProductsByAttributes,
+  formatCopPrice,
 } from "../catalog/products";
 import { listActivePaymentMethods } from "../catalog/paymentMethods";
 import { listShippingRates, resolveShippingRateForCity } from "../catalog/shippingRates";
 import { recordAgentIncident } from "./incidents";
+import { tokenize } from "../search/text";
 
 // Shared with agent.ts (both the tool result here and the system-prompt directive there need the same
 // Spanish wording for each modality) - defined once here since agent.ts already imports from this file,
@@ -156,7 +158,7 @@ export const catalogTools: OpenAI.Chat.ChatCompletionTool[] = [
     function: {
       name: "get_product_details",
       description:
-        "Obtiene el detalle completo de un producto especifico por su ID, incluyendo precio, stock y URLs de fotos/videos.",
+        "Obtiene el detalle completo de un producto especifico por su ID, incluyendo precio, stock y URLs de fotos/videos. La respuesta trae 'variants' (color, stock, hasMedia) solo si el producto tiene - si no viene ese campo, no tiene variantes. Nunca digas que no tiene variantes sin haber llamado esto primero.",
       parameters: {
         type: "object",
         properties: {
@@ -612,18 +614,42 @@ function truncateForList(description: string): string {
 
 function formatProduct(product: Awaited<ReturnType<typeof getProductById>>, opts?: { forList?: boolean }) {
   if (!product) return null;
+  // hasMedia and hasVariantMedia both need to fold in variant-level photos, not just product.media
+  // (variantId: null only - see PRODUCT_INCLUDE) - a real product can have EVERY photo assigned to a
+  // color variant and zero general ones (2026-09-15 incident: hasMedia read false, the model never
+  // called send_product_media, and the customer got a "no tiene variantes"/no-photos reply for a
+  // product that had both).
+  const hasAnyMedia = product.media.length > 0 || product.variants.some((v) => v.media.length > 0);
   return {
     id: product.id,
     name: product.name,
     description: opts?.forList ? truncateForList(product.description) : product.description,
-    price: product.price.toString(),
+    price: formatCopPrice(product.price),
     currency: product.currency,
     stock: totalStock(product),
     category: product.category,
     // No mandamos la URL de media aca - el modelo nunca la usa (send_product_media la resuelve
     // internamente y las reglas del prompt prohiben escribir la URL en el mensaje), mismo patron que ya
     // usa find_products_by_attributes con "hasMedia".
-    hasMedia: product.media.length > 0,
+    hasMedia: hasAnyMedia,
+    // Real production bug (2026-09-15): formatProduct never told the model whether a product HAS
+    // variants at all, so a get_product_details call on a product with 3 real active color variants
+    // (stock and all) got the model answering "no tiene variantes de color cargadas" - flatly false,
+    // straight to the customer. Only present when the product actually has variants, same "omit when
+    // empty" pattern hasMedia already follows via find_products_by_attributes.
+    ...(product.variants.length > 0
+      ? {
+          variants: product.variants
+            .filter((v) => v.active)
+            .map((v) => ({
+              id: v.id,
+              color: v.color,
+              size: v.size,
+              stock: v.stock,
+              hasMedia: v.media.length > 0 || product.media.length > 0,
+            })),
+        }
+      : {}),
   };
 }
 
@@ -762,8 +788,20 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
       // send_product_media on first detail - it sometimes skips it despite the prompt instruction.
       // Send here in code instead, once per product per conversation (tracked via
       // Conversation.mediaSentProductIds), gated by the business's autoSendPhotoOnQuote setting.
+      //
+      // Real production incident (2026-09-15): `product.media` alone (variantId: null only, see
+      // PRODUCT_INCLUDE) is EMPTY for a product whose photos are all assigned to color variants - a
+      // real case had all 3 photos on variants (rosa/plateado/negro), zero general ones. This gate used
+      // to read `product.media.length > 0`, saw 0, and silently skipped auto-send entirely - the model
+      // then also saw `hasMedia: false` (see formatProduct) and never called send_product_media either,
+      // so the bot promised photos twice in the same conversation and sent nothing both times, with the
+      // owner having to step in and send them by hand. No color was named yet at this point in the flow
+      // (get_product_details, not a color-scoped call), so - same rule send_product_media itself already
+      // follows for an unscoped request - the combined send is every variant's media plus the general
+      // ones, not just the first variant's.
+      const allProductMedia = [...product.media, ...product.variants.flatMap((v) => v.media)];
       let mediaJustSent = false;
-      if (product.media.length > 0) {
+      if (allProductMedia.length > 0) {
         const [business, conversation] = await Promise.all([
           prisma.business.findUnique({ where: { id: businessId }, select: { autoSendPhotoOnQuote: true } }),
           prisma.conversation.findUnique({ where: { id: context.conversationId }, select: { mediaSentProductIds: true } }),
@@ -777,7 +815,7 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
             context.conversationId,
             product.id,
             product.name,
-            product.media
+            allProductMedia
           );
           await prisma.conversation.update({
             where: { id: context.conversationId },
@@ -998,6 +1036,31 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
     case "ask_owner": {
       const question = String(input.question ?? "").trim();
       if (!question) return { error: "Falta la pregunta" };
+
+      // Real production incident (2026-09-14): a frustrated customer asked the same unanswered question
+      // twice ("Y tiene radio" ... 5 minutes later "Pero tiene radio") and the model escalated it to the
+      // owner BOTH times - two separate WhatsApp pings for the exact same fact, still zero answers. Same
+      // token-overlap approach the media backstop uses for product names (see
+      // findMentionedProductsForMediaBackstop in agent.ts), scoped to THIS conversation's still-open
+      // questions only - a genuinely different question always goes through untouched.
+      const openForConversation = await prisma.pendingOwnerQuestion.findMany({
+        where: { conversationId: context.conversationId },
+        select: { question: true },
+      });
+      const newTokens = new Set(tokenize(question));
+      const duplicate = openForConversation.find((p) => {
+        const priorTokens = tokenize(p.question);
+        if (priorTokens.length === 0 || newTokens.size === 0) return false;
+        const hits = priorTokens.filter((t) => newTokens.has(t)).length;
+        return hits / priorTokens.length >= 0.6 && hits / newTokens.size >= 0.6;
+      });
+      if (duplicate) {
+        return {
+          asked: true,
+          alreadyPending: true,
+          note: "Esto ya se lo preguntaste al equipo antes en esta misma conversacion y todavia no responden - no vuelvas a escalarlo. Decile al cliente honestamente que seguis esperando la respuesta del equipo, sin prometer un nuevo aviso.",
+        };
+      }
 
       const business = await prisma.business.findUnique({ where: { id: businessId } });
       if (!business?.contactPhone) {

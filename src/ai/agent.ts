@@ -238,6 +238,20 @@ export const SHIPPING_MODALITY_CLAIM_PATTERN =
 export const CATALOG_CHECK_CLAIM_PATTERN =
   /\bcat[aá]logo\b.{0,25}\b(revis|confirm|consult|chequ|mir[ao])|\b(revis|confirm|consult|chequ|mir[ao])\w*\b.{0,25}\bcat[aá]logo\b/i;
 
+// Real production bug (2026-09-15): the model told a customer "Ese modelo... no tiene variantes de
+// color cargadas" for a product that had 3 real active color variants with stock, seconds after
+// get_product_details itself returned that data. Not a dropped-promise pattern like the ones above (no
+// tool call is missing here), so this is checked separately in finalizeTurn against hasVariantsThisTurn
+// - the real, just-fetched answer - not repaired through applyClaimBackstops's registry.
+export const VARIANT_DENIAL_PATTERN =
+  /no tiene variantes|no maneja(mos)? variantes|no hay variantes|una sola presentaci[oó]n|no viene en (otros? )?colores?|no tenemos (otros? )?colores?/i;
+
+// The model's own "I can't tell which product this photo is" clarifying question - used to detect a
+// repeated identify-by-photo loop (see shouldForcePhotoEscalation in generateReply) so it escalates to
+// ask_owner_about_photo instead of asking the same question a third/fourth time.
+export const PHOTO_ID_CLARIFY_PATTERN =
+  /no logro identificar|no pude identificar|no logr[eé] identificar|cu[aá]l de (estos|los|las)\b.{0,20}\bes\b|me confirmas cu[aá]l|podr[ií]a ser uno de estos|para no equivocarme con el modelo/i;
+
 // Same failure mode again, this time for save_customer_name: the bot asks "a nombre de quien hago el
 // pedido?", the customer answers with just their name, and the bot's next reply acknowledges it
 // ("Perfecto, David!") without ever having called save_customer_name - confirmed against a real
@@ -333,13 +347,42 @@ Datos reales de este pedido:
   }
 }
 
+// Real, repeated production bug (2026-09-14/15): a customer's saved name kept flipping to "Plateado",
+// "Negro", or "Pero Negro Sale Todo" - not typos, actual answers to a DIFFERENT question. Root cause:
+// the bot often asks for the name compounded with something else in one message ("Cuál color prefieres?
+// Y ya que estamos, me confirmas tu nombre...", or a 3-item numbered list ending in "...datos de
+// entrega: nombre completo, cedula..."). ASK_NAME_PATTERN below matches that whole message (it DOES
+// contain "nombre"), so whatever the customer replies gets tried as a name - and a short, all-alphabetic,
+// <=4-word answer like "Plateado" or "Pero negro sale todo" passes looksLikePersonName's shape check
+// with nothing to tell it apart from a real name. NOT_A_NAME only ever caught a handful of exact
+// single-word replies (si/no/listo/...), never a color or a short sentence. canonicalColors is the same
+// closed, language-level vocabulary find_products_by_attributes already uses - reusing it here rejects
+// any candidate that mentions a color, in any of its synonyms, business-agnostically.
+function looksLikeNonNameAnswer(candidate: string): boolean {
+  if (canonicalColors(candidate).length > 0) return true;
+  const words = candidate.toLowerCase().split(/\s+/);
+  return words.some((w) => NON_NAME_WORDS.has(w));
+}
+
+// Common Spanish connector/commerce words that keep showing up in these misfires and are not remotely
+// name-shaped, but pass looksLikePersonName's purely-alphabetic/<=4-word check on their own ("Pero negro
+// sale todo" is 4 alphabetic words). Kept small and generic on purpose - never a vertical vocabulary,
+// same principle as canonicalColors/canonicalizeCategoryWord elsewhere in the codebase.
+const NON_NAME_WORDS = new Set([
+  "pero", "sale", "todo", "toda", "todos", "todas", "nada", "mas", "más", "menos", "anticipado",
+  "contraentrega", "descuento", "envio", "envío", "domicilio", "efectivo", "unidad", "unidades", "talla",
+  "tamano", "tamaño", "color", "colores", "prefiero", "quiero", "mejor", "asi", "así", "tambien",
+  "también", "entonces", "porque", "pues", "grande", "pequeno", "pequeño", "mediano",
+]);
+
 function looksLikePersonName(text: string): boolean {
   const trimmed = text.trim();
   if (trimmed.length < 3 || trimmed.length > 60) return false;
   const words = trimmed.split(/\s+/);
   if (words.length > 4) return false;
   if (!words.every((w) => /^[A-Za-zÀ-ÿ'-]+$/.test(w))) return false;
-  return !NOT_A_NAME.has(trimmed.toLowerCase());
+  if (NOT_A_NAME.has(trimmed.toLowerCase())) return false;
+  return !looksLikeNonNameAnswer(trimmed);
 }
 
 function toTitleCase(text: string): string {
@@ -581,14 +624,19 @@ const NAME_PARENTHETICAL_SUFFIX_PATTERN = /\s*\([^)]*\)\s*$/;
 // the customer's message, the bot's current reply, AND the bot's prior turn (see the photo-claim
 // backstop in finalizeTurn for why the prior turn matters). Exported as a pure function for a cheap
 // regression test - no DB/LLM needed to verify the matching decision itself.
-export function findMentionedProductsForMediaBackstop<T extends { name: string; media: unknown[]; category?: string | null }>(
-  products: T[],
-  haystack: string
-): T[] {
+export function findMentionedProductsForMediaBackstop<
+  T extends { name: string; media: unknown[]; category?: string | null; variants?: { media: unknown[] }[] }
+>(products: T[], haystack: string): T[] {
   const haystackTokens = new Set(tokenize(haystack.replace(KEYCAP_DIGIT_PATTERN, " ").replace(LIST_MARKER_PATTERN, " ")));
   const scored = products
     .map((p) => {
-      if (p.media.length === 0) return null;
+      // Real production bug (2026-09-15): checking only p.media (general/unassigned photos) made this
+      // backstop blind to any product whose photos are all assigned to color variants (a real case had
+      // all 3 on variants, zero general) - the bot's own claim "aqui van las fotos" never got backed by
+      // a real send, and the customer got nothing. Same combined-media rule send_product_media and
+      // get_product_details already use.
+      const totalMedia = p.media.length + (p.variants?.reduce((sum, v) => sum + v.media.length, 0) ?? 0);
+      if (totalMedia === 0) return null;
       const nameTokens = tokenize(p.name.replace(NAME_PARENTHETICAL_SUFFIX_PATTERN, ""));
       if (nameTokens.length === 0) return null;
       const hits = nameTokens.filter((t) => haystackTokens.has(t)).length;
@@ -638,6 +686,32 @@ export function findMentionedProductsForMediaBackstop<T extends { name: string; 
 // customer DID answer. Confirmed via a real customer stuck as "Mano" in the panel after giving "Carlos".
 export function stripMarkdownEmphasis(text: string): string {
   return text.replace(/[*_]/g, "");
+}
+
+// Counts how many times, back-to-back at the END of `history`, the customer sent a photo/video and the
+// bot immediately replied with an "I can't tell which product this is" clarifying question - see
+// shouldForcePhotoEscalation in generateReply. Exported as a pure function for a cheap regression test.
+// `history` here should NOT include the current turn's own trailing customer message - that message is
+// what the caller is deciding whether to escalate, not part of the PRIOR streak being measured.
+export function countUnresolvedPhotoIdStreak(
+  history: { role: string; content: string; mediaType: string | null }[]
+): number {
+  let streak = 0;
+  let j = history.length - 1;
+  while (j >= 1) {
+    const assistantMsg = history[j];
+    const priorCustomerMsg = history[j - 1];
+    if (
+      assistantMsg.role === "ASSISTANT" &&
+      priorCustomerMsg.role === "CUSTOMER" &&
+      (priorCustomerMsg.mediaType === "IMAGE" || priorCustomerMsg.mediaType === "VIDEO") &&
+      PHOTO_ID_CLARIFY_PATTERN.test(stripMarkdownEmphasis(assistantMsg.content))
+    ) {
+      streak++;
+      j -= 2;
+    } else break;
+  }
+  return streak;
 }
 
 function lastAssistantText(history: { role: string; content: string }[]): string {
@@ -708,6 +782,26 @@ async function alertOwnerOfDegradedReply(context: ToolContext, reason: string): 
   await recordAgentIncident(context.businessId, "DEGRADED_REPLY", reason, context.conversationId);
 }
 
+// Invariant added 2026-09-15 (real incident: the bot promised photos twice in the same conversation,
+// mediaSentThisTurn stayed 0 both times, and NOTHING recorded it anywhere - no AgentIncident, no owner
+// alert, no trace except the customer eventually asking a human to send them by hand). Both media
+// backstop branches above call this whenever they tried to send (or had a real candidate to send) and
+// still ended the turn with zero actual sends - the model's own text already claims photos went out, so
+// leaving it as-is would ship a dropped promise with no record and no honest correction. Unlike the
+// claim backstops in applyClaimBackstops (which repair a claim by actually doing the thing), there is no
+// "just call the tool again" fix here - the tool already ran and failed/found nothing - so this alerts
+// the owner for real (the text below only says "avise al equipo" because it's about to be true) and
+// appends an honest, non-promising line instead of leaving the false claim standing alone.
+async function honorOrRetractMediaPromise(context: ToolContext, conversationId: string, text: string): Promise<string> {
+  const reason = `El bot prometio fotos/video pero no logro enviar ninguno. Texto: "${text.slice(0, 200)}"`;
+  await recordAgentIncident(context.businessId, "BACKSTOP_INTERVENTION", reason, conversationId);
+  await alertOwner(
+    context,
+    "Aviso: el bot le prometio fotos/video a un cliente pero no logro mandar ninguna (revisa si el producto tiene fotos cargadas, incluidas las de sus variantes). Revisa esa conversacion en el panel."
+  );
+  return `${text}\n\nUy, no logré cargar las fotos en este momento - ya le avisé al equipo para que te las mande. 🙏`;
+}
+
 export async function generateReply(
   conversationId: string,
   context: ToolContext,
@@ -769,6 +863,11 @@ export async function generateReply(
   // guard below also catch a stale productId when THIS tool, not find_products_by_attributes, is what
   // actually scoped the product this turn (reliability plan Phase 2, item 3, 2026-09-13).
   let searchScopedThisTurn: { productId: string; productName: string; variantId: string | null }[] | null = null;
+  // Set whenever get_product_details resolves this turn - lets finalizeTurn correct a false "no tiene
+  // variantes" claim against the product it JUST looked up (with the real colors, not a generic stall),
+  // instead of trusting the model to have read its own tool result correctly.
+  let hasVariantsThisTurn: boolean | null = null;
+  let variantColorsThisTurn: string[] = [];
   let shippingModalitiesThisTurn: { code: string; label: string }[] | null = null;
   // Set when show_order_summary ran this turn and returned ready:true - the one real, unambiguous total
   // for this order, used by guardAgainstOrderTotalMismatch below (B5, 2026-09-13 audit).
@@ -788,6 +887,20 @@ export async function generateReply(
     }
     text = guardAgainstShippingCostHallucination(text, shippingRatesThisTurn);
     await guardAgainstOrderTotalMismatch(context, text, orderSummaryTotalThisTurn);
+
+    // hasVariantsThisTurn === true means get_product_details JUST returned real variants for the
+    // product being discussed - if the model denies that anyway, its own tool result already proves it
+    // wrong, so correct it deterministically instead of leaving a false statement with the customer.
+    if (hasVariantsThisTurn === true && VARIANT_DENIAL_PATTERN.test(text)) {
+      await recordAgentIncident(
+        context.businessId,
+        "BACKSTOP_INTERVENTION",
+        `El bot nego variantes de color que si existen. Texto: "${text.slice(0, 200)}"`,
+        conversationId
+      );
+      const colorList = variantColorsThisTurn.length > 0 ? variantColorsThisTurn.join(", ") : "varios colores";
+      text = text.replace(VARIANT_DENIAL_PATTERN, `sí viene en estos colores: ${colorList}`);
+    }
 
     text = await applyClaimBackstops(text, [
       {
@@ -925,6 +1038,7 @@ export async function generateReply(
     // prose scan matched all of them regardless of color. When the model called the real filter this
     // turn, trust its result instead of re-guessing from text.
     if (attributeMatchThisTurn && attributeMatchThisTurn.length <= 3) {
+      let sentAny = false;
       for (let i = 0; i < attributeMatchThisTurn.length; i++) {
         if (i > 0) await new Promise((resolve) => setTimeout(resolve, 1200));
         const m = attributeMatchThisTurn[i];
@@ -934,12 +1048,17 @@ export async function generateReply(
         // generateReply's own try/catch. Degrade instead: log and keep going, so one failed photo never
         // silences the whole turn or blocks the rest of the batch.
         try {
-          await runCatalogTool(context, "send_product_media", { productId: m.productId, variantId: m.variantId ?? undefined, skipIfAlreadySent: true });
+          const result = (await runCatalogTool(context, "send_product_media", {
+            productId: m.productId,
+            variantId: m.variantId ?? undefined,
+            skipIfAlreadySent: true,
+          })) as { sent?: boolean };
+          if (result?.sent) sentAny = true;
         } catch (error) {
           console.error("Fallo el envio de una foto en el backstop de atributos:", error);
         }
       }
-      return text;
+      return sentAny ? text : await honorOrRetractMediaPromise(context, conversationId, text);
     }
 
     // Fallback for everything else (direct product-name requests, vague follow-ups like "y los otros
@@ -984,18 +1103,23 @@ export async function generateReply(
     const wholeCatalogMatch = products.length > 1 && matched.length === products.length;
     if (matched.length > 5 || wholeCatalogMatch) return text;
 
+    let sentAny = false;
     for (let i = 0; i < matched.length; i++) {
       if (i > 0) await new Promise((resolve) => setTimeout(resolve, 1200));
       // Same reasoning as the attribute-match loop above: never let one failed send take the whole
       // turn's reply down with it.
       try {
-        await runCatalogTool(context, "send_product_media", { productName: matched[i].name, skipIfAlreadySent: true });
+        const result = (await runCatalogTool(context, "send_product_media", {
+          productName: matched[i].name,
+          skipIfAlreadySent: true,
+        })) as { sent?: boolean };
+        if (result?.sent) sentAny = true;
       } catch (error) {
         console.error("Fallo el envio de una foto en el backstop de nombres:", error);
       }
     }
 
-    return text;
+    return sentAny ? text : await honorOrRetractMediaPromise(context, conversationId, text);
   }
 
   const FALLBACK_TEXT = "Disculpa, tuve un problema procesando tu consulta. Un asesor te va a contactar pronto.";
@@ -1019,14 +1143,37 @@ export async function generateReply(
     !!customerText &&
     (canonicalColors(customerText).length > 0 || (await textMentionsConfiguredCategory(context.businessId, customerText)));
 
+  // Real production bug (2026-09-14/15): a customer sends a photo of a product they want, the model
+  // can't confidently match it and asks "¿me confirmas cuál de estos dos es?", the customer sends ANOTHER
+  // photo (reasonable read: "here, does this help identify it"), and the model just asks the same
+  // clarifying question again - a real conversation did this 4 times in a row and never resolved,
+  // wasting the customer's patience and the sale. ask_owner_about_photo exists exactly for this ("last
+  // resort when image analysis can't confidently identify the product") but nothing forced the model to
+  // actually reach for it instead of asking the customer to try again. Force it once the customer has
+  // already sent a photo/video at least twice in a row without the bot ever resolving which product it
+  // is - mirrors the shouldForceAttributeFilter pattern above (force tool_choice, model still owns the
+  // real question text).
+  const lastHistoryEntry = history[history.length - 1];
+  const shouldForcePhotoEscalation =
+    !!lastHistoryEntry &&
+    lastHistoryEntry.role === "CUSTOMER" &&
+    (lastHistoryEntry.mediaType === "IMAGE" || lastHistoryEntry.mediaType === "VIDEO") &&
+    countUnresolvedPhotoIdStreak(history.slice(0, -1)) >= 2;
+
+  const forcedToolChoice = shouldForcePhotoEscalation
+    ? "ask_owner_about_photo"
+    : shouldForceAttributeFilter
+      ? "find_products_by_attributes"
+      : null;
+
   try {
     for (let iteration = 0; iteration < 5; iteration++) {
       const response = await createChatCompletion({
         max_tokens: 1024,
         messages,
         tools: catalogTools,
-        ...(iteration === 0 && shouldForceAttributeFilter
-          ? { tool_choice: { type: "function" as const, function: { name: "find_products_by_attributes" } } }
+        ...(iteration === 0 && forcedToolChoice
+          ? { tool_choice: { type: "function" as const, function: { name: forcedToolChoice } } }
           : {}),
         // @ts-expect-error DeepSeek-specific param, not in the OpenAI SDK types. Disabled: reasoning
         // tokens add latency/cost we don't need for a WhatsApp sales reply.
@@ -1152,8 +1299,18 @@ export async function generateReply(
           modalities?: { code: string; label: string }[];
           ready?: boolean;
           total?: number;
+          id?: string;
+          variants?: { id: string; color: string | null; size: string | null }[];
         };
         if (result?.mediaJustSent || result?.sent) mediaSentThisTurn++;
+        // Tracks whether THIS product genuinely has variants, straight from formatProduct's own output -
+        // used below to correct a "no tiene variantes" claim the model makes right after actually seeing
+        // real variant data (2026-09-15 incident: get_product_details returned 3 real active color
+        // variants and the model still told the customer "no tiene variantes de color cargadas").
+        if (call.function.name === "get_product_details" && typeof result?.id === "string") {
+          hasVariantsThisTurn = Array.isArray(result.variants) && result.variants.length > 0;
+          variantColorsThisTurn = (result.variants ?? []).map((v) => v.color).filter((c): c is string => !!c);
+        }
         if (call.function.name === "ask_owner") ownerAskedThisTurn++;
         if (call.function.name === "save_customer_name") nameSavedThisTurn++;
         if (call.function.name === "save_customer_contact_info") contactSavedThisTurn++;

@@ -346,6 +346,11 @@ const CATEGORY_LABELS: Record<string, string> = {
 };
 
 export interface BotPersonality {
+  // Real production bug (2026-09-14/15): a conversation spanning a business rename (old messages still
+  // literally say "MAG.IMP", the business is now "MAGByLizN") kept the OLD name alive - the model reads
+  // its own history and just continues using whatever name it sees there. Passed straight from
+  // Business.name so there is one deterministic, current answer regardless of what old turns say.
+  businessName?: string | null;
   assistantName?: string | null;
   tone?: string | null;
   dialect?: string | null;
@@ -394,6 +399,12 @@ export function buildSystemPrompt(personality?: BotPersonality | null): string {
   const categoryLabel = personality?.category ? CATEGORY_LABELS[personality.category] : undefined;
   if (categoryLabel) {
     parts.push(`RUBRO DEL NEGOCIO: este negocio es de ${categoryLabel}. Ten esto en cuenta para el tipo de preguntas que hacés y cómo describís los productos.`);
+  }
+
+  if (personality?.businessName?.trim()) {
+    parts.push(
+      `NEGOCIO: se llama exactamente "${personality.businessName.trim()}" - usa siempre este nombre, aunque en mensajes viejos de esta misma conversación aparezca otro (cambio de nombre).`
+    );
   }
 
   if (personality?.assistantName?.trim()) {

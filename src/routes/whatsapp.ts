@@ -46,6 +46,42 @@ import { extractFrame } from "../media/videoFrame";
 
 export const whatsappRouter = Router();
 
+// Real production bug (2026-09-14/15): two webhooks for the same conversation arriving close together
+// (a customer sending two messages back to back, or WhatsApp's own retry after a slow response) used to
+// run TWO generateReply calls concurrently, both reading the same starting history and both writing
+// their own reply - the customer got two different, sometimes flatly contradictory answers within
+// seconds of each other (confirmed against real conversations: one telling a customer "no manejamos
+// micrófonos" for a typo the OTHER reply correctly read as "audífonos", another saving the wrong name -
+// see looksLikeNonNameAnswer in agent.ts for a related but separate cause). pm2 runs this as a single
+// process (fork mode, not cluster), so a plain in-memory per-conversation queue is enough - no Redis/DB
+// lock needed. Each conversationId gets its own promise chain: a new webhook for that conversation waits
+// for the previous one's full handling (generateReply + the reply send + recordMessage) to finish before
+// it starts, so the two are serialized instead of racing. Different conversations are unaffected and run
+// fully in parallel, same as before.
+const conversationLocks = new Map<string, Promise<void>>();
+
+export async function withConversationLock(conversationId: string, fn: () => Promise<void>): Promise<void> {
+  const previous = conversationLocks.get(conversationId) ?? Promise.resolve();
+  // .then(fn, fn) runs fn once `previous` SETTLES, whether it resolved or rejected - a prior turn
+  // throwing must never wedge every later turn for this conversation behind a permanently-rejected
+  // promise.
+  const run = previous.then(fn, fn);
+  // The map only ever stores a swallowed-error version of `run` - otherwise the NEXT caller's `previous`
+  // would itself reject before its own turn even starts.
+  const tail = run.catch(() => {});
+  conversationLocks.set(conversationId, tail);
+  try {
+    await run;
+  } finally {
+    // Free the map entry once nothing is queued behind this call (nobody else overwrote it with their
+    // own tail) - without this a business with many distinct conversations over time leaks one Map entry
+    // per conversationId forever.
+    if (conversationLocks.get(conversationId) === tail) {
+      conversationLocks.delete(conversationId);
+    }
+  }
+}
+
 // Minutos que tiene que llevar callado este lado del chat para que valga la pena mandar el acuse de
 // "ya te leimos". Dentro de esa ventana, o la duena esta escribiendo ahora mismo o el bot acaba de
 // avisar que escala: en los dos casos el cliente ya tiene un mensaje reciente y el acuse solo molesta.
@@ -433,229 +469,232 @@ whatsappRouter.post("/webhook", async (req, res) => {
     const whatsappProfileName: string | undefined = value?.contacts?.[0]?.profile?.name;
     const customer = await getOrCreateCustomer(business.id, from, whatsappProfileName);
     const conversation = await getOrCreateOpenConversation(business.id, customer.id);
+    await withConversationLock(conversation.id, async () => {
 
-    let text = "";
-    let media: { s3Key: string; type: "IMAGE" | "VIDEO" | "AUDIO" } | undefined;
-    let imageAnalysis: string | undefined;
+      let text = "";
+      let media: { s3Key: string; type: "IMAGE" | "VIDEO" | "AUDIO" } | undefined;
+      let imageAnalysis: string | undefined;
 
-    if (message.type === "text") {
-      text = message.text.body;
-    } else if (message.type === "image") {
-      try {
-        const { buffer, mimeType } = await downloadMedia(credentials, message.image.id);
-        const { key, url } = await uploadMedia(buffer, mimeType, "receipts");
-        media = { s3Key: key, type: "IMAGE" };
-        text = message.image.caption ?? "";
-        const catalogHint = await getCatalogHintText(business.id);
-        imageAnalysis = await analyzeCustomerImage(business.id, conversation.id, url, text, catalogHint);
-      } catch (error) {
-        console.error("No se pudo procesar la imagen entrante:", error);
-        text = "[El cliente envio una imagen, pero hubo un problema tecnico y no se pudo procesar. Pedile que la reenvie.]";
-      }
-    } else if (message.type === "video") {
-      try {
-        const { buffer, mimeType } = await downloadMedia(credentials, message.video.id);
-        const { key } = await uploadMedia(buffer, mimeType, "videos");
-        media = { s3Key: key, type: "VIDEO" };
-        text = message.video.caption ?? "";
-        const frame = await extractFrame(buffer);
-        const { url: frameUrl } = await uploadMedia(frame, "image/jpeg", "receipts");
-        const catalogHint = await getCatalogHintText(business.id);
-        imageAnalysis = await analyzeCustomerImage(business.id, conversation.id, frameUrl, text, catalogHint);
-      } catch (error) {
-        console.error("No se pudo procesar el video entrante:", error);
-        text = "[El cliente envio un video, pero hubo un problema tecnico y no se pudo analizar. Pedile que mande una foto del producto en vez de video.]";
-      }
-    } else if (message.type === "audio") {
-      try {
-        const { buffer, mimeType } = await downloadMedia(credentials, message.audio.id);
-        const { key } = await uploadMedia(buffer, mimeType, "audio");
-        media = { s3Key: key, type: "AUDIO" };
-        const transcript = await transcribeAudio(buffer, mimeType);
-        text = transcript || "[El cliente envio una nota de voz, pero no se pudo transcribir. Pedile que la repita por texto.]";
-      } catch (error) {
-        console.error("No se pudo procesar el audio entrante:", error);
-        text = "[El cliente envio una nota de voz, pero hubo un problema tecnico y no se pudo procesar. Pedile que la reenvie o escriba el mensaje.]";
-      }
-    } else if (message.type === "location") {
-      const loc = message.location ?? {};
-      const parts = [loc.name, loc.address].filter(Boolean).join(", ");
-      const coords = loc.latitude != null && loc.longitude != null ? `lat ${loc.latitude}, lng ${loc.longitude}` : "";
-      text = `[El cliente comparte su ubicacion por WhatsApp${parts ? `: ${parts}` : ""}${coords ? ` (${coords})` : ""}. Si es para la direccion de envio, confirmale la direccion exacta en texto (barrio/calle/numero) antes de cerrar el pedido - una ubicacion de mapa sola no siempre alcanza para el mensajero.]`;
-    } else if (message.type === "sticker") {
-      text = "[El cliente envio un sticker, sin texto.]";
-    } else if (message.type === "document") {
-      const filename = message.document?.filename ?? "sin nombre";
-      text = `[El cliente envio un documento/archivo (${filename}), no una foto. Si esperabas un comprobante de pago, pedile que lo reenvie como foto/imagen para poder revisarlo.]`;
-    } else if (message.type === "contacts") {
-      text = "[El cliente compartio una tarjeta de contacto de WhatsApp.]";
-    }
-
-    // If the customer replied/quoted a specific WhatsApp message (long-press "Reply"), and that message
-    // was a product photo/video we sent, tell the model directly which product it was - otherwise it has
-    // to guess or ask "¿cual de los dos?" since WhatsApp doesn't show us the quoted image, only its id.
-    // Keep the raw customer text separate from the marker-prefixed version: the marker itself contains
-    // the words "foto"/"video" and the product's full name, which would otherwise false-trigger the
-    // photo-resend safety net in generateReply (it would think the customer just asked for that photo).
-    const rawText = text;
-    const quotedMessageId: string | undefined = message.context?.id;
-    if (quotedMessageId) {
-      const relatedProductName = await getRelatedProductNameForMessage(quotedMessageId);
-      if (relatedProductName) {
-        text = `[El cliente esta respondiendo a la foto/video de: ${relatedProductName}] ${text}`;
-      }
-    }
-
-    try {
-      await recordMessage(business.id, conversation.id, "CUSTOMER", text, whatsappMessageId, media, imageAnalysis);
-    } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
-        console.log("Mensaje duplicado de WhatsApp ignorado:", whatsappMessageId);
-        return;
-      }
-      throw error;
-    }
-
-    // Todo lo que el equipo dejo pendiente cuando la ventana de 24h estaba cerrada se entrega ACA: este
-    // mensaje entrante es lo que la reabre. Va antes del gate de control humano a proposito - lo que hay
-    // en cola lo escribio un humano, no depende de quien tenga el control ahora.
-    await flushQueuedOutbound(business.id, customer.id, conversation.id, credentials, from);
-
-    // Releer el estado en vez de confiar en el objeto `conversation` leido arriba: entre esa lectura y
-    // este punto corren la descarga del media, la vision y la transcripcion, que tardan segundos o
-    // decenas de segundos. Si la duena toco "Tomar control" o contesto desde el panel en ese rato, el
-    // valor viejo decia false y el bot respondia igual, encima de ella. Caso real 2026-09-14.
-    const gate = await prisma.conversation.findUnique({
-      where: { id: conversation.id },
-      select: { humanControl: true, humanControlAckSent: true },
-    });
-
-    if (gate?.humanControl) {
-      console.log("Conversacion en control humano, el bot no responde:", conversation.id);
-      // Silence with zero acknowledgment reads as the bot being broken to the customer, and the owner
-      // ends up having to jump in just to say "we got your message". Send one heads-up per pause period,
-      // gated on a dedicated flag (not "does the last ASSISTANT message match the ack text") - the owner's
-      // own manual replies are also recorded with role ASSISTANT, so comparing against the last ASSISTANT
-      // message re-fired the ack after every manual reply that wasn't itself the ack. Stay quiet until the
-      // owner/admin actually resumes it, which resets the flag.
-      const HUMAN_CONTROL_ACK = "Ya te leimos, en un momento te contesta el equipo directamente 🙏";
-      // Segunda condicion, ademas del flag: si de este lado se dijo algo hace muy poco, el humano esta
-      // presente (o el bot acaba de avisar que escala) y el acuse solo agrega ruido encima de un mensaje
-      // que el cliente ya vio. El flag solo se limpia en una transicion real a control humano
-      // (ver setHumanControl), esto cubre ademas la ventana en que la duena esta tipeando ahora mismo.
-      const recentlySpoken = await prisma.message.findFirst({
-        where: {
-          conversationId: conversation.id,
-          role: "ASSISTANT",
-          createdAt: { gte: new Date(Date.now() - ACK_QUIET_MINUTES * 60 * 1000) },
-        },
-        select: { id: true },
-      });
-      if (!gate.humanControlAckSent && !recentlySpoken) {
+      if (message.type === "text") {
+        text = message.text.body;
+      } else if (message.type === "image") {
         try {
-          const wamid = await sendTextMessage(credentials, from, HUMAN_CONTROL_ACK);
-          await recordMessage(business.id, conversation.id, "ASSISTANT", HUMAN_CONTROL_ACK, wamid || undefined);
-          await prisma.conversation.update({
-            where: { id: conversation.id },
-            data: { humanControlAckSent: true },
-          });
+          const { buffer, mimeType } = await downloadMedia(credentials, message.image.id);
+          const { key, url } = await uploadMedia(buffer, mimeType, "receipts");
+          media = { s3Key: key, type: "IMAGE" };
+          text = message.image.caption ?? "";
+          const catalogHint = await getCatalogHintText(business.id);
+          imageAnalysis = await analyzeCustomerImage(business.id, conversation.id, url, text, catalogHint);
         } catch (error) {
-          console.error("No se pudo mandar el acuse de recibo durante control humano:", error);
+          console.error("No se pudo procesar la imagen entrante:", error);
+          text = "[El cliente envio una imagen, pero hubo un problema tecnico y no se pudo procesar. Pedile que la reenvie.]";
+        }
+      } else if (message.type === "video") {
+        try {
+          const { buffer, mimeType } = await downloadMedia(credentials, message.video.id);
+          const { key } = await uploadMedia(buffer, mimeType, "videos");
+          media = { s3Key: key, type: "VIDEO" };
+          text = message.video.caption ?? "";
+          const frame = await extractFrame(buffer);
+          const { url: frameUrl } = await uploadMedia(frame, "image/jpeg", "receipts");
+          const catalogHint = await getCatalogHintText(business.id);
+          imageAnalysis = await analyzeCustomerImage(business.id, conversation.id, frameUrl, text, catalogHint);
+        } catch (error) {
+          console.error("No se pudo procesar el video entrante:", error);
+          text = "[El cliente envio un video, pero hubo un problema tecnico y no se pudo analizar. Pedile que mande una foto del producto en vez de video.]";
+        }
+      } else if (message.type === "audio") {
+        try {
+          const { buffer, mimeType } = await downloadMedia(credentials, message.audio.id);
+          const { key } = await uploadMedia(buffer, mimeType, "audio");
+          media = { s3Key: key, type: "AUDIO" };
+          const transcript = await transcribeAudio(buffer, mimeType);
+          text = transcript || "[El cliente envio una nota de voz, pero no se pudo transcribir. Pedile que la repita por texto.]";
+        } catch (error) {
+          console.error("No se pudo procesar el audio entrante:", error);
+          text = "[El cliente envio una nota de voz, pero hubo un problema tecnico y no se pudo procesar. Pedile que la reenvie o escriba el mensaje.]";
+        }
+      } else if (message.type === "location") {
+        const loc = message.location ?? {};
+        const parts = [loc.name, loc.address].filter(Boolean).join(", ");
+        const coords = loc.latitude != null && loc.longitude != null ? `lat ${loc.latitude}, lng ${loc.longitude}` : "";
+        text = `[El cliente comparte su ubicacion por WhatsApp${parts ? `: ${parts}` : ""}${coords ? ` (${coords})` : ""}. Si es para la direccion de envio, confirmale la direccion exacta en texto (barrio/calle/numero) antes de cerrar el pedido - una ubicacion de mapa sola no siempre alcanza para el mensajero.]`;
+      } else if (message.type === "sticker") {
+        text = "[El cliente envio un sticker, sin texto.]";
+      } else if (message.type === "document") {
+        const filename = message.document?.filename ?? "sin nombre";
+        text = `[El cliente envio un documento/archivo (${filename}), no una foto. Si esperabas un comprobante de pago, pedile que lo reenvie como foto/imagen para poder revisarlo.]`;
+      } else if (message.type === "contacts") {
+        text = "[El cliente compartio una tarjeta de contacto de WhatsApp.]";
+      }
+
+      // If the customer replied/quoted a specific WhatsApp message (long-press "Reply"), and that message
+      // was a product photo/video we sent, tell the model directly which product it was - otherwise it has
+      // to guess or ask "¿cual de los dos?" since WhatsApp doesn't show us the quoted image, only its id.
+      // Keep the raw customer text separate from the marker-prefixed version: the marker itself contains
+      // the words "foto"/"video" and the product's full name, which would otherwise false-trigger the
+      // photo-resend safety net in generateReply (it would think the customer just asked for that photo).
+      const rawText = text;
+      const quotedMessageId: string | undefined = message.context?.id;
+      if (quotedMessageId) {
+        const relatedProductName = await getRelatedProductNameForMessage(quotedMessageId);
+        if (relatedProductName) {
+          text = `[El cliente esta respondiendo a la foto/video de: ${relatedProductName}] ${text}`;
         }
       }
-      return;
-    }
 
-    // An image/video message is very likely a payment receipt (or product photo mid-close) for a
-    // purchase already in progress - cutting the customer off here mid-close is worse than letting
-    // one extra message through, so the cap only gates plain text/audio turns.
-    const capStatus =
-      message.type === "image" || message.type === "video"
-        ? { capped: false as const, justCrossed: false, messageCap: null, planTier: business.planTier }
-        : await checkPlanCap(business.id);
-    if (capStatus.capped) {
-      const capText =
-        "Por ahora alcanzamos el límite de mensajes de este mes para este negocio. Un asesor te va a contactar en breve para ayudarte manualmente. ¡Gracias por tu paciencia! 🙏";
-      await sendTextMessage(credentials, from, capText);
-      await recordMessage(business.id, conversation.id, "ASSISTANT", capText);
-
-      if (capStatus.justCrossed && business.contactPhone) {
-        const greeting = business.contactName ? `Hola ${business.contactName}` : "Hola";
-        const capAlertText = `${greeting}, tu negocio alcanzó el límite de ${capStatus.messageCap} mensajes de tu plan ${capStatus.planTier} este mes. El bot dejó de responder automáticamente hasta el próximo mes - escribime si querés subir de plan.`;
-        await trackOwnerSend(business.id, capAlertText, () => sendOwnerAlert(credentials, business.contactPhone!, capAlertText));
+      try {
+        await recordMessage(business.id, conversation.id, "CUSTOMER", text, whatsappMessageId, media, imageAnalysis);
+      } catch (error) {
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+          console.log("Mensaje duplicado de WhatsApp ignorado:", whatsappMessageId);
+          return;
+        }
+        throw error;
       }
-      return;
-    }
 
-    // Cuando el CLIENTE mando el mensaje, no cuando nosotros terminamos de procesarlo: la descarga del
-    // media y la vision ya se comieron parte del reloj antes de llegar aca. Meta manda su timestamp en
-    // segundos; si viene raro, se cae a la hora en que entro el webhook.
-    const metaTimestampMs = Number(message.timestamp) * 1000;
-    const customerSentAt = Number.isFinite(metaTimestampMs) && metaTimestampMs > 0 ? metaTimestampMs : webhookReceivedAt;
+      // Todo lo que el equipo dejo pendiente cuando la ventana de 24h estaba cerrada se entrega ACA: este
+      // mensaje entrante es lo que la reabre. Va antes del gate de control humano a proposito - lo que hay
+      // en cola lo escribio un humano, no depende de quien tenga el control ahora.
+      await flushQueuedOutbound(business.id, customer.id, conversation.id, credentials, from);
 
-    const shippingRatesConfigured = (await prisma.shippingRate.count({ where: { businessId: business.id } })) > 0;
+      // Releer el estado en vez de confiar en el objeto `conversation` leido arriba: entre esa lectura y
+      // este punto corren la descarga del media, la vision y la transcripcion, que tardan segundos o
+      // decenas de segundos. Si la duena toco "Tomar control" o contesto desde el panel en ese rato, el
+      // valor viejo decia false y el bot respondia igual, encima de ella. Caso real 2026-09-14.
+      const gate = await prisma.conversation.findUnique({
+        where: { id: conversation.id },
+        select: { humanControl: true, humanControlAckSent: true },
+      });
 
-    const reply = await generateReply(
-      conversation.id,
-      {
-        businessId: business.id,
-        conversationId: conversation.id,
-        customerId: customer.id,
-        credentials,
-        recipientPhone: from,
-      },
-      {
-        assistantName: business.assistantName,
-        tone: business.botTone,
-        dialect: business.botDialect,
-        greeting: business.botGreeting,
-        neverSay: business.botNeverSay,
-        customInstructions: business.customInstructions,
-        autoSendPhotoOnQuote: business.autoSendPhotoOnQuote,
-        offerPhotosBeforeSending: business.offerPhotosBeforeSending,
-        requirePaymentProof: business.requirePaymentProof,
-        category: business.businessCategory,
-        genderedAddressEnabled: business.genderedAddressEnabled,
-        femaleAddressTerm: business.femaleAddressTerm,
-        maleAddressTerm: business.maleAddressTerm,
-        shippingPaymentModalities: business.shippingPaymentModalities,
-        shippingRatesConfigured,
-      },
-      rawText
-    );
-    // generateReply puede tardar desde segundos hasta minutos (el 2026-09-14, con DeepSeek degradado,
-    // una respuesta salio 30 minutos despues del mensaje del cliente). En todo ese rato la duena puede
-    // haber tomado el control y contestado a mano - mandar igual la respuesta vieja la contradice
-    // delante del cliente. Se descarta: lo que un humano ya contesto vale mas que un borrador viejo.
-    const stillAutomatic = await prisma.conversation.findUnique({
-      where: { id: conversation.id },
-      select: { humanControl: true },
+      if (gate?.humanControl) {
+        console.log("Conversacion en control humano, el bot no responde:", conversation.id);
+        // Silence with zero acknowledgment reads as the bot being broken to the customer, and the owner
+        // ends up having to jump in just to say "we got your message". Send one heads-up per pause period,
+        // gated on a dedicated flag (not "does the last ASSISTANT message match the ack text") - the owner's
+        // own manual replies are also recorded with role ASSISTANT, so comparing against the last ASSISTANT
+        // message re-fired the ack after every manual reply that wasn't itself the ack. Stay quiet until the
+        // owner/admin actually resumes it, which resets the flag.
+        const HUMAN_CONTROL_ACK = "Ya te leimos, en un momento te contesta el equipo directamente 🙏";
+        // Segunda condicion, ademas del flag: si de este lado se dijo algo hace muy poco, el humano esta
+        // presente (o el bot acaba de avisar que escala) y el acuse solo agrega ruido encima de un mensaje
+        // que el cliente ya vio. El flag solo se limpia en una transicion real a control humano
+        // (ver setHumanControl), esto cubre ademas la ventana en que la duena esta tipeando ahora mismo.
+        const recentlySpoken = await prisma.message.findFirst({
+          where: {
+            conversationId: conversation.id,
+            role: "ASSISTANT",
+            createdAt: { gte: new Date(Date.now() - ACK_QUIET_MINUTES * 60 * 1000) },
+          },
+          select: { id: true },
+        });
+        if (!gate.humanControlAckSent && !recentlySpoken) {
+          try {
+            const wamid = await sendTextMessage(credentials, from, HUMAN_CONTROL_ACK);
+            await recordMessage(business.id, conversation.id, "ASSISTANT", HUMAN_CONTROL_ACK, wamid || undefined);
+            await prisma.conversation.update({
+              where: { id: conversation.id },
+              data: { humanControlAckSent: true },
+            });
+          } catch (error) {
+            console.error("No se pudo mandar el acuse de recibo durante control humano:", error);
+          }
+        }
+        return;
+      }
+
+      // An image/video message is very likely a payment receipt (or product photo mid-close) for a
+      // purchase already in progress - cutting the customer off here mid-close is worse than letting
+      // one extra message through, so the cap only gates plain text/audio turns.
+      const capStatus =
+        message.type === "image" || message.type === "video"
+          ? { capped: false as const, justCrossed: false, messageCap: null, planTier: business.planTier }
+          : await checkPlanCap(business.id);
+      if (capStatus.capped) {
+        const capText =
+          "Por ahora alcanzamos el límite de mensajes de este mes para este negocio. Un asesor te va a contactar en breve para ayudarte manualmente. ¡Gracias por tu paciencia! 🙏";
+        await sendTextMessage(credentials, from, capText);
+        await recordMessage(business.id, conversation.id, "ASSISTANT", capText);
+
+        if (capStatus.justCrossed && business.contactPhone) {
+          const greeting = business.contactName ? `Hola ${business.contactName}` : "Hola";
+          const capAlertText = `${greeting}, tu negocio alcanzó el límite de ${capStatus.messageCap} mensajes de tu plan ${capStatus.planTier} este mes. El bot dejó de responder automáticamente hasta el próximo mes - escribime si querés subir de plan.`;
+          await trackOwnerSend(business.id, capAlertText, () => sendOwnerAlert(credentials, business.contactPhone!, capAlertText));
+        }
+        return;
+      }
+
+      // Cuando el CLIENTE mando el mensaje, no cuando nosotros terminamos de procesarlo: la descarga del
+      // media y la vision ya se comieron parte del reloj antes de llegar aca. Meta manda su timestamp en
+      // segundos; si viene raro, se cae a la hora en que entro el webhook.
+      const metaTimestampMs = Number(message.timestamp) * 1000;
+      const customerSentAt = Number.isFinite(metaTimestampMs) && metaTimestampMs > 0 ? metaTimestampMs : webhookReceivedAt;
+
+      const shippingRatesConfigured = (await prisma.shippingRate.count({ where: { businessId: business.id } })) > 0;
+
+      const reply = await generateReply(
+        conversation.id,
+        {
+          businessId: business.id,
+          conversationId: conversation.id,
+          customerId: customer.id,
+          credentials,
+          recipientPhone: from,
+        },
+        {
+          businessName: business.name,
+          assistantName: business.assistantName,
+          tone: business.botTone,
+          dialect: business.botDialect,
+          greeting: business.botGreeting,
+          neverSay: business.botNeverSay,
+          customInstructions: business.customInstructions,
+          autoSendPhotoOnQuote: business.autoSendPhotoOnQuote,
+          offerPhotosBeforeSending: business.offerPhotosBeforeSending,
+          requirePaymentProof: business.requirePaymentProof,
+          category: business.businessCategory,
+          genderedAddressEnabled: business.genderedAddressEnabled,
+          femaleAddressTerm: business.femaleAddressTerm,
+          maleAddressTerm: business.maleAddressTerm,
+          shippingPaymentModalities: business.shippingPaymentModalities,
+          shippingRatesConfigured,
+        },
+        rawText
+      );
+      // generateReply puede tardar desde segundos hasta minutos (el 2026-09-14, con DeepSeek degradado,
+      // una respuesta salio 30 minutos despues del mensaje del cliente). En todo ese rato la duena puede
+      // haber tomado el control y contestado a mano - mandar igual la respuesta vieja la contradice
+      // delante del cliente. Se descarta: lo que un humano ya contesto vale mas que un borrador viejo.
+      const stillAutomatic = await prisma.conversation.findUnique({
+        where: { id: conversation.id },
+        select: { humanControl: true },
+      });
+      if (stillAutomatic?.humanControl) {
+        console.log("El equipo tomo el control mientras se generaba la respuesta, se descarta:", conversation.id);
+        return;
+      }
+
+      // Misma idea, sin que nadie haya tomado el control: si la respuesta tardo demasiado ya no contesta
+      // la pregunta que el cliente hizo, asi que se tira y la conversacion pasa a un humano - dejarla en
+      // automatico significaria que el cliente se queda sin nada.
+      const waitedMinutes = (Date.now() - customerSentAt) / (60 * 1000);
+      if (waitedMinutes > STALE_REPLY_MINUTES) {
+        const detail = `La respuesta tardo ${Math.round(waitedMinutes)} minutos en generarse (limite ${STALE_REPLY_MINUTES}) y se descarto sin mandarla.`;
+        console.error(`${detail} conversation=${conversation.id}`);
+        await recordAgentIncident(business.id, "STALE_REPLY_DISCARDED", detail, conversation.id);
+        await setHumanControl(business.id, conversation.id, true);
+        if (business.contactPhone) {
+          const customerLabel = customerDisplayName(customer);
+          const staleAlertText = `El bot tardo ${Math.round(waitedMinutes)} minutos en responderle a ${customerLabel} y la respuesta se descarto por vieja. Esa conversacion quedo esperandote en el panel.`;
+          await trackOwnerSend(business.id, staleAlertText, () => sendOwnerAlert(credentials, business.contactPhone!, staleAlertText));
+        }
+        return;
+      }
+
+      const formattedReply = formatForWhatsapp(reply);
+      await sendTextMessage(credentials, from, formattedReply);
+      await recordMessage(business.id, conversation.id, "ASSISTANT", formattedReply);
     });
-    if (stillAutomatic?.humanControl) {
-      console.log("El equipo tomo el control mientras se generaba la respuesta, se descarta:", conversation.id);
-      return;
-    }
-
-    // Misma idea, sin que nadie haya tomado el control: si la respuesta tardo demasiado ya no contesta
-    // la pregunta que el cliente hizo, asi que se tira y la conversacion pasa a un humano - dejarla en
-    // automatico significaria que el cliente se queda sin nada.
-    const waitedMinutes = (Date.now() - customerSentAt) / (60 * 1000);
-    if (waitedMinutes > STALE_REPLY_MINUTES) {
-      const detail = `La respuesta tardo ${Math.round(waitedMinutes)} minutos en generarse (limite ${STALE_REPLY_MINUTES}) y se descarto sin mandarla.`;
-      console.error(`${detail} conversation=${conversation.id}`);
-      await recordAgentIncident(business.id, "STALE_REPLY_DISCARDED", detail, conversation.id);
-      await setHumanControl(business.id, conversation.id, true);
-      if (business.contactPhone) {
-        const customerLabel = customerDisplayName(customer);
-        const staleAlertText = `El bot tardo ${Math.round(waitedMinutes)} minutos en responderle a ${customerLabel} y la respuesta se descarto por vieja. Esa conversacion quedo esperandote en el panel.`;
-        await trackOwnerSend(business.id, staleAlertText, () => sendOwnerAlert(credentials, business.contactPhone!, staleAlertText));
-      }
-      return;
-    }
-
-    const formattedReply = formatForWhatsapp(reply);
-    await sendTextMessage(credentials, from, formattedReply);
-    await recordMessage(business.id, conversation.id, "ASSISTANT", formattedReply);
   } catch (error) {
     console.error("Error handling WhatsApp webhook:", error);
   }
