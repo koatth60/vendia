@@ -4,6 +4,7 @@ import path from "path";
 import { env } from "./config/env";
 import { prisma } from "./db/client";
 import { sessionMiddleware } from "./auth/sessionMiddleware";
+import { securityHeaders } from "./security/headers";
 import { captureRawBody } from "./whatsapp/webhookSignature";
 import { setupRealtime } from "./realtime/socket";
 import { whatsappRouter, getActiveTurnCount } from "./routes/whatsapp";
@@ -18,6 +19,9 @@ import { runTokenExpiryJob, TOKEN_EXPIRY_CHECK_INTERVAL_MS } from "./jobs/tokenE
 
 const app = express();
 app.set("trust proxy", 1);
+// Fase 8, punto 8: va primero, para que cubra tambien las respuestas de error de todo lo que viene
+// despues. Ver src/security/headers.ts.
+app.use(securityHeaders);
 // Fase 8, punto 1: el cuerpo crudo de /webhook se captura ANTES del express.json() global, porque una
 // vez parseado el JSON los bytes originales se pierden y la firma HMAC de Meta ya no se puede
 // verificar (ver src/whatsapp/webhookSignature.ts). Solo esta ruta: todo lo demas sigue entrando por
