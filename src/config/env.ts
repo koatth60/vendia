@@ -12,7 +12,11 @@ export const env = {
   deepseekApiKey: process.env.DEEPSEEK_API_KEY ?? "",
   groqApiKey: process.env.GROQ_API_KEY ?? "",
   anthropicApiKey: process.env.ANTHROPIC_API_KEY ?? "",
-  sessionSecret: process.env.SESSION_SECRET ?? "dev-secret-change-me",
+  // Fase 8, punto 5: antes caia a "dev-secret-change-me". Ese valor esta en el repositorio, asi que
+  // cualquiera podia firmar una cookie de sesion valida para cualquier negocio: el control de acceso
+  // entero descansaba en un secreto publico. `required()` para que el proceso no arranque sin el, en
+  // vez de arrancar inseguro y en silencio.
+  sessionSecret: required("SESSION_SECRET"),
   // Fase 8, punto 2: clave para cifrar Business.whatsappAccessToken en reposo (ver
   // src/crypto/secretBox.ts). Es `required()` a proposito: si fuera opcional, un despliegue sin la
   // variable volveria a guardar los tokens en texto plano sin que nadie lo note, que es exactamente el

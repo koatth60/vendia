@@ -763,3 +763,19 @@ enum AgentIncidentKind {
   // saleState.ts) y la conversacion pasa a humanControl - antes se quedaba muda para siempre.
   OWNER_QUESTION_TIMEOUT
 }
+
+// Fase 8, punto 5 del plan maestro (2026-09-15): las sesiones del panel vivian en la memoria del
+// proceso (el MemoryStore por omision de express-session). Cada `pm2 restart` - 103 en lo que va del
+// registro - deslogueaba a todo el mundo, y ademas el propio express-session avisa que ese store
+// pierde memoria y no sirve para produccion.
+//
+// El nombre de la tabla y sus columnas los fija connect-pg-simple, no nosotros: esta modelada aca para
+// que Prisma la conozca y no la reporte como drift, no para usarla desde el codigo.
+model Session {
+  sid    String   @id @db.VarChar
+  sess   Json     @db.Json
+  expire DateTime @db.Timestamp(6)
+
+  @@index([expire])
+  @@map("session")
+}
