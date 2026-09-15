@@ -10,6 +10,7 @@ import { recordOwnerMessage } from "../delivery/ownerLog";
 import { recordAgentIncident } from "./incidents";
 import { listActiveProducts, textMentionsConfiguredCategory } from "../catalog/products";
 import { listActivePaymentMethods } from "../catalog/paymentMethods";
+import { buildCheckoutState } from "../orders/checkoutStateFromDb";
 import { canonicalColors } from "../catalog/attributeTaxonomy";
 import { tokenize, normalizeForMatch } from "../search/text";
 import { buildSystemPrompt, type BotPersonality } from "./prompts/systemPrompt";
@@ -1066,6 +1067,18 @@ export async function generateReply(
   async function finalizeTurn(text: string): Promise<string> {
     text = stripInternalLeaks(text);
     text = guardAgainstPaymentHallucination(text, paymentMethodsThisTurn);
+
+    // Etapa 1 del estado de pedido: se calcula y se registra, NO se usa. Sirve para comparar durante unos
+    // dias lo que el estado dice que falta contra lo que el bot realmente pidio, y corregirlo antes de
+    // que empiece a decidir respuestas. Nunca puede romper el turno: si falla, se loguea y sigue.
+    void buildCheckoutState(conversationId)
+      .then((estado) => {
+        if (!estado) return;
+        console.log(
+          `[estado-pedido] conv=${conversationId} completo=${estado.completo} faltan=${JSON.stringify(estado.faltan)}`
+        );
+      })
+      .catch((error) => console.error("No se pudo calcular el estado de pedido (no bloqueante):", error));
 
     // Verify shipping-cost mentions even if the model never called get_shipping_rates this turn (it may
     // have paraphrased a business's own free-text tier table instead) - fetch the real rates ourselves
