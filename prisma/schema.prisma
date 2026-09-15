@@ -238,6 +238,16 @@ model SaleState {
   // Reservado para Fase 4 (PENDING_OWNER_QUESTION) y Fase 6 (CONFIG_INCOMPLETE) - String simple, no
   // enum: no le fijamos valores a fases que todavia no se disenaron. Sin uso en esta fase.
   blockedBy      String?
+  // Fase 5 del plan maestro (2026-09-15), causa raiz C2: nombres (con variante si aplica) de las fotos/
+  // videos que YA se mandaron de verdad en esta conversacion, escrito por tools.ts en el momento del
+  // envio real - reemplaza reconstruir esa lista leyendo el historial con MEDIA_CAPTION_PATTERN.
+  // Independiente de Business.saleStateEnabled, igual que blockedBy: no mandar fotos repetidas no es una
+  // funcion del motor de venta.
+  mediaSent      String[]     @default([])
+  // Cuantas veces seguidas el cliente mando una foto/video para identificar un producto sin que el turno
+  // lo resolviera (ni un envio real ni una escalacion al dueno) - ver shouldForcePhotoEscalation en
+  // agent.ts. Se resetea a 0 apenas se resuelve; nunca se lee de texto.
+  photoIdStreak  Int          @default(0)
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 }

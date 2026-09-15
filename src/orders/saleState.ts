@@ -347,4 +347,45 @@ export async function clearBlockedByIfNoPendingQuestions(conversationId: string)
   await prisma.saleState.updateMany({ where: { conversationId, blockedBy: { not: null } }, data: { blockedBy: null } });
 }
 
+// Fase 5 del plan maestro (2026-09-15), causa raiz C2: lista de fotos/videos ya mandados de verdad en
+// esta conversacion, escrita por tools.ts en el momento del envio real (send_product_media,
+// get_product_details auto-send) - reemplaza reconstruirla leyendo el historial con
+// MEDIA_CAPTION_PATTERN. Independiente de saleStateEnabled, igual que blockedBy: no repetir una foto ya
+// mandada no es una funcion del motor de venta.
+export async function getMediaSent(conversationId: string): Promise<string[]> {
+  const state = await prisma.saleState.findUnique({ where: { conversationId }, select: { mediaSent: true } });
+  return state?.mediaSent ?? [];
+}
+
+export async function recordMediaSent(conversationId: string, label: string): Promise<void> {
+  const current = await getMediaSent(conversationId);
+  if (current.includes(label)) return;
+  await prisma.saleState.upsert({
+    where: { conversationId },
+    create: { conversationId, mediaSent: [label] },
+    update: { mediaSent: { push: label } },
+  });
+}
+
+// Fase 5 del plan maestro (2026-09-15): reemplazo del contador de rondas de identificacion por foto que
+// antes se calculaba escaneando el historial con PHOTO_ID_CLARIFY_PATTERN (una frase del modelo). Ahora
+// es un contador de verdad: agent.ts lo sube cuando el cliente manda una foto/video y el turno no la
+// resuelve (ni un envio real ni una escalacion al dueno), y lo resetea apenas se resuelve.
+export async function getPhotoIdStreak(conversationId: string): Promise<number> {
+  const state = await prisma.saleState.findUnique({ where: { conversationId }, select: { photoIdStreak: true } });
+  return state?.photoIdStreak ?? 0;
+}
+
+export async function bumpPhotoIdStreak(conversationId: string): Promise<void> {
+  await prisma.saleState.upsert({
+    where: { conversationId },
+    create: { conversationId, photoIdStreak: 1 },
+    update: { photoIdStreak: { increment: 1 } },
+  });
+}
+
+export async function resetPhotoIdStreak(conversationId: string): Promise<void> {
+  await prisma.saleState.updateMany({ where: { conversationId, photoIdStreak: { not: 0 } }, data: { photoIdStreak: 0 } });
+}
+
 export { isEnabled as isSaleStateEnabled };
