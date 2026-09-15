@@ -2,7 +2,7 @@ import { Router } from "express";
 import { getAiUsageSummary, getPlanUsage } from "../../ai/usage";
 import { getAgentIncidentSummary, getHealthFindings } from "../../ai/incidents";
 import { getConfigHealth } from "../../ai/configHealth";
-import { getAnalyticsSummary } from "../../analytics/service";
+import { getAnalyticsSummary, getBaselineMetrics } from "../../analytics/service";
 import { businessIdOf } from "./shared";
 
 export const insightsRouter = Router();
@@ -45,5 +45,13 @@ insightsRouter.get("/api/analytics", async (req, res) => {
   const days = ANALYTICS_RANGES.includes(requested) ? requested : 30;
   const summary = await getAnalyticsSummary(businessIdOf(req), days);
   res.json({ ...summary, days });
+});
+
+// Fase 0 del plan maestro (2026-09-15): linea base P1-P7 contra la que se compara cada fase siguiente.
+insightsRouter.get("/api/baseline", async (req, res) => {
+  const requested = Number(req.query.days);
+  const days = ANALYTICS_RANGES.includes(requested) ? requested : 30;
+  const baseline = await getBaselineMetrics(businessIdOf(req), days);
+  res.json(baseline);
 });
 

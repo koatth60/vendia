@@ -956,6 +956,54 @@ function botHealthCardsHtml(incidents, extraStyle = '') {
     </div>`;
 }
 
+// Fase 0 del plan maestro (2026-09-15): P1-P7 de ONIX-PLAN-MAESTRO.md seccion 2. P2/P3/P4/P6 muestran
+// "sin medir" a proposito - hoy no hay detector para ellas sin agregar una regex nueva, y esa fase tiene
+// prohibido hacerlo.
+function baselineCardsHtml(baseline) {
+  const pct = (n) => `${Math.round(n * 1000) / 10}%`;
+  const guardRows = baseline.p5ByGuard.length === 0
+    ? '<div class="sub">Sin intervenciones en el período</div>'
+    : baseline.p5ByGuard.map((g) => `<div class="sub">${escapeHtml(g.guard)}: <span class="onix-num">${g.count}</span></div>`).join('');
+  return `
+    <div class="metric-grid">
+      <div class="metric-card">
+        <div class="label">P1 · Conversión con intención de compra</div>
+        <div class="value onix-num">${pct(baseline.p1ConversionRate)}</div>
+        <div class="sub"><span class="onix-num">${baseline.p1SoldConversations}</span> vendidas de <span class="onix-num">${baseline.p1IntentConversations}</span> con intención (llegaron a cotización o más)</div>
+      </div>
+      <div class="metric-card">
+        <div class="label">P2 · Turnos hasta el cierre (mediana)</div>
+        <div class="value">Sin medir</div>
+        <div class="sub">Falta instrumentar</div>
+      </div>
+      <div class="metric-card">
+        <div class="label">P3 · Dato pedido dos veces</div>
+        <div class="value">Sin medir</div>
+        <div class="sub">Falta un detector; el actual mide otra cosa</div>
+      </div>
+      <div class="metric-card">
+        <div class="label">P4 · Promesa del bot incumplida</div>
+        <div class="value">Sin medir</div>
+        <div class="sub">Falta un detector; el actual mide otra cosa</div>
+      </div>
+      <div class="metric-card">
+        <div class="label">P5 · Backstops por 100 turnos</div>
+        <div class="value onix-num">${baseline.p5BackstopsPer100Turns}</div>
+        ${guardRows}
+      </div>
+      <div class="metric-card">
+        <div class="label">P6 · Latencia p50 / p95</div>
+        <div class="value">Sin medir</div>
+        <div class="sub">Falta instrumentar</div>
+      </div>
+      <div class="metric-card">
+        <div class="label">P7 · Costo por conversación</div>
+        <div class="value onix-num">${baseline.p7CostPerConversationUsd === null ? '—' : `USD ${baseline.p7CostPerConversationUsd.toFixed(4)}`}</div>
+        <div class="sub">Sobre llamadas a IA con conversación asociada</div>
+      </div>
+    </div>`;
+}
+
 // WhatsApp bold is *text* (single asterisk); older messages sent before the formatting fix may still
 // have **text** (Markdown-style). Render both as <strong> so history looks right either way.
 function formatMessageText(str) {
@@ -3962,20 +4010,22 @@ async function loadHealth() {
   const isFirstLoad = lastHealthSnapshot === null;
   if (isFirstLoad) container.innerHTML = '<div class="card empty-state">Cargando…</div>';
   try {
-    const [pendingRes, failuresRes, logRes, incidentsRes, findingsRes] = await Promise.all([
+    const [pendingRes, failuresRes, logRes, incidentsRes, findingsRes, baselineRes] = await Promise.all([
       apiFetch('/admin/api/pending-questions'),
       apiFetch('/admin/api/delivery-failures'),
       apiFetch('/admin/api/owner-log'),
       apiFetch('/admin/api/agent-incidents'),
       apiFetch('/admin/api/health-findings'),
+      apiFetch('/admin/api/baseline'),
     ]);
     const pending = await pendingRes.json();
     const failures = await failuresRes.json();
     const log = await logRes.json();
     const incidents = await incidentsRes.json();
     const { findings } = await findingsRes.json();
+    const baseline = await baselineRes.json();
 
-    const snapshot = JSON.stringify({ pending, failures, log, incidents, findings });
+    const snapshot = JSON.stringify({ pending, failures, log, incidents, findings, baseline });
     if (snapshot === lastHealthSnapshot) return;
     lastHealthSnapshot = snapshot;
 
@@ -4040,6 +4090,15 @@ async function loadHealth() {
 
     container.innerHTML = `
       ${botHealthCardsHtml(incidents, 'margin-bottom:16px;')}
+
+      <div class="section-title">Línea base (${baseline.days} días)</div>
+      <div class="card" style="margin-bottom:16px;">
+        <div style="font-size:12.5px; color:var(--muted); margin-bottom:10px;">
+          Las siete métricas contra las que se compara cada fase del plan (ONIX-PLAN-MAESTRO.md). Las que
+          todavía dicen "sin medir" necesitan un detector que aún no existe.
+        </div>
+        ${baselineCardsHtml(baseline)}
+      </div>
 
       <div class="section-title">Lo que encontró el chequeo automático</div>
       <div class="card">
