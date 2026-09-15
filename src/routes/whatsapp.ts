@@ -67,11 +67,22 @@ export const whatsappRouter = Router();
 // fully in parallel, same as before.
 const conversationLocks = new Map<string, Promise<void>>();
 
+// Fase 7 del plan maestro (2026-09-15): cuantos turnos (webhook -> generateReply -> envio -> recordMessage)
+// estan en vuelo AHORA MISMO, para que el apagado ordenado en index.ts pueda esperarlos en vez de matarlos
+// a mitad de camino. Antes de esto, cada `pm2 restart` perdia los turnos en vuelo sin ningun registro, y
+// como el webhook ya habia respondido 200, Meta no los reintentaba - el cliente simplemente no recibia
+// respuesta.
+let activeTurnCount = 0;
+export function getActiveTurnCount(): number {
+  return activeTurnCount;
+}
+
 export async function withConversationLock(conversationId: string, fn: () => Promise<void>): Promise<void> {
   const previous = conversationLocks.get(conversationId) ?? Promise.resolve();
   // .then(fn, fn) runs fn once `previous` SETTLES, whether it resolved or rejected - a prior turn
   // throwing must never wedge every later turn for this conversation behind a permanently-rejected
   // promise.
+  activeTurnCount++;
   const run = previous.then(fn, fn);
   // The map only ever stores a swallowed-error version of `run` - otherwise the NEXT caller's `previous`
   // would itself reject before its own turn even starts.
@@ -80,6 +91,7 @@ export async function withConversationLock(conversationId: string, fn: () => Pro
   try {
     await run;
   } finally {
+    activeTurnCount--;
     // Free the map entry once nothing is queued behind this call (nobody else overwrote it with their
     // own tail) - without this a business with many distinct conversations over time leaks one Map entry
     // per conversationId forever.

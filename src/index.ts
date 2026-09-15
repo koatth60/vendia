@@ -4,7 +4,7 @@ import path from "path";
 import { env } from "./config/env";
 import { sessionMiddleware } from "./auth/sessionMiddleware";
 import { setupRealtime } from "./realtime/socket";
-import { whatsappRouter } from "./routes/whatsapp";
+import { whatsappRouter, getActiveTurnCount } from "./routes/whatsapp";
 import { adminRouter } from "./routes/admin";
 import { authRouter } from "./routes/auth";
 import { platformAdminRouter } from "./routes/platformAdmin";
@@ -85,3 +85,41 @@ setInterval(() => {
 setInterval(() => {
   runTokenExpiryJob().catch((error) => console.error("Error corriendo el chequeo de vencimiento de token:", error));
 }, TOKEN_EXPIRY_CHECK_INTERVAL_MS);
+
+// Fase 7 del plan maestro (2026-09-15): sin esto, cada `pm2 restart` mataba el proceso a mitad de un
+// turno (webhook -> generateReply -> envio) sin ningun registro - y como el webhook ya habia respondido
+// 200 antes de procesar nada (ver whatsappRouter.post("/webhook")), Meta nunca reintentaba, asi que ese
+// cliente simplemente se quedaba sin respuesta. server.close() deja de aceptar conexiones nuevas; se
+// espera a que los turnos ya en vuelo (withConversationLock, ver routes/whatsapp.ts) terminen solos,
+// hasta un tope - despues de ese tope se registra explicitamente cuantos quedaron sin terminar en vez de
+// matarlos en silencio.
+const SHUTDOWN_GRACE_MS = 20_000;
+const SHUTDOWN_POLL_MS = 250;
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+let shuttingDown = false;
+
+async function shutdown(signal: string): Promise<void> {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`${signal} recibido: cerrando ordenadamente (esperando turnos en vuelo, tope ${SHUTDOWN_GRACE_MS}ms)...`);
+
+  server.close((error) => {
+    if (error) console.error("Error cerrando el servidor HTTP:", error);
+  });
+
+  const deadline = Date.now() + SHUTDOWN_GRACE_MS;
+  while (getActiveTurnCount() > 0 && Date.now() < deadline) {
+    await sleep(SHUTDOWN_POLL_MS);
+  }
+
+  const stillActive = getActiveTurnCount();
+  if (stillActive > 0) {
+    console.error(`Apagado con ${stillActive} turno(s) en vuelo sin terminar (se agoto el tope de ${SHUTDOWN_GRACE_MS}ms)`);
+  } else {
+    console.log("Todos los turnos en vuelo terminaron, apagado limpio");
+  }
+  process.exit(0);
+}
+
+process.on("SIGTERM", () => void shutdown("SIGTERM"));
+process.on("SIGINT", () => void shutdown("SIGINT"));
