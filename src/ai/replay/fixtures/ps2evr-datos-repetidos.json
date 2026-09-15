@@ -1,0 +1,431 @@
+{
+  "name": "ps2evr-datos-repetidos",
+  "seed": {
+    "catalogName": "MAGByLizN"
+  },
+  "turns": [
+    {
+      "customer": "quiero hacr otra compra",
+      "modelResponses": [
+        {
+          "content": "¡Hola de nuevo! 😊 Con mucho gusto, soy Anita de MAGByLizN.\n\nAntes de seguir, cuéntame: ¿con quién tengo el gusto de hablar? Y dime, ¿qué producto te interesa esta vez o prefieres que te muestre el catálogo? 🤖✨",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "santiago perez",
+      "modelResponses": [
+        {
+          "content": "¡Un gusto, Santiago! 😊\n\nCuéntame, ¿qué producto te interesa esta vez o prefieres que te muestre el catálogo? 🤖✨",
+          "toolCalls": [
+            {
+              "name": "save_customer_name",
+              "arguments": {
+                "name": "Santiago Perez"
+              }
+            }
+          ]
+        },
+        {
+          "content": "Listo, Santiago 😊\n\nEntonces dime, ¿qué producto te interesa esta vez o prefieres que te muestre el catálogo? 🤖✨",
+          "toolCalls": []
+        }
+      ],
+      "expect": {
+        "toolSequence": [
+          "save_customer_name"
+        ]
+      }
+    },
+    {
+      "customer": "quiero unos audifonos",
+      "modelResponses": [
+        {
+          "content": "",
+          "toolCalls": [
+            {
+              "name": "find_products_by_attributes",
+              "arguments": {
+                "category": "audifonos"
+              }
+            }
+          ]
+        },
+        {
+          "content": "¡Claro que sí, Santiago! 🎧 Estos son los audífonos que tenemos disponibles:\n\n1. AIRPODS PRO 2 — $55.000\n2. Audífonos Q70 Earcuff — $46.000\n3. AIRPODS SERIE 4 — $65.000\n4. AIRPODS PRO 3 — $75.000\n5. AIRPODS MAX — $95.000\n6. Combo k11 Mini — $98.000\n\n¿Cuál te llama la atención? Si quieres te mando fotos de alguno 😊",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "airpodx mac",
+      "modelResponses": [
+        {
+          "content": "",
+          "toolCalls": [
+            {
+              "name": "search_products",
+              "arguments": {
+                "query": "airpods max"
+              }
+            }
+          ]
+        },
+        {
+          "content": "",
+          "toolCalls": [
+            {
+              "name": "get_product_details",
+              "arguments": {
+                "productId": "cmu2958zf000hg0sp8q9ts23x"
+              }
+            }
+          ]
+        },
+        {
+          "content": "¡Listo, Santiago! 🎧 Este es el **AIRPODS MAX** — $95.000\n\n• Excelente calidad de sonido, ideal para música y llamadas\n• Bluetooth 5.1 con conexión estable\n• Aislamiento pasivo de ruido\n• Hasta 7 horas de reproducción\n• Incluye mandos de volumen y música, entrada Micro SD y auxiliar\n• Compatible con iPhone y Android\n• Viene con funda y caja contramarcada\n\nY viene en varios colores: Negro, Gris, Blanco, Azul, Morado, Verde y Rosado 🌈\n\n¿Cuál color te gusta y cuántas unidades quieres? 😊",
+          "toolCalls": []
+        }
+      ],
+      "expect": {
+        "toolSequence": [
+          "search_products",
+          "get_product_details"
+        ]
+      }
+    },
+    {
+      "customer": "si, azul",
+      "modelResponses": [
+        {
+          "content": "",
+          "toolCalls": [
+            {
+              "name": "get_product_details",
+              "arguments": {
+                "productName": "AIRPODS MAX"
+              }
+            }
+          ]
+        },
+        {
+          "content": "¡Perfecto, azul! 💙 \n\nEntonces sería 1 AIRPODS MAX en azul por $95.000.\n\nPara continuar con el envío, cuéntame:\n• ¿A qué ciudad y barrio lo enviamos?\n\nY de una vez, ¿cuántas unidades quieres? 😊",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "los mismos datos de antes",
+      "modelResponses": [
+        {
+          "content": "Santiago, dejame reviso tu pedido anterior para tener los datos a mano 😊",
+          "toolCalls": [
+            {
+              "name": "get_previous_conversation",
+              "arguments": {}
+            }
+          ]
+        },
+        {
+          "content": "Santiago, no me aparece un pedido anterior registrado con tus datos 🤔\n\n¿Me los puedes compartir de nuevo, por favor? Necesito:\n• Ciudad\n• Barrio\n• Dirección\n• Casa o Apartamento y piso\n• Celular de contacto\n\nAsí te calculo el envío y seguimos con tu AIRPODS MAX azul 😊",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "Cliente Ejemplo\n00000000\n3000000000\nCiudad Ejemplo\nBarrio Ejemplo\nCalle 10 # 20-30\nCasa",
+      "modelResponses": [
+        {
+          "content": "¡Gracias, Santiago! 😊 Déjame verificar la tarifa de envío para tu ciudad.",
+          "toolCalls": [
+            {
+              "name": "get_shipping_rate_for_city",
+              "arguments": {
+                "city": "Ciudad Ejemplo"
+              }
+            },
+            {
+              "name": "get_shipping_rates",
+              "arguments": {}
+            }
+          ]
+        },
+        {
+          "content": "Santiago, con esos datos no logro validar bien la dirección 🤔 \"Ciudad Ejemplo\" y \"Barrio Ejemplo\" no me coinciden con una ciudad real de Colombia.\n\n¿Me confirmas por favor tu ciudad y barrio reales? Así te calculo bien el envío de tu AIRPODS MAX azul 💙",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "a",
+      "modelResponses": [
+        {
+          "content": "Santiago, necesito la ciudad y el barrio reales para poder calcular tu envío 😊\n\nPor ejemplo: \"Bogotá, barrio Kennedy\" o \"Medellín, barrio Poblado\". ¿Cuáles son los tuyos?",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "Cliente Ejemplo\n00000000\n3000000000\nCiudad Ejemplo\nBarrio Ejemplo\nCalle 10 # 20-30\nCasa",
+      "modelResponses": [
+        {
+          "content": "Santiago, esos datos no me sirven para validar el envío 😅 Necesito que sean reales:\n\n• Tu ciudad (ej. Bogotá, Medellín, Cali...)\n• Tu barrio\n\nSin eso no puedo calcular el costo de envío ni despachar tu AIRPODS MAX azul. ¿Me los confirmas? 😊",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "Cliente Ejemplo\n00000000\n3000000000\nCiudad Ejemplo\nBarrio Ejemplo\nCalle 10 # 20-30\nCasa",
+      "modelResponses": [
+        {
+          "content": "Santiago, de verdad necesito datos reales para poder avanzar 🙏 \"Ciudad Ejemplo\" y \"Barrio Ejemplo\" no son una dirección válida de Colombia, y sin eso no puedo calcular tu envío.\n\nDime por favor:\n• Tu ciudad real\n• Tu barrio real\n\nCon eso seguimos con tu AIRPODS MAX azul 💙",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "si",
+      "modelResponses": [
+        {
+          "content": "El cliente quiere hacer otra compra. Aún no dio nombre, dirección ni forma de pago. No se especificó producto ni en qué quedó la conversación.",
+          "toolCalls": []
+        },
+        {
+          "content": "Santiago, un \"sí\" no me alcanza 😅 Necesito que me escribas el nombre real de tu ciudad y tu barrio.\n\nPor ejemplo: \"Bogotá, Kennedy\".\n\n¿Cuáles son los tuyos? Así seguimos con el envío de tu AIRPODS MAX azul 💙",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "opciones de pago",
+      "modelResponses": [
+        {
+          "content": "¡Claro, Santiago! 🤖 Estas son las formas de pago reales:\n\n1. **Nequi** — 3112855719 (Titular: Lizeth Paola Viloria Sierra)\n2. **Bancolombia** — Cuenta de Ahorros 912-416570-09 (Titular: Lizeth Paola Viloria Sierra)\n3. **Contraentrega** — pago al recibir\n\n¿Cuál prefieres usar? 😊",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "Hola",
+      "modelResponses": [
+        {
+          "content": "¡Hola, Santiago! 😊 Aquí sigo.\n\nRecuerda que para seguir con tu AIRPODS MAX azul necesito:\n• Tu ciudad real\n• Tu barrio\n\nY me cuentas también cuál forma de pago prefieres (Nequi, Bancolombia o contraentrega). Así te calculo el envío 💙",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "La de Neki",
+      "modelResponses": [
+        {
+          "content": "¡Perfecto, Nequi! 💜\n\nSantiago, solo me falta tu ciudad y barrio reales para calcular el envío y cerrar tu pedido 😊\n\nRecuerda que los datos de \"Ciudad Ejemplo\" y \"Barrio Ejemplo\" no me sirven, necesito los reales.\n\n¿Me los compartes?",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "Empecemos una conversacion de 0",
+      "modelResponses": [
+        {
+          "content": "¡Claro que sí, Santiago! 😊 Empecemos de cero.\n\nPara atenderte bien: ¿en qué producto estás interesado o quieres ver el catálogo? 🤖\n\nY cuéntame también con qué nombre te puedo seguir tratando.",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "Hola",
+      "modelResponses": [
+        {
+          "content": "Santiago Pérez quiere comprar unos AirPods Max en azul por $95.000, 1 unidad. Ya dio su nombre y pidió usar los mismos datos de envío y pago de una compra anterior. La conversación quedó en que el bot debe confirmar ciudad, barrio y forma de pago antes de cerrar el pedido.",
+          "toolCalls": []
+        },
+        {
+          "content": "¡Hola, Santiago! 😊 Bienvenido a MAG.IMP ✨\n\n¿En qué producto estás interesado o quieres que te muestre el catálogo? 😊",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "Quiero comprar mi ultimo peddidi",
+      "modelResponses": [
+        {
+          "content": "¡Con gusto, Santiago! 😊\n\n¿Ese último pedido fue el AIRPODS MAX azul que veníamos viendo, o te refieres a un pedido ya realizado antes que quieras retomar? 🤔\n\nCuéntame para ayudarte bien.",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "Mateo55",
+      "modelResponses": [
+        {
+          "content": "Santiago, no entendí bien 😅 ¿\"Mateo55\" es una referencia del producto que buscas, o es el nombre de otra persona?\n\nCuéntame: ¿en qué producto estás interesado? ¿O prefieres que te muestre el catálogo completo? 😊",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "ok ese ya esta pago?",
+      "modelResponses": [
+        {
+          "content": "Déjame revisar, Santiago 😊",
+          "toolCalls": [
+            {
+              "name": "get_order_status",
+              "arguments": {}
+            }
+          ]
+        },
+        {
+          "content": "Santiago, revisé y no me aparece ningún pedido registrado a tu nombre todavía 🤔\n\nNo tengo registro de un pago tuyo. ¿Me cuentas a qué pedido te refieres o qué producto quieres comprar? Así lo gestionamos bien 😊",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "ok",
+      "modelResponses": [
+        {
+          "content": "Con gusto, Santiago 😊\n\nCuando quieras seguimos. Cuéntame qué producto te interesa o si prefieres que te muestre el catálogo completo ✨",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "Quiero hacer otra compra",
+      "modelResponses": [
+        {
+          "content": "Santiago Pérez quiere comprar 1 AirPods Max azul por $95.000. Dio su nombre y varios datos de envío (cédula, celular, dirección \"Calle 10 # 20-30\", Casa) pero con ciudad y barrio de ejemplo inválidos. El bot pidió repetidamente ciudad y barrio reales de Colombia para calcular el envío y cerrar el pedido. La conversación quedó sin avanzar, ya que el cliente responde con datos ficticios o \"si\" sin confirmar la información requerida.",
+          "toolCalls": []
+        },
+        {
+          "content": "¡Perfecto, Santiago! 😊 ¿Qué producto quieres comprar esta vez?\n\nSi prefieres, te muestro el catálogo completo por categorías para que elijas 🤖✨",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "otra diadema",
+      "modelResponses": [
+        {
+          "content": "¡Listo, Santiago! 😊 Déjame revisar las diademas que tenemos disponibles.",
+          "toolCalls": [
+            {
+              "name": "search_products",
+              "arguments": {
+                "query": "diadema"
+              }
+            }
+          ]
+        },
+        {
+          "content": "Santiago, en diademas solo tenemos disponibles los **AIRPODS MAX** (audífonos de diadema) a **$95.000** 🤖\n\n¿Te refieres a esos? Si quieres, reviso los colores disponibles para ti ✨",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "rosada",
+      "modelResponses": [
+        {
+          "content": "",
+          "toolCalls": [
+            {
+              "name": "find_products_by_attributes",
+              "arguments": {
+                "category": "diadema",
+                "color": "rosada",
+                "freeText": "rosada diadema airpods max"
+              }
+            }
+          ]
+        },
+        {
+          "content": "Santiago, déjame verificar en el catálogo si tenemos ese color 😊",
+          "toolCalls": [
+            {
+              "name": "search_products",
+              "arguments": {
+                "query": "AIRPODS MAX"
+              }
+            }
+          ]
+        },
+        {
+          "content": "",
+          "toolCalls": [
+            {
+              "name": "get_product_details",
+              "arguments": {
+                "productId": "cmu2958zf000hg0sp8q9ts23x"
+              }
+            }
+          ]
+        },
+        {
+          "content": "¡Sí tenemos rosado, Santiago! 💙\n\nEl **AIRPODS MAX** está en **$95.000** y viene en estos colores: Negro, Gris, Blanco, Azul, Morado, Verde y **Rosado** ✨\n\n¿Te confirmo el pedido en rosado? Cuéntame cuántas unidades quieres 😊",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "1",
+      "modelResponses": [
+        {
+          "content": "¡Listo, Santiago! 1 AIRPODS MAX en rosado 🤖✨\n\nAhora, para calcular el envío necesito que me confirmes tu **ciudad y barrio** reales (deben estar en Colombia 🇨🇴).\n\n¿Me los compartes? 😊",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "Cliente Ejemplo\n00000000\n3000000000\nCiudad Ejemplo\nBarrio Ejemplo\nCalle 10 # 20-30\nCasa",
+      "modelResponses": [
+        {
+          "content": "Santiago, esos datos no me sirven porque \"Ciudad Ejemplo\" y \"Barrio Ejemplo\" no existen 😅\n\nNecesito tu **ciudad real de Colombia** y tu **barrio real** para poder calcular el envío y cerrar tu pedido 🤖\n\n¿Me los compartes de nuevo, por favor? 😊",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "a",
+      "modelResponses": [
+        {
+          "content": "Santiago Pérez mantiene interés en 1 AirPods Max azul por $95.000 y ya eligió pagar con Nequi. Dio su nombre, cédula, celular y dirección \"Calle 10 # 20-30\", Casa, pero sigue sin proporcionar ciudad y barrio reales de Colombia. El bot le pasó los datos de pago y le reiteró que necesita ciudad y barrio válidos para calcular el envío. Luego el cliente pidió empezar de cero y la conversación quedó reiniciada sin datos útiles para cerrar el pedido.",
+          "toolCalls": []
+        },
+        {
+          "content": "Santiago, disculpa, no entendí tu mensaje 😅\n\nNecesito tu **ciudad real de Colombia** y tu **barrio** para calcular el envío. Por ejemplo: \"Bogotá, Kennedy\" o \"Medellín, Laureles\".\n\n¿Me los confirmas? 😊",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "Nequu",
+      "modelResponses": [
+        {
+          "content": "Santiago, sigo sin poder avanzar así 😅 Necesito dos datos reales:\n\n1️⃣ Tu **ciudad** en Colombia (ej: Bogotá, Medellín, Cali)\n2️⃣ Tu **barrio**\n\nSin esos datos no puedo calcular el valor del envío ni cerrar tu pedido del AIRPODS MAX rosado.\n\n¿Me los compartes, por favor? 😊",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "Confirmo",
+      "modelResponses": [
+        {
+          "content": "Santiago, me falta lo más importante 😅 Todavía no me dices en qué **ciudad y barrio** de Colombia estás. Sin eso no puedo calcular el envío.\n\nEscríbeme algo así: *\"Bogotá, barrio Kennedy\"* o *\"Medellín, barrio Laureles\"* 🙏\n\n¿Me los compartes? 😊",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "",
+      "modelResponses": [
+        {
+          "content": "Santiago, gracias por el comprobante 🙌 Pero todavía me falta un dato clave para poder registrar bien tu pedido: la **ciudad y el barrio reales** de entrega en Colombia.\n\nSin eso no puedo calcular el envío ni enviar tu orden al equipo 😅\n\n¿Me los confirmas, por favor? 😊",
+          "toolCalls": []
+        }
+      ]
+    }
+  ],
+  "note": "Grabado 2026-09-15 contra DeepSeek real: esta corrida NO reprodujo el defecto original (\"dato pedido dos veces\") que le dio nombre al fixture. El modelo rechazo consistentemente \"Ciudad Ejemplo\"/\"Barrio Ejemplo\" (los placeholders de anonimizacion del fixture original, no una ciudad real) y jamas repitio nombre/cedula/celular ya guardados via save_customer_name (llamada una sola vez, turno 1). Dos lecturas posibles, no distinguibles desde aca: (a) el prompt/guards actuales ya mitigan parte de esta clase, o (b) la anonimizacion con placeholders no-reales cambio el comportamiento del modelo respecto a la conversacion original. Se deja SIN expect que fuerce fallo - inventar uno seria mentir sobre lo que esta corrida realmente muestra. Sirve igual como red de regresion estructural (toolSequence de los tool calls reales) para las fases siguientes."
+}

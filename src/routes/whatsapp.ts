@@ -701,6 +701,7 @@ whatsappRouter.post("/webhook", async (req, res) => {
           maleAddressTerm: business.maleAddressTerm,
           shippingPaymentModalities: business.shippingPaymentModalities,
           shippingRatesConfigured,
+          saleStateEnabled: business.saleStateEnabled,
         },
         rawText
       );

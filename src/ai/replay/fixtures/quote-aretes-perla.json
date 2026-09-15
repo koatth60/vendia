@@ -1,0 +1,19 @@
+{
+  "name": "cotizacion simple - aretes de perla (Aurora Joyas)",
+  "seed": { "catalogName": "Aurora Joyas" },
+  "turns": [
+    {
+      "customer": "Hola, tienen aretes de perla?",
+      "modelResponses": [
+        { "toolCalls": [{ "name": "search_products", "arguments": { "query": "aretes perla" } }] },
+        { "toolCalls": [{ "name": "update_conversation_status", "arguments": { "status": "QUOTED" } }] },
+        { "content": "Sí, tenemos los Aretes de perla cultivada a $39.000. ¿Te los envío?" }
+      ],
+      "expect": {
+        "toolSequence": ["search_products", "update_conversation_status"],
+        "textMustNotContain": ["undefined", "null"],
+        "state": { "conversationStatus": "QUOTED" }
+      }
+    }
+  ]
+}

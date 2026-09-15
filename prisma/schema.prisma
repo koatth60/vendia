@@ -65,6 +65,10 @@ model Business {
   // igual que siempre. Encontrado en el prompt de MAGByLizN (pagar todo anticipado / solo producto
   // anticipado+envio contraentrega / todo contraentrega), promovido a mecanismo core reusable.
   shippingPaymentModalities ShippingPaymentModality[] @default([])
+  // Fase 2 del plan maestro (2026-09-15): motor de venta ejecutable (SaleState) contra el modelo
+  // leyendo/escribiendo el estado por su cuenta. Off por defecto - bandera de reversion explicita del
+  // plan: un negocio se prueba primero con esto en true, el resto sigue exactamente igual que hoy.
+  saleStateEnabled         Boolean                   @default(false)
   products                  Product[]
   customers                 Customer[]
   paymentMethods            PaymentMethod[]
@@ -195,6 +199,41 @@ model Order {
 
   @@index([businessId, createdAt])
   @@index([businessId, fulfillmentStatus])
+}
+
+// Fase 2 del plan maestro (2026-09-15), causa raiz C1: hasta ahora ningun lugar del sistema sabia que
+// producto elegio el cliente, que variante, y que datos de entrega ya dio MIENTRAS la venta esta en
+// curso (ver checkoutStateFromDb.ts:41-46) - solo vivia en la memoria del modelo, de ahi salian las
+// repreguntas y los guards que leen prosa para adivinar el estado. Esta tabla es la unica escrita por
+// el motor de venta (src/orders/saleState.ts), nunca por el modelo directamente.
+//
+// Deliberadamente chica: NO guarda missing/subtotal/total/shippingCost ni ciudad/barrio por separado -
+// esos se derivan en cada lectura (computeCheckoutState + resolveShippingRateForCity, igual que ya hace
+// checkoutStateFromDb.ts) a partir de `items` y `address`, para que nunca puedan desincronizarse de la
+// base real. Al cerrar la venta, este estado se vuelca a Order y deja de ser la verdad - Order sigue
+// siendo la verdad historica.
+model SaleState {
+  id             String       @id @default(cuid())
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  conversationId String       @unique
+  // [{productId, productName, variantId, variantLabel, quantity, unitPrice, currency}] - mismo shape
+  // que ResolvedOrderItem (orders/service.ts), validado contra catalogo en cada set_order_item.
+  items          Json         @default("[]")
+  // Snapshot de ESTA conversacion/venta, no del perfil del cliente (Customer tiene sus propios campos
+  // homonimos) - un mismo cliente puede pedir que un pedido puntual llegue a otra direccion. Si estan
+  // vacios, saleState.ts cae al dato de Customer; lo que se escribe aca tambien se duplica a Customer
+  // (dual-write) para que la proxima conversacion arranque con el ultimo dato real.
+  customerName   String?
+  idNumber       String?
+  deliveryPhone  String?
+  address        String?
+  shippingModality ShippingPaymentModality?
+  paymentMethodId  String?
+  // Reservado para Fase 4 (PENDING_OWNER_QUESTION) y Fase 6 (CONFIG_INCOMPLETE) - String simple, no
+  // enum: no le fijamos valores a fases que todavia no se disenaron. Sin uso en esta fase.
+  blockedBy      String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
 }
 
 model OrderItem {
@@ -543,6 +582,7 @@ model Conversation {
   mediaSentProductIds          String[]               @default([])
   unreadCount                  Int                    @default(0)
   order                        Order?
+  saleState                    SaleState?
   messages                     Message[]
   queuedOutbound               QueuedOutboundMessage[]
   createdAt                    DateTime               @default(now())
@@ -644,6 +684,12 @@ model AgentIncident {
   businessId     String
   conversationId String?
   kind           AgentIncidentKind
+  // Fase 0 del plan maestro (2026-09-15): nombre del guard/patron que disparo este incidente
+  // (p.ej. "variant_denial", "media_promise_retraction"). Sin esto, P5 (backstops por 100 turnos)
+  // solo puede reportarse agregado; con esto se puede desglosar por guard, que es lo que deja ver
+  // cuando una fase realmente elimino una clase de falla en vez de solo bajar el conteo total.
+  // Nullable y sin backfill: las filas viejas quedan sin guard, no se les inventa uno.
+  guard          String?
   detail         String
   createdAt      DateTime          @default(now())
 

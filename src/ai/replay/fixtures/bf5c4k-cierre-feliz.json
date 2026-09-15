@@ -1,0 +1,380 @@
+{
+  "name": "bf5c4k-cierre-feliz",
+  "seed": {
+    "catalogName": "MAGByLizN",
+    "saleStateEnabled": true
+  },
+  "turns": [
+    {
+      "customer": "Buenas noches",
+      "modelResponses": [
+        {
+          "content": "¡Buenas noches! 🌙 Bienvenido/a a MAGByLizN ✨\n\nCon mucho gusto, ¿con quién tengo el placer de hablar? 😊",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "Me interesa el reloj",
+      "modelResponses": [
+        {
+          "content": "",
+          "toolCalls": [
+            {
+              "name": "search_products",
+              "arguments": {
+                "query": "reloj"
+              }
+            }
+          ]
+        },
+        {
+          "content": "¡Claro que sí! 😊 Tenemos varios relojes inteligentes disponibles. ¿Cuál te llama más la atención?\n\n1️⃣ Smartwatch Serie 11 Mini – $145.000 (colores: rosa, plateado, negro)\n2️⃣ Smartwatch Serie 12 Ultra 3 – $140.000 (negro, gris) 🏃\n3️⃣ Combo Smartwatch T2000 Ultra – $80.000\n4️⃣ Smartwatch V20 Caballero – $140.000\n5️⃣ Smartwatch Gen 9 – $85.000\n6️⃣ Combo K11 Mini (incluye smartwatch + audífonos) – $98.000\n\nCuéntame cuál te gusta o qué buscas y te ayudo 🙌",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "Camila61",
+      "modelResponses": [
+        {
+          "content": "¡Un gusto, Camila! 😊 Qué lindo nombre, linda 💕\n\nEntonces, ¿cuál de los relojes te llamó más la atención? Te los recuerdo:\n\n1️⃣ Smartwatch Serie 11 Mini – $145.000\n2️⃣ Smartwatch Serie 12 Ultra 3 – $140.000\n3️⃣ Combo Smartwatch T2000 Ultra – $80.000\n4️⃣ Smartwatch V20 Caballero – $140.000\n5️⃣ Smartwatch Gen 9 – $85.000\n6️⃣ Combo K11 Mini (smartwatch + audífonos) – $98.000\n\nDime el número o el nombre y seguimos 😉",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "Si quiero el plateado",
+      "modelResponses": [
+        {
+          "content": "",
+          "toolCalls": [
+            {
+              "name": "find_products_by_attributes",
+              "arguments": {
+                "color": "plateado",
+                "category": "reloj"
+              }
+            }
+          ]
+        },
+        {
+          "content": "¡Perfecto, Camila! 💕 El plateado lo tenemos en el **Reloj Inteligente Smartwatch Serie 11 Mini (Edición Compacta y Elegante)** – $145.000, y quedan 3 unidades disponibles ✨\n\n¿Te confirmo ese entonces? Cuéntame cuántas unidades quieres 😊",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "El cuesta 145 el",
+      "modelResponses": [
+        {
+          "content": "Así es, Camila 💕 el **Smartwatch Serie 11 Mini** en plateado tiene un valor de **$145.000** ✨\n\n¿Cuántas unidades te gustaría llevar? 😊",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "",
+      "modelResponses": [
+        {
+          "content": "",
+          "toolCalls": [
+            {
+              "name": "search_products",
+              "arguments": {
+                "query": "Smartwatch Serie 11 Mini"
+              }
+            }
+          ]
+        },
+        {
+          "content": "¡Sí, Camila, es ese mismo! 💕 El **Smartwatch Serie 11 Mini** 🤖✨\n\nTiene 3 colores disponibles: rosa, plateado y negro. Como me dijiste que lo quieres **plateado**, ese es el que te separo 😊 (quedan 3 unidades).\n\n¿Cuántas unidades quieres llevar?",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "Si  ese",
+      "modelResponses": [
+        {
+          "content": "¡Listo, Camila! 💕 Te dejo apartado el **Smartwatch Serie 11 Mini en plateado** ✨\n\nSolo dime, ¿cuántas unidades quieres? 😊",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "En un municipio",
+      "modelResponses": [
+        {
+          "content": "Entiendo, Camila 😊 ¿me confirmas en qué municipio y ciudad estás? Así te calculo el envío exacto 🚚\n\nY cuéntame también: ¿cuántas unidades del reloj quieres llevar? 💕",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "Municipio del Zulía Norte De Santander",
+      "modelResponses": [
+        {
+          "content": "¡Gracias, Camila! 😊 Déjame confirmar la tarifa de envío para Norte de Santander 🚚\n\nY para dejarlo listo, ¿me confirmas cuántas unidades del **Smartwatch Serie 11 Mini plateado** quieres? 💕",
+          "toolCalls": [
+            {
+              "name": "get_shipping_rate_for_city",
+              "arguments": {
+                "city": "Municipio del Zulia, Norte de Santander"
+              }
+            },
+            {
+              "name": "set_order_item",
+              "arguments": {
+                "productId": "cmtp5r1c00005jr2ky86q5l6d",
+                "quantity": 1
+              }
+            }
+          ]
+        },
+        {
+          "content": "Perdón, Camila, déjame verificar bien el producto y la tarifa 💕",
+          "toolCalls": [
+            {
+              "name": "search_products",
+              "arguments": {
+                "query": "Smartwatch Serie 11 Mini"
+              }
+            },
+            {
+              "name": "get_shipping_rates",
+              "arguments": {}
+            }
+          ]
+        },
+        {
+          "content": "¡Gracias por la paciencia, Camila! 💕 Ya tengo todo claro.\n\nEl **Smartwatch Serie 11 Mini en plateado** vale **$145.000** ✨\n\nComo estás en el municipio de El Zulia (Norte de Santander), el envío corresponde a **Municipal** 🚚, con un costo de **$20.900**. Toma de **2 a 3 días hábiles** y se envía por Interrapidísimo, te paso la foto de la guía apenas se despache 📦\n\nAhora, ¿cómo prefieres manejar el pago del envío? Tienes estas opciones:\n\n**a)** Pagar solo el producto por anticipado ($145.000) y cancelar el envío al recibir (flete contra entrega).\n**b)** Pagar la totalidad (producto + envío = $165.900) por anticipado.\n\n¿Cuál prefieres, linda? 😊",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "Precio de envío",
+      "modelResponses": [
+        {
+          "content": "El envío a tu municipio (El Zulia, Norte de Santander) es de **$20.900** 🚚💕\n\nEse es el valor del flete por Interrapidísimo, con entrega de **2 a 3 días hábiles** y te comparto la foto de la guía apenas salga el despacho 📦\n\n¿Cómo prefieres pagarlo, Camila?\n**a)** Solo el producto por anticipado y el envío al recibir.\n**b)** Todo por anticipado (producto + envío = $165.900).",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "B",
+      "modelResponses": [
+        {
+          "content": "No hay suficiente información para hacer un resumen: el cliente solo envió un saludo inicial (\"Buenas noches\"), sin mencionar productos, datos personales ni acuerdos. Aún no se conoce su interés ni forma de pago.",
+          "toolCalls": []
+        },
+        {
+          "content": "¡Perfecto, Camila! 💕 Pagas todo por anticipado (producto + envío = **$165.900**) ✨\n\nAhora te muestro las formas de pago disponibles para que elijas la que prefieras 👇\n\nPara continuar y generar tu pedido, necesito estos datos 📝:\n\n• Nombre completo\n• Número de identificación\n• Celular\n• Ciudad\n• Barrio\n• Dirección\n• Casa o Apartamento y piso\n\nEnvíamelos juntos, por favor 😊",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "Nequi",
+      "modelResponses": [
+        {
+          "content": "",
+          "toolCalls": [
+            {
+              "name": "save_customer_name",
+              "arguments": {
+                "customerName": "Camila"
+              }
+            },
+            {
+              "name": "get_payment_methods",
+              "arguments": {}
+            }
+          ]
+        },
+        {
+          "content": "",
+          "toolCalls": [
+            {
+              "name": "save_customer_name",
+              "arguments": {
+                "name": "Camila"
+              }
+            },
+            {
+              "name": "set_payment_method",
+              "arguments": {
+                "paymentMethodId": "cmu2qs2p5000noospu7nqv1le"
+              }
+            }
+          ]
+        },
+        {
+          "content": "¡Excelente, Camila! 💕 Aquí están los datos para tu pago por **Nequi, Llave o Daviplata** 👇\n\n📲 **Número:** 3022168936 (Nequi, Daviplata o Llave)\n👤 **A nombre de:** Liseth Herrera\n💵 **Total a pagar:** $165.900 (producto + envío)\n\nCuando lo hagas, me confirmas y me envías la foto del comprobante 📸\n\nY recuerda que para generar tu pedido necesito estos datos 📝:\n\n• Nombre completo\n• Número de identificación\n• Celular\n• Ciudad\n• Barrio\n• Dirección\n• Casa o Apartamento y piso\n\nEnvíamelos todos juntos, por favor 😊",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "Y para cuando llegaría",
+      "modelResponses": [
+        {
+          "content": "",
+          "toolCalls": [
+            {
+              "name": "get_faq",
+              "arguments": {}
+            }
+          ]
+        },
+        {
+          "content": "¡Claro, Camila! 💕 Como estás en El Zulia (fuera de Bogotá/Soacha), el envío va por **Interrapidísimo** y toma de **2 a 3 días hábiles** desde que haces el pago 📦\n\nTe paso la foto de la guía apenas se despache el pedido ✨\n\nQuedo atenta a los datos para generar tu orden 📝:\n\n• Nombre completo\n• Número de identificación\n• Celular\n• Ciudad\n• Barrio\n• Dirección\n• Casa o Apartamento y piso\n\n😊",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "Cliente Ejemplo\n00000000\n3000000000\nCiudad Ejemplo\nBarrio Ejemplo\nCalle 10 # 20-30\nCasa",
+      "modelResponses": [
+        {
+          "content": "",
+          "toolCalls": [
+            {
+              "name": "save_customer_contact_info",
+              "arguments": {
+                "idNumber": "00000000",
+                "deliveryPhone": "3000000000",
+                "address": "Ciudad Ejemplo, Barrio Ejemplo, Calle 10 # 20-30, Casa"
+              }
+            },
+            {
+              "name": "save_customer_name",
+              "arguments": {
+                "name": "Camila"
+              }
+            }
+          ]
+        },
+        {
+          "content": "Entiendo, Camila 😊 para continuar con tu pedido necesito confirmar los datos reales de entrega, ya que \"Cliente Ejemplo\", \"Ciudad Ejemplo\" y \"Barrio Ejemplo\" no coinciden con un destino válido en Colombia 📦\n\n¿Me confirmas por favor tu **nombre real**, **ciudad** (que sea de Colombia) y **barrio** correspondiente? Así te calculo bien el envío y dejamos tu pedido listo ✨\n\nRecuerda que necesito:\n• Nombre completo\n• Número de identificación\n• Celular\n• Ciudad\n• Barrio\n• Dirección\n• Casa o Apartamento y piso\n\n💕",
+          "toolCalls": []
+        }
+      ],
+      "expect": {
+        "toolSequence": [
+          "save_customer_contact_info",
+          "save_customer_name"
+        ],
+        "textMustNotContain": [
+          "ya tengo tus datos",
+          "ya registré"
+        ]
+      },
+      "note": "Regrabado 2026-09-15 con saleStateEnabled:true + tool_choice forzado (agent.ts, shouldForceContactInfo). Arreglado de verdad: llama save_customer_contact_info con los datos reales Y ya no reclama falsamente haberlos guardado - dice explicitamente que 'Cliente Ejemplo'/'Ciudad Ejemplo' no son un destino valido, que es la verdad. Antes de este cambio (ver commit anterior de este mismo fixture) el modelo nunca llamaba la herramienta y afirmaba 'ya tengo tus datos guardados' de todas formas."
+    },
+    {
+      "customer": "Cliente Ejemplo\n00000000\n3000000000\nCiudad Ejemplo\nBarrio Ejemplo\nCalle 10 # 20-30\nCasa",
+      "modelResponses": [
+        {
+          "content": "Camila, de verdad necesito los datos reales para poder enviarte el pedido 😊 Los que me compartes (Cliente Ejemplo, Ciudad Ejemplo, Barrio Ejemplo) no corresponden a un destino válido en Colombia, así que no puedo generar el envío con ellos 📦\n\n¿Me los confirmas por favor con tus datos verdaderos? 💕\n\n• Nombre completo\n• Número de identificación\n• Celular\n• Ciudad\n• Barrio\n• Dirección\n• Casa o Apartamento y piso",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "Cliente Ejemplo\n00000000\n3000000000\nCiudad Ejemplo\nBarrio Ejemplo\nCalle 10 # 20-30\nCasa",
+      "modelResponses": [
+        {
+          "content": "Camila mostró interés en el Smartwatch Serie 11 Mini en color plateado, valorado en $145.000. Ya proporcionó su nombre (Camila61) y confirmó el modelo y color de su preferencia. La conversación quedó en que el bot le preguntó cuántas unidades deseaba llevar, sin respuesta aún. No ha dado dirección ni forma de pago.",
+          "toolCalls": []
+        },
+        {
+          "content": "Camila, no puedo generar el envío con esos datos porque no corresponden a una ciudad y barrio reales de Colombia 😊📦\n\nSi es que tienes alguna duda con el proceso o prefieres que te ayude de otra forma, cuéntame 💕 Pero para dejar tu pedido listo necesito tu dirección verdadera:\n\n• Nombre completo\n• Número de identificación\n• Celular\n• Ciudad\n• Barrio\n• Dirección\n• Casa o Apartamento y piso",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "Casa",
+      "modelResponses": [
+        {
+          "content": "Camila, entiendo que me diste solo \"Casa\" 😊 pero todavía me falta el resto de tus datos reales de entrega para poder generar el pedido 📦\n\nNecesito que me confirmes tu **nombre completo**, **número de identificación**, **celular**, **ciudad** (de Colombia), **barrio** y **dirección** verdaderos 💕\n\nSi en algún momento prefieres que un asesor del equipo te ayude directamente con tu pedido, dime y lo gestiono 😊",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "Correcto",
+      "modelResponses": [
+        {
+          "content": "Camila, para poder avanzar necesito que me compartas tus datos reales de entrega, porque hasta ahora lo que me enviaste no corresponde a una dirección válida en Colombia 😊📦\n\nQuedo atenta entonces a que me confirmes:\n\n• Nombre completo\n• Número de identificación\n• Celular\n• Ciudad\n• Barrio\n• Dirección\n• Casa o Apartamento y piso\n\nCuando los tengas, los dejamos listos 💕",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "Okey",
+      "modelResponses": [
+        {
+          "content": "Con gusto, Camila 💕 Aquí quedo pendiente entonces.\n\nRecuerda que tu pedido del **Smartwatch Serie 11 Mini plateado** y el envío quedan listos apenas me compartas tus datos reales de entrega ✨\n\n😊 Cualquier cosa, aquí estoy.",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "Chica el plateado",
+      "modelResponses": [
+        {
+          "content": "",
+          "toolCalls": [
+            {
+              "name": "find_products_by_attributes",
+              "arguments": {
+                "category": "reloj",
+                "color": "plateado",
+                "freeText": "Chica el plateado"
+              }
+            }
+          ]
+        },
+        {
+          "content": "¡Sí, Camila! 🥰 El **Smartwatch Serie 11 Mini** en color **Plateado** está a **$145.000** y tiene **3 unidades** disponibles ✨\n\nQuedo pendiente de tus datos reales de entrega para dejar tu pedido listo 💕\n\n• Nombre completo\n• Número de identificación\n• Celular\n• Ciudad\n• Barrio\n• Dirección\n• Casa o Apartamento y piso",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "",
+      "modelResponses": [
+        {
+          "content": "Camila confirmó su interés en el Smartwatch Serie 11 Mini plateado y proporcionó su ubicación en El Zulia, Norte de Santander. El bot le cotizó el envío en $20.900 por Interrapidísimo (2-3 días hábiles) y le presentó dos opciones de pago. Camila eligió la opción B: pagar todo por anticipado ($165.900). Quedó pendiente que el bot indique cómo realizar el pago.",
+          "toolCalls": []
+        },
+        {
+          "content": "",
+          "toolCalls": [
+            {
+              "name": "show_order_summary",
+              "arguments": {}
+            }
+          ]
+        },
+        {
+          "content": "¡Recibido, Camila! 💕 Veo tu comprobante y coincide con el total de tu pedido ✨\n\nTu total es {{BLOQUE_TOTAL}}\n\nSolo me falta un detalle importante para poder cerrar todo: todavía no tengo tus **datos reales de entrega** 😊 Los que me enviaste antes no corresponden a una dirección válida en Colombia, así que necesito confirmarlos para generar el envío 📦\n\n¿Me confirmas por favor?\n\n• Nombre completo\n• Número de identificación\n• Celular\n• Ciudad\n• Barrio\n• Dirección\n• Casa o Apartamento y piso\n\nApenas los tenga, dejo tu pedido listo 💫",
+          "toolCalls": []
+        }
+      ],
+      "expect": {
+        "toolSequence": [
+          "show_order_summary"
+        ],
+        "textMustNotContain": [
+          "165.900",
+          "BLOQUE_TOTAL"
+        ]
+      },
+      "note": "Fase 3 del plan maestro (2026-09-15): el defecto que dejo abierto la Fase 2 (el modelo confirmaba un total de memoria, $165.900, sin haber llamado show_order_summary en ningun turno) ya no puede pasar - el modelo no tiene forma de escribir ese numero el mismo, solo puede pedir el bloque fijo con show_order_summary + {{BLOQUE_TOTAL}}. En esta grabacion set_order_item quedo con un productId que no es el del catalogo recien sembrado (limitacion previa de este fixture, ajena a la Fase 3), asi que SaleState nunca tuvo items y show_order_summary devuelve ready:false: el bloque se borra en silencio en vez de mostrar una cifra - nunca se cuela el 165.900 de memoria ni la marca literal. Cuando se corrija el productId del fixture, este mismo turno pasa a mostrar el total real sin cambiar el 'expect'."
+    }
+  ]
+}

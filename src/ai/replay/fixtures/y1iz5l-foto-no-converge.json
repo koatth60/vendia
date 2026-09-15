@@ -1,0 +1,1087 @@
+{
+  "name": "y1iz5l-foto-no-converge",
+  "seed": {
+    "catalogName": "MAGByLizN"
+  },
+  "turns": [
+    {
+      "customer": "Hola quiero este",
+      "modelResponses": [
+        {
+          "content": "¡Hola! 😊 Bienvenido a MAG.IMP, un gusto saludarte. Soy Anita, ¿con quién tengo el gusto de hablar?\n\nDéjame revisar ese reloj que me muestras ✨",
+          "toolCalls": [
+            {
+              "name": "search_products",
+              "arguments": {
+                "query": "reloj inteligente smartwatch negro pantalla rectangular"
+              }
+            }
+          ]
+        },
+        {
+          "content": "¡Gracias! 😊 Veo varios smartwatches en el catálogo. Para no equivocarme, dime tu nombre primero 👌\n\nY mirando tu foto, el que más se parece es el **Reloj Inteligente Smartwatch Serie 12 Ultra 3** (pantalla grande de 49 mm, correa negra deportiva). ¿Te refieres a ese, linda o señor? Cuéntame también si eres tú quien compra, así te trato como corresponde ✨",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "No estoy seguro acá hay otra imagen",
+      "modelResponses": [
+        {
+          "content": "Déjame confirmar cuál es exactamente con las fotos reales del catálogo 👇",
+          "toolCalls": [
+            {
+              "name": "search_products",
+              "arguments": {
+                "query": "smartwatch reloj inteligente negro"
+              }
+            }
+          ]
+        },
+        {
+          "content": "Veo que podrían ser varios 🤔 Te muestro los dos negros que más se parecen a lo que buscas:",
+          "toolCalls": [
+            {
+              "name": "send_product_media",
+              "arguments": {
+                "productId": "cmu298reu0003e4sp4ufycfd5",
+                "variantId": "cmu298rev0004e4sphzw5hz7t"
+              }
+            },
+            {
+              "name": "send_product_media",
+              "arguments": {
+                "productId": "cmu298rey000be4spgjea3qke",
+                "variantId": "cmu298rez000ee4sp2e0wjdm2"
+              }
+            }
+          ]
+        },
+        {
+          "content": "Aaah, no pude enviarte las fotos porque esos modelos aún no las tienen cargadas en el sistema 😅 pero te cuento las opciones negras que tenemos:\n\n- **Serie 12 Ultra 3** (pantalla grande 49 mm, deportivo/robusto) – $140.000\n- **Serie 11 Mini** (compacto y elegante, 41 mm) – $145.000\n- **Smartwatch gen 9** (llamadas y monitoreo) – $85.000\n- **Smartwatch V20 Caballero** (redondo, con dos pulsos) – $140.000\n\nCuéntame cuál te llama la atención y si eres tú quien va a comprar, para tratarte como corresponde ✨",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "Estoy trabajando en ese bot",
+      "modelResponses": [
+        {
+          "content": "¡Ah, perfecto! 😄 Un gusto entonces. Cuando quieras seguimos con el smartwatch — dime cuál de los modelos negros te llama la atención y te paso el detalle ✨",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "quiero  este producto",
+      "modelResponses": [
+        {
+          "content": "Uy, esa foto no se ve lo suficientemente clara para identificar el producto, linda 😅 ¿Me ayudas con una foto más cercana y nítida, o me dices el nombre o referencia del producto? Así te lo busco de una ✨",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "es un airpod rosa, tienes de esos?",
+      "modelResponses": [
+        {
+          "content": "",
+          "toolCalls": [
+            {
+              "name": "find_products_by_attributes",
+              "arguments": {
+                "category": "audifonos",
+                "color": "rosa",
+                "freeText": "airpod rosa"
+              }
+            }
+          ]
+        },
+        {
+          "content": "",
+          "toolCalls": [
+            {
+              "name": "find_products_by_attributes",
+              "arguments": {
+                "category": "audifonos"
+              }
+            }
+          ]
+        },
+        {
+          "content": "Uy, en rosa no los manejamos, linda 😔 pero sí tengo varios AirPods disponibles:\n\n- **AIRPODS PRO 3** – $75.000\n- **AIRPODS PRO 2** – $55.000\n- **AIRPODS SERIE 4** – $65.000\n- **AIRPODS MAX** – $95.000\n- **Audífonos Q70 Earcuff** – $46.000\n- **Combo K11 Mini** – $98.000\n\n¿Alguno te llama la atención? ✨",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "Hola",
+      "modelResponses": [
+        {
+          "content": "¡Hola de nuevo! 😊 Quedo atenta, ¿te animas con alguno de los AirPods que te mostré o prefieres que sigamos con el smartwatch? ✨",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "Muestrame el catalogo pa ve",
+      "modelResponses": [
+        {
+          "content": "¡Con gusto! 😊 Déjame traerlo completo.",
+          "toolCalls": [
+            {
+              "name": "list_all_products",
+              "arguments": {}
+            }
+          ]
+        },
+        {
+          "content": "¡Listo! Este es nuestro catálogo ✨\n\n**⌚ Smartwatches**\n- Combo Smartwatch T2000 Ultra – $80.000\n- Serie 12 Ultra 3 – $140.000 (negro / gris)\n- Serie 11 Mini – $145.000 (rosa / plateado / negro)\n- Smartwatch V20 Caballero – $140.000\n- Smartwatch gen 9 – $85.000\n- Combo Pareja – $115.000\n\n**🎧 Audífonos**\n- AirPods Pro 3 – $75.000\n- AirPods Pro 2 – $55.000\n- AirPods Serie 4 – $65.000\n- AirPods Max – $95.000\n- Audífonos Q70 Earcuff – $46.000\n- Audífonos Bluetooth con parlante integrado – $70.000\n- Combo K11 Mini – $98.000\n\n**🔊 Parlantes**\n- Bombox 4 – $125.000\n- Parlante tipo Alexa – $70.000\n\n**🔋 Accesorios**\n- Power Bank 12000 mAh – $70.000\n\n¿Alguno te llama la atención, linda? 😊",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "Terminemos el chat por ahora luego vuelvo",
+      "modelResponses": [
+        {
+          "content": "¡Con gusto, linda! 😊 Quedo pendiente para cuando quieras retomar. \n\nGracias por comunicarte con MAGByLizN, no dudes en contactarnos ante cualquier duda ✨",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "Hola",
+      "modelResponses": [
+        {
+          "content": "¡Hola de nuevo! 😊 Qué bueno que volviste, linda. ¿Seguimos con alguno de los productos que viste o quieres que te muestre algo en específico? ✨",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "Necesito ayudar",
+      "modelResponses": [
+        {
+          "content": "¡Claro que sí, linda! 😊 Cuéntame en qué necesitas ayuda, ¿es con algún producto, con el envío o con un pedido que ya hiciste? ✨",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "Mandame el catalogo de los edictos",
+      "modelResponses": [
+        {
+          "content": "No hay mensajes nuevos suficientes para generar un resumen. El cliente solo envió un saludo y \"quiero este\" sin especificar producto, datos personales ni forma de pago.",
+          "toolCalls": []
+        },
+        {
+          "content": "Creo que quisiste decir **audífonos** 😊 Te dejo los que tenemos disponibles:\n\n**🎧 Audífonos**\n- AirPods Pro 3 – $75.000\n- AirPods Pro 2 – $55.000\n- AirPods Serie 4 – $65.000\n- AirPods Max – $95.000\n- Audífonos Q70 Earcuff – $46.000\n- Audífonos Bluetooth con parlante integrado – $70.000\n- Combo K11 Mini – $98.000\n\n¿Alguno te llama la atención, linda? ✨",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "Quiero verlos todos",
+      "modelResponses": [
+        {
+          "content": "¡Claro que sí! Déjame enviarte las fotos de cada uno 😊",
+          "toolCalls": [
+            {
+              "name": "send_product_media",
+              "arguments": {
+                "productName": "AirPods Pro 3"
+              }
+            },
+            {
+              "name": "send_product_media",
+              "arguments": {
+                "productName": "AirPods Pro 2"
+              }
+            },
+            {
+              "name": "send_product_media",
+              "arguments": {
+                "productName": "AirPods Serie 4"
+              }
+            },
+            {
+              "name": "send_product_media",
+              "arguments": {
+                "productName": "AirPods Max"
+              }
+            },
+            {
+              "name": "send_product_media",
+              "arguments": {
+                "productName": "Audífonos Q70 Earcuff"
+              }
+            },
+            {
+              "name": "send_product_media",
+              "arguments": {
+                "productName": "Audífonos Bluetooth con parlante integrado"
+              }
+            },
+            {
+              "name": "send_product_media",
+              "arguments": {
+                "productName": "Combo K11 Mini"
+              }
+            }
+          ]
+        },
+        {
+          "content": "Uy, linda, me acabo de dar cuenta que esos modelos aún no tienen las fotos cargadas en el sistema 😔 pero igual te dejo los precios para que los tengas a mano:\n\n**🎧 Audífonos**\n- AirPods Pro 3 – $75.000\n- AirPods Pro 2 – $55.000\n- AirPods Serie 4 – $65.000\n- AirPods Max – $95.000\n- Audífonos Q70 Earcuff – $46.000\n- Audífonos Bluetooth con parlante integrado – $70.000\n- Combo K11 Mini – $98.000\n\n¿Alguno te llama la atención para darte más detalles? ✨",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "Vale",
+      "modelResponses": [
+        {
+          "content": "¡Con gusto, linda! 😊 Cuando quieras me dices cuál te interesa y seguimos ✨",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "Hola",
+      "modelResponses": [
+        {
+          "content": "¡Hola, linda! 😊 ¿Te animas con alguno de los audífonos que te mostré o prefieres ver otra cosa?",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "Probando 1 2 3",
+      "modelResponses": [
+        {
+          "content": "¡Te escucho perfecto, linda! 😄 Cuando quieras seguimos, dime qué producto te interesa y con gusto te ayudo ✨",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "Nuevos mensjwss aparecen",
+      "modelResponses": [
+        {
+          "content": "El cliente preguntó por un AirPod rosa, que no está disponible, y se le ofrecieron alternativas como AirPods Pro 3, Pro 2, Serie 4, Max, Q70 Earcuff y Combo K11 Mini, sin que eligiera ninguno. También se mencionaron smartwatches negros (Serie 12 Ultra 3, Serie 11 Mini, gen 9, V20 Caballero) sin decisión. No proporcionó nombre, dirección ni forma de pago. La conversación quedó en espera de que el cliente retome y elija un producto.",
+          "toolCalls": []
+        },
+        {
+          "content": "Sí, linda, aquí estoy leyéndote 😊 Cuéntame qué necesitas y lo resolvemos ✨",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "Si esos",
+      "modelResponses": [
+        {
+          "content": "¿Cuáles, linda? 😊 Dime el nombre del modelo que te interesa para darte los detalles y el precio.",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "Quiero estos",
+      "modelResponses": [
+        {
+          "content": "¡Qué lindo! 😍 Déjame revisar ese reloj morado que buscas, linda.",
+          "toolCalls": [
+            {
+              "name": "find_products_by_attributes",
+              "arguments": {
+                "color": "morado",
+                "freeText": "reloj inteligente morado"
+              }
+            },
+            {
+              "name": "find_products_by_attributes",
+              "arguments": {
+                "category": "reloj",
+                "freeText": "reloj inteligente"
+              }
+            }
+          ]
+        },
+        {
+          "content": "¡Ya revisé, linda! 😊 En relojes los colores que manejamos son estos:\n\n**⌚ Smartwatch Serie 11 Mini** – $145.000\n- Rosa\n- Plateado\n- Negro\n\n**⌚ Smartwatch Serie 12 Ultra 3** – $140.000\n- Negro\n- Gris\n\nNo tenemos versión en morado, pero el rosa es el más parecido a lo que viste 😊 ¿Te llama alguno de estos?\n\nSobre los lentes, no los manejamos por ahora, pero si quieres te ayudo con cualquier otro producto.",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "Muestrame cuales tienes",
+      "modelResponses": [
+        {
+          "content": "Con mucho gusto, linda 😊 Te muestro los relojes:",
+          "toolCalls": [
+            {
+              "name": "find_products_by_attributes",
+              "arguments": {
+                "category": "reloj"
+              }
+            }
+          ]
+        },
+        {
+          "content": "",
+          "toolCalls": [
+            {
+              "name": "send_product_media",
+              "arguments": {
+                "productId": "cmu298rey000be4spgjea3qke"
+              }
+            },
+            {
+              "name": "send_product_media",
+              "arguments": {
+                "productId": "cmu298reu0003e4sp4ufycfd5"
+              }
+            }
+          ]
+        },
+        {
+          "content": "¡Ay, linda, disculpa! 😔 Los relojes todavía no tienen fotos cargadas, así que no te las puedo mostrar. Pero te doy el detalle completo:\n\n**⌚ Smartwatch Serie 11 Mini** – $145.000 (edición compacta y elegante)\n- Rosa (quedan 2)\n- Plateado (quedan 3)\n- Negro (quedan 3)\n\n**⌚ Smartwatch Serie 12 Ultra 3** – $140.000 (edición deportiva/robusta)\n- Negro (quedan 7)\n- Gris (quedan 8)\n\n¿Cuál te gusta más, linda? ✨",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "Fotos",
+      "modelResponses": [
+        {
+          "content": "Déjame verificarlo de nuevo, linda 😊",
+          "toolCalls": [
+            {
+              "name": "get_product_details",
+              "arguments": {
+                "productId": "cmtp5r1c00005jr2ky86q5l6d"
+              }
+            },
+            {
+              "name": "find_products_by_attributes",
+              "arguments": {
+                "category": "reloj"
+              }
+            }
+          ]
+        },
+        {
+          "content": "Linda, confirmé de nuevo y estos modelos todavía no tienen fotos cargadas en el sistema 😔\n\nPero te dejo el detalle:\n\n**⌚ Smartwatch Serie 11 Mini** – $145.000\n- Rosa (2 disponibles)\n- Plateado (3 disponibles)\n- Negro (3 disponibles)\n\n**⌚ Smartwatch Serie 12 Ultra 3** – $140.000\n- Negro (7 disponibles)\n- Gris (8 disponibles)\n\n¿Cuál te gustaría, linda? ✨",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "Pero yo quiero lo que tiene la persona en la mano",
+      "modelResponses": [
+        {
+          "content": "El cliente sigue interesado en el AirPod rosa y en las alternativas de AirPods y smartwatches, pero no eligió ningún producto tras ver el catálogo. Pidió el catálogo de los \"edictos\" (probablemente audífonos) sin especificar modelo ni precio. No proporcionó nombre, dirección ni forma de pago. La conversación quedó en que el bot debe enviarle ese catálogo específico.",
+          "toolCalls": []
+        },
+        {
+          "content": "Entiendo, linda 😊 Lo que la persona tiene en la mano es un reloj morado, pero en el catálogo no tenemos ese color. Los que sí tenemos son:\n\n**⌚ Smartwatch Serie 11 Mini** – $145.000\n- Rosa (2 disponibles)\n- Plateado (3 disponibles)\n- Negro (3 disponibles)\n\n**⌚ Smartwatch Serie 12 Ultra 3** – $140.000\n- Negro (7 disponibles)\n- Gris (8 disponibles)\n\nEl rosa es el más parecido al morado de la foto 😊 ¿Te sirve alguno?",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "Antes de pasar eso, pensé que era un airpods no? Lo que tiene la chica en los dedos?",
+      "modelResponses": [
+        {
+          "content": "Ah, tienes razón, linda 😊 Reviso bien lo que lleva en las manos.\n\nEn los dedos no se alcanza a distinguir con claridad si es un audífono, pero si es un AirPods, estos son los que manejamos:\n\n**🎧 AirPods**\n- AirPods Pro 3 – $75.000\n- AirPods Pro 2 – $55.000\n- AirPods Serie 4 – $65.000\n- AirPods Max – $95.000\n\n¿Sabes cuál de estos podría ser, o prefieres que te cuente las características de alguno? ✨",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "Y cual es ese que ella tiene ahib",
+      "modelResponses": [
+        {
+          "content": "Linda, no logro distinguir con claridad el modelo exacto que lleva en la foto 😔 Se ve muy pequeño y borroso para confirmarlo con seguridad.\n\nLo más parecido que tienes ahí son:\n\n**🎧 AirPods**\n- AirPods Pro 3 – $75.000\n- AirPods Pro 2 – $55.000\n- AirPods Serie 4 – $65.000\n- AirPods Max – $95.000\n\nSi me confirmas el color o el modelo, te digo cuál es. ¿Te ayudo con alguno? ✨",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "No pero lo que ella tiene en los dedos son pequenos como auricular inalambricos",
+      "modelResponses": [
+        {
+          "content": "Ah, ya te entiendo, linda 😊 Entonces sí, son auriculares inalámbricos pequeños, tipo AirPods.\n\nEstos son los que manejamos:\n\n**🎧 AirPods**\n- AirPods Pro 3 – $75.000\n- AirPods Pro 2 – $55.000\n- AirPods Serie 4 – $65.000\n- AirPods Max – $95.000\n\n¿Te muestro las características de alguno? Por el tamaño pequeño que mencionas, los Pro o los Serie 4 son los que más se parecen 😊",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "Mira el color y muéstrame uno",
+      "modelResponses": [
+        {
+          "content": "Déjame revisar por color, linda 😊",
+          "toolCalls": [
+            {
+              "name": "find_products_by_attributes",
+              "arguments": {
+                "category": "auriculares",
+                "freeText": "pequeños inalámbricos color que se ve en la foto"
+              }
+            }
+          ]
+        },
+        {
+          "content": "",
+          "toolCalls": [
+            {
+              "name": "search_products",
+              "arguments": {
+                "query": "AirPods"
+              }
+            }
+          ]
+        },
+        {
+          "content": "",
+          "toolCalls": [
+            {
+              "name": "send_product_media",
+              "arguments": {
+                "productId": "cmu298rew0006e4spvs3z9ckr"
+              }
+            }
+          ]
+        },
+        {
+          "content": "Linda, revisé por color y la verdad es que los AirPods no tienen un color específico cargado en el sistema, y tampoco tienen fotos disponibles por ahora 😔\n\nLo que sí te puedo confirmar son estos modelos:\n\n**🎧 AirPods**\n- AirPods Pro 3 – $75.000 (10 disponibles)\n- AirPods Pro 2 – $55.000 (10 disponibles)\n- AirPods Serie 4 – $65.000 (11 disponibles)\n- AirPods Max – $95.000 (11 disponibles)\n\nTodos son de estuche blanco clásico. ¿Te cuento las características de alguno, linda? ✨",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "Rosa?",
+      "modelResponses": [
+        {
+          "content": "El cliente mantiene interés en audífonos, especialmente en el AirPod rosa y las alternativas de AirPods y smartwatches, y pidió ver todos los modelos disponibles aunque aún no eligió ninguno. El bot le envió la lista de precios de audífonos sin fotos y el cliente no definió producto. No proporcionó nombre, dirección ni forma de pago. La conversación quedó abierta a que el cliente indique qué modelo le interesa para continuar.",
+          "toolCalls": []
+        },
+        {
+          "content": "",
+          "toolCalls": [
+            {
+              "name": "find_products_by_attributes",
+              "arguments": {
+                "color": "rosado",
+                "freeText": "airpods auriculares inalambricos rosados"
+              }
+            }
+          ]
+        },
+        {
+          "content": "Linda, en audífonos no manejamos tonos rosados 😔 El único producto rosado que tenemos es el **Smartwatch Serie 11 Mini** ($145.000), pero es reloj, no audífonos.\n\nSi te gustan los AirPods, todos vienen en blanco clásico:\n\n**🎧 AirPods**\n- AirPods Pro 3 – $75.000\n- AirPods Pro 2 – $55.000\n- AirPods Serie 4 – $65.000\n- AirPods Max – $95.000\n\n¿Te interesa alguno de estos, o prefieres ver el reloj rosado, linda? ✨",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "y estis cuales son y cuanto valen",
+      "modelResponses": [
+        {
+          "content": "¡Ahora sí, linda! 😊 Ese reloj es justo el que tenemos:\n\n**⌚ Smartwatch Serie 11 Mini** – $145.000\n- Rosa (2 disponibles)\n- Plateado (3 disponibles)\n- Negro (3 disponibles)\n\nY sí, tienes razón: el **plateado** es el que lleva la correa/pulso rosado 🔥 Es tal cual lo que se ve en la foto.\n\n¿Te gustaría el plateado, linda? ✨",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "No veo foto",
+      "modelResponses": [
+        {
+          "content": "Linda, ese modelo todavía no tiene fotos cargadas en el sistema 😔 Por eso no te puedo mostrar la imagen, aunque sí te confirmo que el **plateado con pulso rosado** es tal como lo viste en el live.\n\n**⌚ Smartwatch Serie 11 Mini** – $145.000\n- Plateado (3 disponibles) ← con correa rosada\n- Rosa (2 disponibles)\n- Negro (3 disponibles)\n\n¿Te animas con el plateado, linda? ✨",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "si",
+      "modelResponses": [
+        {
+          "content": "¡Buenísimo, linda! 😊 El **Smartwatch Serie 11 Mini en plateado** es tuyo por **$145.000** ✨\n\nPara organizar el envío necesito que me confirmes:\n\n📦 **Cuántas unidades** quieres\n📍 **Ciudad y barrio** de entrega\n💳 **Forma de pago** que prefieres\n\nY apenas tengamos eso te pido los datos de entrega. ¡Quedo atenta! 💕",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "Buenas buenas",
+      "modelResponses": [
+        {
+          "content": "¡Hola, linda! 😊 Bienvenida a MAGByLizN ✨\n\nJusto veníamos viendo el **Smartwatch Serie 11 Mini en plateado** por $145.000.\n\nPara seguir necesito que me confirmes:\n\n📦 **Cuántas unidades** quieres\n📍 **Ciudad y barrio** de entrega\n💳 **Forma de pago** que prefieres\n\n¿Seguimos con ese pedido? 💕",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "Buenas buenas",
+      "modelResponses": [
+        {
+          "content": "El cliente sigue interesado en smartwatches, ahora enfocado en el modelo que vio en una foto de referencia, y también preguntó por lentes que no se manejan. El bot le ofreció el Smartwatch Serie 11 Mini en rosa como el más parecido a lo que busca, pero no tiene fotos disponibles. El cliente insiste en ver imágenes del producto específico que vio. No proporcionó nombre, dirección ni forma de pago, y la conversación quedó pendiente de resolver la solicitud de fotos o identificar el modelo exacto.",
+          "toolCalls": []
+        },
+        {
+          "content": "¡Hola de nuevo, linda! 😊 Te leo.\n\nQuedamos en el **Smartwatch Serie 11 Mini plateado** ($145.000). Solo me falta saber:\n\n📦 **Cuántas unidades** quieres\n📍 **Ciudad y barrio** de entrega\n💳 **Forma de pago** que prefieres\n\n¿Me confirmas esos datos para armarte el pedido? 💕",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "Hola",
+      "modelResponses": [
+        {
+          "content": "¡Hola, linda! 😊 ¿Cómo estás?\n\nSeguimos con tu **Smartwatch Serie 11 Mini plateado** por $145.000 ✨\n\nCuéntame:\n📦 ¿Cuántas unidades quieres?\n📍 ¿A qué ciudad y barrio lo enviamos?\n💳 ¿Qué forma de pago prefieres?\n\nCon eso te armo el pedido 💕",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "Catalogo",
+      "modelResponses": [
+        {
+          "content": "¡Claro, linda! 😊 Te muestro lo que manejamos:\n\n**⌚ Smartwatches**\n- Smartwatch Serie 11 Mini – $145.000 (rosa, plateado, negro)\n- Smartwatch Serie 11 Pro – $195.000\n- Apple Watch Ultra 2 – $285.000\n- Apple Watch Ultra 3 – $320.000\n- Apple Watch Serie 10 – $225.000\n- Apple Watch Serie 9 – $165.000\n\n**🎧 Audio**\n- AirPods Pro 3 – $75.000\n- AirPods Pro 2 – $55.000\n- AirPods Serie 4 – $65.000\n- AirPods Max – $95.000\n\n¿Quieres que te cuente más de alguno, linda? ✨",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "Cargador",
+      "modelResponses": [
+        {
+          "content": "",
+          "toolCalls": [
+            {
+              "name": "find_products_by_attributes",
+              "arguments": {
+                "freeText": "cargador"
+              }
+            }
+          ]
+        },
+        {
+          "content": "",
+          "toolCalls": [
+            {
+              "name": "search_products",
+              "arguments": {
+                "query": "cargador"
+              }
+            }
+          ]
+        },
+        {
+          "content": "Linda, como tal cargador suelto no manejamos 😊 Lo que sí tenemos en esa línea es:\n\n**🔋 Batería portátil Power Bank 12000 mAh** – $70.000 (5 disponibles)\n\nY de paso te comento que varios combos ya incluyen cargador:\n\n- **Combo K11 Mini** – $98.000 (1 smartwatch mini + 1 par de audífonos mini + 7 pulsos + cargadores)\n- **Combo Smartwatch T2000 Ultra** – $80.000 (incluye cargador)\n- **Smartwatch V20 Caballero** – $140.000 (incluye cargador)\n\n¿Te interesa alguno de estos, linda? O si buscas el cargador para tu Smartwatch Serie 11 Mini, me dices y consulto con el equipo 💕",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "Si fotos",
+      "modelResponses": [
+        {
+          "content": "¡Claro, linda! 😊 ¿Me confirmas de cuál quieres las fotos?\n\n- **Power Bank 12000 mAh** – $70.000\n- **Combo K11 Mini** – $98.000\n- **Combo Smartwatch T2000 Ultra** – $80.000\n- **Smartwatch V20 Caballero** – $140.000\n\nDime cuál o cuáles y te las mando enseguida ✨",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "Ah bueno gracias, quería preguntar nada masb",
+      "modelResponses": [
+        {
+          "content": "El cliente sigue interesado en smartwatches y ahora también en unos auriculares inalámbricos pequeños tipo AirPods que vio en una foto, preguntando específicamente si hay en color rosa. El bot le ofreció el Smartwatch Serie 11 Mini en rosa como el más parecido al morado de la referencia, y le listó los modelos de AirPods disponibles, aclarando que todos son de estuche blanco clásico y sin fotos ni colores específicos cargados. El cliente no proporcionó nombre, dirección ni forma de pago, y la conversación quedó pendiente de confirmar si alguno de los AirPods disponibles le sirve.",
+          "toolCalls": []
+        },
+        {
+          "content": "¡Con gusto, linda! 😊 Para eso estamos.\n\nSi más adelante quieres retomar el **Smartwatch Serie 11 Mini plateado** o ver fotos de algo, me escribes y seguimos 💕\n\nCualquier cosa, aquí estoy ✨",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "Hola estoy interesado en el reloj negro",
+      "modelResponses": [
+        {
+          "content": "",
+          "toolCalls": [
+            {
+              "name": "find_products_by_attributes",
+              "arguments": {
+                "category": "reloj",
+                "color": "negro"
+              }
+            }
+          ]
+        },
+        {
+          "content": "¡Perfecto! 😊 En negro tenemos dos opciones:\n\n1️⃣ **Smartwatch Serie 11 Mini** – $145.000 (3 disponibles)\n2️⃣ **Smartwatch Serie 12 Ultra 3** (deportivo y robusto) – $140.000 (7 disponibles)\n\n¿Cuál te llama más la atención? ✨\n\nOjo que ninguno tiene fotos cargadas todavía, pero te cuento lo que quieras saber de cada uno 💕",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "Muestrame fotos",
+      "modelResponses": [
+        {
+          "content": "¡Claro que sí, linda! 😊 Déjame revisar y te las mando ✨",
+          "toolCalls": [
+            {
+              "name": "find_products_by_attributes",
+              "arguments": {
+                "category": "reloj",
+                "color": "negro"
+              }
+            }
+          ]
+        },
+        {
+          "content": "Linda, revisé y lamentablemente **ninguno de los dos tiene fotos cargadas** en el sistema todavía 😔\n\nPero te confirmo que existen en negro:\n\n1️⃣ **Smartwatch Serie 11 Mini (Negro)** – $145.000 (3 disponibles)\n2️⃣ **Smartwatch Serie 12 Ultra 3 (Negro)** – $140.000 (7 disponibles)\n\nSi quieres te cuento las características de cada uno para que te decidas, ¿te parece? ✨",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "Luego vuelvo",
+      "modelResponses": [
+        {
+          "content": "¡Con gusto, linda! 😊 Aquí te espero.\n\nCuando vuelvas retomamos el **reloj negro** y lo que necesites ✨\n\nQue estés muy bien 💕",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "Quiero un reloj negro",
+      "modelResponses": [
+        {
+          "content": "",
+          "toolCalls": [
+            {
+              "name": "find_products_by_attributes",
+              "arguments": {
+                "category": "reloj",
+                "color": "negro"
+              }
+            }
+          ]
+        },
+        {
+          "content": "¡Listo, linda! 😊 En negro tienes estas dos opciones:\n\n1️⃣ **Reloj Inteligente Smartwatch Serie 11 Mini** – $145.000 (3 disponibles) - edición compacta y elegante\n2️⃣ **Reloj Inteligente Smartwatch Serie 12 Ultra 3** – $140.000 (7 disponibles) - edición deportiva/robusta\n\nLamentablemente ninguna de las dos tiene fotos cargadas todavía 😔 pero puedo contarte las características de la que te interese.\n\n¿Cuál prefieres? ✨",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "Luego seguimos",
+      "modelResponses": [
+        {
+          "content": "El cliente está interesado en el Smartwatch Serie 11 Mini ($145.000), específicamente el plateado con correa rosada, ya que los audífonos AirPods solo vienen en blanco. Aunque dijo \"si\" al reloj plateado, aún no confirma cuántas unidades quiere, ni ha dado ciudad, barrio o forma de pago. La conversación quedó pendiente de que el cliente retome y confirme esos datos para organizar el envío.",
+          "toolCalls": []
+        },
+        {
+          "content": "¡Claro, linda! 😊 Aquí estaré.\n\nCuando quieras retomamos tu **reloj negro** —solo dime si prefieres el Serie 11 Mini o el Serie 12 Ultra 3— y seguimos con todo ✨\n\nQue tengas lindo día 💕",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "Quiero un relog negro",
+      "modelResponses": [
+        {
+          "content": "",
+          "toolCalls": [
+            {
+              "name": "find_products_by_attributes",
+              "arguments": {
+                "category": "reloj",
+                "color": "negro"
+              }
+            }
+          ]
+        },
+        {
+          "content": "¡Con gusto, linda! 😊 En reloj negro tenemos estos dos:\n\n1️⃣ **Reloj Inteligente Smartwatch Serie 11 Mini** (Edición Compacta y Elegante) – **$145.000** · 3 disponibles\n2️⃣ **Reloj Inteligente Smartwatch Serie 12 Ultra 3** (Edición Deportiva / Robusta) – **$140.000** · 7 disponibles\n\nNinguno de los dos tiene fotos cargadas todavía 😔 pero te cuento las características del que prefieras.\n\n¿Cuál te gusta más? ✨",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "Muestrame fotos",
+      "modelResponses": [
+        {
+          "content": "¡Linda! Revisé de nuevo y realmente **ninguno de los dos tiene fotos cargadas** en el sistema todavía 😔\n\nTe confirmo que ambos existen en negro:\n\n1️⃣ **Reloj Inteligente Smartwatch Serie 11 Mini** – **$145.000** · 3 disponibles\n2️⃣ **Reloj Inteligente Smartwatch Serie 12 Ultra 3** – **$140.000** · 7 disponibles\n\nDime cuál te interesa y te cuento sus características, o si prefieres te paso con el equipo para que te manden las fotos ✨",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "[El cliente esta respondiendo a la foto/video de: AIRPODS SERIE 4] Pero esto no es un reloj o si?",
+      "modelResponses": [
+        {
+          "content": "",
+          "toolCalls": [
+            {
+              "name": "get_product_details",
+              "arguments": {
+                "productName": "AIRPODS SERIE 4"
+              }
+            }
+          ]
+        },
+        {
+          "content": "",
+          "toolCalls": [
+            {
+              "name": "search_products",
+              "arguments": {
+                "query": "AIRPODS SERIE 4"
+              }
+            }
+          ]
+        },
+        {
+          "content": "Ay no, linda, tienes toda la razón 😅 Ese es un **AIRPODS SERIE 4** – son audífonos, no un reloj. Se te habrá cruzado esa foto por el chat.\n\nLos **relojes negros** que sí tenemos son estos:\n\n1️⃣ **Reloj Inteligente Smartwatch Serie 11 Mini** – **$145.000** · 3 disponibles en negro\n2️⃣ **Reloj Inteligente Smartwatch Serie 12 Ultra 3** – **$140.000** · 7 disponibles en negro\n\nNinguno tiene fotos cargadas aún 😔 pero dime cuál te interesa y te cuento sus características ✨",
+          "toolCalls": []
+        }
+      ],
+      "expect": {
+        "textMustNotContain": [
+          "no un reloj"
+        ]
+      },
+      "note": "Real (grabado 2026-09-15): send_product_media mando la foto de un AIRPODS SERIE 4 (audifonos) cuando la clienta pregunto por un reloj negro (ver turno 44/context anterior). El bot tiene que corregirse a si mismo - F2/F6 del diagnostico, envio de media que no corresponde al producto en curso."
+    },
+    {
+      "customer": "Muestrame solo. Reloj negros",
+      "modelResponses": [
+        {
+          "content": "",
+          "toolCalls": [
+            {
+              "name": "find_products_by_attributes",
+              "arguments": {
+                "category": "reloj",
+                "color": "negro"
+              }
+            }
+          ]
+        },
+        {
+          "content": "",
+          "toolCalls": [
+            {
+              "name": "send_product_media",
+              "arguments": {
+                "productId": "cmu298rey000be4spgjea3qke",
+                "variantId": "cmu298rez000ee4sp2e0wjdm2"
+              }
+            },
+            {
+              "name": "send_product_media",
+              "arguments": {
+                "productId": "cmu298reu0003e4sp4ufycfd5",
+                "variantId": "cmu298rev0004e4sphzw5hz7t"
+              }
+            }
+          ]
+        },
+        {
+          "content": "Linda, intenté mandártelas pero **ninguno de los dos relojes negros tiene fotos cargadas** en el sistema todavía 😔\n\nTe confirmo los dos que sí hay en negro:\n\n1️⃣ **Reloj Inteligente Smartwatch Serie 11 Mini** – **$145.000** · 3 disponibles · edición compacta y elegante\n2️⃣ **Reloj Inteligente Smartwatch Serie 12 Ultra 3** – **$140.000** · 7 disponibles · edición deportiva/robusta\n\n¿Quieres que te cuente las características de alguno, o prefieres que le pida al equipo que te mande las fotos? ✨",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "[El cliente esta respondiendo a la foto/video de: Reloj Inteligente Smartwatch Serie 12 Ultra 3 (Edición Deportiva / Robusta)] Pero este es plateado",
+      "modelResponses": [
+        {
+          "content": "El cliente sigue interesado en el Smartwatch Serie 11 Mini plateado ($145.000), aunque también preguntó por catálogo general, cargadores y pidió fotos de productos como el Power Bank y combos. No ha confirmado cuántas unidades quiere, ni ciudad, barrio o forma de pago. La conversación quedó en que el cliente solo estaba preguntando y no concretó pedido.",
+          "toolCalls": []
+        },
+        {
+          "content": "",
+          "toolCalls": [
+            {
+              "name": "find_products_by_attributes",
+              "arguments": {
+                "category": "reloj",
+                "color": "negro",
+                "freeText": "reloj negro"
+              }
+            }
+          ]
+        },
+        {
+          "content": "Tienes razón, linda 🙈 Esa foto que te llegó debe ser de la variante **plateada**, no la negra.\n\nTe confirmo que los relojes que sí existen en **negro** son estos:\n\n1️⃣ **Reloj Inteligente Smartwatch Serie 11 Mini** (Edición Compacta y Elegante) – **$145.000** · 3 disponibles en negro\n2️⃣ **Reloj Inteligente Smartwatch Serie 12 Ultra 3** (Edición Deportiva / Robusta) – **$140.000** · 7 disponibles en negro\n\nY lamentablemente **ninguno de los dos tiene fotos cargadas** en el sistema todavía 😔 por eso no te puedo mostrar cómo se ven en negro.\n\n¿Te cuento las características de alguno o prefieres que le pida al equipo que te mande las fotos? ✨",
+          "toolCalls": []
+        }
+      ],
+      "expect": {
+        "textMustNotContain": [
+          "variante plateada"
+        ]
+      },
+      "note": "Segunda vez en la misma conversacion (turno 44 -> send_product_media x2): la foto mandada para \"reloj negro\" resulto ser la variante plateada. Misma clase de falla que el turno 43, distinto producto."
+    },
+    {
+      "customer": "Gracias luego vuelvo",
+      "modelResponses": [
+        {
+          "content": "¡Con gusto, linda! 😊 Aquí te espero.\n\nCuando vuelvas seguimos con tu **reloj negro** 💕",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "Hola, quiero un reloj negro que tienes",
+      "modelResponses": [
+        {
+          "content": "",
+          "toolCalls": [
+            {
+              "name": "find_products_by_attributes",
+              "arguments": {
+                "category": "reloj",
+                "color": "negro"
+              }
+            }
+          ]
+        },
+        {
+          "content": "¡Hola, linda! 😊 Bienvenida de nuevo.\n\nEn **reloj negro** tenemos estos dos disponibles:\n\n1️⃣ **Reloj Inteligente Smartwatch Serie 12 Ultra 3** (Deportiva / Robusta) – **$140.000** · 7 disponibles\n2️⃣ **Reloj Inteligente Smartwatch Serie 11 Mini** (Compacta y Elegante) – **$145.000** · 3 disponibles\n\nNinguno tiene fotos cargadas todavía 😔 pero dime cuál te gusta y te cuento sus características ✨\n\n¿Cuál prefieres?",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "Muestrame fotos",
+      "modelResponses": [
+        {
+          "content": "¡Linda, ya revisé de nuevo y **ninguno de los dos tiene fotos cargadas** en el sistema todavía! 😔\n\nTe confirmo que ambos existen en negro:\n\n1️⃣ **Reloj Inteligente Smartwatch Serie 12 Ultra 3** – **$140.000** · 7 disponibles\n2️⃣ **Reloj Inteligente Smartwatch Serie 11 Mini** – **$145.000** · 3 disponibles\n\n¿Te cuento las características de alguno o prefieres que le pida al equipo que te mande las fotos? ✨",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "Tienen airpods blancos?",
+      "modelResponses": [
+        {
+          "content": "",
+          "toolCalls": [
+            {
+              "name": "find_products_by_attributes",
+              "arguments": {
+                "category": "airpods",
+                "color": "blanco"
+              }
+            }
+          ]
+        },
+        {
+          "content": "Mmm, dejame verificar mejor 😊",
+          "toolCalls": [
+            {
+              "name": "search_products",
+              "arguments": {
+                "query": "airpods"
+              }
+            }
+          ]
+        },
+        {
+          "content": "¡Sí, linda! 😊 Tenemos varios AirPods disponibles (todos blancos, como son originalmente):\n\n1️⃣ **AIRPODS PRO 2** – **$55.000** · 10 disponibles\n2️⃣ **AIRPODS SERIE 4** – **$65.000** · 11 disponibles\n3️⃣ **AIRPODS PRO 3** – **$75.000** · 10 disponibles\n4️⃣ **AIRPODS MAX** – **$95.000** · 11 disponibles\n\nNinguno tiene fotos cargadas por ahora 😔 pero dime cuál te llama la atención y te cuento más detalles ✨",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "Que Combos tienes?",
+      "modelResponses": [
+        {
+          "content": "El cliente ahora busca un reloj negro, eligiendo entre el Smartwatch Serie 11 Mini ($145.000) y el Serie 12 Ultra 3 ($140.000), aunque sigue pidiendo fotos que aún no están disponibles. No ha dado nombre, dirección ni forma de pago. La conversación quedó en pausa porque el cliente dijo que volvería luego.",
+          "toolCalls": []
+        },
+        {
+          "content": "¡Claro, linda! 😊 Tenemos estos combos:\n\n1️⃣ **Combo Reloj + AirPods** – **$110.000**\n2️⃣ **Combo Celular + Reloj** – **$220.000**\n\n¿Quieres que te muestre las características de alguno? ✨",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "Muestrame fotos",
+      "modelResponses": [
+        {
+          "content": "¡Claro, linda! Te mando las fotos de los dos combos 😊",
+          "toolCalls": [
+            {
+              "name": "send_product_media",
+              "arguments": {
+                "productName": "Combo Reloj + AirPods"
+              }
+            },
+            {
+              "name": "send_product_media",
+              "arguments": {
+                "productName": "Combo Celular + Reloj"
+              }
+            }
+          ]
+        },
+        {
+          "content": "Ay, linda, lo siento 😔 Ninguno de los dos combos tiene fotos cargadas en el sistema todavía, por eso no logro mandártelas.\n\nTe confirmo los combos:\n\n1️⃣ **Combo Reloj + AirPods** – **$110.000**\n2️⃣ **Combo Celular + Reloj** – **$220.000**\n\n¿Te cuento qué incluye cada uno? ✨",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "Si también",
+      "modelResponses": [
+        {
+          "content": "¡Listo, linda! Aquí te va el detalle 😊\n\n1️⃣ **Combo Reloj + AirPods** – **$110.000**\nIncluye un reloj inteligente + unos AirPods, ideal si quieres estrenar ambos de una sola vez ✨\n\n2️⃣ **Combo Celular + Reloj** – **$220.000**\nIncluye un celular + un reloj inteligente, perfecto para el combo completo 📱⌚\n\nCuéntame cuál te interesa y con gusto te ayudo a cuadrar tu pedido 💕",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "Necesito un relog negro que tienes",
+      "modelResponses": [
+        {
+          "content": "",
+          "toolCalls": [
+            {
+              "name": "find_products_by_attributes",
+              "arguments": {
+                "color": "negro",
+                "category": "reloj"
+              }
+            }
+          ]
+        },
+        {
+          "content": "¡Claro, linda! 😊 Los relojes negros que tenemos son estos:\n\n1️⃣ **Reloj Inteligente Smartwatch Serie 12 Ultra 3** (Deportiva / Robusta) – **$140.000** · 7 disponibles en negro\n2️⃣ **Reloj Inteligente Smartwatch Serie 11 Mini** (Compacta y Elegante) – **$145.000** · 3 disponibles en negro\n\nLamentablemente **ninguno tiene fotos cargadas** todavía 😔\n\n¿Cuál te gusta más? Dime y te cuento sus características o empezamos a cuadrar tu pedido ✨",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "Quiero relojes negros",
+      "modelResponses": [
+        {
+          "content": "",
+          "toolCalls": [
+            {
+              "name": "find_products_by_attributes",
+              "arguments": {
+                "category": "reloj",
+                "color": "negro"
+              }
+            }
+          ]
+        },
+        {
+          "content": "¡Listo, linda! 😊 Estos son los relojes negros que tenemos:\n\n1️⃣ **Reloj Inteligente Smartwatch Serie 12 Ultra 3** (Edición Deportiva / Robusta) – **$140.000** · 7 disponibles en negro\n2️⃣ **Reloj Inteligente Smartwatch Serie 11 Mini** (Edición Compacta y Elegante) – **$145.000** · 3 disponibles en negro\n\nNinguno tiene fotos cargadas todavía 😔\n\n¿Cuál te gusta más? Dime y te cuento sus características o empezamos a cuadrar tu pedido ✨",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "Muestrame fotos",
+      "modelResponses": [
+        {
+          "content": "El cliente sigue interesado en un reloj negro, eligiendo entre el Smartwatch Serie 11 Mini ($145.000) y el Serie 12 Ultra 3 ($140.000), e insiste en ver fotos reales del producto en negro. Señaló que la foto del Serie 12 Ultra 3 que recibió muestra el reloj en plateado, no en negro. Aún no ha dado nombre, dirección ni forma de pago, y la conversación sigue en la fase de elegir modelo y aclarar el color.",
+          "toolCalls": []
+        },
+        {
+          "content": "Ay, linda 😔 Acabo de revisarlo de nuevo y **ninguno de los dos relojes tiene fotos cargadas** en el sistema todavía, por eso no puedo mostrártelas.\n\nTe confirmo los relojes negros:\n\n1️⃣ **Reloj Inteligente Smartwatch Serie 12 Ultra 3** – **$140.000** · 7 disponibles\n2️⃣ **Reloj Inteligente Smartwatch Serie 11 Mini** – **$145.000** · 3 disponibles\n\n¿Te cuento las características de alguno, o prefieres elegir uno y cuadramos el pedido? ✨",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "Solo ese tienes?",
+      "modelResponses": [
+        {
+          "content": "No, linda, con mucho gusto te confirmo 😊 De relojes inteligentes tenemos **estos dos** en negro:\n\n1️⃣ **Reloj Inteligente Smartwatch Serie 12 Ultra 3** (Deportiva / Robusta) – **$140.000** · 7 disponibles\n2️⃣ **Reloj Inteligente Smartwatch Serie 11 Mini** (Compacta y Elegante) – **$145.000** · 3 disponibles\n\nDéjame revisar si hay algún otro modelo de reloj en el catálogo ✨",
+          "toolCalls": [
+            {
+              "name": "list_all_products",
+              "arguments": {}
+            }
+          ]
+        },
+        {
+          "content": "¡Linda, buena noticia! 😊 Revisé todo el catálogo y **sí tenemos más relojes**, aunque estos no manejan solo color negro:\n\n1️⃣ **COMBO SMARTWATCH T2000 ULTRA** – **$80.000** · 14 disponibles\n2️⃣ **Smartwatch V20 Caballero** – **$140.000** · 5 disponibles\n3️⃣ **Smartwatch gen 9** – **$85.000** · 10 disponibles\n4️⃣ **Combo Pareja** (2 smartwatch) – **$115.000** · 20 disponibles\n5️⃣ **Combo k11 Mini** (smartwatch + audífonos) – **$98.000** · 10 disponibles\n\nY los que sí tienen negro confirmado:\n\n6️⃣ **Reloj Inteligente Smartwatch Serie 12 Ultra 3** – **$140.000** · 7 en negro ✅\n7️⃣ **Reloj Inteligente Smartwatch Serie 11 Mini** – **$145.000** · 3 en negro ✅\n\nOjo que el **Serie 11 Mini** también viene en **rosa** y **plateado**, y el **Serie 12 Ultra 3** en **negro** y **gris**.\n\n¿Alguno te llama la atención? ✨",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "Porque enviaste solo 1 foto",
+      "modelResponses": [
+        {
+          "content": "No te mandé ninguna foto, linda 😔 Ninguno de los relojes tiene imágenes cargadas en el sistema, por eso no logro enviártelas. Si vieras alguna, agradecería si me dices, porque no debería llegar nada sin foto real 🧐\n\nLo que sí tengo confirmado son los relojes negros:\n\n1️⃣ **Reloj Inteligente Smartwatch Serie 12 Ultra 3** – **$140.000** · 7 en negro\n2️⃣ **Reloj Inteligente Smartwatch Serie 11 Mini** – **$145.000** · 3 en negro\n\n¿Cuál te gusta más para seguir con tu pedido? ✨",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "Gen 9",
+      "modelResponses": [
+        {
+          "content": "¡Perfecto, linda! 😊 Déjame traerte el detalle completo del **Smartwatch gen 9**.",
+          "toolCalls": [
+            {
+              "name": "get_product_details",
+              "arguments": {
+                "productId": "Smartwatch gen 9"
+              }
+            }
+          ]
+        },
+        {
+          "content": "Déjame buscarlo bien, linda 🔍",
+          "toolCalls": [
+            {
+              "name": "search_products",
+              "arguments": {
+                "query": "Smartwatch gen 9"
+              }
+            }
+          ]
+        },
+        {
+          "content": "¡Listo, linda! Aquí va el detalle del **Smartwatch gen 9** ⌚✨\n\n📌 **Smartwatch gen 9** – **$85.000** · **10 disponibles**\n\nCombina la elegancia de una joya con el control total de tu día a día desde tu muñeca. Diseñado para destacar, permite **realizar llamadas** y **monitorear tu salud** desde la muñeca.\n\nOjo que este modelo **no tiene fotos cargadas** ni variantes de color confirmadas (a diferencia del Serie 11 Mini y el Serie 12 Ultra 3 que sí tienen negro ✅).\n\n¿Te sirve este o prefieres que sigamos con uno de los que sí tienen negro? Cuéntame y cuadramos tu pedido 💕",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "Pero entonces porque me. Los. Mostraste si te he estado pidiendo relojes negros que tengas",
+      "modelResponses": [
+        {
+          "content": "",
+          "toolCalls": [
+            {
+              "name": "find_products_by_attributes",
+              "arguments": {
+                "category": "reloj",
+                "color": "negro"
+              }
+            }
+          ]
+        },
+        {
+          "content": "Tienes toda la razón, linda, y te pido disculpas 🙏 Me equivoqué al mostrarte opciones que no eran negras cuando lo que pediste desde el principio fue relojes negros.\n\nEstos son los únicos **relojes negros** que tenemos:\n\n1️⃣ **Reloj Inteligente Smartwatch Serie 12 Ultra 3** (Deportiva / Robusta) – **$140.000** · 7 disponibles\n2️⃣ **Reloj Inteligente Smartwatch Serie 11 Mini** (Compacta y Elegante) – **$145.000** · 3 disponibles\n\nLamentablemente ninguno tiene fotos cargadas todavía 😔 pero esos dos son los reales en negro.\n\n¿Cuál te gusta más para cuadrar tu pedido? 💕",
+          "toolCalls": []
+        }
+      ]
+    }
+  ],
+  "knownFailing": "F2/F6: send_product_media mando fotos que no correspondian al producto pedido (turnos 43 y 45 - audifonos en vez de reloj, variante plateada en vez de negra), y el bot tuvo que autocorregirse frente a la clienta. Lo arregla la Fase 5 (medios como decision de herramienta validada)."
+}

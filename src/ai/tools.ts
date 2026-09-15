@@ -8,6 +8,7 @@ import {
   findProductsByAttributes,
   formatCopPrice,
 } from "../catalog/products";
+import { PAYMENT_BLOCK_MARKER, SHIPPING_BLOCK_MARKER, TOTAL_BLOCK_MARKER, ORDER_SUMMARY_BLOCK_MARKER } from "./fixedBlockMarkers";
 import { listActivePaymentMethods } from "../catalog/paymentMethods";
 import { listShippingRates, resolveShippingRateForCity } from "../catalog/shippingRates";
 import { recordAgentIncident } from "./incidents";
@@ -41,6 +42,15 @@ import {
   markOrderCanceled,
   type ResolvedOrderItem,
 } from "../orders/service";
+import {
+  getSaleState,
+  setOrderItem as setSaleStateOrderItem,
+  removeOrderItem as removeSaleStateOrderItem,
+  setShippingModality as setSaleStateShippingModality,
+  setPaymentMethod as setSaleStatePaymentMethod,
+  saveDeliveryDataToSaleState,
+  isSaleStateEnabled,
+} from "../orders/saleState";
 import {
   sendImageMessage,
   sendVideoMessage,
@@ -499,6 +509,72 @@ export const catalogTools: OpenAI.Chat.ChatCompletionTool[] = [
   },
 ];
 
+// Fase 2 del plan maestro (2026-09-15): solo se agregan al array de herramientas que ve el modelo para
+// un negocio con Business.saleStateEnabled=true (ver agent.ts) - un negocio sin la bandera no paga el
+// costo de tokens de estas 4 herramientas ni puede llamarlas.
+export const saleStateTools: OpenAI.Chat.ChatCompletionTool[] = [
+  {
+    type: "function",
+    function: {
+      name: "set_order_item",
+      description:
+        "Fija (no suma) la cantidad de un producto/variante en el pedido en curso. Llamala apenas el cliente elija producto y cantidad, y de nuevo si cambia de cantidad o de variante - siempre reemplaza el valor anterior de esa misma linea, no lo acumula. productId/variantId tienen que ser los reales que te devolvio search_products/get_product_details/find_products_by_attributes EN ESTA conversacion, nunca inventados.",
+      parameters: {
+        type: "object",
+        properties: {
+          productId: { type: "string", description: "Id real del producto, tal como lo devolvio una herramienta de catalogo." },
+          variantId: { type: "string", description: "Id real de la variante (color/talla), SOLO si el producto tiene variantes." },
+          quantity: { type: "number", description: "Cantidad total deseada de esa linea (reemplaza, no suma)." },
+        },
+        required: ["productId", "quantity"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "remove_order_item",
+      description: "Quita un producto del pedido en curso porque el cliente se arrepintio o lo cambio por otro. Si no das variantId, quita todas las lineas de ese producto.",
+      parameters: {
+        type: "object",
+        properties: {
+          productId: { type: "string", description: "Id real del producto a quitar." },
+          variantId: { type: "string", description: "Id real de la variante a quitar, si el pedido tiene mas de una de este producto." },
+        },
+        required: ["productId"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "set_shipping_modality",
+      description: "Guarda la modalidad de pago del ENVIO que eligio el cliente (ver get_shipping_payment_modalities para las opciones reales de este negocio). Distinto del metodo de pago (Nequi/tarjeta/etc, ver set_payment_method).",
+      parameters: {
+        type: "object",
+        properties: {
+          code: { type: "string", enum: ["PREPAID_ALL", "PREPAID_PRODUCT_COD_SHIPPING", "COD_ALL"], description: "El code exacto que devolvio get_shipping_payment_modalities." },
+        },
+        required: ["code"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "set_payment_method",
+      description: "Guarda el metodo de pago (Nequi/tarjeta/contraentrega/etc) que eligio el cliente para este pedido. El id tiene que ser el real que te devolvio get_payment_methods EN ESTA conversacion.",
+      parameters: {
+        type: "object",
+        properties: {
+          paymentMethodId: { type: "string", description: "Id real del metodo de pago, tal como lo devolvio get_payment_methods." },
+        },
+        required: ["paymentMethodId"],
+      },
+    },
+  },
+];
+
 interface PendingOrderDraft {
   items: ResolvedOrderItem[];
   shippingAddress: string | null;
@@ -709,6 +785,17 @@ const TOOL_INPUT_SCHEMAS: Record<string, z.ZodTypeAny> = {
     shippingCost: SCALAR_INPUT.optional(),
     items: z.array(ORDER_ITEM_INPUT).optional(),
   }),
+  set_order_item: z.object({
+    productId: SCALAR_INPUT,
+    variantId: SCALAR_INPUT.optional(),
+    quantity: SCALAR_INPUT,
+  }),
+  remove_order_item: z.object({
+    productId: SCALAR_INPUT,
+    variantId: SCALAR_INPUT.optional(),
+  }),
+  set_shipping_modality: z.object({ code: SCALAR_INPUT }),
+  set_payment_method: z.object({ paymentMethodId: SCALAR_INPUT }),
 };
 
 function describeZodIssues(error: z.ZodError): string {
@@ -943,7 +1030,10 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
         return { methods: [], note: "Este negocio todavia no configuro formas de pago. Decile al cliente que un asesor le va a confirmar como pagar." };
       }
       return {
-        methods: methods.map((m) => ({ type: m.type, label: m.label, details: m.details })),
+        // `id` agregado en Fase 2 (2026-09-15): lo necesita set_payment_method para guardar cual eligio
+        // el cliente sin ambiguedad de label (dos metodos podrian compartir el mismo label).
+        methods: methods.map((m) => ({ id: m.id, type: m.type, label: m.label, details: m.details })),
+        note: `No escribas vos el numero/llave/titular: pone la marca ${PAYMENT_BLOCK_MARKER} donde quieras mostrarlos y el sistema la reemplaza por estos datos reales antes de enviar.`,
       };
     }
     case "get_shipping_rates": {
@@ -954,7 +1044,13 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
           note: "Este negocio no tiene tarifas de envio estructuradas todavia. Segui las instrucciones especificas del negocio tal como estan escritas para esto.",
         };
       }
-      return { rates: rates.map((r) => ({ label: r.label, cost: r.cost.toString() })) };
+      return {
+        rates: rates.map((r) => ({ label: r.label, cost: r.cost.toString() })),
+        note:
+          rates.length === 1
+            ? `Hay una sola tarifa configurada: no escribas vos el numero, pone la marca ${SHIPPING_BLOCK_MARKER} donde quieras mostrarlo.`
+            : "Hay varias tarifas configuradas - decidi cual categoria/ciudad le corresponde al cliente con las instrucciones del negocio y confirmala con get_shipping_rate_for_city antes de poner la marca de costo.",
+      };
     }
     case "get_shipping_rate_for_city": {
       const city = String(input.city ?? "").trim();
@@ -967,7 +1063,12 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
           note: "Esta ciudad no tiene una regla exacta configurada. No inventes su categoria: segui las instrucciones propias del negocio para clasificarla, y usa get_shipping_rates para confirmar el monto de la categoria que corresponda.",
         };
       }
-      return { matched: true, label: resolved.label, cost: resolved.cost.toString() };
+      return {
+        matched: true,
+        label: resolved.label,
+        cost: resolved.cost.toString(),
+        note: `No escribas vos el numero: pone la marca ${SHIPPING_BLOCK_MARKER} donde quieras mostrarlo y el sistema la reemplaza por este costo real.`,
+      };
     }
     case "get_shipping_payment_modalities": {
       const business = await prisma.business.findUnique({ where: { id: businessId }, select: { shippingPaymentModalities: true } });
@@ -1009,6 +1110,9 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
       }
 
       await saveCustomerName(context.businessId, context.customerId, name);
+      if (await isSaleStateEnabled(businessId)) {
+        await saveDeliveryDataToSaleState(context.conversationId, { customerName: name });
+      }
       return { saved: true, name };
     }
     case "save_customer_contact_info": {
@@ -1016,8 +1120,37 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
       const deliveryPhone = input.deliveryPhone ? String(input.deliveryPhone).trim() : undefined;
       const address = input.address ? String(input.address).trim() : undefined;
       if (!idNumber && !deliveryPhone && !address) return { error: "Falta la cedula, el celular o la direccion" };
-      await saveCustomerContactInfo(context.businessId, context.customerId, { idNumber, deliveryPhone, address });
-      return { saved: true, idNumber, deliveryPhone, address };
+
+      // Fase 2 (2026-09-15): rechazo por forma ANTES de guardar - valida el argumento de la
+      // herramienta, no prosa generada (la clase de guard que el plan si permite). Sin regex nueva:
+      // conteo de caracteres plano. Por campo, no todo-o-nada: lo que sirve se guarda igual.
+      const onlyDigits = (s: string) => [...s].every((c) => c >= "0" && c <= "9");
+      const rejected: Record<string, string> = {};
+      let validIdNumber = idNumber;
+      let validDeliveryPhone = deliveryPhone;
+      if (idNumber && !(onlyDigits(idNumber) && idNumber.length >= 6 && idNumber.length <= 15)) {
+        rejected.idNumber = `"${idNumber}" no parece un numero de cedula real (solo digitos, 6 a 15).`;
+        validIdNumber = undefined;
+      }
+      if (deliveryPhone && !(onlyDigits(deliveryPhone) && deliveryPhone.length >= 7 && deliveryPhone.length <= 15)) {
+        rejected.deliveryPhone = `"${deliveryPhone}" no parece un celular real (solo digitos, 7 a 15).`;
+        validDeliveryPhone = undefined;
+      }
+      if (!validIdNumber && !validDeliveryPhone && !address) {
+        return { saved: false, error: "Ningun dato tiene forma valida.", rejected };
+      }
+
+      await saveCustomerContactInfo(context.businessId, context.customerId, { idNumber: validIdNumber, deliveryPhone: validDeliveryPhone, address });
+      if (await isSaleStateEnabled(businessId)) {
+        await saveDeliveryDataToSaleState(context.conversationId, { idNumber: validIdNumber, deliveryPhone: validDeliveryPhone, address });
+      }
+      return {
+        saved: true,
+        idNumber: validIdNumber,
+        deliveryPhone: validDeliveryPhone,
+        address,
+        ...(Object.keys(rejected).length > 0 ? { rejected, note: "Alguno de los datos no tenia forma valida y no se guardo - pedile al cliente que lo confirme de nuevo." } : {}),
+      };
     }
     case "update_conversation_status": {
       const status = ["INTERESTED", "QUOTED", "NEGOTIATING"].includes(String(input.status)) ? (input.status as "INTERESTED" | "QUOTED" | "NEGOTIATING") : null;
@@ -1226,6 +1359,31 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
       };
     }
     case "show_order_summary": {
+      // Fase 2 (2026-09-15): con la bandera activa, el pedido sale de SaleState (lo que el motor ya
+      // valido linea por linea via set_order_item), no de lo que el modelo mande en `items` - asi el
+      // total nunca puede quedar corto por un producto mal escrito o una variante sin elegir.
+      if (await isSaleStateEnabled(businessId)) {
+        const state = await getSaleState(context.conversationId);
+        if (!state || state.items.length === 0) {
+          return { ready: false, note: "Todavia no hay ningun producto en el pedido en curso - usa set_order_item primero." };
+        }
+        return {
+          ready: true,
+          items: state.items.map((item) => ({
+            productName: item.productName,
+            variantLabel: item.variantLabel,
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+            lineTotal: item.unitPrice * item.quantity,
+          })),
+          subtotal: state.subtotal,
+          shippingCost: state.shippingCost ?? 0,
+          total: state.total,
+          currency: state.items[0].currency,
+          note: `No escribas vos los items, el envio ni el TOTAL: pone la marca ${ORDER_SUMMARY_BLOCK_MARKER} donde quieras mostrar el resumen completo (o ${TOTAL_BLOCK_MARKER} si solo necesitas el total suelto) y el sistema la reemplaza por estos numeros reales antes de enviar. Pedile que confirme antes de seguir.`,
+        };
+      }
+
       const shippingCost = input.shippingCost !== undefined && input.shippingCost !== null ? Number(input.shippingCost) : 0;
       const { items, unresolved, needsAttribute } = await resolveOrderItems(
         businessId,
@@ -1274,20 +1432,43 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
     case "close_conversation": {
       const outcome = input.outcome === "LOST" ? "LOST" : "SOLD";
 
+      const saleStateOn = await isSaleStateEnabled(businessId);
+
       if (outcome === "SOLD") {
         const summary = String(input.summary ?? "").trim();
-        const shippingAddress = input.shippingAddress ? String(input.shippingAddress).trim() : null;
-        const paymentMethodLabel = input.paymentMethodLabel ? String(input.paymentMethodLabel).trim() : null;
-        const shippingCost = input.shippingCost !== undefined && input.shippingCost !== null ? Number(input.shippingCost) : null;
-        const { items, unresolved, needsAttribute } = await resolveOrderItems(
-          businessId,
-          Array.isArray(input.items) ? (input.items as { productName: string; quantity: number; variantLabel?: string }[]) : []
-        );
+        const saleState = saleStateOn ? await getSaleState(context.conversationId) : null;
+
+        // Fase 2 (2026-09-15): con la bandera activa, el pedido/direccion/pago salen de SaleState (ya
+        // validados por set_order_item/save_customer_contact_info/set_payment_method), no de lo que el
+        // modelo mande aca - close_conversation ya no puede cerrar un pedido distinto del que el motor
+        // vino armando.
+        const shippingAddress = saleStateOn ? saleState?.address ?? null : input.shippingAddress ? String(input.shippingAddress).trim() : null;
+        const paymentMethodLabel = saleStateOn
+          ? saleState?.paymentMethodLabel ?? null
+          : input.paymentMethodLabel
+            ? String(input.paymentMethodLabel).trim()
+            : null;
+        const shippingCost = saleStateOn
+          ? saleState?.shippingCost ?? null
+          : input.shippingCost !== undefined && input.shippingCost !== null
+            ? Number(input.shippingCost)
+            : null;
+        const { items, unresolved, needsAttribute } = saleStateOn
+          ? { items: saleState?.items ?? [], unresolved: [] as string[], needsAttribute: [] as string[] }
+          : await resolveOrderItems(
+              businessId,
+              Array.isArray(input.items) ? (input.items as { productName: string; quantity: number; variantLabel?: string }[]) : []
+            );
+
+        if (saleStateOn && items.length === 0) {
+          return { closed: false, note: "Todavia no hay ningun producto en el pedido en curso - usa set_order_item primero." };
+        }
 
         // Real production incident (2026-09-12): a sale closed without ever asking the customer's color.
         // Unlike `unresolved` below (which only warns the owner and still closes), this BLOCKS the close -
         // the product exists and matched fine, but which color/size sold is still unknown, and that's not
         // something an owner can fix after the fact from an alert message the way a misspelled name is.
+        // Con SaleState esto no puede pasar (set_order_item exige la variante al agregar la linea).
         if (needsAttribute.length > 0) {
           return {
             closed: false,
@@ -1349,6 +1530,10 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
         await askForCsat(context.credentials, order.id, context.recipientPhone);
       }
 
+      // La venta de esta conversacion termino (vendida o perdida) - SaleState ya se volco a Order (o no
+      // aplica, LOST), deja de ser la verdad en curso. deleteMany no falla si la fila no existe.
+      if (saleStateOn) await prisma.saleState.deleteMany({ where: { conversationId: context.conversationId } });
+
       await updateConversationStatus(businessId, context.conversationId, outcome);
       return outcome === "SOLD"
         ? {
@@ -1357,6 +1542,39 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
             note: "El pedido quedo cerrado de una. Confirmaselo al cliente con calidez, agradecele la compra, y despedite - no dejes la conversacion en un simple 'listo' seco.",
           }
         : { closed: true, outcome };
+    }
+    case "set_order_item": {
+      const result = await setSaleStateOrderItem(businessId, context.conversationId, {
+        productId: String(input.productId ?? "").trim(),
+        variantId: input.variantId ? String(input.variantId).trim() : undefined,
+        quantity: Number(input.quantity),
+      });
+      if (!result.ok) return result;
+      return {
+        ok: true,
+        item: result.item,
+        missing: result.state.checkout.faltan,
+        subtotal: result.state.subtotal,
+        total: result.state.total,
+      };
+    }
+    case "remove_order_item": {
+      const result = await removeSaleStateOrderItem(context.conversationId, {
+        productId: String(input.productId ?? "").trim(),
+        variantId: input.variantId ? String(input.variantId).trim() : undefined,
+      });
+      if (!result.ok) return result;
+      return { ok: true, items: result.state.items, missing: result.state.checkout.faltan, subtotal: result.state.subtotal, total: result.state.total };
+    }
+    case "set_shipping_modality": {
+      const result = await setSaleStateShippingModality(businessId, context.conversationId, String(input.code ?? "").trim());
+      if (!result.ok) return result;
+      return { ok: true, modality: result.state.shippingModality };
+    }
+    case "set_payment_method": {
+      const result = await setSaleStatePaymentMethod(businessId, context.conversationId, String(input.paymentMethodId ?? "").trim());
+      if (!result.ok) return result;
+      return { ok: true, method: { id: result.state.paymentMethodId, label: result.state.paymentMethodLabel } };
     }
     case "get_order_status": {
       const order = await getLatestOrderForCustomer(businessId, context.customerId);

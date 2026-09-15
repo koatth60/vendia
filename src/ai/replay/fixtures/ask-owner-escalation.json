@@ -1,0 +1,18 @@
+{
+  "name": "escalar al dueno una pregunta sin FAQ (Aurora Joyas)",
+  "seed": { "catalogName": "Aurora Joyas" },
+  "turns": [
+    {
+      "customer": "Hacen envio internacional a Miami?",
+      "modelResponses": [
+        { "toolCalls": [{ "name": "ask_owner", "arguments": { "question": "El cliente pregunta si hacen envio internacional a Miami" } }] },
+        { "toolCalls": [{ "name": "ask_owner", "arguments": { "question": "El cliente pregunta si hacen envio internacional a Miami" } }] },
+        { "content": "Le estoy confirmando eso al equipo, en un momento te digo." }
+      ],
+      "expect": {
+        "toolSequence": ["ask_owner", "ask_owner"],
+        "sideEffects": { "ownerQuestionsCreated": 1 }
+      }
+    }
+  ]
+}

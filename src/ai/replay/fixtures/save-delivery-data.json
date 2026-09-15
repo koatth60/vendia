@@ -1,0 +1,29 @@
+{
+  "name": "guardar nombre y datos de entrega (Aurora Joyas)",
+  "seed": { "catalogName": "Aurora Joyas" },
+  "turns": [
+    {
+      "customer": "Soy Camila Ruiz, mi cedula es 1020304050, mi celular 3001234567, vivo en Calle 10 #5-20, Bogota",
+      "modelResponses": [
+        { "toolCalls": [{ "name": "save_customer_name", "arguments": { "name": "Camila Ruiz" } }] },
+        {
+          "toolCalls": [
+            {
+              "name": "save_customer_contact_info",
+              "arguments": { "idNumber": "1020304050", "deliveryPhone": "3001234567", "address": "Calle 10 #5-20, Bogota" }
+            }
+          ]
+        },
+        { "content": "Perfecto Camila, ya quedaron guardados tus datos." }
+      ],
+      "expect": {
+        "toolSequence": ["save_customer_name", "save_customer_contact_info"],
+        "state": {
+          "customerName": "Camila Ruiz",
+          "customerIdNumber": "1020304050",
+          "customerDeliveryPhone": "3001234567"
+        }
+      }
+    }
+  ]
+}

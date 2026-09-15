@@ -16,10 +16,11 @@ export async function recordAgentIncident(
   businessId: string,
   kind: AgentIncidentKind,
   detail: string,
-  conversationId?: string
+  conversationId?: string,
+  guard?: string
 ): Promise<void> {
   try {
-    await prisma.agentIncident.create({ data: { businessId, kind, detail, conversationId } });
+    await prisma.agentIncident.create({ data: { businessId, kind, detail, conversationId, guard } });
   } catch (error) {
     console.error("No se pudo registrar un AgentIncident (no bloqueante):", error);
   }
@@ -122,4 +123,25 @@ export async function getAgentIncidentSummary(businessId: string, sinceDays = 7)
     externalApiFailures: counts.EXTERNAL_API_FAILURE ?? 0,
     lastExternalApiFailure: lastFailure,
   };
+}
+
+// P5 de la linea base (Fase 0 del plan maestro, 2026-09-15): intervenciones de backstop desglosadas
+// por guard. El objetivo de esta metrica no es que baje, es que cada fase la borre por completo para
+// un guard dado - un total agregado no distingue "el guard X ya no existe" de "el guard X interviene
+// menos". Filas de antes de esta fase quedan con guard null y se agrupan como "(sin guard registrado)".
+export interface BackstopByGuardRow {
+  guard: string;
+  count: number;
+}
+
+export async function getBackstopInterventionsByGuard(businessId: string, sinceDays = 7): Promise<BackstopByGuardRow[]> {
+  const since = new Date(Date.now() - sinceDays * 24 * 60 * 60 * 1000);
+  const grouped = await prisma.agentIncident.groupBy({
+    by: ["guard"],
+    where: { businessId, kind: "BACKSTOP_INTERVENTION", createdAt: { gte: since } },
+    _count: { _all: true },
+  });
+  return grouped
+    .map((row) => ({ guard: row.guard ?? "(sin guard registrado)", count: row._count._all }))
+    .sort((a, b) => b.count - a.count);
 }

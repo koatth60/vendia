@@ -1,7 +1,7 @@
 import type OpenAI from "openai";
 import { deepseek, DEEPSEEK_MODEL } from "./client";
 import { createChatCompletion } from "./modelFailover";
-import { catalogTools, runCatalogTool, type ToolContext } from "./tools";
+import { catalogTools, saleStateTools, runCatalogTool, type ToolContext } from "./tools";
 import { getRecentHistory } from "../conversation/service";
 import { logAiUsage } from "./usage";
 import { prisma } from "../db/client";
@@ -11,10 +11,19 @@ import { recordAgentIncident } from "./incidents";
 import { listActiveProducts, textMentionsConfiguredCategory } from "../catalog/products";
 import { listActivePaymentMethods } from "../catalog/paymentMethods";
 import { buildCheckoutState } from "../orders/checkoutStateFromDb";
+import { getSaleState, formatSaleStateForPrompt } from "../orders/saleState";
 import { canonicalColors } from "../catalog/attributeTaxonomy";
 import { tokenize, normalizeForMatch } from "../search/text";
 import { buildSystemPrompt, type BotPersonality } from "./prompts/systemPrompt";
 import { CLOSING_MESSAGE_PROMPT } from "./prompts/closingMessage";
+import {
+  PAYMENT_BLOCK_MARKER,
+  SHIPPING_BLOCK_MARKER,
+  TOTAL_BLOCK_MARKER,
+  ORDER_SUMMARY_BLOCK_MARKER,
+} from "./fixedBlockMarkers";
+
+export { PAYMENT_BLOCK_MARKER, SHIPPING_BLOCK_MARKER, TOTAL_BLOCK_MARKER, ORDER_SUMMARY_BLOCK_MARKER };
 
 // Track C item 1 (ONIX-RELIABILITY-PLAN.md): prompt template literals (BASE_SYSTEM_PROMPT and its
 // directives, buildSystemPrompt, CLOSING_MESSAGE_PROMPT) live in ./prompts/ now, separate from the
@@ -614,33 +623,6 @@ export function extractNameFromDeliveryAnswer(text: string): string | null {
   return extractNameFromAnswer(cleaned);
 }
 
-const PAYMENT_MENTION_PATTERN = /nequi|bancolombia|daviplata|titular|transferencia|llave/i;
-
-// Prompt instructions alone weren't enough to stop the model from occasionally fabricating an entire
-// fake account number + titular for a real payment method (seen in production: a completely invented
-// Nequi number and name, not even close to the real configured one - real money risk). This is the hard
-// backstop: if the reply mentions payment details but contains a 7+ digit run that isn't in ANY of the
-// real configured methods, don't trust the model's text at all - replace it with the real data verbatim.
-export function guardAgainstPaymentHallucination(
-  text: string,
-  paymentMethods: { label: string; details: string }[] | null
-): string {
-  if (!paymentMethods?.length || !PAYMENT_MENTION_PATTERN.test(text)) return text;
-  const knownDigits = paymentMethods.map((m) => m.details.replace(/\D/g, "")).join("|");
-  const digitRuns = text.match(/\d{7,}/g) ?? [];
-  const hasUnverifiedNumber = digitRuns.some((run) => !knownDigits.includes(run));
-  if (!hasUnverifiedNumber) return text;
-
-  console.error("Dato de pago inventado por el modelo, reemplazado por los datos reales configurados:", {
-    modelText: text,
-    realMethods: paymentMethods,
-  });
-  return [
-    "¡Perfecto! Estos son los datos reales para el pago:",
-    ...paymentMethods.map((m) => `*${m.label}*\n${m.details}`),
-  ].join("\n\n");
-}
-
 // Un metodo real puede combinar varios canales en una sola etiqueta (ej. "Nequi, Llave o Daviplata") -
 // el modelo confirma con el cliente solo el canal puntual que uso ("Nequi"), no la etiqueta completa.
 // Encontrado por npm run regression 2026-09-13: el match exacto original bloqueaba close_conversation en
@@ -658,98 +640,77 @@ export function matchesConfiguredPaymentMethod(label: string, realMethods: { lab
   });
 }
 
-const SHIPPING_MENTION_PATTERN = /env[ií]o/i;
-
-// Mostly detection-only, unlike guardAgainstPaymentHallucination above: a shipping cost is usually one
-// clause inside a longer message (order summary, product price alongside it), so blindly discarding the
-// whole reply the way the payment guard does would also nuke unrelated real content. With several
-// configured tiers (see ShippingRate/get_shipping_rates) there's no single "the real number" to
-// auto-substitute - stays detection-only there. Revisited 2026-09-13 (audit F6): with exactly ONE
-// configured tier there IS a single unambiguous real number, so that one case now gets corrected in place
-// instead of only logged - same reasoning as guardAgainstOrderTotalMismatch below reaching a different
-// conclusion for a genuinely ambiguous multi-tier case.
-export function guardAgainstShippingCostHallucination(
-  text: string,
-  shippingRates: { label: string; cost: string }[] | null
-): string {
-  if (!shippingRates?.length || !SHIPPING_MENTION_PATTERN.test(text)) return text;
-  // Parse-and-round rather than stripping non-digits like the reply-text side does below: a Decimal's
-  // toString() can carry a real fractional part ("9000.00", or worse with no @db.Decimal scale set,
-  // "9000.000000000000000000000000") - stripping the "." there concatenates the fraction's zeros onto the
-  // integer part instead of discarding them, corrupting every comparison. Colombian peso amounts in the
-  // reply text, by contrast, only ever use "." as a thousands separator with no real fraction, so stripping
-  // non-digits there is correct.
-  const knownCosts = new Set(shippingRates.map((r) => String(Math.round(parseFloat(r.cost)))));
-  // [ \t]? (not \s?) between the number and "envio" - \s also matches newline, which let an unrelated
-  // number on the PREVIOUS bullet line (e.g. the product price, "$145.000\n- Envio: ...") get treated as
-  // "near" the word envio just because a line break and a bullet character separated them. Found by the
-  // regression suite: every real, correctly-quoted shipping cost was flagged as a false positive because
-  // the chunk it grabbed was actually the product price line above it, not the real shipping line.
-  //
-  // Forward direction only (envio, THEN the number) - a reverse "number, then envio within 15 chars"
-  // branch used to also fire on "producto ($46.000) + el envio" and "$145.000) y el envio", grabbing the
-  // PRODUCT price sitting right before the word envio instead of an actual shipping figure. The real
-  // phrasing this bot uses always states envio's own cost after the word, never before it.
-  //
-  // Digit run capped at 4-6 (not 4-9): every real configured tier tops out at 6 digits (88.900), while a
-  // cedula or celular runs 7-10 - capping here also stops the fake anonymized placeholder digits
-  // ("00000000"/"3000000000") from a nearby "datos de entrega" block being mistaken for a cost.
-  const chunkPattern = /env[ií]o[^.\n]{0,40}?\$?[ \t]?[\d.,]{4,6}\b/gi;
-  const nearbyChunks = text.match(chunkPattern) ?? [];
-  let sawMismatch = false;
-  for (const chunk of nearbyChunks) {
-    const digits = (chunk.match(/[\d.,]{4,6}/) ?? [""])[0].replace(/\D/g, "");
-    if (digits.length >= 4 && digits.length <= 6 && !knownCosts.has(digits)) {
-      sawMismatch = true;
-      break;
-    }
-  }
-  if (!sawMismatch) return text;
-
-  console.error("Costo de envio mencionado no coincide con ninguna tarifa real configurada - revisar:", {
-    modelText: text,
-    realRates: shippingRates,
-  });
-
-  // Only safe to auto-correct with exactly one configured tier - the real number is unambiguous. With 2+
-  // tiers there's no way to know which one applies without the customer's city/category context this
-  // guard doesn't have, so it stays detection-only there, same as before.
-  if (shippingRates.length !== 1) return text;
-  const realCostDigits = String(Math.round(parseFloat(shippingRates[0].cost)));
-  const formattedCost = realCostDigits.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
-  return text.replace(chunkPattern, (chunk) => chunk.replace(/[\d.,]{4,6}\b/, formattedCost));
+function formatPesos(n: number): string {
+  return Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
 }
 
-const ORDER_TOTAL_MENTION_PATTERN = /total/i;
+export interface FixedBlockData {
+  paymentMethods: { label: string; details: string }[] | null;
+  shippingRate: { label: string; cost: string } | null;
+  orderSummary: {
+    items: { productName: string; variantLabel?: string | null; quantity: number; lineTotal: number }[];
+    shippingCost: number;
+    total: number;
+  } | null;
+}
 
-// B5 (2026-09-13 audit): a guard exists for a hallucinated payment number (guardAgainstPaymentHallucination,
-// hard-replaces the whole reply) and for shipping cost (guardAgainstShippingCostHallucination,
-// detection-only - several tiers, no single "the" real number). Nothing existed for the order TOTAL the
-// bot tells the customer, even though show_order_summary already computes exactly one real, unambiguous
-// total per call - a wrong number here is a customer confirming payment for the wrong amount, same money
-// risk class as the payment guard. Detection + owner alert (not an in-place rewrite like the payment
-// guard): the figure appears in varied formatting ("$145.000", "145000"), and blindly substring-replacing
-// it risks corrupting unrelated text worse than the shipping guard's already-accepted "detect, don't
-// rewrite" tradeoff for the exact same reason.
-export async function guardAgainstOrderTotalMismatch(context: ToolContext, text: string, realTotal: number | null): Promise<void> {
-  if (realTotal === null || !ORDER_TOTAL_MENTION_PATTERN.test(text)) return;
-  const realTotalDigits = String(Math.round(realTotal));
-  const nearbyChunks = text.match(/total[^.\n]{0,30}?\$?[ \t]?[\d.,]{4,9}\b/gi) ?? [];
-  const mentionedTotals = nearbyChunks
-    .map((chunk) => (chunk.match(/[\d.,]{4,9}\b/) ?? [""])[0].replace(/\D/g, ""))
-    .filter(Boolean);
-  const hasMismatch = mentionedTotals.some((digits) => digits !== realTotalDigits);
-  if (!hasMismatch) return;
+// Fase 3 del plan maestro (2026-09-15), causa raiz C2: reemplaza los tres guards que LEIAN la prosa ya
+// generada para detectar una cifra de pago/envio/total inventada (guardAgainstPaymentHallucination,
+// guardAgainstShippingCostHallucination, guardAgainstOrderTotalMismatch - los tres borrados en este
+// commit, junto con las tres backstop tras el hecho). El modelo ya no escribe estas cifras: pone la marca
+// correspondiente donde quiere que aparezcan y redacta alrededor; esta funcion la sustituye por el dato
+// real de ESTE turno antes de que el mensaje salga. Una marca sin dato real que la respalde (el modelo la
+// puso sin haber llamado la herramienta que la llena) se borra en silencio en vez de dejarla pasar
+// literal al cliente - finalizeTurn registra el incidente cuando eso pasa.
+export function renderFixedBlocks(text: string, data: FixedBlockData): { text: string; missingBlocks: string[] } {
+  const missingBlocks: string[] = [];
 
-  console.error("Total del pedido mencionado no coincide con el real de show_order_summary - posible cifra inventada:", {
-    modelText: text,
-    realTotal,
-    mentionedTotals,
-  });
-  await alertOwner(
-    context,
-    `Aviso: el bot le menciono al cliente un total de pedido distinto al real ($${realTotalDigits}). Revisa esa conversacion antes de que se confirme un pago con la cifra equivocada.`
-  );
+  if (text.includes(PAYMENT_BLOCK_MARKER)) {
+    if (data.paymentMethods?.length) {
+      const block = data.paymentMethods.map((m) => `*${m.label}*\n${m.details}`).join("\n\n");
+      text = text.split(PAYMENT_BLOCK_MARKER).join(block);
+    } else {
+      missingBlocks.push("pago");
+      text = text.split(PAYMENT_BLOCK_MARKER).join("");
+    }
+  }
+
+  if (text.includes(SHIPPING_BLOCK_MARKER)) {
+    if (data.shippingRate) {
+      text = text.split(SHIPPING_BLOCK_MARKER).join(`$${formatPesos(parseFloat(data.shippingRate.cost))}`);
+    } else {
+      missingBlocks.push("envio");
+      text = text.split(SHIPPING_BLOCK_MARKER).join("");
+    }
+  }
+
+  if (text.includes(TOTAL_BLOCK_MARKER)) {
+    if (data.orderSummary) {
+      text = text.split(TOTAL_BLOCK_MARKER).join(`$${formatPesos(data.orderSummary.total)}`);
+    } else {
+      missingBlocks.push("total");
+      text = text.split(TOTAL_BLOCK_MARKER).join("");
+    }
+  }
+
+  if (text.includes(ORDER_SUMMARY_BLOCK_MARKER)) {
+    if (data.orderSummary) {
+      const lines = [
+        ...data.orderSummary.items.map(
+          (item) =>
+            `${item.quantity}x ${item.productName}${item.variantLabel ? ` (${item.variantLabel})` : ""} — $${formatPesos(item.lineTotal)}`
+        ),
+        data.orderSummary.shippingCost > 0 ? `Envío: $${formatPesos(data.orderSummary.shippingCost)}` : "Envío: gratis",
+        `Total: $${formatPesos(data.orderSummary.total)}`,
+      ];
+      text = text.split(ORDER_SUMMARY_BLOCK_MARKER).join(lines.join("\n"));
+    } else {
+      missingBlocks.push("resumen");
+      text = text.split(ORDER_SUMMARY_BLOCK_MARKER).join("");
+    }
+  }
+
+  return { text, missingBlocks };
 }
 
 function looksLikeIdOrPhone(text: string): boolean {
@@ -942,7 +903,7 @@ async function applyClaimBackstops(
     const testText = guard.matchAgainstStrippedText ? stripMarkdownEmphasis(text) : text;
     if (guard.pattern.test(testText) && !guard.suppressor.test(testText)) {
       text = await guard.repair(text);
-      await recordAgentIncident(businessId, "BACKSTOP_INTERVENTION", `Guard "${guard.name}" reparo una promesa incumplida`, conversationId);
+      await recordAgentIncident(businessId, "BACKSTOP_INTERVENTION", `Guard "${guard.name}" reparo una promesa incumplida`, conversationId, guard.name);
     }
   }
   return text;
@@ -968,7 +929,7 @@ async function alertOwnerOfDegradedReply(context: ToolContext, reason: string): 
     context,
     `Aviso: el bot le mando una respuesta generica a un cliente en vez de resolverle la consulta. Motivo: ${reason}. Revisa esa conversacion en el panel.`
   );
-  await recordAgentIncident(context.businessId, "DEGRADED_REPLY", reason, context.conversationId);
+  await recordAgentIncident(context.businessId, "DEGRADED_REPLY", reason, context.conversationId, "degraded_reply_fallback");
 }
 
 // Invariant added 2026-09-15 (real incident: the bot promised photos twice in the same conversation,
@@ -983,7 +944,7 @@ async function alertOwnerOfDegradedReply(context: ToolContext, reason: string): 
 // appends an honest, non-promising line instead of leaving the false claim standing alone.
 async function honorOrRetractMediaPromise(context: ToolContext, conversationId: string, text: string): Promise<string> {
   const reason = `El bot prometio fotos/video pero no logro enviar ninguno. Texto: "${text.slice(0, 200)}"`;
-  await recordAgentIncident(context.businessId, "BACKSTOP_INTERVENTION", reason, conversationId);
+  await recordAgentIncident(context.businessId, "BACKSTOP_INTERVENTION", reason, conversationId, "media_promise_retraction");
   await alertOwner(
     context,
     "Aviso: el bot le prometio fotos/video a un cliente pero no logro mandar ninguna (revisa si el producto tiene fotos cargadas, incluidas las de sus variantes). Revisa esa conversacion en el panel."
@@ -1007,6 +968,16 @@ export async function generateReply(
   const { history: mediaFreeHistory, photosSent } = extractMediaHistory(history);
   const modelFacingHistory = mediaFreeHistory.slice(-20);
 
+  // Fase 2 del plan maestro (2026-09-15), causa raiz C1: el estado real del pedido en curso, calculado
+  // de la base (nunca de lo que diga el modelo), inyectado como mensaje system - mismo canal que ya usa
+  // FOTOS/VIDEOS YA ENVIADOS abajo. Solo para negocios con la bandera activa; el resto sigue exactamente
+  // igual que hoy.
+  const saleState = personality?.saleStateEnabled ? await getSaleState(conversationId) : null;
+  const saleStateText = saleState ? formatSaleStateForPrompt(saleState) : "";
+  // Herramientas nuevas solo visibles (y llamables) para un negocio con la bandera activa - el resto no
+  // paga el costo de tokens de un tool que no puede usar.
+  const tools = personality?.saleStateEnabled ? [...catalogTools, ...saleStateTools] : catalogTools;
+
   const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
     { role: "system", content: buildSystemPrompt(personality) },
     ...(contextSummary
@@ -1016,6 +987,9 @@ export async function generateReply(
             content: `RESUMEN DE LO HABLADO ANTES (mensajes mas viejos que ya no ves completos): ${contextSummary}`,
           },
         ]
+      : []),
+    ...(saleStateText
+      ? [{ role: "system" as const, content: saleStateText }]
       : []),
     ...(photosSent.length > 0
       ? [
@@ -1041,7 +1015,12 @@ export async function generateReply(
   // Cuenta las consultas a get_faq de este turno: la primera se fuerza antes de dejar escalar (ver abajo).
   let faqCheckedThisTurn = 0;
   let paymentMethodsThisTurn: { type: string; label: string; details: string }[] | null = null;
-  let shippingRatesThisTurn: { label: string; cost: string }[] | null = null;
+  // Fase 3 del plan maestro (2026-09-15): dos fuentes posibles para {{BLOQUE_ENVIO}}. get_shipping_rate_for_city
+  // ya devuelve una tarifa unica resuelta para la ciudad del cliente - siempre gana si corrio este turno.
+  // get_shipping_rates devuelve TODAS las tarifas configuradas; solo sirve de fuente cuando el negocio
+  // tiene una sola (ambiguo con 2+, nadie eligio categoria todavia).
+  let shippingRatesListThisTurn: { label: string; cost: string }[] | null = null;
+  let cityShippingRateThisTurn: { label: string; cost: string } | null = null;
   // Set only when find_products_by_attributes ran this turn AND resolved unambiguously (not spanning
   // several categories with no category given - see "el rosadito" handling in tools.ts). This is the
   // real fix for "reloj negro sends airpods/wrong colors" (2026-09-12): the media backstop below prefers
@@ -1060,13 +1039,12 @@ export async function generateReply(
   let hasVariantsThisTurn: boolean | null = null;
   let variantColorsThisTurn: string[] = [];
   let shippingModalitiesThisTurn: { code: string; label: string }[] | null = null;
-  // Set when show_order_summary ran this turn and returned ready:true - the one real, unambiguous total
-  // for this order, used by guardAgainstOrderTotalMismatch below (B5, 2026-09-13 audit).
-  let orderSummaryTotalThisTurn: number | null = null;
+  // Fase 3: resultado completo de show_order_summary de ESTE turno (no solo el total) - fuente de
+  // {{BLOQUE_TOTAL}} y {{BLOQUE_RESUMEN}}. null si no corrio o si todavia no esta ready.
+  let orderSummaryThisTurn: FixedBlockData["orderSummary"] = null;
 
   async function finalizeTurn(text: string): Promise<string> {
     text = stripInternalLeaks(text);
-    text = guardAgainstPaymentHallucination(text, paymentMethodsThisTurn);
 
     // Etapa 1 del estado de pedido: se calcula y se registra, NO se usa. Sirve para comparar durante unos
     // dias lo que el estado dice que falta contra lo que el bot realmente pidio, y corregirlo antes de
@@ -1080,17 +1058,23 @@ export async function generateReply(
       })
       .catch((error) => console.error("No se pudo calcular el estado de pedido (no bloqueante):", error));
 
-    // Verify shipping-cost mentions even if the model never called get_shipping_rates this turn (it may
-    // have paraphrased a business's own free-text tier table instead) - fetch the real rates ourselves
-    // just for this check whenever shipping is mentioned. Read-only, no side effect on the order/reply.
-    if (!shippingRatesThisTurn && SHIPPING_MENTION_PATTERN.test(text)) {
-      const shippingResult = (await runCatalogTool(context, "get_shipping_rates", {})) as {
-        rates?: { label: string; cost: string }[];
-      };
-      if (shippingResult?.rates?.length) shippingRatesThisTurn = shippingResult.rates;
+    const resolvedShippingRate =
+      cityShippingRateThisTurn ?? (shippingRatesListThisTurn?.length === 1 ? shippingRatesListThisTurn[0] : null);
+    const { text: renderedText, missingBlocks } = renderFixedBlocks(text, {
+      paymentMethods: paymentMethodsThisTurn,
+      shippingRate: resolvedShippingRate,
+      orderSummary: orderSummaryThisTurn,
+    });
+    text = renderedText;
+    if (missingBlocks.length > 0) {
+      await recordAgentIncident(
+        context.businessId,
+        "BACKSTOP_INTERVENTION",
+        `El bot puso una marca de bloque fijo (${missingBlocks.join(", ")}) sin haber llamado la herramienta que la respalda este turno - se borro antes de enviar.`,
+        conversationId,
+        "fixed_block_missing_data"
+      );
     }
-    text = guardAgainstShippingCostHallucination(text, shippingRatesThisTurn);
-    await guardAgainstOrderTotalMismatch(context, text, orderSummaryTotalThisTurn);
 
     // hasVariantsThisTurn === true means get_product_details JUST returned real variants for the
     // product being discussed - if the model denies that anyway, its own tool result already proves it
@@ -1100,7 +1084,8 @@ export async function generateReply(
         context.businessId,
         "BACKSTOP_INTERVENTION",
         `El bot nego variantes de color que si existen. Texto: "${text.slice(0, 200)}"`,
-        conversationId
+        conversationId,
+        "variant_denial"
       );
       const colorList = variantColorsThisTurn.length > 0 ? variantColorsThisTurn.join(", ") : "varios colores";
       text = text.replace(VARIANT_DENIAL_PATTERN, `sí viene en estos colores: ${colorList}`);
@@ -1176,7 +1161,12 @@ export async function generateReply(
       await runCatalogTool(context, "flag_conversation_intent", { intent: "SOLICITA_AGENTE" });
     }
 
-    if (nameSavedThisTurn === 0 && customerText) {
+    // Fase 2 del plan maestro (2026-09-15), causa raiz C1: estos dos backstops INFIEREN el dato leyendo
+    // la prosa del cliente porque hasta ahora no habia otro lugar que supiera que se le pregunto. Con
+    // SaleState activo el modelo ve el estado real y llama save_customer_name/save_customer_contact_info
+    // el mismo (ver PEDIDO_DATOS_DIRECTIVE_SALESTATE), asi que esta inferencia queda apagada para no
+    // pisarle el guardado bien hecho con una lectura de prosa peor. Bandera apagada = cero cambio.
+    if (nameSavedThisTurn === 0 && customerText && !personality?.saleStateEnabled) {
       if (ASK_NAME_PATTERN.test(lastAssistantText(history))) {
         // extractNameFromAnswer handles both a bare "David" AND a greeting-wrapped answer like "Hola con
         // einer mucho gusto" - a strict superset of the old bare looksLikePersonName(customerText) check
@@ -1193,7 +1183,7 @@ export async function generateReply(
       }
     }
 
-    if (contactSavedThisTurn === 0 && customerText) {
+    if (contactSavedThisTurn === 0 && customerText && !personality?.saleStateEnabled) {
       const priorAsk = lastAssistantText(history);
       const askedId = ASK_ID_PATTERN.test(priorAsk);
       const askedPhone = ASK_PHONE_PATTERN.test(priorAsk);
@@ -1347,7 +1337,8 @@ export async function generateReply(
         context.businessId,
         "BACKSTOP_INTERVENTION",
         `Texto parecia prometer fotos pero no se identifico ningun producto para mandar: "${text.slice(0, 160)}"`,
-        conversationId
+        conversationId,
+        "media_backstop_no_candidate"
       );
       return text;
     }
@@ -1410,18 +1401,46 @@ export async function generateReply(
     (lastHistoryEntry.mediaType === "IMAGE" || lastHistoryEntry.mediaType === "VIDEO") &&
     countUnresolvedPhotoIdStreak(history.slice(0, -1)) >= 2;
 
+  // Fase 2 seguimiento (2026-09-15): regrabar bf5c4k con SaleState activo mostro que el empujon de
+  // prompt solo no alcanza - en una conversacion real el modelo jamas llamo save_customer_name ni
+  // save_customer_contact_info por su cuenta (ver knownFailing de ese fixture), a pesar de que el
+  // prompt se lo pide. Mismo mecanismo que shouldForceAttributeFilter/shouldForcePhotoEscalation de
+  // arriba: se fuerza CUAL herramienta llamar, nunca los argumentos - el modelo sigue siendo quien lee
+  // el mensaje del cliente y decide los valores reales. Los patrones reusados (ASK_NAME_PATTERN,
+  // ASK_ID_PATTERN, etc, y extractSelfIntroducedName) son los MISMOS que ya existian para el camino
+  // viejo de inferencia por regex - aca se usan solo como disparador ("le preguntaron esto"), nunca
+  // para adivinar el valor, que es justamente la distincion que separa este guard del que la Fase 2
+  // vino a apagar. Solo aplica con la bandera activa; sin ella, cero cambio de comportamiento.
+  const priorAskForForcing = lastAssistantText(history);
+  const shouldForceSaveName =
+    !!personality?.saleStateEnabled &&
+    !saleState?.customerName &&
+    !!customerText &&
+    (ASK_NAME_PATTERN.test(priorAskForForcing) || !!extractSelfIntroducedName(customerText));
+  const shouldForceContactInfo =
+    !!personality?.saleStateEnabled &&
+    !!customerText &&
+    (!saleState?.idNumber || !saleState?.deliveryPhone || !saleState?.address) &&
+    (ASK_ID_PATTERN.test(priorAskForForcing) ||
+      ASK_PHONE_PATTERN.test(priorAskForForcing) ||
+      ASK_DELIVERY_DATA_PATTERN.test(priorAskForForcing));
+
   const forcedToolChoice = shouldForcePhotoEscalation
     ? "ask_owner_about_photo"
     : shouldForceAttributeFilter
       ? "find_products_by_attributes"
-      : null;
+      : shouldForceSaveName
+        ? "save_customer_name"
+        : shouldForceContactInfo
+          ? "save_customer_contact_info"
+          : null;
 
   try {
     for (let iteration = 0; iteration < 5; iteration++) {
       const response = await createChatCompletion({
         max_tokens: 1024,
         messages,
-        tools: catalogTools,
+        tools,
         ...(iteration === 0 && forcedToolChoice
           ? { tool_choice: { type: "function" as const, function: { name: forcedToolChoice } } }
           : {}),
@@ -1570,6 +1589,8 @@ export async function generateReply(
           modalities?: { code: string; label: string }[];
           ready?: boolean;
           total?: number;
+          shippingCost?: number;
+          items?: { productName: string; variantLabel?: string | null; quantity: number; lineTotal: number }[];
           id?: string;
           variants?: { id: string; color: string | null; size: string | null }[];
         };
@@ -1600,10 +1621,10 @@ export async function generateReply(
           paymentMethodsThisTurn = result.methods;
         }
         if (call.function.name === "get_shipping_rates" && Array.isArray(result?.rates) && result.rates.length > 0) {
-          shippingRatesThisTurn = result.rates;
+          shippingRatesListThisTurn = result.rates;
         }
         if (call.function.name === "get_shipping_rate_for_city" && result?.matched && result.label && result.cost) {
-          shippingRatesThisTurn = [...(shippingRatesThisTurn ?? []), { label: result.label, cost: result.cost }];
+          cityShippingRateThisTurn = { label: result.label, cost: result.cost };
         }
         if (
           call.function.name === "find_products_by_attributes" &&
@@ -1613,8 +1634,13 @@ export async function generateReply(
         ) {
           attributeMatchThisTurn = result.matches;
         }
-        if (call.function.name === "show_order_summary" && result?.ready && typeof result.total === "number") {
-          orderSummaryTotalThisTurn = result.total;
+        if (
+          call.function.name === "show_order_summary" &&
+          result?.ready &&
+          typeof result.total === "number" &&
+          Array.isArray(result.items)
+        ) {
+          orderSummaryThisTurn = { items: result.items, shippingCost: result.shippingCost ?? 0, total: result.total };
         }
         if (call.function.name === "get_shipping_payment_modalities" && Array.isArray(result?.modalities) && result.modalities.length > 0) {
           shippingModalitiesThisTurn = result.modalities;
@@ -1646,7 +1672,7 @@ export async function generateReply(
   // to write the actual final answer using everything already gathered in `messages` instead of just
   // returning whatever text happened to come along with the last tool call.
   console.warn(`generateReply: loop de tool-calling agotado (5 iteraciones) sin respuesta final, conversation=${conversationId}`);
-  await recordAgentIncident(context.businessId, "LOOP_EXHAUSTED", "Loop de tool-calling agotado (5 iteraciones) sin respuesta final", conversationId);
+  await recordAgentIncident(context.businessId, "LOOP_EXHAUSTED", "Loop de tool-calling agotado (5 iteraciones) sin respuesta final", conversationId, "loop_exhaustion");
   let finalText = lastText;
   try {
     const finalCompletion = await createChatCompletion({
