@@ -8,13 +8,7 @@ import {
   markOrderCanceled,
 } from "../../orders/service";
 import { recordMessage } from "../../conversation/service";
-import {
-  sendTextMessage,
-  sendImageMessage,
-  sendVideoMessage,
-  formatForWhatsapp,
-  type WhatsappCredentials,
-} from "../../whatsapp/client";
+import { sendToCustomer, formatForWhatsapp, type WhatsappCredentials } from "../../whatsapp/outbound";
 import { uploadMedia } from "../../media/s3";
 import { upload, businessIdOf, isUnsupportedImageType } from "./shared";
 
@@ -72,8 +66,20 @@ ordersRouter.put("/api/orders/:id/ship", upload.single("file"), async (req, res)
   // a caption baked into that message, a media failure used to take the whole notification down with it
   // and the order still got marked "Enviado" as if the customer had heard nothing.
   const messageText = formattedNote || defaultMessage;
-  const textWamid = await sendTextMessage(credentials, order.customer.phoneNumber, messageText);
-  await recordMessage(businessId, order.conversationId, "ASSISTANT", messageText, textWamid || undefined);
+  const shipNotice = await sendToCustomer({
+    businessId,
+    conversationId: order.conversationId,
+    credentials,
+    to: order.customer.phoneNumber,
+    content: { kind: "text", text: messageText },
+    recordAs: { text: messageText },
+  });
+  // Se propaga como antes (la ruta responde 500 y el pedido NO queda marcado como enviado): el aviso de
+  // texto es la garantia real de esta accion, marcarlo despachado sin que el cliente se entere es
+  // exactamente el error que este bloque existe para evitar.
+  if (!shipNotice.delivered) {
+    throw new Error(shipNotice.failure?.message ?? "No se pudo avisar al cliente del envio");
+  }
 
   let mediaS3Key: string | null = null;
   let mediaType: string | null = null;
@@ -84,10 +90,15 @@ ordersRouter.put("/api/orders/:id/ship", upload.single("file"), async (req, res)
       const type = file.mimetype.startsWith("video") ? "VIDEO" : "IMAGE";
       const folder = type === "VIDEO" ? "videos" : "images";
       const { key, url } = await uploadMedia(file.buffer, file.mimetype, folder);
-      const wamid =
-        type === "IMAGE"
-          ? await sendImageMessage(credentials, order.customer.phoneNumber, url)
-          : await sendVideoMessage(credentials, order.customer.phoneNumber, url);
+      const media = await sendToCustomer({
+        businessId,
+        conversationId: order.conversationId,
+        credentials,
+        to: order.customer.phoneNumber,
+        content: type === "IMAGE" ? { kind: "image", url } : { kind: "video", url },
+      });
+      if (!media.delivered) throw new Error(media.failure?.message ?? "No se pudo enviar el archivo adjunto");
+      const wamid = media.wamid;
       mediaS3Key = key;
       mediaType = type;
       await recordMessage(businessId, order.conversationId, "ASSISTANT", type === "IMAGE" ? "[Foto]" : "[Video]", wamid || undefined, {
@@ -123,11 +134,16 @@ ordersRouter.put("/api/orders/:id/cancel", async (req, res) => {
       accessToken: business.whatsappAccessToken,
     };
     const messageText = "Tu pedido fue cancelado. Cualquier duda me escribes.";
-    try {
-      const wamid = await sendTextMessage(credentials, order.customer.phoneNumber, messageText);
-      await recordMessage(businessId, order.conversationId, "ASSISTANT", messageText, wamid || undefined);
-    } catch (error) {
-      console.error("No se pudo avisar al cliente de la cancelacion del pedido:", error);
+    const notice = await sendToCustomer({
+      businessId,
+      conversationId: order.conversationId,
+      credentials,
+      to: order.customer.phoneNumber,
+      content: { kind: "text", text: messageText },
+      recordAs: { text: messageText },
+    });
+    if (!notice.delivered) {
+      console.error("No se pudo avisar al cliente de la cancelacion del pedido:", notice.failure?.message);
     }
   }
 

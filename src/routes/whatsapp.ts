@@ -2,7 +2,15 @@ import { Router } from "express";
 import { Prisma } from "@prisma/client";
 import { env } from "../config/env";
 import { prisma } from "../db/client";
-import { sendTextMessage, sendImageMessage, sendOwnerAlert, sendTemplateMessage, downloadMedia, formatForWhatsapp, type WhatsappCredentials } from "../whatsapp/client";
+import {
+  sendAlertToOwner,
+  sendToCustomer,
+  sendToOwner,
+  drainQueuedOutboundForCustomer,
+  downloadMedia,
+  formatForWhatsapp,
+  type WhatsappCredentials,
+} from "../whatsapp/outbound";
 import { uploadMedia } from "../media/s3";
 import {
   getOrCreateCustomer,
@@ -18,9 +26,6 @@ import {
   updateConversationStatus,
   getRelatedProductNameForMessage,
   customerDisplayName,
-  queueOutboundMessage,
-  listQueuedOutboundForCustomer,
-  markQueuedOutboundSent,
   saveCustomerContactInfo,
 } from "../conversation/service";
 import { generateReply, generateClosingMessage, extractDeliveryDataFromAnswer, extractAddressFromAnswer } from "../ai/agent";
@@ -42,7 +47,7 @@ import { recordAgentIncident } from "../ai/incidents";
 // as a plain nudge so the customer writes back, which re-opens the window for a real answer. Either way,
 // the caller decides what to actually tell the owner - it needs the true outcome, not an optimistic
 // assumption that a returned wamid meant the customer got it.
-import { recordOwnerMessage, trackOwnerSend } from "../delivery/ownerLog";
+import { recordOwnerMessage } from "../delivery/ownerLog";
 import { extractFrame } from "../media/videoFrame";
 
 export const whatsappRouter = Router();
@@ -94,31 +99,40 @@ const ACK_QUIET_MINUTES = 15;
 // a mano. A esa altura la respuesta no contesta nada, confunde. Se descarta y pasa a un humano.
 const STALE_REPLY_MINUTES = 10;
 
-// El cliente acaba de escribir, asi que la ventana de 24h esta abierta de nuevo: se entrega lo que el
-// equipo habia dejado pendiente cuando estaba cerrada (ver QueuedOutboundMessage). Nunca deja caer el
-// webhook - si esto falla, el mensaje del cliente igual tiene que seguir su curso.
-async function flushQueuedOutbound(
+// Respuesta de servicio a la duena dentro de un intercambio que ella misma abrio escribiendo (las
+// confirmaciones del flujo de citar-y-responder). Sale por la capa unica y deja el mismo registro en
+// OwnerMessageLog que dejaba trackOwnerSend.
+async function replyToOwner(
   businessId: string,
-  customerId: string,
-  conversationId: string,
   credentials: WhatsappCredentials,
-  customerPhone: string
+  ownerPhone: string,
+  text: string
 ): Promise<void> {
-  try {
-    const queued = await listQueuedOutboundForCustomer(businessId, customerId);
-    for (const item of queued) {
-      try {
-        const wamid = await sendTextMessage(credentials, customerPhone, item.body);
-        await recordMessage(businessId, conversationId, "ASSISTANT", item.body, wamid || undefined);
-        await markQueuedOutboundSent(item.id);
-      } catch (error) {
-        console.error(`No se pudo entregar el mensaje en cola ${item.id}:`, error);
-        return;
-      }
-    }
-  } catch (error) {
-    console.error("No se pudo revisar la cola de salida:", error);
-  }
+  const result = await sendToOwner(businessId, credentials, ownerPhone, { kind: "text", text });
+  await recordOwnerMessage(businessId, {
+    direction: "OUT",
+    body: text,
+    success: result.delivered,
+    errorMessage: result.failure?.message ?? null,
+  });
+  if (!result.delivered) console.error("No se pudo contestarle a la duena:", result.failure?.message);
+}
+
+// Aviso con plantilla aprobada a la duena (llega tambien fuera de su ventana de 24h).
+async function alertOwnerTracked(
+  businessId: string,
+  credentials: WhatsappCredentials,
+  ownerPhone: string,
+  text: string
+): Promise<void> {
+  const result = await sendAlertToOwner(businessId, credentials, ownerPhone, text);
+  await recordOwnerMessage(businessId, {
+    direction: "OUT",
+    body: text,
+    success: result.delivered,
+    errorMessage: result.failure?.message ?? null,
+  });
+  if (!result.delivered) console.error("No se pudo avisarle a la duena:", result.failure?.message);
 }
 
 const CONFIRM_WORDS = ["si", "sí", "confirmado", "confirmo", "listo", "ok", "dale", "correcto", "confirm_yes"];
@@ -138,43 +152,23 @@ async function deliverOwnerAnswerToCustomer(
   customerPhone: string,
   text: string
 ): Promise<{ delivered: boolean; nudged: boolean; queued: boolean }> {
-  try {
-    await sendTextMessage(credentials, customerPhone, text);
-    return { delivered: true, nudged: false, queued: false };
-  } catch (error) {
-    console.error("No se pudo entregar la respuesta del dueno al cliente (posible ventana de 24h cerrada):", error);
-    // La plantilla de reenganche sola no alcanzaba: el cliente volvia a escribir y la respuesta real ya
-    // se habia perdido, asi que el dueno tenia que acordarse de reescribirla. Se encola y el webhook la
-    // entrega sola apenas el cliente conteste (ese mensaje entrante reabre la ventana).
-    let queued = false;
-    try {
-      await queueOutboundMessage(businessId, conversationId, text, "OWNER_ANSWER");
-      queued = true;
-    } catch (queueError) {
-      console.error("No se pudo dejar la respuesta del dueno en cola:", queueError);
-    }
-    let nudged = false;
-    const business = await prisma.business.findUnique({
-      where: { id: businessId },
-      select: { followUpTemplateName: true, followUpTemplateLanguage: true },
-    });
-    if (business?.followUpTemplateName) {
-      try {
-        await sendTemplateMessage(credentials, customerPhone, business.followUpTemplateName, business.followUpTemplateLanguage);
-        nudged = true;
-      } catch (templateError) {
-        console.error("Tampoco se pudo mandar la plantilla de reenganche al cliente:", templateError);
-      }
-    }
-    await recordDeliveryFailure(businessId, {
-      wamid: "",
-      recipientPhone: customerPhone,
-      errorCode: null,
-      errorMessage: error instanceof Error ? error.message : String(error),
-      critical: false,
-    });
-    return { delivered: false, nudged, queued };
-  }
+  // Mismo resultado que antes (entregado / encolado / plantilla de reenganche / fallo registrado), pero
+  // decidido en un solo lugar: la capa de salida verifica la ventana ANTES de intentar, en vez de
+  // deducirla de que Meta haya rechazado el envio.
+  const result = await sendToCustomer({
+    businessId,
+    conversationId,
+    credentials,
+    to: customerPhone,
+    content: { kind: "text", text },
+    onWindowClosed: "queue",
+    queueOrigin: "OWNER_ANSWER",
+  });
+  return {
+    delivered: result.outcome === "SENT",
+    nudged: result.outcome !== "SENT" && result.delivered,
+    queued: result.queued,
+  };
 }
 
 function ownerConfirmationText(outcome: { delivered: boolean; nudged: boolean; queued: boolean }, successText: string): string {
@@ -225,7 +219,7 @@ export async function handleOwnerReply(
           ? ` Tenes ${totalOpen} cosas esperando respuesta ahora mismo, necesito saber a cual te referis.`
           : "";
       const noQuoteText = `No identifique a que mensaje te refieres.${hint} Por favor responde citando (mantén presionado y "Responder") el mensaje especifico.`;
-      await trackOwnerSend(businessId, noQuoteText, () => sendTextMessage(credentials, ownerPhone, noQuoteText));
+      await replyToOwner(businessId, credentials, ownerPhone, noQuoteText);
       return;
     }
   }
@@ -234,7 +228,7 @@ export async function handleOwnerReply(
     const answerText = message.type === "text" ? (message.text?.body ?? "").trim() : "";
     if (!answerText) {
       const askTextText = "Respondeme con un mensaje de texto, citando esa misma pregunta, por favor.";
-      await trackOwnerSend(businessId, askTextText, () => sendTextMessage(credentials, ownerPhone, askTextText));
+      await replyToOwner(businessId, credentials, ownerPhone, askTextText);
       return;
     }
 
@@ -251,10 +245,18 @@ export async function handleOwnerReply(
         outcome = await deliverOwnerAnswerToCustomer(businessId, pendingQuestion.conversationId, credentials, pendingQuestion.customer.phoneNumber, productText);
         await recordMessage(businessId, pendingQuestion.conversationId, "ASSISTANT", productText);
         if (outcome.delivered && match.product.media.length > 0) {
-          try {
-            await sendImageMessage(credentials, pendingQuestion.customer.phoneNumber, match.product.media[0].url);
-          } catch (error) {
-            console.error("No se pudo enviar la foto del producto identificado al cliente:", error);
+          const photo = await sendToCustomer({
+            businessId,
+            conversationId: pendingQuestion.conversationId,
+            credentials,
+            to: pendingQuestion.customer.phoneNumber,
+            content: { kind: "image", url: match.product.media[0].url },
+            // El texto acaba de salir, asi que la ventana esta abierta; si no lo estuviera, no se gasta
+            // una plantilla de reenganche en mandar una foto suelta.
+            onWindowClosed: "fail",
+          });
+          if (!photo.delivered) {
+            console.error("No se pudo enviar la foto del producto identificado al cliente:", photo.failure?.message);
           }
         }
       } else {
@@ -265,7 +267,7 @@ export async function handleOwnerReply(
       await clearPendingOwnerQuestion(pendingQuestion.questionId);
       await setHumanControl(businessId, pendingQuestion.conversationId, false);
       const confirmedProductText = ownerConfirmationText(outcome, "Listo, le confirme el producto al cliente ✅");
-      await trackOwnerSend(businessId, confirmedProductText, () => sendTextMessage(credentials, ownerPhone, confirmedProductText));
+      await replyToOwner(businessId, credentials, ownerPhone, confirmedProductText);
       return;
     }
 
@@ -279,13 +281,13 @@ export async function handleOwnerReply(
     // review in the admin panel).
     await recordAskOwnerResolution(businessId, pendingQuestion.question, answerText, pendingQuestion.conversationId);
     const forwardedText = ownerConfirmationText(answerOutcome, "Listo, le reenvie tu respuesta al cliente ✅");
-    await trackOwnerSend(businessId, forwardedText, () => sendTextMessage(credentials, ownerPhone, forwardedText));
+    await replyToOwner(businessId, credentials, ownerPhone, forwardedText);
     return;
   }
 
   if (!conversation) {
     const expiredText = "Ese mensaje ya no esta esperando respuesta (puede que ya se haya resuelto o haya expirado).";
-    await trackOwnerSend(businessId, expiredText, () => sendTextMessage(credentials, ownerPhone, expiredText));
+    await replyToOwner(businessId, credentials, ownerPhone, expiredText);
     return;
   }
 
@@ -298,7 +300,7 @@ export async function handleOwnerReply(
 
   if (!isConfirm && !isDeny) {
     const clarifyText = 'Respondeme "si" o "no" citando ese mismo mensaje, por favor.';
-    await trackOwnerSend(businessId, clarifyText, () => sendTextMessage(credentials, ownerPhone, clarifyText));
+    await replyToOwner(businessId, credentials, ownerPhone, clarifyText);
     return;
   }
 
@@ -336,19 +338,37 @@ export async function handleOwnerReply(
       totalAmount: Number(order.totalAmount),
       currency: order.currency,
     });
-    await sendTextMessage(credentials, customerPhone, customerText);
-    await recordMessage(businessId, conversation.id, "ASSISTANT", customerText);
+    const closing = await sendToCustomer({
+      businessId,
+      conversationId: conversation.id,
+      credentials,
+      to: customerPhone,
+      content: { kind: "text", text: customerText },
+      recordAs: { text: customerText },
+    });
     await askForCsat(credentials, order.id, customerPhone);
-    const confirmedSaleText = "Listo, le avise al cliente ✅";
-    await trackOwnerSend(businessId, confirmedSaleText, () => sendTextMessage(credentials, ownerPhone, confirmedSaleText));
+    // Antes esta confirmacion a la duena era fija: decia "le avise al cliente" aunque el envio hubiera
+    // fallado. Ahora dice lo que realmente paso.
+    const confirmedSaleText = closing.delivered
+      ? "Listo, le avise al cliente ✅"
+      : "El pedido quedo registrado, pero NO se pudo avisarle al cliente - revisa esa conversacion en el panel.";
+    await replyToOwner(businessId, credentials, ownerPhone, confirmedSaleText);
   } else {
     await clearPendingConfirmation(conversation.id);
     const customerText =
       "No logramos confirmar tu pago todavia. ¿Puedes reenviar una foto mas clara del comprobante o confirmar el monto por texto?";
-    await sendTextMessage(credentials, customerPhone, customerText);
-    await recordMessage(businessId, conversation.id, "ASSISTANT", customerText);
-    const deniedSaleText = "Listo, le pedi al cliente que reenvie el comprobante.";
-    await trackOwnerSend(businessId, deniedSaleText, () => sendTextMessage(credentials, ownerPhone, deniedSaleText));
+    const asked = await sendToCustomer({
+      businessId,
+      conversationId: conversation.id,
+      credentials,
+      to: customerPhone,
+      content: { kind: "text", text: customerText },
+      recordAs: { text: customerText },
+    });
+    const deniedSaleText = asked.delivered
+      ? "Listo, le pedi al cliente que reenvie el comprobante."
+      : "No se pudo contactar al cliente para pedirle el comprobante - revisa esa conversacion en el panel.";
+    await replyToOwner(businessId, credentials, ownerPhone, deniedSaleText);
   }
 }
 
@@ -456,8 +476,16 @@ whatsappRouter.post("/webhook", async (req, res) => {
       const buttonId: string | undefined = message.interactive?.button_reply?.id;
       if (buttonId?.startsWith("csat_")) {
         const result = await recordCsatReply(business.id, from, buttonId);
-        if (result.recorded) {
-          await sendTextMessage(credentials, from, "¡Gracias por tu opinión! 🙏");
+        if (result.recorded && result.conversationId) {
+          await sendToCustomer({
+            businessId: business.id,
+            conversationId: result.conversationId,
+            credentials,
+            to: from,
+            content: { kind: "text", text: "¡Gracias por tu opinión! 🙏" },
+            // El cliente acaba de tocar el boton, la ventana esta abierta por definicion.
+            onWindowClosed: "fail",
+          });
         }
       }
       return;
@@ -584,7 +612,7 @@ whatsappRouter.post("/webhook", async (req, res) => {
       // Todo lo que el equipo dejo pendiente cuando la ventana de 24h estaba cerrada se entrega ACA: este
       // mensaje entrante es lo que la reabre. Va antes del gate de control humano a proposito - lo que hay
       // en cola lo escribio un humano, no depende de quien tenga el control ahora.
-      await flushQueuedOutbound(business.id, customer.id, conversation.id, credentials, from);
+      await drainQueuedOutboundForCustomer(business.id, customer.id, credentials, from);
 
       // Releer el estado en vez de confiar en el objeto `conversation` leido arriba: entre esa lectura y
       // este punto corren la descarga del media, la vision y la transcripcion, que tardan segundos o
@@ -632,15 +660,22 @@ whatsappRouter.post("/webhook", async (req, res) => {
           select: { id: true },
         });
         if (!gate.humanControlAckSent && !recentlySpoken) {
-          try {
-            const wamid = await sendTextMessage(credentials, from, HUMAN_CONTROL_ACK);
-            await recordMessage(business.id, conversation.id, "ASSISTANT", HUMAN_CONTROL_ACK, wamid || undefined);
+          const ack = await sendToCustomer({
+            businessId: business.id,
+            conversationId: conversation.id,
+            credentials,
+            to: from,
+            content: { kind: "text", text: HUMAN_CONTROL_ACK },
+            onWindowClosed: "fail",
+            recordAs: { text: HUMAN_CONTROL_ACK },
+          });
+          if (ack.delivered) {
             await prisma.conversation.update({
               where: { id: conversation.id },
               data: { humanControlAckSent: true },
             });
-          } catch (error) {
-            console.error("No se pudo mandar el acuse de recibo durante control humano:", error);
+          } else {
+            console.error("No se pudo mandar el acuse de recibo durante control humano:", ack.failure?.message);
           }
         }
         return;
@@ -656,13 +691,20 @@ whatsappRouter.post("/webhook", async (req, res) => {
       if (capStatus.capped) {
         const capText =
           "Por ahora alcanzamos el límite de mensajes de este mes para este negocio. Un asesor te va a contactar en breve para ayudarte manualmente. ¡Gracias por tu paciencia! 🙏";
-        await sendTextMessage(credentials, from, capText);
-        await recordMessage(business.id, conversation.id, "ASSISTANT", capText);
+        await sendToCustomer({
+          businessId: business.id,
+          conversationId: conversation.id,
+          credentials,
+          to: from,
+          content: { kind: "text", text: capText },
+          onWindowClosed: "fail",
+          recordAs: { text: capText },
+        });
 
         if (capStatus.justCrossed && business.contactPhone) {
           const greeting = business.contactName ? `Hola ${business.contactName}` : "Hola";
           const capAlertText = `${greeting}, tu negocio alcanzó el límite de ${capStatus.messageCap} mensajes de tu plan ${capStatus.planTier} este mes. El bot dejó de responder automáticamente hasta el próximo mes - escribime si querés subir de plan.`;
-          await trackOwnerSend(business.id, capAlertText, () => sendOwnerAlert(credentials, business.contactPhone!, capAlertText));
+          await alertOwnerTracked(business.id, credentials, business.contactPhone!, capAlertText);
         }
         return;
       }
@@ -730,14 +772,20 @@ whatsappRouter.post("/webhook", async (req, res) => {
         if (business.contactPhone) {
           const customerLabel = customerDisplayName(customer);
           const staleAlertText = `El bot tardo ${Math.round(waitedMinutes)} minutos en responderle a ${customerLabel} y la respuesta se descarto por vieja. Esa conversacion quedo esperandote en el panel.`;
-          await trackOwnerSend(business.id, staleAlertText, () => sendOwnerAlert(credentials, business.contactPhone!, staleAlertText));
+          await alertOwnerTracked(business.id, credentials, business.contactPhone!, staleAlertText);
         }
         return;
       }
 
       const formattedReply = formatForWhatsapp(reply);
-      await sendTextMessage(credentials, from, formattedReply);
-      await recordMessage(business.id, conversation.id, "ASSISTANT", formattedReply);
+      await sendToCustomer({
+        businessId: business.id,
+        conversationId: conversation.id,
+        credentials,
+        to: from,
+        content: { kind: "text", text: formattedReply },
+        recordAs: { text: formattedReply },
+      });
     });
   } catch (error) {
     console.error("Error handling WhatsApp webhook:", error);

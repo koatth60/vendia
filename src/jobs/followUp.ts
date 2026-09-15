@@ -1,5 +1,5 @@
 import { prisma } from "../db/client";
-import { sendTemplateMessage, type WhatsappCredentials } from "../whatsapp/client";
+import { sendToCustomer, type WhatsappCredentials } from "../whatsapp/outbound";
 import { findConversationsDueForFollowUp, markFollowUpSent, recordMessage } from "../conversation/service";
 
 export async function runFollowUpJob(): Promise<void> {
@@ -24,12 +24,24 @@ export async function runFollowUpJob(): Promise<void> {
 
     for (const conversation of dueConversations) {
       try {
-        await sendTemplateMessage(
+        const result = await sendToCustomer({
+          businessId: business.id,
+          conversationId: conversation.id,
           credentials,
-          conversation.customer.phoneNumber,
-          business.followUpTemplateName!,
-          business.followUpTemplateLanguage
-        );
+          to: conversation.customer.phoneNumber,
+          content: {
+            kind: "template",
+            name: business.followUpTemplateName!,
+            language: business.followUpTemplateLanguage,
+          },
+        });
+        // Una plantilla no depende de la ventana de 24h, asi que un fallo aca es real (plantilla no
+        // aprobada, token vencido, limite de tasa) y no "se paso la hora": no se marca como enviado, para
+        // que el proximo pase lo vuelva a intentar en vez de darlo por hecho.
+        if (!result.delivered) {
+          console.error(`No se pudo enviar seguimiento para conversacion ${conversation.id}: ${result.failure?.message}`);
+          continue;
+        }
         await recordMessage(business.id, conversation.id, "ASSISTANT", `[Plantilla de seguimiento enviada: ${business.followUpTemplateName}]`);
         await markFollowUpSent(conversation.id);
       } catch (error) {

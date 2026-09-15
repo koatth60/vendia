@@ -5,7 +5,7 @@ import { catalogTools, saleStateTools, runCatalogTool, type ToolContext } from "
 import { getRecentHistory, findOpenPendingOwnerQuestionsForConversation } from "../conversation/service";
 import { logAiUsage } from "./usage";
 import { prisma } from "../db/client";
-import { sendOwnerAlert } from "../whatsapp/client";
+import { sendAlertToOwner } from "../whatsapp/outbound";
 import { recordOwnerMessage } from "../delivery/ownerLog";
 import { recordAgentIncident } from "./incidents";
 import { textMentionsConfiguredCategory } from "../catalog/products";
@@ -706,12 +706,14 @@ function lastAssistantText(history: { role: string; content: string }[]): string
 async function alertOwner(context: ToolContext, text: string): Promise<void> {
   const business = await prisma.business.findUnique({ where: { id: context.businessId }, select: { contactPhone: true } });
   if (!business?.contactPhone) return;
-  try {
-    const wamid = await sendOwnerAlert(context.credentials, business.contactPhone, text);
-    await recordOwnerMessage(context.businessId, { direction: "OUT", body: text, success: Boolean(wamid) });
-  } catch (error) {
-    console.error("No se pudo avisar al dueno:", error);
-  }
+  const result = await sendAlertToOwner(context.businessId, context.credentials, business.contactPhone, text);
+  await recordOwnerMessage(context.businessId, {
+    direction: "OUT",
+    body: text,
+    success: result.delivered,
+    errorMessage: result.failure?.message ?? null,
+  });
+  if (!result.delivered) console.error("No se pudo avisar al dueno:", result.failure?.message);
 }
 
 async function alertOwnerOfDegradedReply(context: ToolContext, reason: string): Promise<void> {

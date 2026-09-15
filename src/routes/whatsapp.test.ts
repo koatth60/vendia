@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { prisma } from "../db/client";
 import { handleOwnerReply } from "./whatsapp";
-import type { WhatsappCredentials } from "../whatsapp/client";
+import type { WhatsappCredentials } from "../whatsapp/outbound";
 
 // Regression tests for the owner-reply-without-quoting fix: previously ANY owner reply that didn't
 // long-press "Responder" on a specific message was rejected outright ("No identifique a que mensaje te
@@ -51,9 +51,14 @@ afterEach(() => {
   globalThis.fetch = originalFetch;
 });
 
-async function makeCustomerAndConversation() {
+// Fase 7: todo envio libre a un cliente pasa por la ventana de 24h de WhatsApp, que se mide contra su
+// ultimo mensaje. Una conversacion real siempre tiene uno; sin el, la capa de salida da la ventana por
+// cerrada, y con razon. `lastCustomerMessage` es ese mensaje: los casos que escalan una pregunta le
+// pasan la pregunta real del cliente, que es lo que el dueno esta contestando.
+async function makeCustomerAndConversation(lastCustomerMessage = "Hola") {
   const customer = await prisma.customer.create({ data: { businessId, phoneNumber: `57300${Date.now()}${Math.floor(Math.random() * 1000)}` } });
   const conversation = await prisma.conversation.create({ data: { customerId: customer.id, humanControl: true } });
+  await prisma.message.create({ data: { conversationId: conversation.id, role: "CUSTOMER", content: lastCustomerMessage } });
   return { customer, conversation };
 }
 
@@ -145,7 +150,7 @@ test("handleOwnerReply still resolves correctly via an explicit quoted message i
 });
 
 test("handleOwnerReply queues the resolved ask_owner exchange as a learned FAQ candidate", async () => {
-  const { customer, conversation } = await makeCustomerAndConversation();
+  const { customer, conversation } = await makeCustomerAndConversation("Tienen envio a Barranquilla?");
   const wamid = `wamid.q-${randomUUID()}`;
   await prisma.pendingOwnerQuestion.create({
     data: { conversationId: conversation.id, wamid, question: "Tienen envio a Barranquilla?" },
@@ -309,6 +314,7 @@ del pedido, sin agregar ni modificar nada mas:
       },
     },
   });
+  await prisma.message.create({ data: { conversationId: conversation.id, role: "CUSTOMER", content: "Ya pague" } });
 
   try {
     await handleOwnerReply(business2.id, credentials, "573000000002", {

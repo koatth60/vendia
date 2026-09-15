@@ -16,14 +16,11 @@ import {
   cancelQueuedOutbound,
 } from "../../conversation/service";
 import {
-  sendTextMessage,
-  sendImageMessage,
-  sendVideoMessage,
-  sendTemplateMessage,
+  sendToCustomer,
   listApprovedTemplates,
   formatForWhatsapp,
   type WhatsappCredentials,
-} from "../../whatsapp/client";
+} from "../../whatsapp/outbound";
 import { generateClosingMessage } from "../../ai/agent";
 import { extractSaleDetails } from "../../ai/extractSale";
 import {
@@ -147,17 +144,36 @@ conversationsRouter.post("/api/conversations/:id/messages", upload.single("file"
     const type = file.mimetype.startsWith("video") ? "VIDEO" : "IMAGE";
     const folder = type === "VIDEO" ? "videos" : "images";
     const { key, url } = await uploadMedia(file.buffer, file.mimetype, folder);
-    const wamid =
-      type === "IMAGE"
-        ? await sendImageMessage(credentials, conversation.customer.phoneNumber, url, formattedText || undefined)
-        : await sendVideoMessage(credentials, conversation.customer.phoneNumber, url, formattedText || undefined);
-    await recordMessage(businessId, String(req.params.id), "ASSISTANT", formattedText || (type === "IMAGE" ? "[Foto]" : "[Video]"), wamid || undefined, {
+    const media = await sendToCustomer({
+      businessId,
+      conversationId: String(req.params.id),
+      credentials,
+      to: conversation.customer.phoneNumber,
+      content:
+        type === "IMAGE"
+          ? { kind: "image", url, caption: formattedText || undefined }
+          : { kind: "video", url, caption: formattedText || undefined },
+      // La ventana ya se verifico arriba y la ruta decidio que hacer si estaba cerrada (409 o cola). Si
+      // se cerro en el medio, se propaga el error como antes en vez de mandar una plantilla que el dueno
+      // no pidio.
+      onWindowClosed: "fail",
+    });
+    if (!media.delivered) throw new Error(media.failure?.message ?? "No se pudo enviar el archivo");
+    await recordMessage(businessId, String(req.params.id), "ASSISTANT", formattedText || (type === "IMAGE" ? "[Foto]" : "[Video]"), media.wamid || undefined, {
       s3Key: key,
       type,
     });
   } else {
-    const wamid = await sendTextMessage(credentials, conversation.customer.phoneNumber, formattedText);
-    await recordMessage(businessId, String(req.params.id), "ASSISTANT", formattedText, wamid || undefined);
+    const sent = await sendToCustomer({
+      businessId,
+      conversationId: String(req.params.id),
+      credentials,
+      to: conversation.customer.phoneNumber,
+      content: { kind: "text", text: formattedText },
+      onWindowClosed: "fail",
+      recordAs: { text: formattedText },
+    });
+    if (!sent.delivered) throw new Error(sent.failure?.message ?? "No se pudo enviar el mensaje");
   }
   await clearPendingOwnerQuestionsForConversation(String(req.params.id));
 
@@ -216,10 +232,17 @@ conversationsRouter.post("/api/conversations/:id/send-template", async (req, res
     phoneNumberId: business.whatsappPhoneNumberId,
     accessToken: business.whatsappAccessToken,
   };
-  const wamid = await sendTemplateMessage(credentials, conversation.customer.phoneNumber, templateName, language);
+  const sent = await sendToCustomer({
+    businessId,
+    conversationId: String(req.params.id),
+    credentials,
+    to: conversation.customer.phoneNumber,
+    content: { kind: "template", name: templateName, language },
+  });
+  if (!sent.delivered) throw new Error(sent.failure?.message ?? "No se pudo enviar la plantilla");
   // Records the template's real wording, not just its name - the thread should read like a normal
   // message the customer actually saw, same as every other outbound bubble.
-  await recordMessage(businessId, String(req.params.id), "ASSISTANT", template.bodyText || `[Plantilla: ${templateName}]`, wamid || undefined);
+  await recordMessage(businessId, String(req.params.id), "ASSISTANT", template.bodyText || `[Plantilla: ${templateName}]`, sent.wamid || undefined);
   await setHumanControl(businessId, String(req.params.id), true);
   await clearAgentRequestFlag(businessId, String(req.params.id));
   await clearPendingOwnerQuestionsForConversation(String(req.params.id));
@@ -334,8 +357,22 @@ conversationsRouter.post("/api/conversations/:id/close-sale", async (req, res) =
       totalAmount: Number(order.totalAmount),
       currency: order.currency,
     }));
-  const wamid = await sendTextMessage(credentials, conversation.customer.phoneNumber, text);
-  await recordMessage(businessId, conversation.id, "ASSISTANT", text, wamid || undefined);
+  const sent = await sendToCustomer({
+    businessId,
+    conversationId: conversation.id,
+    credentials,
+    to: conversation.customer.phoneNumber,
+    content: { kind: "text", text },
+    // El dueno acaba de cerrar la venta a mano desde el panel; si la ventana esta cerrada, el mensaje de
+    // cierre queda en cola y sale solo cuando el cliente vuelva a escribir, igual que la respuesta del
+    // dueno por WhatsApp. No se pierde el texto.
+    onWindowClosed: "queue",
+    queueOrigin: "PANEL",
+    recordAs: { text },
+  });
+  if (!sent.delivered) {
+    console.error("No se pudo entregar el mensaje de cierre de la venta manual:", sent.failure?.message);
+  }
   await askForCsat(credentials, order.id, conversation.customer.phoneNumber);
   await clearPendingOwnerQuestionsForConversation(conversation.id);
 

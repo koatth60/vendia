@@ -1,5 +1,5 @@
 import { prisma } from "../db/client";
-import { sendOwnerAlert, type WhatsappCredentials } from "../whatsapp/client";
+import { sendAlertToOwner, type WhatsappCredentials } from "../whatsapp/outbound";
 import { recordOwnerMessage } from "../delivery/ownerLog";
 import { recordAgentIncident } from "../ai/incidents";
 
@@ -105,12 +105,16 @@ async function alertOwner(
   contactPhone: string,
   text: string
 ): Promise<void> {
-  try {
-    // Sin saltos de linea: la plantilla onix_owner_alert los rechaza (WhatsApp 132018).
-    const wamid = await sendOwnerAlert(credentials, contactPhone, text.replace(/\s*\n\s*/g, " "));
-    await recordOwnerMessage(businessId, { direction: "OUT", body: text, success: Boolean(wamid) });
-  } catch (error) {
-    console.error("No se pudo avisar al dueno del chequeo de conversaciones:", error);
+  // Sin saltos de linea: la plantilla onix_owner_alert los rechaza (WhatsApp 132018).
+  const result = await sendAlertToOwner(businessId, credentials, contactPhone, text.replace(/\s*\n\s*/g, " "));
+  await recordOwnerMessage(businessId, {
+    direction: "OUT",
+    body: text,
+    success: result.delivered,
+    errorMessage: result.failure?.message ?? null,
+  });
+  if (!result.delivered) {
+    console.error("No se pudo avisar al dueno del chequeo de conversaciones:", result.failure?.message);
   }
 }
 

@@ -56,6 +56,10 @@ async function seedOrder() {
   });
   const customer = await prisma.customer.create({ data: { businessId: business.id, phoneNumber: `573004${Date.now()}` } });
   const conversation = await prisma.conversation.create({ data: { customerId: customer.id } });
+  // Fase 7: todo envio libre a un cliente pasa por la ventana de 24h de WhatsApp, que se mide contra su
+  // ultimo mensaje. Una conversacion real siempre tiene uno; sin el, la capa de salida da la ventana
+  // por cerrada y con razon.
+  await prisma.message.create({ data: { conversationId: conversation.id, role: "CUSTOMER", content: "Hola" } });
   const order = await prisma.order.create({
     data: { businessId: business.id, customerId: customer.id, conversationId: conversation.id, summary: "1x Smartwatch", totalAmount: 145000, currency: "COP" },
   });
@@ -95,7 +99,7 @@ test("PUT /api/orders/:id/cancel notifies the customer by WhatsApp before cancel
     assert.equal(updated.fulfillmentStatus, "CANCELED");
     assert.ok(updated.canceledAt);
 
-    const messages = await prisma.message.findMany({ where: { conversationId: conversation.id } });
+    const messages = await prisma.message.findMany({ where: { conversationId: conversation.id, role: "ASSISTANT" } });
     assert.equal(messages.length, 1, "the cancellation notice must be recorded in the conversation history");
   } finally {
     await cleanup(business.id, conversation.id);

@@ -62,14 +62,12 @@ import {
   recordMediaSent,
 } from "../orders/saleState";
 import {
-  sendImageMessage,
-  sendVideoMessage,
-  sendTextMessage,
-  sendOwnerAlert,
-  sendInteractiveButtonsMessage,
+  sendAlertToOwner,
+  sendToCustomer,
+  sendToOwner,
   isBsuid,
   type WhatsappCredentials,
-} from "../whatsapp/client";
+} from "../whatsapp/outbound";
 import { prisma } from "../db/client";
 import { getPresignedMediaUrl } from "../media/s3";
 import { recordOwnerMessage } from "../delivery/ownerLog";
@@ -96,10 +94,17 @@ async function sendMediaWithSpacing(
     if (i > 0) await sleep(1200);
     const item = media[i];
     const mediaType = item.type === "IMAGE" ? "IMAGE" : "VIDEO";
-    const wamid =
-      mediaType === "IMAGE"
-        ? await sendImageMessage(credentials, recipientPhone, item.url)
-        : await sendVideoMessage(credentials, recipientPhone, item.url);
+    const result = await sendToCustomer({
+      businessId,
+      conversationId,
+      credentials,
+      to: recipientPhone,
+      content: mediaType === "IMAGE" ? { kind: "image", url: item.url } : { kind: "video", url: item.url },
+    });
+    // Se propaga como antes: quien llama a esto necesita saber que la foto NO salio, porque si no el
+    // modelo sigue la conversacion como si el cliente ya la estuviera viendo.
+    if (!result.delivered) throw new Error(result.failure?.message ?? "No se pudo enviar el medio del producto");
+    const wamid = result.wamid;
     await recordMessage(
       businessId,
       conversationId,
@@ -627,27 +632,29 @@ async function requestSaleConfirmation(context: ToolContext, summary: string, dr
 
   let wamid = "";
   let lastError: unknown = null;
-  try {
-    wamid = await sendInteractiveButtonsMessage(context.credentials, business.contactPhone, text, [
+  const buttons = await sendToOwner(context.businessId, context.credentials, business.contactPhone, {
+    kind: "buttons",
+    text,
+    buttons: [
       { id: "confirm_yes", title: "✅ Si llego" },
       { id: "confirm_no", title: "❌ No llego" },
-    ]);
-  } catch (error) {
-    lastError = error;
-    console.error("No se pudo enviar los botones de confirmacion de venta al dueno, probando texto libre:", error);
-  }
-
-  if (!wamid) {
-    try {
-      wamid = await sendTextMessage(
-        context.credentials,
-        business.contactPhone,
-        `${text}\n\nRespondeme "si" o "no" citando este mismo mensaje, por favor.`
-      );
+    ],
+  });
+  if (buttons.delivered) {
+    wamid = buttons.wamid;
+  } else {
+    lastError = new Error(buttons.failure?.message ?? "Sin wamid");
+    console.error("No se pudo enviar los botones de confirmacion de venta al dueno, probando texto libre:", lastError);
+    const plain = await sendToOwner(context.businessId, context.credentials, business.contactPhone, {
+      kind: "text",
+      text: `${text}\n\nRespondeme "si" o "no" citando este mismo mensaje, por favor.`,
+    });
+    if (plain.delivered) {
+      wamid = plain.wamid;
       lastError = null;
-    } catch (error) {
-      lastError = error;
-      console.error("No se pudo enviar la confirmacion de venta al dueno de ninguna forma (revisar manualmente):", error, {
+    } else {
+      lastError = new Error(plain.failure?.message ?? "Sin wamid");
+      console.error("No se pudo enviar la confirmacion de venta al dueno de ninguna forma (revisar manualmente):", lastError, {
         businessId: context.businessId,
         conversationId: context.conversationId,
       });
@@ -1212,17 +1219,15 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
         const greeting = business.contactName ? `Hola ${business.contactName}` : "Hola";
         const customerLabel = await describeCustomer(context.customerId, context.recipientPhone);
         const intentAlertText = `${greeting}, el cliente ${customerLabel} reporto ${label}. El bot dejo de responderle, toma el control vos directamente.`;
-        try {
-          await sendOwnerAlert(context.credentials, business.contactPhone, intentAlertText);
-          await recordOwnerMessage(businessId, { direction: "OUT", body: intentAlertText, success: true });
-        } catch (error) {
-          await recordOwnerMessage(businessId, {
-            direction: "OUT",
-            body: intentAlertText,
-            success: false,
-            errorMessage: error instanceof Error ? error.message : String(error),
-          });
-          console.error("No se pudo enviar la alerta de intent al dueno:", error);
+        const intentAlert = await sendAlertToOwner(businessId, context.credentials, business.contactPhone, intentAlertText);
+        await recordOwnerMessage(businessId, {
+          direction: "OUT",
+          body: intentAlertText,
+          success: intentAlert.delivered,
+          errorMessage: intentAlert.failure?.message ?? null,
+        });
+        if (!intentAlert.delivered) {
+          console.error("No se pudo enviar la alerta de intent al dueno:", intentAlert.failure?.message);
         }
       }
 
@@ -1266,18 +1271,13 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
         'Respondeme citando (mantén presionado y "Responder") este mismo mensaje con la respuesta y se la reenvio tal cual al cliente.',
       ].join("\n\n");
 
-      let wamid = "";
-      let askOwnerError: unknown = null;
-      try {
-        wamid = await sendOwnerAlert(context.credentials, business.contactPhone, text);
-      } catch (error) {
-        askOwnerError = error;
-      }
+      const askOwner = await sendAlertToOwner(businessId, context.credentials, business.contactPhone, text);
+      const wamid = askOwner.delivered ? askOwner.wamid : "";
       await recordOwnerMessage(businessId, {
         direction: "OUT",
         body: text,
         success: Boolean(wamid),
-        errorMessage: wamid ? null : askOwnerError instanceof Error ? askOwnerError.message : askOwnerError ? String(askOwnerError) : "Sin wamid",
+        errorMessage: wamid ? null : askOwner.failure?.message ?? "Sin wamid",
       });
       if (!wamid) {
         return {
@@ -1337,23 +1337,26 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
       // para que el dueno no se quede sin ningun aviso.
       let wamid = "";
       let photoAlertError: unknown = null;
-      try {
-        wamid =
-          lastMedia.mediaType === "VIDEO"
-            ? await sendVideoMessage(context.credentials, business.contactPhone, mediaUrl, caption)
-            : await sendImageMessage(context.credentials, business.contactPhone, mediaUrl, caption);
-      } catch (error) {
-        photoAlertError = error;
-        console.error("No se pudo reenviar la foto/video como media al dueno, probando con link de texto:", error);
-      }
-
-      if (!wamid) {
-        try {
-          wamid = await sendTextMessage(context.credentials, business.contactPhone, `${caption}\n\n${mediaUrl}`);
+      const asMedia = await sendToOwner(businessId, context.credentials, business.contactPhone, {
+        kind: lastMedia.mediaType === "VIDEO" ? "video" : "image",
+        url: mediaUrl,
+        caption,
+      });
+      if (asMedia.delivered) {
+        wamid = asMedia.wamid;
+      } else {
+        photoAlertError = new Error(asMedia.failure?.message ?? "Sin wamid");
+        console.error("No se pudo reenviar la foto/video como media al dueno, probando con link de texto:", photoAlertError);
+        const asLink = await sendToOwner(businessId, context.credentials, business.contactPhone, {
+          kind: "text",
+          text: `${caption}\n\n${mediaUrl}`,
+        });
+        if (asLink.delivered) {
+          wamid = asLink.wamid;
           photoAlertError = null;
-        } catch (error) {
-          photoAlertError = error;
-          console.error("No se pudo enviar NINGUNA notificacion al dueno para identificar el producto (revisar manualmente):", error, {
+        } else {
+          photoAlertError = new Error(asLink.failure?.message ?? "Sin wamid");
+          console.error("No se pudo enviar NINGUNA notificacion al dueno para identificar el producto (revisar manualmente):", photoAlertError, {
             businessId,
             conversationId: context.conversationId,
           });
@@ -1513,17 +1516,15 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
           const business = await prisma.business.findUnique({ where: { id: businessId } });
           if (business?.contactPhone) {
             const unresolvedText = `Aviso: en este pedido no pude identificar en el catalogo estos productos que menciono el cliente: ${unresolved.join(", ")}. Revisa el pedido manualmente, puede haber quedado incompleto.`;
-            try {
-              await sendOwnerAlert(context.credentials, business.contactPhone, unresolvedText);
-              await recordOwnerMessage(businessId, { direction: "OUT", body: unresolvedText, success: true });
-            } catch (error) {
-              await recordOwnerMessage(businessId, {
-                direction: "OUT",
-                body: unresolvedText,
-                success: false,
-                errorMessage: error instanceof Error ? error.message : String(error),
-              });
-              console.error("No se pudo avisar al dueno de items no resueltos:", error);
+            const unresolvedAlert = await sendAlertToOwner(businessId, context.credentials, business.contactPhone, unresolvedText);
+            await recordOwnerMessage(businessId, {
+              direction: "OUT",
+              body: unresolvedText,
+              success: unresolvedAlert.delivered,
+              errorMessage: unresolvedAlert.failure?.message ?? null,
+            });
+            if (!unresolvedAlert.delivered) {
+              console.error("No se pudo avisar al dueno de items no resueltos:", unresolvedAlert.failure?.message);
             }
           }
         }
@@ -1640,17 +1641,15 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
       if (business?.contactPhone) {
         const customerLabel = await describeCustomer(context.customerId, context.recipientPhone);
         const cancelAlertText = `Aviso: el pedido de ${customerLabel} fue cancelado por el bot a pedido del cliente.\n\n${order.summary}`;
-        try {
-          await sendOwnerAlert(context.credentials, business.contactPhone, cancelAlertText);
-          await recordOwnerMessage(businessId, { direction: "OUT", body: cancelAlertText, success: true });
-        } catch (error) {
-          await recordOwnerMessage(businessId, {
-            direction: "OUT",
-            body: cancelAlertText,
-            success: false,
-            errorMessage: error instanceof Error ? error.message : String(error),
-          });
-          console.error("No se pudo avisar al dueno de la cancelacion:", error);
+        const cancelAlert = await sendAlertToOwner(businessId, context.credentials, business.contactPhone, cancelAlertText);
+        await recordOwnerMessage(businessId, {
+          direction: "OUT",
+          body: cancelAlertText,
+          success: cancelAlert.delivered,
+          errorMessage: cancelAlert.failure?.message ?? null,
+        });
+        if (!cancelAlert.delivered) {
+          console.error("No se pudo avisar al dueno de la cancelacion:", cancelAlert.failure?.message);
         }
       }
 

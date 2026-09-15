@@ -3,7 +3,7 @@ import type { OrderFulfillmentStatus } from "@prisma/client";
 import { findConfidentProductMatch } from "../catalog/products";
 import { canonicalColors } from "../catalog/attributeTaxonomy";
 import { normalizeForMatch, escapeForRegExp } from "../search/text";
-import { sendInteractiveButtonsMessage, type WhatsappCredentials } from "../whatsapp/client";
+import { sendToCustomer, type WhatsappCredentials } from "../whatsapp/outbound";
 import { getPresignedMediaUrl } from "../media/s3";
 import { emitOrderNew, emitOrderUpdated } from "../realtime/events";
 
@@ -222,43 +222,57 @@ export async function askForCsat(
   orderId: string,
   customerPhone: string
 ): Promise<void> {
-  try {
-    const wamid = await sendInteractiveButtonsMessage(
-      credentials,
-      customerPhone,
-      "¿Cómo calificarías la atención que recibiste? 😊",
-      [
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+    select: { businessId: true, conversationId: true },
+  });
+  if (!order) return;
+  const result = await sendToCustomer({
+    businessId: order.businessId,
+    conversationId: order.conversationId,
+    credentials,
+    to: customerPhone,
+    content: {
+      kind: "buttons",
+      text: "¿Cómo calificarías la atención que recibiste? 😊",
+      buttons: [
         { id: "csat_3", title: "😃 Buena" },
         { id: "csat_2", title: "😐 Regular" },
         { id: "csat_1", title: "😞 Mala" },
-      ]
-    );
-    if (!wamid) return;
-    await prisma.order.update({ where: { id: orderId }, data: { csatAskedAt: new Date() } });
-  } catch (error) {
-    console.error("No se pudo enviar la encuesta de satisfaccion:", error);
+      ],
+    },
+    // La encuesta se manda justo despues de cerrar la venta, con la ventana abierta. Si por lo que sea
+    // esta cerrada, no se gasta una plantilla de reenganche en pedir una calificacion.
+    onWindowClosed: "fail",
+  });
+  if (!result.delivered) {
+    console.error("No se pudo enviar la encuesta de satisfaccion:", result.failure?.message);
+    return;
   }
+  await prisma.order.update({ where: { id: orderId }, data: { csatAskedAt: new Date() } });
 }
 
 export async function recordCsatReply(
   businessId: string,
   customerPhone: string,
   buttonId: string
-): Promise<{ recorded: boolean }> {
+): Promise<{ recorded: boolean; conversationId: string | null }> {
   const rating = CSAT_BUTTON_RATINGS[buttonId];
-  if (!rating) return { recorded: false };
+  if (!rating) return { recorded: false, conversationId: null };
 
   const customer = await prisma.customer.findFirst({ where: { businessId, phoneNumber: customerPhone } });
-  if (!customer) return { recorded: false };
+  if (!customer) return { recorded: false, conversationId: null };
 
   const order = await prisma.order.findFirst({
     where: { customerId: customer.id, csatAskedAt: { not: null }, csatRating: null },
     orderBy: { createdAt: "desc" },
   });
-  if (!order) return { recorded: false };
+  if (!order) return { recorded: false, conversationId: null };
 
   await prisma.order.update({ where: { id: order.id }, data: { csatRating: rating } });
-  return { recorded: true };
+  // Devuelve la conversacion para que el agradecimiento salga por la capa de salida, que necesita saber
+  // contra que conversacion verificar la ventana de 24h.
+  return { recorded: true, conversationId: order.conversationId };
 }
 
 function formatOrder<T extends { totalAmount: unknown; shippingCost: unknown; items: { unitPrice: unknown }[] }>(order: T) {

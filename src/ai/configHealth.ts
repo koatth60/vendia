@@ -1,7 +1,7 @@
 import { prisma } from "../db/client";
 import { listActivePaymentMethods } from "../catalog/paymentMethods";
 import { listShippingRates } from "../catalog/shippingRates";
-import { listApprovedTemplates } from "../whatsapp/client";
+import { listApprovedTemplates } from "../whatsapp/outbound";
 
 export interface ConfigHealth {
   hasContactPhone: boolean;

@@ -93,6 +93,10 @@ function restoreFetch() {
 
 async function freshContext(): Promise<ToolContext> {
   const conversation = await prisma.conversation.create({ data: { customerId } });
+  // Fase 7: todo envio libre a un cliente pasa por la ventana de 24h de WhatsApp, que se mide contra su
+  // ultimo mensaje. Una conversacion real siempre tiene uno; sin el, la capa de salida da la ventana
+  // por cerrada y con razon.
+  await prisma.message.create({ data: { conversationId: conversation.id, role: "CUSTOMER", content: "Hola" } });
   return {
     businessId,
     conversationId: conversation.id,

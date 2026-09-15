@@ -9,7 +9,7 @@ import {
   deleteTemplate,
   normalizeTemplateName,
   type WhatsappCredentials,
-} from "../../whatsapp/client";
+} from "../../whatsapp/outbound";
 import { deepseek, DEEPSEEK_MODEL } from "../../ai/client";
 import { IMPROVE_INSTRUCTIONS_PROMPT } from "../../ai/prompts/improveInstructions";
 import { logAiUsage } from "../../ai/usage";

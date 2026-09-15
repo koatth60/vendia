@@ -327,6 +327,10 @@ async function handleClosedWindow(params: SendToCustomerParams, policy: WindowCl
   if (template) {
     const nudge = await sendWithRetries(() => sendTemplateMessage(credentials, to, template.name, template.language));
     if (!nudge.failure) {
+      // La plantilla salio, pero el mensaje que se queria mandar NO llego: para la duena eso sigue
+      // siendo un mensaje sin entregar y tiene que verlo en el panel. Sin esto, "le mandamos un aviso
+      // para que vuelva a escribir" se leia como si el tema estuviera resuelto.
+      await noteFailure(businessId, to, closed);
       return {
         outcome: queuedId ? "QUEUED" : "SENT_AS_TEMPLATE",
         delivered: true,
@@ -396,15 +400,17 @@ export async function sendAlertToOwner(
   };
 }
 
-// Texto libre a la duena (no una alerta con plantilla): las respuestas del flujo de confirmacion que
-// ella misma acaba de iniciar escribiendo, o sea con su propia ventana recien abierta.
-export async function sendTextToOwner(
+// Cualquier otra cosa hacia la duena que no sea la alerta con plantilla: los botones de confirmacion de
+// venta, la foto que el cliente mando para identificar un producto, o el texto plano al que esos dos
+// caen cuando Meta los rechaza. Son respuestas dentro de un intercambio que ella misma esta teniendo,
+// asi que su ventana esta abierta; lo que faltaba era reintento y registro del fallo.
+export async function sendToOwner(
   businessId: string,
   credentials: WhatsappCredentials,
   ownerPhone: string,
-  text: string
+  content: OutboundContent
 ): Promise<OutboundResult> {
-  const { wamid, attempts, failure } = await sendWithRetries(() => sendTextMessage(credentials, ownerPhone, text));
+  const { wamid, attempts, failure } = await sendWithRetries(() => dispatch(credentials, ownerPhone, content));
   if (failure) {
     await noteFailure(businessId, ownerPhone, failure);
     return failed(failure, attempts, null);
