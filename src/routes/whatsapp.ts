@@ -517,15 +517,42 @@ whatsappRouter.post("/webhook", async (req, res) => {
       } else if (message.type === "location") {
         const loc = message.location ?? {};
         const parts = [loc.name, loc.address].filter(Boolean).join(", ");
-        const coords = loc.latitude != null && loc.longitude != null ? `lat ${loc.latitude}, lng ${loc.longitude}` : "";
-        text = `[El cliente comparte su ubicacion por WhatsApp${parts ? `: ${parts}` : ""}${coords ? ` (${coords})` : ""}. Si es para la direccion de envio, confirmale la direccion exacta en texto (barrio/calle/numero) antes de cerrar el pedido - una ubicacion de mapa sola no siempre alcanza para el mensajero.]`;
+        // Un pin arrastrado en el mapa (el caso mas comun) llega SOLO con lat/lng, sin name ni address -
+        // y dos numeros crudos en el panel no le sirven a nadie para despachar. Real 2026-09-15: un
+        // cliente mando su ubicacion para el envio y en la bandeja se veia "(lat 4.68, lng -74.15)", que
+        // la duena no podia abrir. El link de mapa es clickeable desde el panel y desde WhatsApp.
+        const hasCoords = loc.latitude != null && loc.longitude != null;
+        const coords = hasCoords ? `lat ${loc.latitude}, lng ${loc.longitude}` : "";
+        const mapLink = hasCoords ? ` Ver en el mapa: https://www.google.com/maps?q=${loc.latitude},${loc.longitude}` : "";
+        text = `[El cliente comparte su ubicacion por WhatsApp${parts ? `: ${parts}` : ""}${coords ? ` (${coords})` : ""}.${mapLink} Si es para la direccion de envio, confirmale la direccion exacta en texto (barrio/calle/numero) antes de cerrar el pedido - una ubicacion de mapa sola no siempre alcanza para el mensajero.]`;
       } else if (message.type === "sticker") {
         text = "[El cliente envio un sticker, sin texto.]";
       } else if (message.type === "document") {
         const filename = message.document?.filename ?? "sin nombre";
         text = `[El cliente envio un documento/archivo (${filename}), no una foto. Si esperabas un comprobante de pago, pedile que lo reenvie como foto/imagen para poder revisarlo.]`;
       } else if (message.type === "contacts") {
-        text = "[El cliente compartio una tarjeta de contacto de WhatsApp.]";
+        // Real perdida de datos (2026-09-15): esto guardaba solo la frase fija y TIRABA la tarjeta
+        // entera. Un cliente compartio el contacto de la persona que recibe el pedido y ni el nombre ni
+        // el telefono quedaron en ningun lado - ni base, ni logs (el payload crudo no se registra), asi
+        // que la duena tuvo que abrir WhatsApp a mano para poder despachar.
+        //
+        // OJO: `message.contacts` (la tarjeta que comparte el cliente) NO es `value.contacts` (el perfil
+        // de quien escribe, que se lee mas arriba para whatsappProfileName). Se llaman igual y guardan
+        // cosas distintas: confundirlos guardaria el nombre del remitente en vez del destinatario.
+        const cards: any[] = Array.isArray(message.contacts) ? message.contacts : [];
+        const described = cards
+          .map((card) => {
+            const nombre = card?.name?.formatted_name || [card?.name?.first_name, card?.name?.last_name].filter(Boolean).join(" ");
+            const telefonos = (Array.isArray(card?.phones) ? card.phones : [])
+              .map((t: any) => t?.phone || t?.wa_id)
+              .filter(Boolean);
+            return [nombre, telefonos.length > 0 ? telefonos.join(" / ") : null].filter(Boolean).join(" - ");
+          })
+          .filter((d) => d.length > 0);
+        text =
+          described.length > 0
+            ? `[El cliente compartio ${described.length === 1 ? "esta tarjeta de contacto" : "estas tarjetas de contacto"}: ${described.join(" | ")}. Si es para el envio, esta es la persona que RECIBE el pedido - no es el nombre del cliente con el que estas hablando. Confirmale a quien te escribe si el pedido va a nombre de ese contacto antes de cerrarlo.]`
+            : "[El cliente compartio una tarjeta de contacto de WhatsApp, pero llego sin nombre ni telefono legibles. Pedile que te escriba el nombre y el numero por texto.]";
       }
 
       // If the customer replied/quoted a specific WhatsApp message (long-press "Reply"), and that message

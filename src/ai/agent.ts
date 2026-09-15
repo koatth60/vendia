@@ -368,22 +368,60 @@ Datos reales de este pedido:
 // single-word replies (si/no/listo/...), never a color or a short sentence. canonicalColors is the same
 // closed, language-level vocabulary find_products_by_attributes already uses - reusing it here rejects
 // any candidate that mentions a color, in any of its synonyms, business-agnostically.
+// Primer intento (2026-09-15, temprano): una lista de palabras prohibidas armada con los casos vistos
+// ese dia (colores y conectores). Fallo a los minutos de desplegarse - "Me envías el catalogo" se guardo
+// como nombre porque "envías" y "catalogo" no estaban en la lista. Perseguir palabras sueltas no puede
+// funcionar: el conjunto de frases que no son nombres es infinito.
+//
+// Este es el criterio al reves, y si generaliza: las palabras de CLASE CERRADA del español (pronombres,
+// preposiciones, articulos, conjunciones, adverbios basicos) son un conjunto finito y completo. Una
+// oracion real casi siempre contiene al menos una; un nombre propio no contiene ninguna. "Me envías el
+// catalogo" cae por "me" y "el"; "Pero negro sale todo" cae por "pero" y "todo"; "Diana" y "Maria Jose
+// Rodriguez" pasan limpios. Se suman los colores (canonicalColors, el mismo vocabulario cerrado que usa
+// find_products_by_attributes) porque responder el color cuando el bot pregunto color Y nombre en el
+// mismo mensaje es el caso que mas se repitio.
+const NAME_PARTICLES = new Set(["de", "del", "la", "las", "los", "y"]);
+
+const CLOSED_CLASS_WORDS = new Set([
+  // pronombres
+  "yo", "tu", "tú", "vos", "usted", "ustedes", "el", "él", "ella", "ello", "nosotros", "nosotras",
+  "vosotros", "ellos", "ellas", "me", "te", "se", "lo", "le", "nos", "os", "les", "mi", "mí", "ti",
+  "conmigo", "contigo", "consigo", "este", "esta", "esto", "estos", "estas", "ese", "esa", "eso",
+  "esos", "esas", "aquel", "aquella", "aquello", "mio", "mío", "mia", "tuyo", "tuya", "suyo", "suya",
+  "nuestro", "nuestra", "que", "qué", "quien", "quién", "cual", "cuál", "cuyo", "cuanto", "cuánto",
+  "algo", "alguien", "nadie", "nada", "alguno", "alguna", "ninguno", "ninguna", "todo", "toda",
+  "todos", "todas", "otro", "otra", "mucho", "mucha", "poco", "poca", "varios", "varias", "cada",
+  "mismo", "misma",
+  // preposiciones
+  "ante", "bajo", "con", "contra", "desde", "durante", "en", "entre", "hacia", "hasta", "mediante",
+  "para", "por", "segun", "según", "sin", "sobre", "tras", "via", "vía", "al",
+  // articulos
+  "un", "una", "unos", "unas",
+  // conjunciones
+  "e", "ni", "o", "u", "pero", "mas", "sino", "aunque", "porque", "pues", "si", "sí", "como", "cuando",
+  "mientras", "donde", "dónde", "entonces",
+  // adverbios de uso corriente
+  "no", "tambien", "también", "tampoco", "muy", "más", "menos", "ya", "aun", "aún", "todavia",
+  "todavía", "siempre", "nunca", "aqui", "aquí", "ahi", "ahí", "alli", "allí", "aca", "acá", "alla",
+  "allá", "ahora", "luego", "despues", "después", "antes", "bien", "mal", "asi", "así", "solo", "sólo",
+  "quiza", "quizá", "casi", "entonces",
+]);
+
 function looksLikeNonNameAnswer(candidate: string): boolean {
   if (canonicalColors(candidate).length > 0) return true;
-  const words = candidate.toLowerCase().split(/\s+/);
-  return words.some((w) => NON_NAME_WORDS.has(w));
+  if (CHAT_NOISE_PATTERN.test(candidate.trim())) return true;
+  const words = candidate.toLowerCase().split(/\s+/).filter(Boolean);
+  if (words.some((w) => DOMAIN_NOUNS.has(w) || CHAT_NOISE_PATTERN.test(w))) return true;
+  // Las particulas de apellido compuesto ("De la Hoz", "Del Río") son palabras de clase cerrada que si
+  // aparecen en nombres reales colombianos - se toleran solo cuando ademas hay al menos dos palabras
+  // que no lo son, que es la forma que tiene un apellido compuesto de verdad.
+  const realWords = words.filter((w) => !NAME_PARTICLES.has(w));
+  const particlesAreLegit = realWords.length >= 2;
+  return words.some((w) => {
+    if (NAME_PARTICLES.has(w) && particlesAreLegit) return false;
+    return CLOSED_CLASS_WORDS.has(w) || NAME_PARTICLES.has(w);
+  });
 }
-
-// Common Spanish connector/commerce words that keep showing up in these misfires and are not remotely
-// name-shaped, but pass looksLikePersonName's purely-alphabetic/<=4-word check on their own ("Pero negro
-// sale todo" is 4 alphabetic words). Kept small and generic on purpose - never a vertical vocabulary,
-// same principle as canonicalColors/canonicalizeCategoryWord elsewhere in the codebase.
-const NON_NAME_WORDS = new Set([
-  "pero", "sale", "todo", "toda", "todos", "todas", "nada", "mas", "más", "menos", "anticipado",
-  "contraentrega", "descuento", "envio", "envío", "domicilio", "efectivo", "unidad", "unidades", "talla",
-  "tamano", "tamaño", "color", "colores", "prefiero", "quiero", "mejor", "asi", "así", "tambien",
-  "también", "entonces", "porque", "pues", "grande", "pequeno", "pequeño", "mediano",
-]);
 
 function looksLikePersonName(text: string): boolean {
   const trimmed = text.trim();
@@ -410,8 +448,24 @@ function toTitleCase(text: string): string {
 // sentence-shaped answer still correctly returns null once the filler is removed. Exported for a cheap
 // pure-function test - no DB/LLM needed.
 const NAME_ANSWER_FILLER_WORDS = new Set([
-  "hola", "buenas", "buenos", "dias", "días", "tardes", "noches", "que", "qué", "tal", "con", "mucho",
-  "mucha", "gusto", "el", "la", "es", "soy", "yo",
+  "hola", "buenas", "buenos", "bueno", "buena", "dia", "día", "dias", "días", "tarde", "tardes",
+  "noche", "noches", "que", "qué", "tal", "con", "mucho", "mucha", "gusto", "el", "la", "es", "soy", "yo",
+]);
+
+// Se quitan en cualquier posicion, no solo en los extremos - ver extractNameFromAnswer.
+const ANSWER_FRAME_WORDS = new Set(["con", "hablas", "habla", "soy", "es", "llamo", "llaman", "dicen", "mi", "nombre"]);
+
+// Encima de la regla de clase cerrada: un puñado de respuestas de chat y de palabras del propio dominio
+// que el replay mostro colandose como nombres ("Sii", "Fotos", "Reloj", "Sii estan correctos"). Esto si
+// es una lista, y como tal nunca va a estar completa - por eso el replay contra conversaciones reales
+// (scripts/replay-name-and-delivery.ts) es la verificacion que manda antes de desplegar, no la lista.
+const CHAT_NOISE_PATTERN = /^(s[ií]+|n[oó]+|ok+|okey|oki|dale|listo|sip|nop|ajá|aja|mmm+|jaj+a*)$/i;
+const DOMAIN_NOUNS = new Set([
+  "foto", "fotos", "video", "videos", "imagen", "imagenes", "imágenes", "catalogo", "catálogo",
+  "precio", "precios", "envio", "envío", "domicilio", "producto", "productos", "combo", "combos",
+  "reloj", "relojes", "audifonos", "audífonos", "parlante", "parlantes", "color", "colores", "talla",
+  "tallas", "unidad", "unidades", "correcto", "correctos", "correcta", "correctas", "estan", "están",
+  "esta", "está", "pedido", "pedidos", "garantia", "garantía",
 ]);
 
 export function extractNameFromAnswer(customerText: string): string | null {
@@ -420,11 +474,23 @@ export function extractNameFromAnswer(customerText: string): string | null {
   // envio?"), which would otherwise strip down to a short all-alphabetic phrase that superficially fits
   // looksLikePersonName's shape check just like a real name would.
   if (/[?¿]/.test(customerText)) return null;
-  const words = customerText
+  let words = customerText
     .trim()
     .split(/\s+/)
     .map((w) => w.replace(/^[¡¿]+|[.,!¡¿?]+$/g, ""))
-    .filter((w) => w.length > 0 && !NAME_ANSWER_FILLER_WORDS.has(w.toLowerCase()));
+    .filter((w) => w.length > 0);
+  // El saludo y la cortesia SIEMPRE van a los costados del nombre ("Hola con einer mucho gusto",
+  // "buenas tardes, mucho gusto, Maria Fernanda"), nunca en el medio. Recortar solo por los extremos y
+  // no en cualquier posicion: "la" es muletilla al inicio pero es parte del apellido en "Juan De la
+  // Hoz", y filtrarla en todas partes devolvia "Juan De Hoz".
+  const isFiller = (w: string) => NAME_ANSWER_FILLER_WORDS.has(w.toLowerCase());
+  while (words.length > 0 && isFiller(words[0])) words = words.slice(1);
+  while (words.length > 0 && isFiller(words[words.length - 1])) words = words.slice(0, -1);
+  // El armazon con el que la gente presenta su nombre ("Hablas con María", "te habla Andres") sí puede
+  // quedar en el medio, y es un conjunto chico y fijo - distinto de los articulos, que en el medio son
+  // parte del apellido. Encontrado por el replay: al recortar solo por los extremos, "Hablas con María"
+  // pasaba a rechazarse porque el "con" del medio caia en la regla de clase cerrada.
+  words = words.filter((w) => !ANSWER_FRAME_WORDS.has(w.toLowerCase()));
   if (words.length === 0) return null;
   const candidate = words.join(" ");
   return looksLikePersonName(candidate) ? toTitleCase(candidate) : null;
@@ -457,6 +523,74 @@ export function extractSelfIntroducedName(customerText: string): string | null {
 // for exactly one of the two (safer to miss it than to save a phone number as a cedula or vice versa).
 const ASK_ID_PATTERN = /\b(numero de (identificaci[oó]n|c[eé]dula)|tu c[eé]dula|c[eé]dula,? por favor)\b/i;
 const ASK_PHONE_PATTERN = /\b(numero de celular|tu celular|celular de contacto|celular,? por favor)\b/i;
+
+// Se cumple cuando el turno anterior del bot pidio datos de entrega, en cualquier forma - incluida la
+// lista de varios datos de una sola vez ("Nombre y apellido, cedula, celular, ciudad, barrio..."), que es
+// como este negocio (y el default del producto desde 2026-09-13) los pide.
+const ASK_DELIVERY_DATA_PATTERN =
+  /\b(datos de (entrega|env[ií]o)|nombre y apellido|nombre completo)\b|\bc[eé]dula\b|\bcelular\b|\bidentificaci[oó]n\b/i;
+
+// Real production incident (2026-09-15, el mas caro del dia): desde que el bot pide TODOS los datos de
+// entrega en un solo mensaje, los clientes contestan mezclando texto y numeros -
+// "Sebastián montealegre sotelo        CC: 1004074880" o "Celular 3208935318   Mosquera Cundinamarca".
+// Los dos guardadores viejos eran ciegos a eso: looksLikeIdOrPhone exigia que el mensaje entero fuera
+// digitos (^[\d\s-]{6,15}$) y extractNameFromAnswer exigia palabras puramente alfabeticas, asi que ni la
+// cedula ni el celular ni el nombre llegaban a la ficha - el bot respondia "ya tengo el nombre y la
+// cedula" y en la base los tres campos seguian en null. Encima, cuando el bot pedia cedula Y celular en
+// el mismo mensaje, el codigo viejo ni siquiera intentaba (no sabia cual de los dos contestaba el
+// cliente). Esta funcion identifica cada dato por su PROPIA forma y etiqueta, no por cual fue la
+// pregunta, asi que la ambiguedad desaparece.
+//
+// Reglas, pensadas para Colombia: el celular son 10 digitos que arrancan en 3; la cedula, 6 a 10 digitos
+// que no arrancan en 3. Una etiqueta explicita al lado del numero ("CC", "cedula", "celular", "cel")
+// gana siempre sobre la forma. Un numero con $ o COP cerca es plata, nunca un documento.
+const MONEY_NEAR_PATTERN = /(\$|\bcop\b|\bpesos\b|\bmil\b)/i;
+const ID_LABEL_PATTERN = /\b(c\.?c\.?|c[eé]dula|documento|identificaci[oó]n|nit|ti)\b/i;
+const PHONE_LABEL_PATTERN = /\b(celular|cel|tel[eé]fono|tel|whatsapp|wpp|movil|m[oó]vil|contacto)\b/i;
+
+export function extractDeliveryDataFromAnswer(text: string): { idNumber?: string; deliveryPhone?: string } {
+  const out: { idNumber?: string; deliveryPhone?: string } = {};
+  // Cada corrida de digitos junto con las ~18 letras que la preceden, para poder leer su etiqueta.
+  const runs = [...text.matchAll(/([^\d]{0,18})(\d[\d.\s-]{4,18}\d)/g)];
+  for (const run of runs) {
+    const before = run[1] ?? "";
+    const digits = (run[2] ?? "").replace(/\D/g, "");
+    if (digits.length < 6 || digits.length > 11) continue;
+    // La plata puede llevar su marca ANTES ("$145.000") o DESPUES ("145.000 pesos", "145000 COP") - hay
+    // que mirar los dos lados o un precio termina guardado como numero de cedula.
+    const after = text.slice((run.index ?? 0) + run[0].length, (run.index ?? 0) + run[0].length + 12);
+    if (MONEY_NEAR_PATTERN.test(before) || MONEY_NEAR_PATTERN.test(after)) continue;
+
+    const labeledId = ID_LABEL_PATTERN.test(before);
+    const labeledPhone = PHONE_LABEL_PATTERN.test(before);
+    const looksPhone = digits.length === 10 && digits.startsWith("3");
+
+    if (labeledPhone && !labeledId) {
+      out.deliveryPhone ??= digits;
+    } else if (labeledId && !labeledPhone) {
+      out.idNumber ??= digits;
+    } else if (looksPhone) {
+      out.deliveryPhone ??= digits;
+    } else if (digits.length >= 6 && digits.length <= 10) {
+      out.idNumber ??= digits;
+    }
+  }
+  return out;
+}
+
+// El nombre dentro de una respuesta combinada: se queda solo con el tramo alfabetico antes del primer
+// numero o etiqueta ("Sebastián montealegre sotelo        CC: 1004074880" -> "Sebastián montealegre
+// sotelo") y lo pasa por el mismo filtro estricto que el resto de los nombres.
+export function extractNameFromDeliveryAnswer(text: string): string | null {
+  const head = text.split(/\d/)[0] ?? "";
+  const cleaned = head
+    .replace(ID_LABEL_PATTERN, " ")
+    .replace(PHONE_LABEL_PATTERN, " ")
+    .replace(/[^A-Za-zÀ-ÿ'\-\s]/g, " ")
+    .trim();
+  if (!cleaned) return null;
+  return extractNameFromAnswer(cleaned);
+}
 
 const PAYMENT_MENTION_PATTERN = /nequi|bancolombia|daviplata|titular|transferencia|llave/i;
 
@@ -999,14 +1133,35 @@ export async function generateReply(
       }
     }
 
-    if (contactSavedThisTurn === 0 && customerText && looksLikeIdOrPhone(customerText)) {
+    if (contactSavedThisTurn === 0 && customerText) {
       const priorAsk = lastAssistantText(history);
       const askedId = ASK_ID_PATTERN.test(priorAsk);
       const askedPhone = ASK_PHONE_PATTERN.test(priorAsk);
-      if (askedId && !askedPhone) {
-        await runCatalogTool(context, "save_customer_contact_info", { idNumber: customerText.trim() });
-      } else if (askedPhone && !askedId) {
-        await runCatalogTool(context, "save_customer_contact_info", { deliveryPhone: customerText.trim() });
+
+      if (looksLikeIdOrPhone(customerText)) {
+        // Respuesta de un solo dato, puro numero: sigue resolviendose por cual fue la pregunta, que es
+        // mas confiable que la forma cuando el mensaje no trae ninguna etiqueta.
+        if (askedId && !askedPhone) {
+          await runCatalogTool(context, "save_customer_contact_info", { idNumber: customerText.trim() });
+        } else if (askedPhone && !askedId) {
+          await runCatalogTool(context, "save_customer_contact_info", { deliveryPhone: customerText.trim() });
+        }
+      } else if (ASK_DELIVERY_DATA_PATTERN.test(priorAsk)) {
+        // Respuesta combinada (texto + numeros). Cada dato se identifica por su propia etiqueta/forma,
+        // asi que ya no importa que el bot haya pedido varios a la vez - ver
+        // extractDeliveryDataFromAnswer.
+        const found = extractDeliveryDataFromAnswer(customerText);
+        if (found.idNumber || found.deliveryPhone) {
+          await runCatalogTool(context, "save_customer_contact_info", found);
+        }
+        if (nameSavedThisTurn === 0) {
+          const combinedName = extractNameFromDeliveryAnswer(customerText);
+          // save_customer_name ya protege por su cuenta el nombre viejo cuando el nuevo es el del
+          // destinatario y no una correccion del cliente (ver ese case en tools.ts).
+          if (combinedName) {
+            await runCatalogTool(context, "save_customer_name", { name: combinedName });
+          }
+        }
       }
     }
 
@@ -1063,8 +1218,12 @@ export async function generateReply(
             productId: m.productId,
             variantId: m.variantId ?? undefined,
             skipIfAlreadySent: true,
-          })) as { sent?: boolean };
-          if (result?.sent) sentAny = true;
+          })) as { sent?: boolean; skipped?: boolean };
+          // `skipped` significa que esas fotos YA se le mandaron antes en esta conversacion - el cliente
+          // las tiene, no se cayo nada. Contarlo como fallo hacia que el bot se disculpara por fotos que
+          // el cliente ya habia recibido (mismo texto de disculpa que ya causo tres mensajes raros en
+          // produccion el 2026-09-15, esta vez por la rama de atributos).
+          if (result?.sent || result?.skipped) sentAny = true;
         } catch (error) {
           console.error("Fallo el envio de una foto en el backstop de atributos:", error);
         }
@@ -1141,8 +1300,9 @@ export async function generateReply(
         const result = (await runCatalogTool(context, "send_product_media", {
           productName: matched[i].name,
           skipIfAlreadySent: true,
-        })) as { sent?: boolean };
-        if (result?.sent) sentAny = true;
+        })) as { sent?: boolean; skipped?: boolean };
+        // Mismo criterio que la rama de atributos: ya enviadas antes = el cliente las tiene.
+        if (result?.sent || result?.skipped) sentAny = true;
       } catch (error) {
         console.error("Fallo el envio de una foto en el backstop de nombres:", error);
       }

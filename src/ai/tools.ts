@@ -11,7 +11,7 @@ import {
 import { listActivePaymentMethods } from "../catalog/paymentMethods";
 import { listShippingRates, resolveShippingRateForCity } from "../catalog/shippingRates";
 import { recordAgentIncident } from "./incidents";
-import { tokenize } from "../search/text";
+import { tokenize, normalizeForMatch } from "../search/text";
 
 // Shared with agent.ts (both the tool result here and the system-prompt directive there need the same
 // Spanish wording for each modality) - defined once here since agent.ts already imports from this file,
@@ -978,6 +978,34 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
     case "save_customer_name": {
       const name = String(input.name ?? "").trim();
       if (!name) return { error: "Falta el nombre" };
+
+      // Real production incident (2026-09-15): una clienta se presento como "Diana" al saludar, y al
+      // final del pedido dio "Sebastián Montealegre Sotelo" como nombre del DESTINATARIO del regalo. Esto
+      // sobrescribia sin condicion, asi que la ficha de la clienta quedo con el nombre de otra persona -
+      // el bot le siguio diciendo Diana en el chat (lo leia del historial) mientras el CRM decia Sebastián.
+      // Un nombre ya guardado solo se reemplaza si el nuevo lo COMPLETA ("Diana" -> "Diana Perez"): eso es
+      // el mismo ser humano dando su nombre completo. Cualquier otro nombre distinto es, casi siempre,
+      // quien recibe el pedido, y ese dato pertenece al pedido, no a la ficha del cliente.
+      // El panel sigue pudiendo corregirlo a mano: admin/customers.ts llama saveCustomerName directo, sin
+      // pasar por esta herramienta.
+      const existing = await prisma.customer.findFirst({
+        where: { id: context.customerId, businessId },
+        select: { name: true },
+      });
+      const previous = existing?.name?.trim();
+      if (previous) {
+        const a = normalizeForMatch(previous);
+        const b = normalizeForMatch(name);
+        const isCompletion = b.startsWith(a) || a.startsWith(b);
+        if (!isCompletion) {
+          return {
+            saved: false,
+            keptName: previous,
+            note: `Este cliente ya esta guardado como "${previous}" y "${name}" es un nombre distinto, asi que no se cambio nada. Si "${name}" es quien RECIBE el pedido, no es el nombre del cliente: no lo guardes aca, va en los datos de entrega del pedido. Si de verdad el cliente se corrigio y ahora se llama asi, decilo en tu respuesta y el negocio lo ajusta desde el panel.`,
+          };
+        }
+      }
+
       await saveCustomerName(context.businessId, context.customerId, name);
       return { saved: true, name };
     }
