@@ -5,6 +5,7 @@ import {
   deleteProductMedia,
   assignProductMedia,
   listAllProductsPage,
+  listActiveProductsForOrderPicker,
   updateProduct,
   addProductMedia,
   createProductVariant,
@@ -27,6 +28,13 @@ catalogRouter.get("/api/products", async (req, res) => {
   const q = typeof req.query.q === "string" ? req.query.q.trim() : undefined;
   const { items, total } = await listAllProductsPage(businessIdOf(req), (page - 1) * PRODUCTS_PAGE_SIZE, PRODUCTS_PAGE_SIZE, q);
   res.json({ items, total, page, pageSize: PRODUCTS_PAGE_SIZE });
+});
+
+// Catálogo completo (sin paginar, sin media) para el selector de producto/variante del cierre manual de
+// venta - ese formulario necesita elegir por id de una, no buscar página por página.
+catalogRouter.get("/api/products/for-order-picker", async (req, res) => {
+  const items = await listActiveProductsForOrderPicker(businessIdOf(req));
+  res.json({ items });
 });
 
 catalogRouter.post("/api/products", async (req, res) => {

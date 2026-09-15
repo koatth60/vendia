@@ -1922,6 +1922,114 @@ function closeConversation() {
   closeSaleFormCancel();
 }
 
+// Catálogo cargado para el selector de "Cerrar venta" - se recarga cada vez que se abre el formulario
+// (no productsCache, que es la vista paginada del tab Catálogo y no trae el catálogo completo). Sin
+// media, sin presign de S3: ver listActiveProductsForOrderPicker.
+let closeSaleCatalog = [];
+
+// Empate por nombre entre dos productos que solo se diferencian en una palabra corta (M4 vs M5, XL vs L)
+// ya no se puede resolver a ciegas del lado del servidor (findConfidentProductMatch rechaza el empate a
+// proposito) - por eso el match acá tiene que ser EXACTO, no aproximado: si el texto no calza con un
+// nombre real letra por letra (salvo mayúsculas/espacios de sobra), la fila queda sin productId y se
+// manda como texto libre, igual que hacía el textarea viejo para lo que no encontraba.
+function closeSaleProductByExactName(name) {
+  const norm = String(name || '').trim().toLowerCase();
+  if (!norm) return null;
+  return closeSaleCatalog.find((p) => p.name.trim().toLowerCase() === norm) || null;
+}
+
+function closeSaleVariantLabel(v) {
+  return [v.color, v.size].filter(Boolean).join(' / ') || '(sin nombre)';
+}
+
+function closeSaleItemRowHtml() {
+  return `
+    <div class="close-sale-item-row">
+      <input type="text" class="close-sale-item-product" list="close-sale-product-options"
+        placeholder="Buscar producto del catálogo..." oninput="onCloseSaleProductInput(this)" />
+      <select class="close-sale-item-variant" style="display:none;" onchange="onCloseSaleVariantChange(this)"></select>
+      <input type="number" class="close-sale-item-qty" min="1" value="1" title="Cantidad" />
+      <button type="button" class="close-sale-item-remove" title="Quitar" onclick="removeCloseSaleItemRow(this)">✕</button>
+    </div>
+    <div class="close-sale-item-warning" style="display:none;"></div>`;
+}
+
+function addCloseSaleItemRow() {
+  document.getElementById('close-sale-items-rows').insertAdjacentHTML('beforeend', closeSaleItemRowHtml());
+}
+
+function removeCloseSaleItemRow(btn) {
+  const row = btn.closest('.close-sale-item-row');
+  const warning = row.nextElementSibling;
+  row.remove();
+  if (warning && warning.classList.contains('close-sale-item-warning')) warning.remove();
+}
+
+function closeSaleRowWarning(row, text) {
+  const warning = row.nextElementSibling;
+  if (!warning || !warning.classList.contains('close-sale-item-warning')) return;
+  warning.textContent = text;
+  warning.style.display = text ? 'block' : 'none';
+}
+
+// Reconstruye el <select> de variante para la fila cuando el producto elegido cambia - solo se muestra
+// si el producto tiene variantes activas, y arranca sin nada elegido (obliga a elegir, igual que el
+// backend: needsAttribute bloquea el cierre mientras no haya variantId).
+function renderCloseSaleVariantSelect(row, product) {
+  const select = row.querySelector('.close-sale-item-variant');
+  if (!product || product.variants.length === 0) {
+    select.style.display = 'none';
+    select.innerHTML = '';
+    return;
+  }
+  select.innerHTML = `<option value="">Color/talla...</option>${product.variants
+    .map((v) => `<option value="${escapeHtml(v.id)}">${escapeHtml(closeSaleVariantLabel(v))}</option>`)
+    .join('')}`;
+  select.style.display = 'inline-block';
+}
+
+function onCloseSaleProductInput(input) {
+  const row = input.closest('.close-sale-item-row');
+  const product = closeSaleProductByExactName(input.value);
+  input.dataset.productId = product ? product.id : '';
+  renderCloseSaleVariantSelect(row, product);
+  closeSaleRowWarning(row, product && product.variants.length > 0 ? 'Elegí color/talla antes de confirmar.' : '');
+}
+
+function onCloseSaleVariantChange(select) {
+  const row = select.closest('.close-sale-item-row');
+  closeSaleRowWarning(row, select.value ? '' : 'Elegí color/talla antes de confirmar.');
+}
+
+async function loadCloseSaleCatalog() {
+  const res = await apiFetch('/admin/api/products/for-order-picker');
+  const { items } = await res.json();
+  closeSaleCatalog = items;
+  document.getElementById('close-sale-product-options').innerHTML = items.map((p) => `<option value="${escapeHtml(p.name)}"></option>`).join('');
+}
+
+function clearCloseSaleItemRows() {
+  document.getElementById('close-sale-items-rows').innerHTML = '';
+}
+
+// Arma una fila por item extraído por la IA - lo que calza EXACTO con un nombre real del catálogo queda
+// preseleccionado (con su selector de variante si aplica, sin elegir todavía); lo que no calza queda como
+// texto libre a la vista, para que el dueño lo corrija o lo borre a mano (nunca se inventa un id).
+function addCloseSaleItemRowFromExtraction(item) {
+  addCloseSaleItemRow();
+  const rows = document.querySelectorAll('#close-sale-items-rows .close-sale-item-row');
+  const row = rows[rows.length - 1];
+  const productInput = row.querySelector('.close-sale-item-product');
+  const qtyInput = row.querySelector('.close-sale-item-qty');
+  qtyInput.value = Math.max(1, Math.floor(Number(item.quantity) || 1));
+
+  const product = closeSaleProductByExactName(item.productName);
+  productInput.value = product ? product.name : (item.productName || '');
+  productInput.dataset.productId = product ? product.id : '';
+  renderCloseSaleVariantSelect(row, product);
+  closeSaleRowWarning(row, product && product.variants.length > 0 ? 'Elegí color/talla antes de confirmar.' : '');
+}
+
 async function openCloseSaleForm() {
   document.getElementById('close-sale-form').style.display = 'block';
   await prefillCloseSaleForm();
@@ -1932,10 +2040,19 @@ async function prefillCloseSaleForm() {
   const status = document.getElementById('close-sale-status');
   status.textContent = 'Leyendo la conversación...';
   status.style.color = 'var(--muted)';
+  clearCloseSaleItemRows();
   try {
-    const res = await apiFetch(`/admin/api/conversations/${currentConversationId}/extract-sale-details`);
-    const details = await res.json();
-    document.getElementById('close-sale-items').value = (details.items || []).map((i) => `${i.quantity}x ${i.productName}`).join('\n');
+    const [, extractRes] = await Promise.all([
+      loadCloseSaleCatalog(),
+      apiFetch(`/admin/api/conversations/${currentConversationId}/extract-sale-details`),
+    ]);
+    const details = await extractRes.json();
+    const items = details.items || [];
+    if (items.length === 0) {
+      addCloseSaleItemRow();
+    } else {
+      items.forEach(addCloseSaleItemRowFromExtraction);
+    }
     document.getElementById('close-sale-address').value = details.shippingAddress || '';
     document.getElementById('close-sale-payment').value = details.paymentMethodLabel || '';
     document.getElementById('close-sale-shipping').value = details.shippingCost ?? '';
@@ -1944,6 +2061,10 @@ async function prefillCloseSaleForm() {
     document.getElementById('close-sale-notes').value = details.notes || '';
     status.textContent = 'Prellenado con la IA - revisa y corrige antes de confirmar ✎';
   } catch (err) {
+    if (closeSaleCatalog.length === 0) {
+      try { await loadCloseSaleCatalog(); } catch { /* el catálogo se puede recargar manualmente reabriendo el formulario */ }
+    }
+    if (document.querySelectorAll('#close-sale-items-rows .close-sale-item-row').length === 0) addCloseSaleItemRow();
     status.textContent = `No se pudo prellenar automático (${err.message}) - llena a mano.`;
     status.style.color = 'var(--danger)';
   }
@@ -1951,7 +2072,7 @@ async function prefillCloseSaleForm() {
 
 function closeSaleFormCancel() {
   document.getElementById('close-sale-form').style.display = 'none';
-  document.getElementById('close-sale-items').value = '';
+  clearCloseSaleItemRows();
   document.getElementById('close-sale-address').value = '';
   document.getElementById('close-sale-payment').value = '';
   document.getElementById('close-sale-shipping').value = '';
@@ -1967,11 +2088,43 @@ function closeSaleFormCancel() {
 
 async function confirmCloseSale() {
   if (!currentConversationId) return;
-  const items = document.getElementById('close-sale-items').value.split('\n').map((l) => l.trim()).filter(Boolean);
+  const status = document.getElementById('close-sale-status');
+
+  const rows = Array.from(document.querySelectorAll('#close-sale-items-rows .close-sale-item-row'));
+  const items = [];
+  let missingVariant = false;
+  for (const row of rows) {
+    const productInput = row.querySelector('.close-sale-item-product');
+    const variantSelect = row.querySelector('.close-sale-item-variant');
+    const qtyInput = row.querySelector('.close-sale-item-qty');
+    const productName = productInput.value.trim();
+    if (!productName) continue;
+
+    const productId = productInput.dataset.productId || undefined;
+    // El producto tiene variantes (el select quedó visible) pero todavía no se eligió ninguna - se
+    // bloquea acá mismo, antes de mandar la petición, con el mismo criterio que needsAttribute del
+    // servidor (que sigue siendo quien realmente lo hace cumplir).
+    if (variantSelect.style.display !== 'none' && !variantSelect.value) {
+      closeSaleRowWarning(row, 'Elegí color/talla antes de confirmar.');
+      missingVariant = true;
+      continue;
+    }
+    items.push({
+      productId,
+      variantId: variantSelect.value || undefined,
+      productName,
+      quantity: Math.max(1, Math.floor(Number(qtyInput.value) || 1)),
+    });
+  }
+  if (missingVariant) {
+    setStatus('Faltan colores/tallas por elegir', true);
+    return;
+  }
   if (items.length === 0) {
     setStatus('Agrega al menos un producto', true);
     return;
   }
+
   const shippingAddress = document.getElementById('close-sale-address').value.trim();
   const paymentMethodLabel = document.getElementById('close-sale-payment').value.trim();
   const shippingCost = document.getElementById('close-sale-shipping').value.trim();
@@ -1981,7 +2134,6 @@ async function confirmCloseSale() {
   const customerMessage = document.getElementById('close-sale-message').value.trim();
 
   const confirmBtn = document.getElementById('close-sale-confirm-btn');
-  const status = document.getElementById('close-sale-status');
   confirmBtn.disabled = true;
   confirmBtn.textContent = 'Cerrando venta...';
   status.textContent = '';

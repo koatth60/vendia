@@ -784,8 +784,10 @@
                   <span id="close-sale-status" style="font-size:12px;"></span>
                   <button class="btn-secondary" type="button" onclick="prefillCloseSaleForm()" style="white-space:nowrap; font-size:12px; padding:4px 10px;">🔄 Releer conversación</button>
                 </div>
-                <label>Productos (uno por línea, ej: 1x Smartwatch Serie 11 Mini)</label>
-                <textarea id="close-sale-items" placeholder="1x Smartwatch Serie 11 Mini" style="min-height:56px;"></textarea>
+                <label>Productos</label>
+                <datalist id="close-sale-product-options"></datalist>
+                <div id="close-sale-items-rows"></div>
+                <button class="btn-secondary" type="button" onclick="addCloseSaleItemRow()" style="font-size:12px; padding:4px 10px; margin-top:4px;">+ Agregar producto</button>
                 <div class="grid-2">
                   <div>
                     <label>Dirección de envío</label>

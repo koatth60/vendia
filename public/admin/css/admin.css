@@ -1613,3 +1613,35 @@
     .col-chart { gap: 12px; height: 170px; }
     .col-pair { height: 130px; }
   }
+
+  /* --- Cierre manual de venta · filas de producto/variante -----------------
+     Reemplaza el textarea de texto libre (bug de produccion, 2026-09-15: un
+     nombre escrito a mano no distingue dos productos casi identicos ni sabe
+     si el producto tiene variantes). Cada fila manda productId/variantId
+     reales, no un nombre para adivinar. */
+  .close-sale-item-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 8px; margin-bottom: 4px;
+    border: 1px solid var(--onix-border);
+    border-radius: var(--onix-radius-control);
+    background: var(--onix-surface-field);
+  }
+  .close-sale-item-product { flex: 1 1 auto; min-width: 0; }
+  .close-sale-item-variant { flex: 0 1 170px; min-width: 0; }
+  .close-sale-item-qty { flex: 0 0 60px; width: 60px; text-align: center; }
+  .close-sale-item-remove {
+    flex-shrink: 0; width: 26px; height: 26px; padding: 0;
+    border: none; border-radius: 50%;
+    background: transparent; color: var(--onix-dim);
+    font-size: 13px; line-height: 1; cursor: pointer;
+  }
+  .close-sale-item-remove:hover { background: var(--onix-danger-soft); color: var(--onix-danger); }
+  .close-sale-item-warning {
+    font-size: 11.5px; color: var(--onix-warn);
+    margin: -2px 0 8px 2px;
+  }
+  @media (max-width: 640px) {
+    .close-sale-item-row { flex-wrap: wrap; }
+    .close-sale-item-product { flex-basis: 100%; }
+    .close-sale-item-variant { flex: 1 1 auto; }
+  }

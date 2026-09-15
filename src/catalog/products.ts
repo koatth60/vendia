@@ -89,6 +89,24 @@ export async function listAllProductsPage(businessId: string, skip: number, take
   return { items, total };
 }
 
+// Para el selector de "Cerrar venta" del panel (Fase de correccion, 2026-09-15) - a diferencia de
+// listActiveProducts, no incluye media ni presigna URLs de S3 (ese trabajo no aporta nada a un
+// <select>/<datalist> de nombre + precio + variantes, y esta llamada corre cada vez que el dueno abre
+// el formulario de cierre manual).
+export async function listActiveProductsForOrderPicker(businessId: string) {
+  return prisma.product.findMany({
+    where: { businessId, active: true },
+    select: {
+      id: true,
+      name: true,
+      price: true,
+      currency: true,
+      variants: { where: { active: true }, select: { id: true, color: true, size: true } },
+    },
+    orderBy: { name: "asc" },
+  });
+}
+
 export async function getProductById(businessId: string, id: string) {
   const product = await prisma.product.findFirst({
     where: { id, businessId },
