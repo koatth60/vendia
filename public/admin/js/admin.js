@@ -2488,6 +2488,7 @@ function candidateRowHtml(c) {
   return `
     <div style="padding:12px; border:1px solid var(--border); border-radius:var(--radius-md);" data-candidate-id="${c.id}">
       ${freq}
+      ${c.warning ? `<div style="font-size:12px; background:var(--warning-light, #fbf0d9); color:var(--warning, #8a5a00); padding:8px 10px; border-radius:var(--radius-sm); margin-bottom:8px;">⚠ ${escapeHtml(c.warning)}</div>` : ''}
       <label style="font-size:12px;">Pregunta</label>
       <input class="candidate-question" value="${escapeHtml(c.question)}" />
       <label style="font-size:12px;">Respuesta</label>
@@ -3921,18 +3922,20 @@ async function loadHealth() {
   const isFirstLoad = lastHealthSnapshot === null;
   if (isFirstLoad) container.innerHTML = '<div class="card empty-state">Cargando…</div>';
   try {
-    const [pendingRes, failuresRes, logRes, incidentsRes] = await Promise.all([
+    const [pendingRes, failuresRes, logRes, incidentsRes, findingsRes] = await Promise.all([
       apiFetch('/admin/api/pending-questions'),
       apiFetch('/admin/api/delivery-failures'),
       apiFetch('/admin/api/owner-log'),
       apiFetch('/admin/api/agent-incidents'),
+      apiFetch('/admin/api/health-findings'),
     ]);
     const pending = await pendingRes.json();
     const failures = await failuresRes.json();
     const log = await logRes.json();
     const incidents = await incidentsRes.json();
+    const { findings } = await findingsRes.json();
 
-    const snapshot = JSON.stringify({ pending, failures, log, incidents });
+    const snapshot = JSON.stringify({ pending, failures, log, incidents, findings });
     if (snapshot === lastHealthSnapshot) return;
     lastHealthSnapshot = snapshot;
 
@@ -3976,8 +3979,36 @@ async function loadHealth() {
           </div>
         `).join('');
 
+    const FINDING_LABELS = {
+      DATO_NO_GUARDADO: 'Dijo tener un dato que no guardó',
+      FOTO_PROMETIDA_SIN_ENVIAR: 'Prometió fotos y no las mandó',
+      RESPUESTA_DUPLICADA: 'Contestó dos veces lo mismo',
+      VENTA_SIN_PEDIDO: 'Cerró una venta sin registrar el pedido',
+      FUGA_INTERNA: 'Le mostró algo interno al cliente',
+    };
+    const findingRows = findings.length === 0
+      ? '<div class="empty-state" style="padding:18px;">El chequeo no encontró nada en las últimas 24 horas.</div>'
+      : findings.map((f) => `
+          <div style="display:flex; justify-content:space-between; gap:10px; align-items:flex-start; padding:11px 0; border-bottom:1px solid var(--border-soft);">
+            <div style="min-width:0;">
+              <div style="font-size:13px; font-weight:600;">${escapeHtml(FINDING_LABELS[f.kind] || f.kind)}</div>
+              <div style="font-size:12.5px; color:var(--muted); margin-top:3px; white-space:pre-wrap;">${escapeHtml(f.detail)}</div>
+              <div style="font-size:11px; color:var(--muted-soft); margin-top:2px;">${escapeHtml(timeAgo(f.createdAt))}</div>
+            </div>
+          </div>
+        `).join('');
+
     container.innerHTML = `
       ${botHealthCardsHtml(incidents, 'margin-bottom:16px;')}
+
+      <div class="section-title">Lo que encontró el chequeo automático</div>
+      <div class="card">
+        <div style="font-size:12.5px; color:var(--muted); margin-bottom:6px;">
+          Cada media hora se revisan las conversaciones recientes buscando cosas que el bot hizo mal.
+          Esto es de las últimas 24 horas.
+        </div>
+        ${findingRows}
+      </div>
 
       <div class="section-title">Preguntas del bot sin responder</div>
       <div class="card">
