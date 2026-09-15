@@ -52,6 +52,7 @@ import {
   saveDeliveryDataToSaleState,
   isSaleStateEnabled,
   setBlockedBy,
+  recordMediaSent,
 } from "../orders/saleState";
 import {
   sendImageMessage,
@@ -912,6 +913,7 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
             where: { id: context.conversationId },
             data: { mediaSentProductIds: { push: product.id } },
           });
+          await recordMediaSent(context.conversationId, product.name);
           mediaJustSent = true;
         }
       }
@@ -1013,6 +1015,7 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
           data: { mediaSentProductIds: { set: [...updated] } },
         });
       }
+      await recordMediaSent(context.conversationId, variantLabel ? `${product.name} (${variantLabel})` : product.name);
 
       return { sent: true, product: product.name, variant: variantLabel, count: media.length };
     }
