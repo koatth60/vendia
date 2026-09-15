@@ -3837,6 +3837,38 @@ async function deleteCrmNote(noteId) {
 // Fase 3 - Inicio (tablero) y Salud del bot
 // ==============================================================================================
 
+// Fase 6 del plan maestro (2026-09-15): a que pestaña manda cada motivo real de bloqueo de
+// getSaleGate.canSell (src/ai/configHealth.ts) - mismas 3 etiquetas en español que devuelve el backend.
+const SALE_GATE_TARGET_BY_LABEL = {
+  'métodos de pago': { tab: 'payments', cta: 'Ir a Pagos' },
+  'tarifas de envío': { tab: 'shipping', cta: 'Ir a Envíos' },
+  'teléfono de contacto': { tab: 'negocio', cta: 'Ir a Identidad' },
+};
+
+// Tarjeta de bloqueo del tablero: reusa exactamente el mismo bloque visual que "Requiere tu atención"
+// (action-card/is-urgent), una fila por cada cosa que falta, con su propio enlace a la seccion que la
+// arregla - no un CTA unico que solo puede mandar a un solo lugar.
+function saleGateBlockCardHtml(health) {
+  if (!health || health.canSell) return '';
+  const rows = (health.missingForSale || []).map((label) => {
+    const target = SALE_GATE_TARGET_BY_LABEL[label] || { tab: 'negocio', cta: 'Configurar' };
+    const capitalized = label.charAt(0).toUpperCase() + label.slice(1);
+    return `
+      <div class="action-card is-urgent">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--onix-danger)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4.5 21 19.5H3z"/><path d="M12 10v4M12 16.8v.2"/></svg>
+        <div style="min-width:0;">
+          <div class="title">${escapeHtml(capitalized)}</div>
+        </div>
+        <button type="button" class="btn-danger-solid action-cta" onclick="switchTab('${target.tab}')">${escapeHtml(target.cta)}</button>
+      </div>`;
+  }).join('');
+  return `
+    <div class="section-title">El bot todavía no puede cerrar ventas</div>
+    <div style="font-size:12.5px; color:var(--muted); margin:-4px 0 10px;">Sin esto, no puede mostrarle un total al cliente ni registrar un pago - mientras tanto deja el pedido anotado y te avisa para que lo confirmes vos.</div>
+    ${rows}
+  `;
+}
+
 const ACTION_META = {
   HUMAN_WAITING: { title: 'Conversaciones esperando a un humano', cta: 'Atender', go: () => switchTab('conversations') },
   OWNER_QUESTION: { title: 'Preguntas del bot sin responder', cta: 'Revisar', go: () => switchTab('health') },
@@ -3875,6 +3907,8 @@ async function loadDashboard() {
         }).join('');
 
     container.innerHTML = `
+      ${saleGateBlockCardHtml(data.health)}
+
       <div class="section-title">Requiere tu atención</div>
       ${actionsHtml}
 
