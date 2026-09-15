@@ -4433,19 +4433,58 @@ let waConnectConfig = null;
 // vuelta con el code. Se guardan acá porque los tres tienen que viajar juntos al servidor.
 let waSignupAssets = null;
 
+// Lo último que mandó el popup, para poder EXPLICAR qué pasó en vez de decir "intentá de nuevo". El
+// flujo tiene varias salidas parciales (cancelar, crear la cuenta sin agregar número) y sin esto todas
+// se ven igual desde afuera: no hay assets y listo.
+let waLastSignupEvent = null;
+
+// Acepta cualquier subdominio de facebook.com (www, web, business...): el popup no siempre postea desde
+// el mismo. Se compara el HOST parseado y no con endsWith sobre la cadena, porque
+// "https://facebook.com.atacante.io" termina distinto pero pasaría un endsWith ingenuo sobre el origen.
+function isFacebookOrigin(origin) {
+  try {
+    const url = new URL(origin);
+    return url.protocol === 'https:' && (url.hostname === 'facebook.com' || url.hostname.endsWith('.facebook.com'));
+  } catch {
+    return false;
+  }
+}
+
 window.addEventListener('message', (event) => {
   // Sin este filtro, cualquier iframe de cualquier origen podría inyectar un waba_id falso y hacer que
   // el negocio quede apuntando a una cuenta ajena.
-  if (event.origin !== 'https://www.facebook.com' && event.origin !== 'https://web.facebook.com') return;
+  if (!isFacebookOrigin(event.origin)) return;
   try {
-    const data = JSON.parse(event.data);
-    if (data.type === 'WA_EMBEDDED_SIGNUP' && data.event === 'FINISH') {
+    const data = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
+    if (!data || data.type !== 'WA_EMBEDDED_SIGNUP') return;
+    waLastSignupEvent = data;
+    console.log('[Embedded Signup]', data.event, data.data || {});
+    // FINISH es el único que trae los dos ids. FINISH_ONLY_WABA significa que se creó la cuenta pero no
+    // se llegó a agregar un número, y CANCEL que se cerró a mitad de camino.
+    if (data.event === 'FINISH' && data.data && data.data.phone_number_id && data.data.waba_id) {
       waSignupAssets = { phoneNumberId: data.data.phone_number_id, wabaId: data.data.waba_id };
     }
   } catch {
     // El popup manda también mensajes que no son JSON - no es un error, se ignoran.
   }
 });
+
+// Traduce la salida parcial del popup a algo accionable. Decir "intentá de nuevo" sin más deja al dueño
+// repitiendo exactamente el mismo paso que ya falló.
+function whyNoSignupAssets() {
+  const ev = waLastSignupEvent;
+  if (!ev) {
+    return 'Facebook no mandó ningún dato del registro. Si cerraste la ventana antes de terminar, volvé a empezar y completá todos los pasos.';
+  }
+  if (ev.event === 'CANCEL') {
+    const step = ev.data && ev.data.current_step ? ` Quedó en el paso: ${ev.data.current_step}.` : '';
+    return `Cancelaste el registro antes de terminar.${step} Volvé a darle y completá hasta verificar el número por SMS.`;
+  }
+  if (ev.event === 'FINISH_ONLY_WABA') {
+    return 'Se creó la cuenta de WhatsApp Business pero no llegaste a agregar y verificar un número. Volvé a darle y completá ese paso.';
+  }
+  return `Facebook terminó con "${ev.event}" y sin número. Volvé a intentar completando hasta la verificación por SMS.`;
+}
 
 async function loadWhatsappConnection() {
   const stateEl = document.getElementById('wa-connect-state');
@@ -4498,6 +4537,7 @@ function startWhatsappSignup() {
   }
 
   waSignupAssets = null;
+  waLastSignupEvent = null;
   FB.init({ appId: waConnectConfig.appId, cookie: true, xfbml: false, version: 'v21.0' });
 
   FB.login((response) => {
@@ -4507,7 +4547,7 @@ function startWhatsappSignup() {
       return;
     }
     if (!waSignupAssets) {
-      setStatus('Facebook no devolvió qué número elegiste. Intentá de nuevo.', true);
+      setStatus(whyNoSignupAssets(), true);
       return;
     }
     finishWhatsappSignup(code);
