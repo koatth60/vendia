@@ -9,8 +9,11 @@ import {
   drainQueuedOutboundForCustomer,
   downloadMedia,
   formatForWhatsapp,
+  markCustomerMessageSeen,
+  computeTypingDelayMs,
   type WhatsappCredentials,
 } from "../whatsapp/outbound";
+import { createBurstBuffer } from "../whatsapp/burstBuffer";
 import { uploadMedia } from "../media/s3";
 import { checkWebhookSignature, signatureHeaderOf } from "../whatsapp/webhookSignature";
 import { maskPhone } from "../whatsapp/logging";
@@ -388,6 +391,144 @@ export async function handleOwnerReply(
   }
 }
 
+// ---------------------------------------------------------------------------
+// Fase 10 del plan maestro (2026-09-15), eje 19: agrupacion de rafaga (capa [1] INGESTA)
+// ---------------------------------------------------------------------------
+//
+// Antes, dos o tres mensajes seguidos del mismo cliente (webhooks separados de Meta, segundos de
+// diferencia) disparaban cada uno su propio generateReply completo - el cliente recibia varias
+// respuestas, a veces contradictorias entre si porque cada llamada partia del mismo historial sin
+// ver lo que la otra iba a contestar. replyBurstBuffer los agrupa por conversation.id con una
+// ventana de silencio de ~8s (createBurstBuffer, generico y probado aparte en
+// src/whatsapp/burstBuffer.test.ts) y recien entonces genera y manda UNA sola respuesta para todo
+// lo que el cliente escribio en ese rato.
+//
+// Corre DELANTE del lock por conversacion: cada mensaje individual sigue pasando por su propio
+// withConversationLock para el trabajo que no puede esperar (grabar el mensaje, el gate de control
+// humano, el tope del plan, drenar la cola de salida - ver el handler del POST /webhook mas abajo).
+// Lo unico que se agrupa y difiere es la generacion y el envio de la respuesta, que corre en SU
+// PROPIA adquisicion del lock cuando la rafaga se descarga (runGenerateAndSend).
+type BusinessRow = NonNullable<Awaited<ReturnType<typeof prisma.business.findUnique>>>;
+type CustomerRow = Awaited<ReturnType<typeof getOrCreateCustomer>>;
+
+export interface ReplyBurstItem {
+  rawText: string;
+  customerSentAt: number;
+  business: BusinessRow;
+  customer: CustomerRow;
+  credentials: WhatsappCredentials;
+  from: string;
+}
+
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+// Combinacion pura de una rafaga en un solo turno - separada de runGenerateAndSend (que si hace
+// I/O real: DB, generateReply, WhatsApp) para poder probarla sin tocar nada de eso. El ultimo
+// mensaje de la rafaga manda en credenciales/negocio/cliente (en la practica son siempre los
+// mismos dentro de una misma conversacion); el texto se concatena para que el modelo y los
+// backstop-guards de agent.ts vean TODO lo que el cliente escribio, no solo el ultimo mensaje. La
+// hora de referencia para el descarte por vieja es la del PRIMER mensaje: es desde ahi que el
+// cliente esta esperando.
+export function combineBurstItems(items: ReplyBurstItem[]): {
+  last: ReplyBurstItem;
+  combinedRawText: string;
+  customerSentAt: number;
+} {
+  return {
+    last: items[items.length - 1],
+    combinedRawText: items.map((item) => item.rawText).join("\n"),
+    customerSentAt: items[0].customerSentAt,
+  };
+}
+
+async function runGenerateAndSend(conversationId: string, items: ReplyBurstItem[]): Promise<void> {
+  const { last, combinedRawText, customerSentAt } = combineBurstItems(items);
+  const { business, customer, credentials, from } = last;
+
+  const shippingRatesConfigured = (await prisma.shippingRate.count({ where: { businessId: business.id } })) > 0;
+
+  const reply = await generateReply(
+    conversationId,
+    {
+      businessId: business.id,
+      conversationId,
+      customerId: customer.id,
+      credentials,
+      recipientPhone: from,
+    },
+    {
+      businessName: business.name,
+      assistantName: business.assistantName,
+      tone: business.botTone,
+      dialect: business.botDialect,
+      greeting: business.botGreeting,
+      neverSay: business.botNeverSay,
+      customInstructions: business.customInstructions,
+      autoSendPhotoOnQuote: business.autoSendPhotoOnQuote,
+      offerPhotosBeforeSending: business.offerPhotosBeforeSending,
+      requirePaymentProof: business.requirePaymentProof,
+      category: business.businessCategory,
+      genderedAddressEnabled: business.genderedAddressEnabled,
+      femaleAddressTerm: business.femaleAddressTerm,
+      maleAddressTerm: business.maleAddressTerm,
+      shippingPaymentModalities: business.shippingPaymentModalities,
+      shippingRatesConfigured,
+      saleStateEnabled: business.saleStateEnabled,
+    },
+    combinedRawText
+  );
+
+  // Mismo motivo que antes de la Fase 10: generateReply puede tardar desde segundos hasta minutos,
+  // y en ese rato la duena puede haber tomado el control y contestado a mano - mandar igual la
+  // respuesta vieja la contradice delante del cliente.
+  const stillAutomatic = await prisma.conversation.findUnique({
+    where: { id: conversationId },
+    select: { humanControl: true },
+  });
+  if (stillAutomatic?.humanControl) {
+    console.log("El equipo tomo el control mientras se generaba la respuesta, se descarta:", conversationId);
+    return;
+  }
+
+  // Sin que nadie haya tomado el control: si la respuesta tardo demasiado ya no contesta lo que el
+  // cliente pregunto, asi que se tira y la conversacion pasa a un humano.
+  const waitedMinutes = (Date.now() - customerSentAt) / (60 * 1000);
+  if (waitedMinutes > STALE_REPLY_MINUTES) {
+    const detail = `La respuesta tardo ${Math.round(waitedMinutes)} minutos en generarse (limite ${STALE_REPLY_MINUTES}) y se descarto sin mandarla.`;
+    console.error(`${detail} conversation=${conversationId}`);
+    await recordAgentIncident(business.id, "STALE_REPLY_DISCARDED", detail, conversationId);
+    await setHumanControl(business.id, conversationId, true);
+    if (business.contactPhone) {
+      const customerLabel = customerDisplayName(customer);
+      const staleAlertText = `El bot tardo ${Math.round(waitedMinutes)} minutos en responderle a ${customerLabel} y la respuesta se descarto por vieja. Esa conversacion quedo esperandote en el panel.`;
+      await alertOwnerTracked(business.id, credentials, business.contactPhone!, staleAlertText);
+    }
+    return;
+  }
+
+  const formattedReply = formatForWhatsapp(reply);
+  // Demora proporcional al largo de la respuesta antes de mandarla: se siente mas humano que una
+  // respuesta instantanea, y el indicador de "escribiendo" (prendido al recibir cada mensaje, ver
+  // markCustomerMessageSeen en el handler del POST) cubre esta espera.
+  await sleep(computeTypingDelayMs(formattedReply.length));
+
+  await sendToCustomer({
+    businessId: business.id,
+    conversationId,
+    credentials,
+    to: from,
+    content: { kind: "text", text: formattedReply },
+    recordAs: { text: formattedReply },
+  });
+}
+
+const replyBurstBuffer = createBurstBuffer<ReplyBurstItem>(
+  async (conversationId, items) => {
+    await withConversationLock(conversationId, () => runGenerateAndSend(conversationId, items));
+  },
+  { windowMs: Number(process.env.WHATSAPP_BURST_WINDOW_MS ?? "") || 8000 }
+);
+
 whatsappRouter.get("/webhook", (req, res) => {
   const mode = req.query["hub.mode"];
   const token = req.query["hub.verify_token"];
@@ -542,6 +683,15 @@ whatsappRouter.post("/webhook", async (req, res) => {
     const whatsappProfileName: string | undefined = value?.contacts?.[0]?.profile?.name;
     const customer = await getOrCreateCustomer(business.id, from, whatsappProfileName);
     const conversation = await getOrCreateOpenConversation(business.id, customer.id);
+
+    // Fase 10 del plan maestro: apenas se sabe que es un mensaje real de este cliente, se marca
+    // como leido y se prende el indicador de "escribiendo" - no hace falta esperar a procesar el
+    // mensaje entero (puede tardar segundos si es una foto/audio). No es critico: si falla, el
+    // turno sigue igual (ver markCustomerMessageSeen en outbound.ts).
+    if (whatsappMessageId) {
+      await markCustomerMessageSeen(credentials, whatsappMessageId);
+    }
+
     await withConversationLock(conversation.id, async () => {
 
       let text = "";
@@ -759,76 +909,18 @@ whatsappRouter.post("/webhook", async (req, res) => {
       const metaTimestampMs = Number(message.timestamp) * 1000;
       const customerSentAt = Number.isFinite(metaTimestampMs) && metaTimestampMs > 0 ? metaTimestampMs : webhookReceivedAt;
 
-      const shippingRatesConfigured = (await prisma.shippingRate.count({ where: { businessId: business.id } })) > 0;
-
-      const reply = await generateReply(
-        conversation.id,
-        {
-          businessId: business.id,
-          conversationId: conversation.id,
-          customerId: customer.id,
-          credentials,
-          recipientPhone: from,
-        },
-        {
-          businessName: business.name,
-          assistantName: business.assistantName,
-          tone: business.botTone,
-          dialect: business.botDialect,
-          greeting: business.botGreeting,
-          neverSay: business.botNeverSay,
-          customInstructions: business.customInstructions,
-          autoSendPhotoOnQuote: business.autoSendPhotoOnQuote,
-          offerPhotosBeforeSending: business.offerPhotosBeforeSending,
-          requirePaymentProof: business.requirePaymentProof,
-          category: business.businessCategory,
-          genderedAddressEnabled: business.genderedAddressEnabled,
-          femaleAddressTerm: business.femaleAddressTerm,
-          maleAddressTerm: business.maleAddressTerm,
-          shippingPaymentModalities: business.shippingPaymentModalities,
-          shippingRatesConfigured,
-          saleStateEnabled: business.saleStateEnabled,
-        },
-        rawText
-      );
-      // generateReply puede tardar desde segundos hasta minutos (el 2026-09-14, con DeepSeek degradado,
-      // una respuesta salio 30 minutos despues del mensaje del cliente). En todo ese rato la duena puede
-      // haber tomado el control y contestado a mano - mandar igual la respuesta vieja la contradice
-      // delante del cliente. Se descarta: lo que un humano ya contesto vale mas que un borrador viejo.
-      const stillAutomatic = await prisma.conversation.findUnique({
-        where: { id: conversation.id },
-        select: { humanControl: true },
-      });
-      if (stillAutomatic?.humanControl) {
-        console.log("El equipo tomo el control mientras se generaba la respuesta, se descarta:", conversation.id);
-        return;
-      }
-
-      // Misma idea, sin que nadie haya tomado el control: si la respuesta tardo demasiado ya no contesta
-      // la pregunta que el cliente hizo, asi que se tira y la conversacion pasa a un humano - dejarla en
-      // automatico significaria que el cliente se queda sin nada.
-      const waitedMinutes = (Date.now() - customerSentAt) / (60 * 1000);
-      if (waitedMinutes > STALE_REPLY_MINUTES) {
-        const detail = `La respuesta tardo ${Math.round(waitedMinutes)} minutos en generarse (limite ${STALE_REPLY_MINUTES}) y se descarto sin mandarla.`;
-        console.error(`${detail} conversation=${conversation.id}`);
-        await recordAgentIncident(business.id, "STALE_REPLY_DISCARDED", detail, conversation.id);
-        await setHumanControl(business.id, conversation.id, true);
-        if (business.contactPhone) {
-          const customerLabel = customerDisplayName(customer);
-          const staleAlertText = `El bot tardo ${Math.round(waitedMinutes)} minutos en responderle a ${customerLabel} y la respuesta se descarto por vieja. Esa conversacion quedo esperandote en el panel.`;
-          await alertOwnerTracked(business.id, credentials, business.contactPhone!, staleAlertText);
-        }
-        return;
-      }
-
-      const formattedReply = formatForWhatsapp(reply);
-      await sendToCustomer({
-        businessId: business.id,
-        conversationId: conversation.id,
+      // Fase 10 del plan maestro: no se llama a generateReply directamente aca. Se agrupa con
+      // cualquier otro mensaje que este mismo cliente mande en los proximos ~8s (replyBurstBuffer,
+      // definido arriba) y recien entonces se genera y manda UNA sola respuesta para toda la
+      // rafaga - ver runGenerateAndSend. Esto libera el lock de este mensaje puntual de inmediato
+      // en vez de tenerlo abierto esperando a que se genere una respuesta.
+      replyBurstBuffer.add(conversation.id, {
+        rawText,
+        customerSentAt,
+        business,
+        customer,
         credentials,
-        to: from,
-        content: { kind: "text", text: formattedReply },
-        recordAs: { text: formattedReply },
+        from,
       });
     });
   } catch (error) {
