@@ -189,6 +189,16 @@ export const OPEN_CLARIFYING_QUESTION_PATTERN =
 // match ANY bracketed text mentioning foto(s)/video(s), regardless of the exact wording around it - the
 // model has no real caption format worth preserving here, only real sends do, and those never appear
 // inside the model's own generated `text`.
+// Not every "foto" in a reply is a CATALOG photo. A courier tracking slip ("te paso la foto de la guía
+// apenas se realice el envío") and a payment receipt ("mandame la foto del comprobante") both match the
+// claim patterns above word for word, but neither is something send_product_media could ever deliver -
+// the first is a future promise about a document that does not exist yet, the second is a photo the
+// CUSTOMER sends US. Real regression (2026-09-15): the guía phrasing dragged the whole media backstop in
+// mid-purchase and appended a "no logré cargar las fotos" retraction to a perfectly correct shipping
+// answer. Checked before the backstop engages at all.
+export const NON_PRODUCT_PHOTO_PATTERN =
+  /\b(gu[ií]a|comprobante|recibo|soporte|transferencia|pago)\b/i;
+
 export const FAKE_MEDIA_TAG_PATTERN = /\[[^\]]{0,60}\b(?:fotos?|videos?)\b[^\]]{0,60}\]/i;
 export const MEDIA_TAG_STRIP_PATTERN = /\[[^\]]{0,60}\b(?:fotos?|videos?)\b[^\]]{0,60}\]/gi;
 
@@ -1020,6 +1030,7 @@ export async function generateReply(
       (PHOTO_CLAIM_PATTERN.test(text) &&
         PHOTO_REQUEST_PATTERN.test(text) &&
         !OPEN_CLARIFYING_QUESTION_PATTERN.test(text) &&
+        !NON_PRODUCT_PHOTO_PATTERN.test(text) &&
         !OFFER_OR_PENDING_CONFIRMATION_PATTERN.test(stripMarkdownEmphasis(text))) ||
       fakeMediaTag;
     if (!customerAsked && !modelClaimsSent) return text;
@@ -1102,6 +1113,24 @@ export async function generateReply(
     // to silently drop legitimate 3+ product requests.
     const wholeCatalogMatch = products.length > 1 && matched.length === products.length;
     if (matched.length > 5 || wholeCatalogMatch) return text;
+
+    // Zero candidates does NOT mean a dropped product-photo promise - far more often it means the
+    // "claim" was never about a catalog photo at all. Real regression this caused within minutes of
+    // shipping (2026-09-15): "te paso la foto de la guía apenas se realice el envío" (a courier tracking
+    // slip, promised for the FUTURE) matched PHOTO_CLAIM_PATTERN + PHOTO_REQUEST_PATTERN, matched no
+    // product (correctly - there is none), and got the retraction line glued onto an otherwise perfect
+    // shipping answer, in front of a customer mid-purchase. The retraction only makes sense when we had
+    // a real product to send and the send itself failed; with nothing to send, stay quiet and just leave
+    // the incident for the panel.
+    if (matched.length === 0) {
+      await recordAgentIncident(
+        context.businessId,
+        "BACKSTOP_INTERVENTION",
+        `Texto parecia prometer fotos pero no se identifico ningun producto para mandar: "${text.slice(0, 160)}"`,
+        conversationId
+      );
+      return text;
+    }
 
     let sentAny = false;
     for (let i = 0; i < matched.length; i++) {
