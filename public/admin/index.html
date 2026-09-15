@@ -319,7 +319,7 @@
         <div class="hint">Puede tardar unos minutos en verse actualizada dentro de WhatsApp.</div>
       </div>
 
-      <div class="settings-group settings-group-last">
+      <div class="settings-group">
         <div class="settings-group-title">Contacto</div>
         <div class="grid-2">
           <div>
@@ -332,6 +332,22 @@
           </div>
         </div>
         <div class="hint">Un número distinto al del bot. Cuando un cliente mande el comprobante de pago, el bot te va a escribir a este número pidiendo que confirmes si el pago llegó antes de cerrarle la venta al cliente.</div>
+      </div>
+
+      <div class="settings-group settings-group-last">
+        <div class="settings-group-title">Escalación al dueño</div>
+        <p class="settings-desc">Cuando el bot te pregunta algo que no puede resolver solo, esto controla cuánto espera antes de avisarte de nuevo y cuándo da por vencida la espera.</p>
+        <div class="grid-2">
+          <div>
+            <label>Recordatorio si no respondes (minutos)</label>
+            <input id="business-owner-reminder-minutes" type="number" min="1" placeholder="180" />
+          </div>
+          <div>
+            <label>Vencimiento de la pregunta (horas)</label>
+            <input id="business-owner-question-timeout-hours" type="number" min="1" placeholder="24" />
+          </div>
+        </div>
+        <div class="hint">Pasado el recordatorio, el bot te vuelve a escribir. Pasado el vencimiento, la conversación pasa a control manual para que la revises directamente.</div>
       </div>
 
       <div class="section-title owner-only">Zona de peligro</div>

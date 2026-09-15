@@ -185,6 +185,8 @@ async function loadBusiness() {
     watchBusinessDirty();
     document.getElementById('business-contact-name').value = business.contactName || '';
     document.getElementById('business-contact-phone').value = business.contactPhone || '';
+    document.getElementById('business-owner-reminder-minutes').value = business.ownerReminderMinutes || 180;
+    document.getElementById('business-owner-question-timeout-hours').value = business.ownerQuestionTimeoutHours || 24;
     document.getElementById('business-followup-template').dataset.saved = business.followUpTemplateName || '';
     document.getElementById('business-followup-language').value = business.followUpTemplateLanguage || 'es';
     document.getElementById('business-followup-hours').value = business.followUpDelayHours || 24;
@@ -473,6 +475,8 @@ async function saveBusiness() {
   const businessCategory = document.getElementById('bot-category').value;
   const contactName = document.getElementById('business-contact-name').value.trim();
   const contactPhone = document.getElementById('business-contact-phone').value.trim();
+  const ownerReminderMinutes = Number(document.getElementById('business-owner-reminder-minutes').value) || 180;
+  const ownerQuestionTimeoutHours = Number(document.getElementById('business-owner-question-timeout-hours').value) || 24;
   const followUpTemplateName = document.getElementById('business-followup-template').value.trim();
   const followUpTemplateLanguage = document.getElementById('business-followup-language').value.trim() || 'es';
   const followUpDelayHours = Number(document.getElementById('business-followup-hours').value) || 24;
@@ -492,6 +496,7 @@ async function saveBusiness() {
       body: JSON.stringify({
         name, description, customInstructions, assistantName, botTone, botDialect, botGreeting, botNeverSay,
         autoSendPhotoOnQuote, offerPhotosBeforeSending, requirePaymentProof, businessCategory, contactName, contactPhone,
+        ownerReminderMinutes, ownerQuestionTimeoutHours,
         followUpTemplateName, followUpTemplateLanguage, followUpDelayHours,
         genderedAddressEnabled, femaleAddressTerm, maleAddressTerm, shippingPaymentModalities,
       }),
@@ -3178,7 +3183,8 @@ const OWNER_ONLY_INPUT_IDS = [
   'business-name', 'business-description', 'business-instructions',
   'bot-category', 'bot-assistant-name', 'bot-tone', 'bot-dialect', 'bot-greeting', 'bot-never-say', 'bot-photo-mode', 'bot-require-proof',
   'business-contact-name',
-  'business-contact-phone', 'business-followup-template', 'business-followup-language', 'business-followup-hours',
+  'business-contact-phone', 'business-owner-reminder-minutes', 'business-owner-question-timeout-hours',
+  'business-followup-template', 'business-followup-language', 'business-followup-hours',
   'pm-type', 'pm-label', 'pm-details',
   'faq-question', 'faq-answer',
   'team-name', 'team-email', 'team-password',
