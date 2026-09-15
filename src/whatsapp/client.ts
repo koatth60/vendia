@@ -20,20 +20,90 @@ function recipientField(to: string): { to: string } | { recipient: string } {
   return isBsuid(to) ? { recipient: to } : { to };
 }
 
+// Meta answers a failed send with a JSON envelope: { error: { message, type, code, error_subcode,
+// error_data: { details } } }. `code` is the only stable, machine-readable part of it - the message
+// text is prose Meta rewrites whenever it likes, and every caller that branched on it was really
+// branching on a string that could change without notice. GraphApiError carries the parsed code so
+// src/whatsapp/outbound.ts can decide (retry / template fallback / give up) on the number instead.
+export class GraphApiError extends Error {
+  readonly status: number | null;
+  readonly code: number | null;
+  readonly subcode: number | null;
+  readonly details: string | null;
+  readonly timedOut: boolean;
+
+  constructor(init: {
+    message: string;
+    status?: number | null;
+    code?: number | null;
+    subcode?: number | null;
+    details?: string | null;
+    timedOut?: boolean;
+  }) {
+    super(init.message);
+    this.name = "GraphApiError";
+    this.status = init.status ?? null;
+    this.code = init.code ?? null;
+    this.subcode = init.subcode ?? null;
+    this.details = init.details ?? null;
+    this.timedOut = init.timedOut ?? false;
+  }
+}
+
+interface MetaErrorEnvelope {
+  error?: { message?: string; code?: number; error_subcode?: number; error_data?: { details?: string } };
+}
+
+function graphErrorFromBody(status: number, bodyText: string): GraphApiError {
+  let parsed: MetaErrorEnvelope | null = null;
+  try {
+    parsed = JSON.parse(bodyText) as MetaErrorEnvelope;
+  } catch {
+    parsed = null;
+  }
+  const metaError = parsed?.error;
+  return new GraphApiError({
+    message: `WhatsApp API error (${status})${metaError?.code ? ` [${metaError.code}]` : ""}: ${metaError?.message ?? bodyText}`,
+    status,
+    code: typeof metaError?.code === "number" ? metaError.code : null,
+    subcode: typeof metaError?.error_subcode === "number" ? metaError.error_subcode : null,
+    details: metaError?.error_data?.details ?? null,
+  });
+}
+
+// Sin timeout, un `fetch` a Meta que no responde nunca deja el turno colgado para siempre - y como el
+// envio corre dentro del lock por conversacion (src/routes/whatsapp.ts), ese cliente deja de recibir
+// cualquier respuesta hasta que se reinicie el proceso. Se corta aca y el error se trata como
+// reintentable, que es lo que realmente es.
+const GRAPH_TIMEOUT_MS = Number(process.env.WHATSAPP_TIMEOUT_MS ?? "") || 15000;
+
 async function callGraphApi(credentials: WhatsappCredentials, body: unknown) {
   const url = `${GRAPH_BASE_URL}/${credentials.phoneNumberId}/messages`;
-  const response = await fetch(url, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${credentials.accessToken}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
-  });
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${credentials.accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(GRAPH_TIMEOUT_MS),
+    });
+  } catch (error) {
+    // Un abort por timeout y una caida de red llegan igual de reintentables; se distingue el timeout
+    // solo para poder contarlo aparte en los registros.
+    const timedOut = error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");
+    throw new GraphApiError({
+      message: timedOut
+        ? `WhatsApp API sin respuesta despues de ${GRAPH_TIMEOUT_MS} ms`
+        : `WhatsApp API inalcanzable: ${error instanceof Error ? error.message : String(error)}`,
+      timedOut,
+    });
+  }
 
   if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`WhatsApp API error (${response.status}): ${errorText}`);
+    throw graphErrorFromBody(response.status, await response.text());
   }
 
   return response.json();
