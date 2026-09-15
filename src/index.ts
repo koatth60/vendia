@@ -2,6 +2,7 @@ import express from "express";
 import http from "node:http";
 import path from "path";
 import { env } from "./config/env";
+import { prisma } from "./db/client";
 import { sessionMiddleware } from "./auth/sessionMiddleware";
 import { setupRealtime } from "./realtime/socket";
 import { whatsappRouter, getActiveTurnCount } from "./routes/whatsapp";
@@ -19,8 +20,17 @@ app.set("trust proxy", 1);
 app.use(express.json());
 app.use(sessionMiddleware);
 
-app.get("/health", (_req, res) => {
-  res.json({ status: "ok" });
+// Fase 7 del plan maestro (2026-09-15): antes devolvia {status:"ok"} incondicionalmente - no detectaba
+// una conexion rota a Postgres, que es justo el tipo de falla que un healthcheck existe para atrapar.
+// `SELECT 1` es la consulta mas barata que toca la base de verdad, sin depender de ninguna tabla.
+app.get("/health", async (_req, res) => {
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    res.json({ status: "ok" });
+  } catch (error) {
+    console.error("Healthcheck fallo: no se pudo consultar la base de datos:", error);
+    res.status(503).json({ status: "error", detail: "database unreachable" });
+  }
 });
 
 // Los estáticos no llevan hash en el nombre (admin.css es siempre admin.css), así que
