@@ -2,6 +2,7 @@ import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } fro
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { randomUUID } from "crypto";
 import { env } from "../config/env";
+import { detectFileType, type DetectedFileType, type FileKind } from "./fileType";
 
 let s3: S3Client | null = null;
 
@@ -21,20 +22,87 @@ function getS3Client(): S3Client {
   return s3;
 }
 
+// Fase 8, punto 7 del plan maestro (2026-09-15). Tope por tipo, no uno solo para todo: 50 MB para un
+// video es razonable, para una foto de catalogo no - y el tope mas alto es el que termina definiendo
+// cuanto puede ocupar cualquier subida si no se separan.
+export const MAX_BYTES_BY_KIND: Record<FileKind, number> = {
+  image: 12 * 1024 * 1024,
+  video: 50 * 1024 * 1024,
+  audio: 20 * 1024 * 1024,
+};
+
+// Que puede caer en cada carpeta. "receipts" recibe fotos de comprobantes y tambien el cuadro que se
+// extrae de un video entrante (ver routes/whatsapp.ts), las dos cosas son imagenes.
+const ALLOWED_KINDS_BY_FOLDER: Record<MediaFolder, FileKind[]> = {
+  images: ["image"],
+  receipts: ["image"],
+  videos: ["video"],
+  audio: ["audio"],
+};
+
+export class RejectedMediaError extends Error {}
+
+export type MediaFolder = "images" | "videos" | "audio" | "receipts";
+
+// Toda la decision de "este archivo se acepta y con que tipo se guarda", separada de la subida para
+// poder probarla sin tocar S3 - y para que quede en un solo lugar en vez de repartida entre las rutas.
+export function resolveUploadType(
+  buffer: Buffer,
+  declaredContentType: string,
+  folder: MediaFolder
+): DetectedFileType {
+  // El tipo sale del contenido, no de lo que declara quien sube. Antes la extension era
+  // `declaredContentType.split("/")[1]`: subiendo algo como "text/html" quedaba un .html servido con
+  // Content-Type: text/html desde el bucket, o sea una pagina ejecutable alojada en nuestro dominio de
+  // medios, con una URL que el panel reparte.
+  const detected = detectFileType(buffer);
+  if (!detected) {
+    throw new RejectedMediaError(
+      `Tipo de archivo no reconocido (el cliente lo declaro como ${declaredContentType}). Usa JPG, PNG, WEBP, MP4 o audio.`
+    );
+  }
+
+  // mp4 y m4a son el MISMO contenedor: la unica diferencia es si adentro hay pista de video. Los bytes
+  // no alcanzan para separarlos cuando la marca es generica ("isom", "mp42"), que es lo que manda
+  // WhatsApp en varias notas de voz. Solo en ese empate se mira lo que declaro quien sube, y solo para
+  // elegir entre dos formatos que igual son medios inertes - no para decidir si el archivo se acepta.
+  const resolved: DetectedFileType =
+    folder === "audio" && detected.mime === "video/mp4" && declaredContentType.startsWith("audio/")
+      ? { mime: "audio/mp4", extension: "m4a", kind: "audio" }
+      : detected;
+
+  if (!ALLOWED_KINDS_BY_FOLDER[folder].includes(resolved.kind)) {
+    throw new RejectedMediaError(`Un archivo ${resolved.mime} no va en ${folder}`);
+  }
+  if (resolved.mime === "image/gif") {
+    throw new RejectedMediaError("Formato GIF no soportado todavía - usa JPG, PNG o video.");
+  }
+
+  const maxBytes = MAX_BYTES_BY_KIND[resolved.kind];
+  if (buffer.length > maxBytes) {
+    throw new RejectedMediaError(
+      `El archivo pesa ${Math.round(buffer.length / (1024 * 1024))} MB y el maximo para ${resolved.kind} es ${Math.round(maxBytes / (1024 * 1024))} MB`
+    );
+  }
+
+  return resolved;
+}
+
 export async function uploadMedia(
   buffer: Buffer,
-  contentType: string,
-  folder: "images" | "videos" | "audio" | "receipts" | "backups"
+  declaredContentType: string,
+  folder: MediaFolder
 ): Promise<{ key: string; url: string }> {
-  const extension = contentType.split("/")[1] ?? "bin";
-  const key = `${folder}/${randomUUID()}.${extension}`;
+  const detected = resolveUploadType(buffer, declaredContentType, folder);
+
+  const key = `${folder}/${randomUUID()}.${detected.extension}`;
 
   await getS3Client().send(
     new PutObjectCommand({
       Bucket: env.aws.bucket,
       Key: key,
       Body: buffer,
-      ContentType: contentType,
+      ContentType: detected.mime,
     })
   );
 

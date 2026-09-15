@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { requireAuth } from "../../auth/requireAuth";
+import { uploadErrorHandler } from "./shared";
 import { businessRouter } from "./business";
 import { catalogRouter } from "./catalog";
 import { paymentsRouter } from "./payments";
@@ -31,3 +32,8 @@ adminRouter.use(dashboardRouter);
 adminRouter.use(shippingRouter);
 adminRouter.use(searchRouter);
 adminRouter.use(whatsappConnectRouter);
+
+// Fase 8, punto 7: convierte el rechazo de una subida (tipo no permitido, tamano, contenido que no
+// coincide con lo declarado) en un 400 con el motivo, en vez del 500 generico del manejador por
+// omision de Express. Va al final: un manejador de errores solo ve lo que largan los que estan antes.
+adminRouter.use(uploadErrorHandler);
