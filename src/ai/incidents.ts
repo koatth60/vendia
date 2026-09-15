@@ -45,6 +45,37 @@ export interface AgentIncidentSummary {
   lastExternalApiFailure: { detail: string; createdAt: Date } | null;
 }
 
+// Fase 0 del plan de estabilizacion (2026-09-15): el detalle de lo que encontro el chequeo automatico de
+// conversaciones, agrupado por tipo y con la conversacion de cada caso. Hasta ahora el panel solo mostraba
+// CUANTAS intervenciones hubo; un contador no dice si el bot prometio fotos que no mando o si una venta
+// se cerro sin quedar registrada, que es justo lo que el dueno necesita ver. Ver jobs/conversationHealth.ts.
+export interface HealthFindingRow {
+  kind: string;
+  detail: string;
+  conversationId: string | null;
+  createdAt: Date;
+}
+
+export async function getHealthFindings(businessId: string, sinceHours = 24): Promise<HealthFindingRow[]> {
+  const since = new Date(Date.now() - sinceHours * 60 * 60 * 1000);
+  const rows = await prisma.agentIncident.findMany({
+    where: { businessId, createdAt: { gte: since }, detail: { startsWith: "[chequeo]" } },
+    orderBy: { createdAt: "desc" },
+    take: 100,
+    select: { detail: true, conversationId: true, createdAt: true },
+  });
+  return rows.map((r) => {
+    // "[chequeo] TIPO: texto" -> { kind: "TIPO", detail: "texto" }
+    const match = r.detail.match(/^\[chequeo\]\s+([A-Z_]+):\s*([\s\S]*)$/);
+    return {
+      kind: match?.[1] ?? "DESCONOCIDO",
+      detail: match?.[2] ?? r.detail,
+      conversationId: r.conversationId,
+      createdAt: r.createdAt,
+    };
+  });
+}
+
 // Powers the admin panel's "salud del bot" numbers - counts over the trailing window, plus a live count
 // of conversations currently stuck (humanControl:true, not sold/lost - see the Fase A watchdog fields).
 export async function getAgentIncidentSummary(businessId: string, sinceDays = 7): Promise<AgentIncidentSummary> {

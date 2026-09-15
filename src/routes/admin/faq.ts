@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { listFaqEntries, createFaqEntry, updateFaqEntry, deleteFaqEntry } from "../../catalog/faq";
-import { listPendingCandidates, approveCandidate, discardCandidate } from "../../catalog/learnedFaq";
+import { listPendingCandidates, approveCandidate, discardCandidate, MIN_OCCURRENCES_TO_SUGGEST } from "../../catalog/learnedFaq";
 import { requireOwner } from "../../auth/requireOwner";
 import { businessIdOf } from "./shared";
 
@@ -34,7 +34,10 @@ faqRouter.delete("/api/faq/:id", requireOwner, async (req, res) => {
 
 
 faqRouter.get("/api/faq-candidates", async (req, res) => {
-  const candidates = await listPendingCandidates(businessIdOf(req));
+  // Solo se le proponen al dueno las preguntas que llegaron mas de una vez - ver
+  // MIN_OCCURRENCES_TO_SUGGEST. Las demas siguen guardadas y aparecen solas cuando alguien las repite.
+  const all = await listPendingCandidates(businessIdOf(req));
+  const candidates = all.filter((c) => c.occurrences >= MIN_OCCURRENCES_TO_SUGGEST);
   res.json(candidates);
 });
 

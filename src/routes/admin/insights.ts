@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { getAiUsageSummary, getPlanUsage } from "../../ai/usage";
-import { getAgentIncidentSummary } from "../../ai/incidents";
+import { getAgentIncidentSummary, getHealthFindings } from "../../ai/incidents";
 import { getConfigHealth } from "../../ai/configHealth";
 import { getAnalyticsSummary } from "../../analytics/service";
 import { businessIdOf } from "./shared";
@@ -19,6 +19,13 @@ insightsRouter.get("/api/ai-usage", async (req, res) => {
 insightsRouter.get("/api/agent-incidents", async (req, res) => {
   const summary = await getAgentIncidentSummary(businessIdOf(req));
   res.json(summary);
+});
+
+// Fase 0 (2026-09-15): el detalle de lo que encontro el chequeo automatico en las ultimas 24h, para que
+// "salud del bot" deje de ser solo contadores y diga QUE paso en cada conversacion.
+insightsRouter.get("/api/health-findings", async (req, res) => {
+  const findings = await getHealthFindings(businessIdOf(req));
+  res.json({ findings });
 });
 
 // Fase G, 2026-09-13 audit: surfaces the config gaps that today fail silently in production - see

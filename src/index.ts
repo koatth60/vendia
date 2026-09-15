@@ -10,6 +10,7 @@ import { authRouter } from "./routes/auth";
 import { platformAdminRouter } from "./routes/platformAdmin";
 import { runFollowUpJob } from "./jobs/followUp";
 import { runEscalationReminderJob } from "./jobs/escalationReminder";
+import { runConversationHealthJob, HEALTH_CHECK_INTERVAL_MS } from "./jobs/conversationHealth";
 
 const app = express();
 app.set("trust proxy", 1);
@@ -67,3 +68,8 @@ const ESCALATION_REMINDER_INTERVAL_MS = 30 * 60 * 1000;
 setInterval(() => {
   runEscalationReminderJob().catch((error) => console.error("Error corriendo el job de recordatorio de escalaciones:", error));
 }, ESCALATION_REMINDER_INTERVAL_MS);
+
+// Fase 0: el chequeo de conversaciones corre solo. Ver src/jobs/conversationHealth.ts.
+setInterval(() => {
+  runConversationHealthJob().catch((error) => console.error("Error corriendo el chequeo de conversaciones:", error));
+}, HEALTH_CHECK_INTERVAL_MS);

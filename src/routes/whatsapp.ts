@@ -21,8 +21,9 @@ import {
   queueOutboundMessage,
   listQueuedOutboundForCustomer,
   markQueuedOutboundSent,
+  saveCustomerContactInfo,
 } from "../conversation/service";
-import { generateReply, generateClosingMessage } from "../ai/agent";
+import { generateReply, generateClosingMessage, extractDeliveryDataFromAnswer, extractAddressFromAnswer } from "../ai/agent";
 import { analyzeCustomerImage } from "../ai/vision";
 import { transcribeAudio } from "../ai/transcription";
 import { checkPlanCap } from "../ai/usage";
@@ -596,6 +597,21 @@ whatsappRouter.post("/webhook", async (req, res) => {
 
       if (gate?.humanControl) {
         console.log("Conversacion en control humano, el bot no responde:", conversation.id);
+
+        // El bot no CONTESTA bajo control humano, pero eso no significa que el sistema deba ignorar lo
+        // que el cliente escribe. Real (2026-09-15): mientras la duena atendia a mano, un cliente dio el
+        // nombre de quien recibe, su celular y la direccion; los tres quedaron solo como prosa en el chat
+        // y la ficha siguio vacia, asi que el despacho salio sin datos estructurados. Capturar es callado
+        // y no le manda nada al cliente, asi que no pisa a la persona que esta atendiendo.
+        try {
+          const found = extractDeliveryDataFromAnswer(rawText);
+          const direccion = extractAddressFromAnswer(rawText) ?? undefined;
+          if (found.idNumber || found.deliveryPhone || direccion) {
+            await saveCustomerContactInfo(business.id, customer.id, { ...found, address: direccion });
+          }
+        } catch (error) {
+          console.error("No se pudieron capturar los datos de entrega bajo control humano:", error);
+        }
         // Silence with zero acknowledgment reads as the bot being broken to the customer, and the owner
         // ends up having to jump in just to say "we got your message". Send one heads-up per pause period,
         // gated on a dedicated flag (not "does the last ASSISTANT message match the ack text") - the owner's

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   extractDeliveryDataFromAnswer,
   extractNameFromDeliveryAnswer,
+  extractAddressFromAnswer,
   extractNameFromAnswer,
   extractSelfIntroducedName,
 } from "./agent";
@@ -74,4 +75,22 @@ test("sigue aceptando nombres reales, incluidos los compuestos", () => {
 
 test("tolera particulas de apellido compuesto cuando hay nombre de verdad alrededor", () => {
   assert.equal(extractNameFromAnswer("Juan De la Hoz"), "Juan De La Hoz");
+});
+
+// La direccion de entrega no tenia donde guardarse hasta el 2026-09-15: Customer.address existia pero
+// ningun camino lo llenaba. Estos son mensajes reales de clientes de esa noche.
+test("saca la direccion de una respuesta con varios datos juntos", () => {
+  const real = "Santa rosa de cabal risaralda  \n Cra 17 # 23-03 villa alegria  \n Linda Marin  \n 1093223487  \n 3135794619";
+  assert.equal(extractAddressFromAnswer(real), "Cra 17 # 23-03 villa alegria");
+});
+
+test("conserva el detalle de casa o piso, que el mensajero necesita", () => {
+  assert.equal(extractAddressFromAnswer("Cr143#143b-42  Casa piso 3"), "Cr143#143b-42  Casa piso 3");
+  assert.equal(extractAddressFromAnswer("Barrio la aurora   Calle 57 sur 65 92"), "Calle 57 sur 65 92");
+});
+
+test("no confunde una cedula ni un celular con una direccion", () => {
+  assert.equal(extractAddressFromAnswer("Sebastián montealegre sotelo        CC: 1004074880"), null);
+  assert.equal(extractAddressFromAnswer("3208935318"), null);
+  assert.equal(extractAddressFromAnswer("Camila"), null);
 });

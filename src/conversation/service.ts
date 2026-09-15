@@ -141,11 +141,39 @@ export async function getOrCreateOpenConversation(businessId: string, customerId
   if (existing) return existing;
 
   const conversation = await prisma.conversation.create({
-    data: { customerId, status: "NEW" },
+    data: { customerId, status: "NEW", contextSummary: await summarizePreviousPurchase(customerId) },
     include: { customer: true },
   });
   emitNewConversation(businessId, formatConversationRow(conversation));
   return conversation;
+}
+
+// Real (2026-09-15): una clienta cerro su compra y minutos despues escribio "Vale gracias". Como su
+// conversacion ya estaba en SOLD, eso abrio una conversacion NUEVA y vacia, donde el bot no tenia idea de
+// que acababa de comprar - le respondio "¿hay algo más en lo que te pueda ayudar?" como si no se
+// conocieran. El panel ya agrupa las conversaciones por cliente; lo que faltaba era que el BOT tambien
+// supiera. Se siembra el resumen de contexto con lo minimo para no arrancar de cero: que compro y cuando.
+// Una sola frase y solo de lo reciente - no es el historial completo, es el hilo que no hay que soltar.
+const PREVIOUS_PURCHASE_WINDOW_DAYS = 7;
+
+async function summarizePreviousPurchase(customerId: string): Promise<string | null> {
+  const since = new Date(Date.now() - PREVIOUS_PURCHASE_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+  const order = await prisma.order.findFirst({
+    where: { customerId, createdAt: { gte: since } },
+    orderBy: { createdAt: "desc" },
+    include: { items: true },
+  });
+  if (!order) return null;
+
+  const productos = order.items.map((i) => `${i.quantity}x ${i.productName}`).join(", ");
+  const cuando = order.createdAt.toLocaleDateString("es-CO", { day: "numeric", month: "long" });
+  const estado =
+    order.fulfillmentStatus === "SHIPPED"
+      ? "ya fue despachado"
+      : order.fulfillmentStatus === "CANCELED"
+        ? "quedo cancelado"
+        : "todavia no ha sido despachado";
+  return `Este cliente ya compro con nosotros el ${cuando}: ${productos || "un pedido"} por un total de ${order.totalAmount.toString()} ${order.currency}, y ese pedido ${estado}. No lo trates como un cliente nuevo ni le pidas de nuevo los datos que ya dio, y si escribe por ese pedido respondele sobre el.`;
 }
 
 // "Previous conversation" for the continue-or-restart prompt some businesses' own scripts ask for (e.g.
@@ -292,7 +320,10 @@ export async function saveCustomerName(businessId: string, customerId: string, n
 export async function saveCustomerContactInfo(
   businessId: string,
   customerId: string,
-  data: { idNumber?: string; deliveryPhone?: string }
+  // `address` se sumo el 2026-09-15: la direccion de entrega no tenia donde guardarse. Una clienta
+  // mando "Cra 17 # 23-03 villa alegria" y Customer.address seguia vacio - el dato solo sobrevivia como
+  // prosa dentro del resumen del pedido, donde no se puede buscar ni exportar ni usar para la guia.
+  data: { idNumber?: string; deliveryPhone?: string; address?: string }
 ) {
   const customer = await prisma.customer.findFirst({ where: { id: customerId, businessId } });
   if (!customer) return null;
@@ -301,6 +332,7 @@ export async function saveCustomerContactInfo(
     data: {
       ...(data.idNumber ? { idNumber: data.idNumber } : {}),
       ...(data.deliveryPhone ? { deliveryPhone: data.deliveryPhone } : {}),
+      ...(data.address ? { address: data.address } : {}),
     },
   });
   await emitConversationRowsForCustomer(businessId, customerId);

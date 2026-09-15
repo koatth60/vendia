@@ -125,7 +125,10 @@ test("listPendingCandidates orders by occurrences (most-requested first)", async
     await recordAskOwnerResolution(business2.id, "Hacen envios a Estados Unidos?", "No por ahora.", null);
     // Bump the second one twice more (each shares "hacen"/"envios"/"estados"/"unidos" with the
     // original, well above the 2-token threshold) so it ends up with the highest occurrences.
-    await recordAskOwnerResolution(business2.id, "Ustedes hacen envios a Estados Unidos tambien?", "No.", null);
+    // La respuesta no puede ser un "No." pelado: desde el filtro de calidad (2026-09-15) una respuesta
+    // que no dice nada por si sola ya no se guarda como sugerencia, porque era justo lo que llenaba las
+    // FAQ de entradas que solo se entendian leyendo la conversacion original.
+    await recordAskOwnerResolution(business2.id, "Ustedes hacen envios a Estados Unidos tambien?", "No, todavia no llegamos alla.", null);
     await recordAskOwnerResolution(business2.id, "Confirman que hacen envios a Estados Unidos?", "Todavia no.", null);
 
     const candidates = await listPendingCandidates(business2.id);

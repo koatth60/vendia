@@ -578,6 +578,27 @@ export function extractDeliveryDataFromAnswer(text: string): { idNumber?: string
   return out;
 }
 
+// La direccion dentro de una respuesta combinada. Una direccion colombiana casi siempre trae una de
+// estas palabras de via ("Cra 17 # 23-03", "Calle 57 sur 65 92", "Mz 4 casa 12"), y eso la distingue de
+// una cedula o un celular sueltos sin necesidad de entender la frase entera. Se toma la linea completa
+// donde aparece: el resto de la linea suele ser el barrio o el detalle de casa/apartamento, que el
+// mensajero necesita igual. Real (2026-09-15): "Santa rosa de cabal risaralda | Cra 17 # 23-03 villa
+// alegria | Linda Marin | 1093223487 | 3135794619" - todo en un mensaje, y la direccion no se guardaba.
+const STREET_WORD_PATTERN =
+  /\b(cra|carrera|cll|calle|kr|kra|av|avenida|diagonal|diag|transversal|trans|tv|manzana|mz|lote|lt|autopista|via|vereda|conjunto|torre|apto|apartamento|casa|piso|barrio|bloque|interior|urbanizaci[oó]n)\b/i;
+
+export function extractAddressFromAnswer(text: string): string | null {
+  const lines = text
+    .split(/\n|\s{3,}|\s*\|\s*/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+  const candidate = lines.find((l) => STREET_WORD_PATTERN.test(l) && /\d/.test(l));
+  if (!candidate) return null;
+  // Una linea que es solo un numero largo con una palabra suelta no es una direccion.
+  if (candidate.replace(/\D/g, "").length > 12) return null;
+  return candidate.length > 120 ? candidate.slice(0, 120) : candidate;
+}
+
 // El nombre dentro de una respuesta combinada: se queda solo con el tramo alfabetico antes del primer
 // numero o etiqueta ("Sebastián montealegre sotelo        CC: 1004074880" -> "Sebastián montealegre
 // sotelo") y lo pasa por el mismo filtro estricto que el resto de los nombres.
@@ -832,6 +853,29 @@ export function stripMarkdownEmphasis(text: string): string {
   return text.replace(/[*_]/g, "");
 }
 
+// Nombres de herramientas internas escritos dentro del mensaje al cliente. Real (2026-09-15): una
+// clienta recibio "Aquí van las fotos del Combo Pareja 📸 [send_product_media: Combo Pareja]". El modelo
+// imita el formato de los tool calls que ve en su propio contexto. FAKE_MEDIA_TAG_PATTERN no lo
+// agarraba porque ese patron exige la palabra foto/video adentro del corchete, y aca el corchete lleva
+// el nombre tecnico de la herramienta.
+const TOOL_CALL_LEAK_PATTERN = /\[\s*(?:send_product_media|get_product_details|search_products|find_products_by_attributes|ask_owner(?:_about_photo)?|save_customer_(?:name|contact_info)|get_faq|get_payment_methods|get_shipping_[a-z_]+|show_order_summary|close_sale|update_conversation_status|flag_conversation_intent|cancel_order|get_previous_conversation|list_all_products)\b[^\]]*\]/gi;
+
+// El estado interno del sistema no es asunto del cliente. Real (2026-09-15): a una clienta que acababa
+// de pagar y mandar el comprobante el bot le respondio "tu pedido aún no aparece registrado en el
+// sistema porque el pago todavía está en verificación de nuestro lado". Es cierto y es pesimo: describe
+// la mecanica interna en vez de decirle lo unico que le importa, que su pago esta siendo verificado.
+const INTERNAL_STATE_PATTERN =
+  /\bno (aparece|figura|esta|está) (registrad[oa]|cargad[oa]|cread[oa]) en (el|nuestro) sistema\b[^.]*\.?/gi;
+
+export function stripInternalLeaks(text: string): string {
+  return text
+    .replace(TOOL_CALL_LEAK_PATTERN, "")
+    .replace(INTERNAL_STATE_PATTERN, "tu pago todavía lo está verificando el equipo")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/[ \t]+\n/g, "\n")
+    .trim();
+}
+
 // Counts how many times, back-to-back at the END of `history`, the customer sent a photo/video and the
 // bot immediately replied with an "I can't tell which product this is" clarifying question - see
 // shouldForcePhotoEscalation in generateReply. Exported as a pure function for a cheap regression test.
@@ -993,6 +1037,8 @@ export async function generateReply(
   let contactSavedThisTurn = 0;
   let intentFlaggedThisTurn = 0;
   let catalogCheckedThisTurn = 0;
+  // Cuenta las consultas a get_faq de este turno: la primera se fuerza antes de dejar escalar (ver abajo).
+  let faqCheckedThisTurn = 0;
   let paymentMethodsThisTurn: { type: string; label: string; details: string }[] | null = null;
   let shippingRatesThisTurn: { label: string; cost: string }[] | null = null;
   // Set only when find_products_by_attributes ran this turn AND resolved unambiguously (not spanning
@@ -1018,6 +1064,7 @@ export async function generateReply(
   let orderSummaryTotalThisTurn: number | null = null;
 
   async function finalizeTurn(text: string): Promise<string> {
+    text = stripInternalLeaks(text);
     text = guardAgainstPaymentHallucination(text, paymentMethodsThisTurn);
 
     // Verify shipping-cost mentions even if the model never called get_shipping_rates this turn (it may
@@ -1151,8 +1198,9 @@ export async function generateReply(
         // asi que ya no importa que el bot haya pedido varios a la vez - ver
         // extractDeliveryDataFromAnswer.
         const found = extractDeliveryDataFromAnswer(customerText);
-        if (found.idNumber || found.deliveryPhone) {
-          await runCatalogTool(context, "save_customer_contact_info", found);
+        const address = extractAddressFromAnswer(customerText) ?? undefined;
+        if (found.idNumber || found.deliveryPhone || address) {
+          await runCatalogTool(context, "save_customer_contact_info", { ...found, address });
         }
         if (nameSavedThisTurn === 0) {
           const combinedName = extractNameFromDeliveryAnswer(customerText);
@@ -1445,6 +1493,27 @@ export async function generateReply(
             : searchScopedThisTurn && searchScopedThisTurn.length > 0
               ? searchScopedThisTurn
               : null;
+        // Real (2026-09-15): una clienta pregunto "¿de qué ciudad son ustedes?" y el bot lo escalo al
+        // dueno - pero la respuesta YA estaba en una FAQ escrita a mano, redactada como "Tienen punto
+        // fisico". No fue falta de informacion, fue que no la busco. Minutos despues le contesto lo mismo
+        // a otro cliente sin escalar. Escalar le cuesta tiempo real al dueno y deja al cliente esperando,
+        // asi que antes de molestarlo se le devuelven las FAQ al modelo una vez. Si despues de verlas
+        // sigue necesitando escalar, la segunda llamada pasa derecho.
+        if (call.function.name === "ask_owner" && faqCheckedThisTurn === 0) {
+          faqCheckedThisTurn++;
+          const faqs = await runCatalogTool(context, "get_faq", {});
+          messages.push({
+            role: "tool",
+            tool_call_id: call.id,
+            content: JSON.stringify({
+              asked: false,
+              note: "Antes de escalar: estas son las preguntas frecuentes de este negocio. Si alguna responde lo que pregunto el cliente (aunque este redactada distinto), contestale vos con eso y no escales. Si de verdad ninguna sirve, volve a llamar ask_owner y esta vez si se le manda al dueno.",
+              faq: faqs,
+            }),
+          });
+          continue;
+        }
+
         if (call.function.name === "send_product_media" && scopedProductsThisTurn) {
           const inputProductId = input.productId ? String(input.productId) : null;
           const inputProductName = input.productName ? normalizeForMatch(String(input.productName)) : null;
@@ -1504,6 +1573,7 @@ export async function generateReply(
         if (call.function.name === "save_customer_name") nameSavedThisTurn++;
         if (call.function.name === "save_customer_contact_info") contactSavedThisTurn++;
         if (call.function.name === "flag_conversation_intent") intentFlaggedThisTurn++;
+        if (call.function.name === "get_faq") faqCheckedThisTurn++;
         if (["search_products", "get_product_details", "list_all_products"].includes(call.function.name)) {
           catalogCheckedThisTurn++;
         }
