@@ -209,6 +209,15 @@ export function customerRequestsHuman(text: string): boolean {
   return HUMAN_REQUEST_PATTERN.test(text);
 }
 
+// Reintroducido de la Fase 4 del plan maestro (2026-09-15, commit e26d71e la borro junto con
+// applyClaimBackstops) - mismo patron exacto, ahora solo como detector sin efecto para F1 del
+// diagnostico: cuenta cuando el modelo promete consultar al dueno en prosa sin que exista ninguna
+// PendingOwnerQuestion real que respalde esa promesa (ni de este turno ni de uno anterior). Nunca
+// llama ask_owner, nunca toca el texto - ver el AgentIncident "escalacion_prometida_sin_herramienta"
+// en finalizeTurn.
+const ESCALATION_CLAIM_PATTERN =
+  /\b(equipo|due[ñn][oa]s?)\b.{0,25}\b(consult|confirm|pregunt|revis)|\b(consult|confirm|pregunt|revis)\w*\b.{0,25}\b(equipo|due[ñn][oa]s?)\b/i;
+
 // Fallback for the order-closed confirmation when there's no customInstructions to follow, or the
 // one-shot closing generation below fails/returns nothing - dialect doesn't change this particular
 // sentence (no "tenés"/"tienes" style conjugation in it), only tone (formality/emoji) and sign-off vary.
@@ -843,6 +852,23 @@ export async function generateReply(
 
     if (intentFlaggedThisTurn === 0 && customerText && customerRequestsHuman(customerText)) {
       await runCatalogTool(context, "flag_conversation_intent", { intent: "SOLICITA_AGENTE" });
+    }
+
+    // F1 del diagnostico: detector sin efecto. Si el texto promete consultar al dueno pero no hay
+    // ninguna PendingOwnerQuestion real que la respalde (ni abierta antes de este turno, ni creada
+    // recien por un ask_owner/ask_owner_about_photo que si corrio), solo se cuenta - nunca se llama
+    // ask_owner, nunca se toca el texto.
+    if (ESCALATION_CLAIM_PATTERN.test(text)) {
+      const stillNoOpenQuestion = (await findOpenPendingOwnerQuestionsForConversation(conversationId)).length === 0;
+      if (stillNoOpenQuestion) {
+        await recordAgentIncident(
+          context.businessId,
+          "BACKSTOP_INTERVENTION",
+          `El bot prometio consultar al dueno en prosa sin ninguna PendingOwnerQuestion real que respalde la promesa. Texto: "${text.slice(0, 200)}"`,
+          conversationId,
+          "escalacion_prometida_sin_herramienta"
+        );
+      }
     }
 
     // Fase 2 del plan maestro (2026-09-15), causa raiz C1: estos dos backstops INFIEREN el dato leyendo
