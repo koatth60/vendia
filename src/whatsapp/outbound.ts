@@ -120,6 +120,11 @@ const BACKOFF_MS: Record<"TRANSIENT" | "RATE_LIMITED", number[]> = {
   RATE_LIMITED: [2000, 8000],
 };
 
+// Fija la espera entre reintentos en vez de usar la escalera de arriba. Existe para que las pruebas no
+// tengan que esperar 10 segundos reales para comprobar que un 429 se reintenta; en produccion no se
+// define y la escalera manda.
+const BACKOFF_OVERRIDE_MS = process.env.WHATSAPP_RETRY_BACKOFF_MS ? Number(process.env.WHATSAPP_RETRY_BACKOFF_MS) : null;
+
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 interface AttemptResult {
@@ -139,7 +144,7 @@ async function sendWithRetries(send: () => Promise<string>): Promise<AttemptResu
         return { wamid: null, attempts: attempt, failure };
       }
       const schedule = BACKOFF_MS[failure.kind === "RATE_LIMITED" ? "RATE_LIMITED" : "TRANSIENT"];
-      await sleep(schedule[attempt - 1] ?? schedule[schedule.length - 1]);
+      await sleep(BACKOFF_OVERRIDE_MS ?? schedule[attempt - 1] ?? schedule[schedule.length - 1]);
     }
   }
   return { wamid: null, attempts: MAX_ATTEMPTS, failure };
