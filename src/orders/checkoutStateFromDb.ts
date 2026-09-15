@@ -1,6 +1,7 @@
 import { prisma } from "../db/client";
 import { resolveShippingRateForCity } from "../catalog/shippingRates";
 import { computeCheckoutState, type CheckoutFacts, type CheckoutState } from "./checkoutState";
+import { getBusinessLocale } from "../config/businessConfig";
 
 // Etapa 1 del rediseno (ver el diseno del estado de pedido): el estado se CALCULA y se observa, pero
 // todavia no entra al prompt ni cambia una sola respuesta. La idea es comparar durante unos dias lo que
@@ -91,9 +92,11 @@ export async function buildCheckoutState(conversationId: string): Promise<Checko
     }
   }
 
+  // Fase 11: el pais y la regla de documento salen del negocio, no de una constante.
+  const negocio = await getBusinessLocale(conversation.customer.businessId);
+
   const facts: CheckoutFacts = {
-    // Hoy siempre CO. Cuando se venda en Mexico esto sale de la ciudad/zona resuelta, no de una constante.
-    pais: "CO",
+    pais: negocio.countryCode,
     productos,
     varianteFaltante,
     nombre: conversation.customer.name,
@@ -104,5 +107,5 @@ export async function buildCheckoutState(conversationId: string): Promise<Checko
     formaPago: conversation.order?.paymentMethodLabel ?? null,
     zonaEnvio,
   };
-  return computeCheckoutState(facts);
+  return computeCheckoutState(facts, negocio.requirements);
 }

@@ -103,6 +103,24 @@ model Business {
   // leyendo/escribiendo el estado por su cuenta. Off por defecto - bandera de reversion explicita del
   // plan: un negocio se prueba primero con esto en true, el resto sigue exactamente igual que hoy.
   saleStateEnabled         Boolean                   @default(false)
+  // Fase 11 del plan maestro (2026-09-15), causa raiz C5: el pais del negocio deja de estar cableado en
+  // el codigo. Elige la entrada de src/config/countries.ts que decide el formato de precio, que forma
+  // tiene un telefono y un documento, como se reconoce una direccion despachable y como se le pide cada
+  // dato al cliente. Default "CO" porque es lo que todo negocio existente ya era.
+  countryCode               String                    @default("CO")
+  // Moneda y zona horaria arrancan del pais (ver countries.ts) pero son campos propios: un negocio
+  // colombiano que cobra en USD, o uno mexicano en Cancun, existe y no deberia necesitar un pais nuevo.
+  currency                  String                    @default("COP")
+  timezone                  String                    @default("America/Bogota")
+  // Horario de atencion, forma { "mon": ["09:00","18:00"], ..., "sun": null } - ver
+  // src/config/businessHours.ts. null = sin cargar, y entonces nada entra al prompt.
+  businessHours             Json?
+  // Si este negocio pide documento de identidad para despachar. Antes era una constante de Colombia.
+  requiresIdDocument        Boolean                   @default(true)
+  // Zonas de envio (ShippingRate.label, comparado sin tildes ni mayusculas) donde el documento NO se
+  // pide. Antes era la lista literal ["bogota","soacha"] adentro de orders/checkoutState.ts, igual para
+  // todos los negocios del producto. La migracion la copia tal cual a los negocios que ya existian.
+  idDocumentExemptZones     String[]                  @default([])
   products                  Product[]
   customers                 Customer[]
   paymentMethods            PaymentMethod[]

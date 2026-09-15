@@ -3,6 +3,7 @@ import type { ShippingPaymentModality } from "@prisma/client";
 import { getProductById } from "../catalog/products";
 import { resolveShippingRateForCity } from "../catalog/shippingRates";
 import { computeCheckoutState, type CheckoutFacts, type CheckoutState } from "./checkoutState";
+import { getBusinessLocale } from "../config/businessConfig";
 
 // Fase 2 del plan maestro (2026-09-15), causa raiz C1. Unico dueno de lectura/escritura de SaleState -
 // ver ONIX-PLAN-MAESTRO.md seccion 1.3 y 4 (Fase 2) para el diseno completo. Nada fuera de este archivo
@@ -121,8 +122,11 @@ export async function getSaleState(conversationId: string): Promise<SaleStateSna
     }
   }
 
+  // Fase 11: el pais y la regla de documento salen de Business, no de una constante colombiana.
+  const negocio = await getBusinessLocale(businessId);
+
   const facts: CheckoutFacts = {
-    pais: "CO",
+    pais: negocio.countryCode,
     productos: items.map((i) => ({ nombre: i.productName, cantidad: i.quantity, variante: i.variantLabel })),
     varianteFaltante,
     nombre: customerName,
@@ -133,7 +137,7 @@ export async function getSaleState(conversationId: string): Promise<SaleStateSna
     formaPago: paymentMethodLabel,
     zonaEnvio: shippingLabel,
   };
-  const checkout = computeCheckoutState(facts);
+  const checkout = computeCheckoutState(facts, negocio.requirements);
 
   const subtotal = items.reduce((sum, i) => sum + i.unitPrice * i.quantity, 0);
   const total = subtotal + (shippingCost ?? 0);

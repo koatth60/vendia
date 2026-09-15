@@ -7,18 +7,21 @@
 // un recuerdo no es un estado. Esto se calcula de la base, asi que no puede desincronizarse.
 //
 // Fuentes de los campos obligatorios:
-//  - Las instrucciones configuradas del negocio, que son la verdad operativa (la cedula solo se pide
-//    fuera de Bogota/Soacha).
+//  - Las instrucciones configuradas del negocio, que son la verdad operativa.
 //  - Lo que una transportadora pide para emitir la guia: nombre completo y contacto del destinatario,
 //    direccion exacta con referencias, y del paquete su contenido, peso y valor declarado.
 //    Ver https://coordinadora.com/blog/como-generar-guias-de-envio/ - ese articulo es material
 //    divulgativo, no una norma, y NO menciona la cedula, asi que se usa solo para sumar campos de guia,
 //    nunca para reemplazar lo que el negocio ya exige.
 //
-// Pensado core desde el principio: los requisitos viven por pais (ver REQUISITOS_POR_PAIS), no cableados
-// a Colombia, porque la intencion es vender tambien en Mexico.
+// Fase 11 del plan maestro (2026-09-15): lo que este archivo sabia de Colombia ya no vive aca. La forma
+// de una direccion y las palabras con que se pide cada dato salen de src/config/countries.ts segun el
+// pais del negocio; QUE zonas no piden documento sale del propio negocio (BusinessRequirements), no de
+// una constante del producto. Este archivo quedo puro: recibe hechos y reglas, devuelve estado.
 
-export type CountryCode = "CO" | "MX";
+import { COUNTRIES, type CountryCode } from "../config/countries";
+
+export type { CountryCode };
 
 export type FieldKey =
   | "productos"
@@ -31,7 +34,7 @@ export type FieldKey =
   | "formaPago";
 
 export interface CheckoutFacts {
-  /** Pais de destino del envio. Hoy siempre CO; el dia que se venda en Mexico llega "MX" desde la ciudad. */
+  /** Pais del negocio, de Business.countryCode - decide validadores, etiquetas y como se pide cada dato. */
   pais: CountryCode;
   productos: { nombre: string; cantidad: number; variante: string | null }[];
   /** true si alguno de los productos pedidos tiene variantes y todavia no se eligio cual. */
@@ -55,6 +58,14 @@ export interface FieldState {
   ok: boolean;
 }
 
+/** Lo que el NEGOCIO decidio sobre el documento de identidad, leido de Business (no del pais). */
+export interface BusinessRequirements {
+  /** Business.requiresIdDocument. false = este negocio nunca pide documento, sea cual sea la zona. */
+  requiresIdDocument: boolean;
+  /** Business.idDocumentExemptZones: zonas donde NO se pide, comparadas sin tildes ni mayusculas. */
+  idDocumentExemptZones: string[];
+}
+
 export interface CheckoutState {
   pais: CountryCode;
   campos: FieldState[];
@@ -71,74 +82,36 @@ export function tieneNombreCompleto(nombre: string | null): boolean {
 }
 
 // Una direccion sirve para despachar cuando trae, ademas de la via, el detalle de llegada (barrio, casa o
-// apartamento, piso). "Cra 17 # 23-03" sin barrio deja al mensajero a medio camino.
-// En Colombia la via se abrevia fuerte y muchas veces va pegada al numero ("Cr143#143b-42", "Cl 57 sur").
-// Por eso el patron no puede exigir un limite de palabra despues de la abreviatura: pide la abreviatura
-// seguida (con o sin espacio, con o sin #) de un numero, que es lo que de verdad la identifica.
-const VIA_PATTERN =
-  /(^|\s)(cra?|carrera|cll?|calle|kra?|av|avenida|diag(onal)?|trans(versal)?|tv|dg|mz|manzana|lote|lt|autopista|v[ií]a|vereda|circular)\.?\s*#?\s*\d/i;
-const DETALLE_PATTERN = /\b(barrio|conjunto|torre|apto|apartamento|casa|piso|bloque|interior|oficina|local|urbanizaci[oó]n)\b/i;
-
-export function direccionEsDespachable(direccion: string | null): boolean {
+// apartamento, piso en Colombia; colonia y codigo postal en Mexico). "Cra 17 # 23-03" sin barrio deja al
+// mensajero a medio camino, igual que "Av. Insurgentes 300" sin colonia.
+// Los dos patrones son los del pais (countries.ts): los de CO son exactamente los que estaban aca antes
+// de la Fase 11, movidos sin tocarlos.
+export function direccionEsDespachable(direccion: string | null, pais: CountryCode): boolean {
   if (!direccion) return false;
-  return VIA_PATTERN.test(direccion) && /\d/.test(direccion) && DETALLE_PATTERN.test(direccion);
+  const reglas = COUNTRIES[pais];
+  return reglas.viaPattern.test(direccion) && /\d/.test(direccion) && reglas.detallePattern.test(direccion);
 }
 
-interface RequisitoPais {
-  /** Zonas donde el documento de identidad NO se pide. Fuera de esas, si. */
-  zonasSinDocumento: string[];
-  etiquetaDocumento: string;
-  pedir: Record<FieldKey, string>;
-}
-
-// Solo CO esta poblado con reglas reales y verificadas contra el negocio. MX queda declarado a proposito
-// pero sin dar por ciertos sus requisitos: cuando se venda alla hay que confirmarlos con la
-// transportadora de ese pais antes de usarlo, igual que se hizo aca.
-const REQUISITOS_POR_PAIS: Record<CountryCode, RequisitoPais> = {
-  CO: {
-    zonasSinDocumento: ["bogota", "soacha"],
-    etiquetaDocumento: "número de cédula",
-    pedir: {
-      productos: "qué producto quieres y cuántas unidades",
-      variante: "el color",
-      nombre: "tu nombre y apellido",
-      documento: "tu número de cédula",
-      telefono: "tu celular de contacto",
-      ciudad: "tu ciudad",
-      direccion: "tu barrio, la dirección exacta, y si es casa o apartamento con piso",
-      formaPago: "cómo prefieres pagar",
-    },
-  },
-  MX: {
-    // Pendiente de confirmar con la transportadora mexicana antes de vender alla.
-    zonasSinDocumento: [],
-    etiquetaDocumento: "identificación",
-    pedir: {
-      productos: "qué producto quieres y cuántas unidades",
-      variante: "el color",
-      nombre: "tu nombre y apellido",
-      documento: "tu identificación",
-      telefono: "tu teléfono de contacto",
-      ciudad: "tu ciudad y estado",
-      direccion: "tu colonia, calle y número, y el código postal",
-      formaPago: "cómo prefieres pagar",
-    },
-  },
-};
-
-function documentoRequerido(pais: CountryCode, zonaEnvio: string | null): boolean {
-  const reglas = REQUISITOS_POR_PAIS[pais];
+// El documento se pide cuando el NEGOCIO lo exige y la zona resuelta no esta entre sus exentas. Antes de
+// la Fase 11 la lista de exentas era ["bogota","soacha"] cableada aca para todos los negocios del
+// producto; la migracion la copio a cada negocio colombiano que ya existia.
+function documentoRequerido(reglas: BusinessRequirements, zonaEnvio: string | null): boolean {
+  if (!reglas.requiresIdDocument) return false;
   if (!zonaEnvio) return false; // Sin zona resuelta todavia no se sabe: no se pide de mas.
-  const zona = zonaEnvio
+  const zona = normalizeZona(zonaEnvio);
+  return !reglas.idDocumentExemptZones.some((z) => zona.includes(normalizeZona(z)));
+}
+
+function normalizeZona(value: string): string {
+  return value
     .toLowerCase()
     .normalize("NFD")
     .replace(/[̀-ͯ]/g, "");
-  return !reglas.zonasSinDocumento.some((z) => zona.includes(z));
 }
 
-export function computeCheckoutState(facts: CheckoutFacts): CheckoutState {
-  const reglas = REQUISITOS_POR_PAIS[facts.pais];
-  const docRequerido = documentoRequerido(facts.pais, facts.zonaEnvio);
+export function computeCheckoutState(facts: CheckoutFacts, negocio: BusinessRequirements): CheckoutState {
+  const pedir = COUNTRIES[facts.pais].pedir;
+  const docRequerido = documentoRequerido(negocio, facts.zonaEnvio);
 
   const campos: FieldState[] = [
     {
@@ -175,14 +148,14 @@ export function computeCheckoutState(facts: CheckoutFacts): CheckoutState {
       key: "direccion",
       requerido: true,
       valor: facts.direccion,
-      ok: direccionEsDespachable(facts.direccion),
+      ok: direccionEsDespachable(facts.direccion, facts.pais),
       pedir: null,
     },
     { key: "formaPago", requerido: true, valor: facts.formaPago, ok: Boolean(facts.formaPago), pedir: null },
   ];
 
   for (const campo of campos) {
-    campo.pedir = campo.requerido && !campo.ok ? reglas.pedir[campo.key] : null;
+    campo.pedir = campo.requerido && !campo.ok ? pedir[campo.key] : null;
   }
 
   const faltan = campos.map((c) => c.pedir).filter((p): p is string => p !== null);
