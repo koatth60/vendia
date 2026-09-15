@@ -4483,6 +4483,10 @@ function whyNoSignupAssets() {
   if (ev.event === 'FINISH_ONLY_WABA') {
     return 'Se creó la cuenta de WhatsApp Business pero no llegaste a agregar y verificar un número. Volvé a darle y completá ese paso.';
   }
+  if (ev.event === 'ERROR') {
+    const detail = ev.data && ev.data.error_message ? ` Facebook dijo: ${ev.data.error_message}` : '';
+    return `Facebook reportó un error durante el registro.${detail}`;
+  }
   return `Facebook terminó con "${ev.event}" y sin número. Volvé a intentar completando hasta la verificación por SMS.`;
 }
 
@@ -4557,7 +4561,11 @@ function startWhatsappSignup() {
     // servidor necesita para pedir el token de negocio.
     response_type: 'code',
     override_default_response_type: true,
-    extras: { setup: {}, featureType: '', sessionInfoVersion: '3' },
+    // `setup: {}` y nada más. Acá había además featureType y sessionInfoVersion:'3', parámetros de una
+    // versión vieja del flujo: con ellos el popup corría y devolvía el code, pero nunca posteaba de
+    // vuelta el WA_EMBEDDED_SIGNUP con el phone_number_id, así que la conexión moría siempre en el
+    // último paso. Embedded Signup v4 no los lleva.
+    extras: { setup: {} },
   });
 }
 
