@@ -2,7 +2,7 @@ import type OpenAI from "openai";
 import { deepseek, DEEPSEEK_MODEL } from "./client";
 import { createChatCompletion } from "./modelFailover";
 import { catalogTools, saleStateTools, runCatalogTool, type ToolContext } from "./tools";
-import { getRecentHistory } from "../conversation/service";
+import { getRecentHistory, findOpenPendingOwnerQuestionsForConversation } from "../conversation/service";
 import { logAiUsage } from "./usage";
 import { prisma } from "../db/client";
 import { sendOwnerAlert } from "../whatsapp/client";
@@ -905,11 +905,17 @@ export async function generateReply(
   // paga el costo de tokens de un tool que no puede usar.
   const tools = personality?.saleStateEnabled ? [...catalogTools, ...saleStateTools] : catalogTools;
 
-  // Fase 4 del plan maestro (2026-09-15), causa raiz C2: si esta conversacion ya tiene una pregunta sin
-  // responder del dueno AL EMPEZAR este turno, finalizeTurn fuerza el bloque fijo de espera en vez de
-  // dejar que el modelo prometa una consulta nueva - independiente de saleStateEnabled (ver
-  // getBlockedBy), la escalacion real es Core, no una funcion de seguimiento de pedido.
+  // Fase 4 del plan maestro (2026-09-15), correccion causa raiz C2: si esta conversacion ya tiene una
+  // pregunta sin responder del dueno AL EMPEZAR este turno, se lo decimos al modelo como dato de estado
+  // (mismo canal que FOTOS/VIDEOS YA ENVIADOS abajo) en vez de reemplazarle la respuesta entera despues -
+  // eso descartaba cualquier respuesta real a otra cosa que el cliente preguntara. Independiente de
+  // saleStateEnabled (ver getBlockedBy): la escalacion real es Core, no una funcion de seguimiento de
+  // pedido. La pregunta pendiente en si (no solo el marcador) viene de PendingOwnerQuestion - ask_owner
+  // en tools.ts ya se niega a abrir una segunda mientras esta siga abierta.
   const blockedByAtTurnStart = await getBlockedBy(conversationId);
+  const pendingOwnerQuestionsAtTurnStart = blockedByAtTurnStart
+    ? await findOpenPendingOwnerQuestionsForConversation(conversationId)
+    : [];
 
   const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
     { role: "system", content: buildSystemPrompt(personality) },
@@ -932,6 +938,14 @@ export async function generateReply(
           },
         ]
       : []),
+    ...(pendingOwnerQuestionsAtTurnStart.length > 0
+      ? [
+          {
+            role: "system" as const,
+            content: `PREGUNTA PENDIENTE CON EL DUEÑO: ya le preguntaste ${pendingOwnerQuestionsAtTurnStart.map((p) => `"${p.question}"`).join(", ")}, sigue sin responder. No vuelvas a prometer que vas a consultar eso; sí puedes seguir ayudando con todo lo demás.`,
+          },
+        ]
+      : []),
     ...modelFacingHistory.map((m) => ({
       role: toOpenAiRole(m.role),
       content: messageText(m),
@@ -940,7 +954,6 @@ export async function generateReply(
 
   let lastText = "";
   let mediaSentThisTurn = 0;
-  let ownerAskedThisTurn = 0;
   let nameSavedThisTurn = 0;
   let contactSavedThisTurn = 0;
   let intentFlaggedThisTurn = 0;
@@ -1018,19 +1031,6 @@ export async function generateReply(
       );
       const colorList = variantColorsThisTurn.length > 0 ? variantColorsThisTurn.join(", ") : "varios colores";
       text = text.replace(VARIANT_DENIAL_PATTERN, `sí viene en estos colores: ${colorList}`);
-    }
-
-    // Fase 4 del plan maestro (2026-09-15), causa raiz C2: mientras la conversacion siga bloqueada por
-    // una pregunta al dueno que ya estaba pendiente ANTES de este turno, el modelo no puede prometer
-    // "voy a consultar"/"le avise al equipo" de nuevo - esa promesa ya existe como PendingOwnerQuestion
-    // real (ver ask_owner en tools.ts) y whatsapp.ts la resuelve aparte, como mensaje propio, apenas el
-    // dueno responda. Si el modelo SI llamo ask_owner este mismo turno (ownerAskedThisTurn !== 0, otra
-    // pregunta nueva o la escalacion que recien desbloqueo/bloqueo la conversacion), su texto es real y
-    // se deja pasar. Reemplaza los cuatro guards de applyClaimBackstops (payment_options, shipping_
-    // modality, catalog_check, escalation): esos reparaban una promesa despues de dicha leyendo el texto
-    // del modelo; esto directamente no deja que la promesa vieja se repita, sin necesidad de detectarla.
-    if (blockedByAtTurnStart && ownerAskedThisTurn === 0) {
-      text = "Ya le pregunté eso al equipo y todavía estoy esperando la respuesta - apenas me confirmen te aviso 🙏";
     }
 
     if (intentFlaggedThisTurn === 0 && customerText && customerRequestsHuman(customerText)) {
@@ -1458,7 +1458,6 @@ export async function generateReply(
           hasVariantsThisTurn = Array.isArray(result.variants) && result.variants.length > 0;
           variantColorsThisTurn = (result.variants ?? []).map((v) => v.color).filter((c): c is string => !!c);
         }
-        if (call.function.name === "ask_owner") ownerAskedThisTurn++;
         if (call.function.name === "save_customer_name") nameSavedThisTurn++;
         if (call.function.name === "save_customer_contact_info") contactSavedThisTurn++;
         if (call.function.name === "flag_conversation_intent") intentFlaggedThisTurn++;

@@ -13,6 +13,19 @@
         "toolSequence": ["ask_owner", "ask_owner"],
         "sideEffects": { "ownerQuestionsCreated": 1 }
       }
+    },
+    {
+      "customer": "Mientras tanto, tienen aretes de perla?",
+      "modelResponses": [
+        { "toolCalls": [{ "name": "search_products", "arguments": { "query": "aretes perla" } }] },
+        { "content": "Sí, tenemos los Aretes de perla cultivada a $39.000. Y sobre el envio a Miami, en cuanto el equipo me confirme te aviso." }
+      ],
+      "note": "Correccion Fase 4 (2026-09-15, causa raiz C2): con blockedBy activo, generateReply ya no le reemplaza TODA la respuesta por la frase de espera - una pregunta real sobre otra cosa tiene que recibir una respuesta real.",
+      "expect": {
+        "toolSequence": ["search_products"],
+        "textMustContain": ["$39.000"],
+        "textMustNotContain": ["Ya le pregunté eso al equipo y todavía estoy esperando"]
+      }
     }
   ]
 }

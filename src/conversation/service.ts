@@ -522,12 +522,47 @@ export async function findOpenPendingOwnerQuestionsForBusiness(businessId: strin
   }));
 }
 
+// Correccion Fase 4 del plan maestro (2026-09-15): la pregunta REAL, no solo el marcador blockedBy -
+// generateReply (agent.ts) la usa para decirle al modelo que ya la escaló en vez de dejarlo prometer
+// de nuevo, y runCatalogTool (ask_owner en tools.ts) la usa para negarse a abrir una segunda mientras
+// esta siga sin respuesta.
+export async function findOpenPendingOwnerQuestionsForConversation(conversationId: string) {
+  return prisma.pendingOwnerQuestion.findMany({
+    where: { conversationId },
+    select: { question: true },
+    orderBy: { createdAt: "asc" },
+  });
+}
+
 export async function findOpenPendingConfirmationsForBusiness(businessId: string) {
   return prisma.conversation.findMany({
     where: { customer: { businessId }, pendingConfirmationMessageId: { not: null } },
     include: { customer: true },
     orderBy: { updatedAt: "desc" },
   });
+}
+
+// Correccion Fase 4 del plan maestro (2026-09-15), causa raiz C2: blockedBy no tenia salida si el
+// dueno nunca respondia - la conversacion quedaba muda para siempre. jobs/escalationReminder.ts usa
+// esto para encontrar, por negocio, las preguntas que ya superaron Business.ownerQuestionTimeoutHours
+// (a diferencia de findPendingOwnerQuestionsDueForReminder, no filtra por remindedAt: un recordatorio
+// ya mandado no evita el timeout).
+export async function findPendingOwnerQuestionsPastTimeout(businessId: string, olderThan: Date) {
+  const pending = await prisma.pendingOwnerQuestion.findMany({
+    where: {
+      conversation: { customer: { businessId }, status: { notIn: ["SOLD", "LOST"] } },
+      createdAt: { lte: olderThan },
+    },
+    include: { conversation: { include: { customer: true } } },
+    orderBy: { createdAt: "asc" },
+  });
+  return pending.map((p) => ({
+    questionId: p.id,
+    question: p.question,
+    kind: p.kind,
+    conversationId: p.conversationId,
+    customer: p.conversation.customer,
+  }));
 }
 
 // Escalations the owner never answered - one reminder per question (remindedAt gates it so the

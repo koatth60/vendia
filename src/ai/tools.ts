@@ -12,7 +12,7 @@ import { PAYMENT_BLOCK_MARKER, SHIPPING_BLOCK_MARKER, TOTAL_BLOCK_MARKER, ORDER_
 import { listActivePaymentMethods } from "../catalog/paymentMethods";
 import { listShippingRates, resolveShippingRateForCity } from "../catalog/shippingRates";
 import { recordAgentIncident } from "./incidents";
-import { tokenize, normalizeForMatch } from "../search/text";
+import { normalizeForMatch } from "../search/text";
 
 // Shared with agent.ts (both the tool result here and the system-prompt directive there need the same
 // Spanish wording for each modality) - defined once here since agent.ts already imports from this file,
@@ -32,6 +32,7 @@ import {
   recordMessage,
   createPendingOwnerQuestion,
   getPreviousClosedConversation,
+  findOpenPendingOwnerQuestionsForConversation,
 } from "../conversation/service";
 import {
   resolveOrderItems,
@@ -1202,28 +1203,17 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
       const question = String(input.question ?? "").trim();
       if (!question) return { error: "Falta la pregunta" };
 
-      // Real production incident (2026-09-14): a frustrated customer asked the same unanswered question
-      // twice ("Y tiene radio" ... 5 minutes later "Pero tiene radio") and the model escalated it to the
-      // owner BOTH times - two separate WhatsApp pings for the exact same fact, still zero answers. Same
-      // token-overlap approach the media backstop uses for product names (see
-      // findMentionedProductsForMediaBackstop in agent.ts), scoped to THIS conversation's still-open
-      // questions only - a genuinely different question always goes through untouched.
-      const openForConversation = await prisma.pendingOwnerQuestion.findMany({
-        where: { conversationId: context.conversationId },
-        select: { question: true },
-      });
-      const newTokens = new Set(tokenize(question));
-      const duplicate = openForConversation.find((p) => {
-        const priorTokens = tokenize(p.question);
-        if (priorTokens.length === 0 || newTokens.size === 0) return false;
-        const hits = priorTokens.filter((t) => newTokens.has(t)).length;
-        return hits / priorTokens.length >= 0.6 && hits / newTokens.size >= 0.6;
-      });
-      if (duplicate) {
+      // Correccion Fase 4 del plan maestro (2026-09-15), causa raiz C2: mientras esta conversacion tenga
+      // CUALQUIER PendingOwnerQuestion abierta (no solo una parecida en texto - real incidente 2026-09-14
+      // con "Y tiene radio" / "Pero tiene radio" repetidas), no se abre otra. blockedBy (ver saleState.ts,
+      // inyectado como system message en agent.ts) ya bloquea la promesa nueva en el texto; esta es la
+      // validacion del lado de la herramienta - un argumento contra la base, no una frase que el modelo
+      // tiene que recordar.
+      const openForConversation = await findOpenPendingOwnerQuestionsForConversation(context.conversationId);
+      if (openForConversation.length > 0) {
         return {
-          asked: true,
-          alreadyPending: true,
-          note: "Esto ya se lo preguntaste al equipo antes en esta misma conversacion y todavia no responden - no vuelvas a escalarlo. Decile al cliente honestamente que seguis esperando la respuesta del equipo, sin prometer un nuevo aviso.",
+          error: "Ya hay una pregunta esperando respuesta del dueno en esta conversacion.",
+          note: "No llames ask_owner de nuevo hasta que el dueno responda la pregunta anterior. Decile al cliente honestamente que seguis esperando esa respuesta, y segui ayudando con cualquier otra cosa que necesite.",
         };
       }
 

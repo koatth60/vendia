@@ -1,5 +1,6 @@
 {
   "name": "igmt9z-aurora-sin-config",
+  "knownFailing": "Correccion Fase 4 (2026-09-15, causa raiz C2): esto volvio a knownFailing al sacar el reemplazo de texto completo en agent.ts (blockedByAtTurnStart && ownerAskedThisTurn===0) - esa linea es lo que ponia esta fixture en verde (ver commit e26d71e: 'Fixture igmt9z pasa de knownFailing a verde'), no arreglaba F1. F1 sigue siendo un defecto real y separado (el modelo inventa 'ya le avise al equipo' en prosa para preguntas NUEVAS sin llamar ask_owner) - la correccion actual (system message PREGUNTA PENDIENTE + ask_owner devolviendo error si ya hay una pregunta abierta) no lo cubre porque estos turnos son respuestas grabadas (replay determinista, no DeepSeek real): ningun cambio de prompt puede alterarlas. Pendiente una Fase que ataque F1 en si.",
   "seed": {
     "catalogName": "Aurora Joyas"
   },

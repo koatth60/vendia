@@ -53,6 +53,12 @@ model Business {
   followUpTemplateLanguage  String                    @default("es")
   followUpDelayHours        Int                       @default(24)
   ownerReminderMinutes      Int                       @default(180)
+  // Correccion Fase 4 del plan maestro (2026-09-15), causa raiz C2: blockedBy (ver saleState.ts) no
+  // tenia salida si el dueno nunca respondia una pregunta escalada - la conversacion quedaba muda para
+  // siempre. Pasadas estas horas sin respuesta, jobs/escalationReminder.ts limpia blockedBy, pasa la
+  // conversacion a control humano y avisa al dueno y al panel. Configurable por negocio, igual que
+  // ownerReminderMinutes arriba.
+  ownerQuestionTimeoutHours Int                       @default(24)
   // Gendered address tone (ej: alternar el nombre con "linda"/"bella" para mujeres, "Sr."/"Señor" para
   // hombres) - encontrado en el prompt de MAGByLizN, promovido a mecanismo core (detectar genero,
   // corregir si el cliente se queja) pero las palabras exactas quedan opt-in por negocio: off por
@@ -710,4 +716,8 @@ enum AgentIncidentKind {
   // salio 30 minutos despues del mensaje del cliente, ya fuera de contexto. La conversacion pasa a
   // control humano en vez de mandar algo viejo.
   STALE_REPLY_DISCARDED
+  // Correccion Fase 4 del plan maestro (2026-09-15): una PendingOwnerQuestion (ask_owner) llego a
+  // Business.ownerQuestionTimeoutHours sin respuesta del dueno. blockedBy se limpia solo (ver
+  // saleState.ts) y la conversacion pasa a humanControl - antes se quedaba muda para siempre.
+  OWNER_QUESTION_TIMEOUT
 }

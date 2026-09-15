@@ -1,9 +1,13 @@
 import { prisma } from "../db/client";
 import { sendOwnerAlert, sendTextMessage, type WhatsappCredentials } from "../whatsapp/client";
 import { recordOwnerMessage } from "../delivery/ownerLog";
+import { recordAgentIncident } from "../ai/incidents";
 import {
   findPendingOwnerQuestionsDueForReminder,
   markPendingOwnerQuestionReminded,
+  findPendingOwnerQuestionsPastTimeout,
+  clearPendingOwnerQuestionsForConversation,
+  setHumanControl,
   findStalledConversationsDueForReminder,
   markStalledReminderSent,
   recordMessage,
@@ -119,6 +123,38 @@ export async function runEscalationReminderJob(): Promise<void> {
       }
 
       await markPendingOwnerQuestionReminded(pending.questionId);
+    }
+
+    // Correccion Fase 4 del plan maestro (2026-09-15), causa raiz C2: el bloque anterior solo RECUERDA -
+    // si el dueno sigue sin responder, blockedBy (ver saleState.ts) dejaba la conversacion muda para
+    // siempre porque nada lo limpiaba. Pasadas Business.ownerQuestionTimeoutHours (default 24h), la
+    // desbloqueamos nosotros: se borran las PendingOwnerQuestion vencidas de esa conversacion (lo que ya
+    // limpia blockedBy, ver clearBlockedByIfNoPendingQuestions), pasa a control humano, y se le avisa al
+    // dueno (WhatsApp) y al panel (AgentIncident) - una vez por conversacion, no una vez por pregunta.
+    const timeoutBefore = new Date(Date.now() - business.ownerQuestionTimeoutHours * 60 * 60 * 1000);
+    const timedOutQuestions = await findPendingOwnerQuestionsPastTimeout(business.id, timeoutBefore);
+    const timedOutConversations = new Set<string>();
+    for (const pending of timedOutQuestions) {
+      if (timedOutConversations.has(pending.conversationId)) continue;
+      timedOutConversations.add(pending.conversationId);
+
+      const text = `Se vencio el tiempo de espera (${business.ownerQuestionTimeoutHours}h) sin que respondieras esta pregunta de ${customerDisplayName(pending.customer)}: "${pending.question}". La conversacion paso a control manual - revisala en el panel.`;
+      try {
+        const wamid = await sendOwnerAlert(credentials, business.contactPhone, text);
+        await recordOwnerMessage(business.id, { direction: "OUT", body: text, success: Boolean(wamid) });
+      } catch (error) {
+        await recordOwnerMessage(business.id, {
+          direction: "OUT",
+          body: text,
+          success: false,
+          errorMessage: error instanceof Error ? error.message : String(error),
+        });
+        console.error(`No se pudo enviar aviso de timeout de escalacion (conversation=${pending.conversationId}):`, error);
+      }
+
+      await clearPendingOwnerQuestionsForConversation(pending.conversationId);
+      await setHumanControl(business.id, pending.conversationId, true);
+      await recordAgentIncident(business.id, "OWNER_QUESTION_TIMEOUT", text, pending.conversationId, "owner_question_timeout");
     }
 
     const stalled = await findStalledConversationsDueForReminder(business.id, stage1Before, stage2Before);

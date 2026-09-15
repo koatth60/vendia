@@ -6,7 +6,8 @@ export type AgentIncidentKind =
   | "BACKSTOP_INTERVENTION"
   | "DEGRADED_REPLY"
   | "EXTERNAL_API_FAILURE"
-  | "STALE_REPLY_DISCARDED";
+  | "STALE_REPLY_DISCARDED"
+  | "OWNER_QUESTION_TIMEOUT";
 
 // Fase F, 2026-09-13 audit (F9): none of agent.ts's backend safety nets left any queryable trace before
 // this - only a console.error/warn nobody reads unless tailing production logs. Best-effort on purpose:
