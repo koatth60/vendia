@@ -42,12 +42,18 @@ after(async () => {
 
 // Cada "proceso" de la prueba es un store nuevo sobre la misma tabla: es lo mismo que pasa despues de
 // un reinicio, donde nada de la memoria anterior sobrevive.
+//
+// pruneSessionInterval:false no es un detalle de estilo (2026-09-15): cada PgSession arranca un
+// setInterval de limpieza que nadie apaga, asi que el proceso de este archivo nunca terminaba y
+// `npm test` se colgaba aca para siempre - despues de que `after` cierra el pool, ese intervalo ademas
+// escupe "Failed to prune sessions: Cannot use a pool after calling end on the pool" en cada vuelta. La
+// prueba no necesita que se limpien sesiones vencidas.
 function appWithFreshStore(): express.Express {
   const PgSession = connectPgSimple(session);
   const app = express();
   app.use(
     session({
-      store: new PgSession({ pool, tableName: "session", createTableIfMissing: false }),
+      store: new PgSession({ pool, tableName: "session", createTableIfMissing: false, pruneSessionInterval: false }),
       secret: "secreto-de-prueba",
       resave: false,
       saveUninitialized: false,
