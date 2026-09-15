@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { Prisma } from "@prisma/client";
 import { env } from "../config/env";
+import { toBusinessLocale } from "../config/businessConfig";
 import { prisma } from "../db/client";
 import {
   sendAlertToOwner,
@@ -837,8 +838,10 @@ whatsappRouter.post("/webhook", async (req, res) => {
         // y la ficha siguio vacia, asi que el despacho salio sin datos estructurados. Capturar es callado
         // y no le manda nada al cliente, asi que no pisa a la persona que esta atendiendo.
         try {
-          const found = extractDeliveryDataFromAnswer(rawText);
-          const direccion = extractAddressFromAnswer(rawText) ?? undefined;
+          // Fase 11: la forma de un documento, un telefono y una direccion depende del pais del negocio.
+          const { countryCode } = toBusinessLocale(business);
+          const found = extractDeliveryDataFromAnswer(rawText, countryCode);
+          const direccion = extractAddressFromAnswer(rawText, countryCode) ?? undefined;
           if (found.idNumber || found.deliveryPhone || direccion) {
             await saveCustomerContactInfo(business.id, customer.id, { ...found, address: direccion });
           }

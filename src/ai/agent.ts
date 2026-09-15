@@ -25,6 +25,7 @@ import { tokenize, normalizeForMatch } from "../search/text";
 import { buildSystemPrompt, type BotPersonality } from "./prompts/systemPrompt";
 import { formatPrice } from "../config/money";
 import { getBusinessLocale } from "../config/businessConfig";
+import { COUNTRIES, type CountryCode } from "../config/countries";
 import { CLOSING_MESSAGE_PROMPT } from "./prompts/closingMessage";
 import {
   PAYMENT_BLOCK_MARKER,
@@ -474,14 +475,16 @@ const ASK_DELIVERY_DATA_PATTERN =
 // cliente). Esta funcion identifica cada dato por su PROPIA forma y etiqueta, no por cual fue la
 // pregunta, asi que la ambiguedad desaparece.
 //
-// Reglas, pensadas para Colombia: el celular son 10 digitos que arrancan en 3; la cedula, 6 a 10 digitos
-// que no arrancan en 3. Una etiqueta explicita al lado del numero ("CC", "cedula", "celular", "cel")
-// gana siempre sobre la forma. Un numero con $ o COP cerca es plata, nunca un documento.
-const MONEY_NEAR_PATTERN = /(\$|\bcop\b|\bpesos\b|\bmil\b)/i;
-const ID_LABEL_PATTERN = /\b(c\.?c\.?|c[eé]dula|documento|identificaci[oó]n|nit|ti)\b/i;
-const PHONE_LABEL_PATTERN = /\b(celular|cel|tel[eé]fono|tel|whatsapp|wpp|movil|m[oó]vil|contacto)\b/i;
+// Fase 11 del plan maestro (2026-09-15): las reglas dejaron de ser colombianas. Antes decian, aca mismo,
+// "el celular son 10 digitos que arrancan en 3; la cedula, 6 a 10 digitos que no arrancan en 3" - con eso
+// un celular mexicano (5512345678) caia en la rama de cedula y se guardaba como documento de identidad.
+// Ahora la forma la decide el pais del negocio (countries.ts: classifyDigits), y las etiquetas tambien
+// ("CC"/"cedula" en Colombia, "INE"/"CURP" en Mexico). Una etiqueta explicita al lado del numero gana
+// siempre sobre la forma. Un numero con $ o COP cerca es plata, nunca un documento.
+const MONEY_NEAR_PATTERN = /(\$|\bcop\b|\bmxn\b|\bpesos\b|\bmil\b)/i;
 
-export function extractDeliveryDataFromAnswer(text: string): { idNumber?: string; deliveryPhone?: string } {
+export function extractDeliveryDataFromAnswer(text: string, pais: CountryCode): { idNumber?: string; deliveryPhone?: string } {
+  const reglas = COUNTRIES[pais];
   const out: { idNumber?: string; deliveryPhone?: string } = {};
   // Cada corrida de digitos junto con las ~18 letras que la preceden, para poder leer su etiqueta.
   const runs = [...text.matchAll(/([^\d]{0,18})(\d[\d.\s-]{4,18}\d)/g)];
@@ -494,38 +497,38 @@ export function extractDeliveryDataFromAnswer(text: string): { idNumber?: string
     const after = text.slice((run.index ?? 0) + run[0].length, (run.index ?? 0) + run[0].length + 12);
     if (MONEY_NEAR_PATTERN.test(before) || MONEY_NEAR_PATTERN.test(after)) continue;
 
-    const labeledId = ID_LABEL_PATTERN.test(before);
-    const labeledPhone = PHONE_LABEL_PATTERN.test(before);
-    const looksPhone = digits.length === 10 && digits.startsWith("3");
+    const labeledId = reglas.idLabelPattern.test(before);
+    const labeledPhone = reglas.phoneLabelPattern.test(before);
 
     if (labeledPhone && !labeledId) {
       out.deliveryPhone ??= digits;
-    } else if (labeledId && !labeledPhone) {
-      out.idNumber ??= digits;
-    } else if (looksPhone) {
-      out.deliveryPhone ??= digits;
-    } else if (digits.length >= 6 && digits.length <= 10) {
-      out.idNumber ??= digits;
+      continue;
     }
+    if (labeledId && !labeledPhone) {
+      out.idNumber ??= digits;
+      continue;
+    }
+    const shape = reglas.classifyDigits(digits);
+    if (shape === "phone") out.deliveryPhone ??= digits;
+    else if (shape === "document") out.idNumber ??= digits;
   }
   return out;
 }
 
-// La direccion dentro de una respuesta combinada. Una direccion colombiana casi siempre trae una de
-// estas palabras de via ("Cra 17 # 23-03", "Calle 57 sur 65 92", "Mz 4 casa 12"), y eso la distingue de
-// una cedula o un celular sueltos sin necesidad de entender la frase entera. Se toma la linea completa
-// donde aparece: el resto de la linea suele ser el barrio o el detalle de casa/apartamento, que el
-// mensajero necesita igual. Real (2026-09-15): "Santa rosa de cabal risaralda | Cra 17 # 23-03 villa
-// alegria | Linda Marin | 1093223487 | 3135794619" - todo en un mensaje, y la direccion no se guardaba.
-const STREET_WORD_PATTERN =
-  /\b(cra|carrera|cll|calle|kr|kra|av|avenida|diagonal|diag|transversal|trans|tv|manzana|mz|lote|lt|autopista|via|vereda|conjunto|torre|apto|apartamento|casa|piso|barrio|bloque|interior|urbanizaci[oó]n)\b/i;
-
-export function extractAddressFromAnswer(text: string): string | null {
+// La direccion dentro de una respuesta combinada. Una direccion trae casi siempre una palabra de via
+// ("Cra 17 # 23-03", "Calle 57 sur 65 92", "Mz 4 casa 12" en Colombia; "Av. Insurgentes 300, Col. Roma"
+// en Mexico), y eso la distingue de una cedula o un celular sueltos sin necesidad de entender la frase
+// entera. Se toma la linea completa donde aparece: el resto de la linea suele ser el barrio/colonia o el
+// detalle de casa/apartamento, que el mensajero necesita igual. Real (2026-09-15): "Santa rosa de cabal
+// risaralda | Cra 17 # 23-03 villa alegria | Linda Marin | 1093223487 | 3135794619" - todo en un
+// mensaje, y la direccion no se guardaba. Fase 11: las palabras de via son las del pais (countries.ts).
+export function extractAddressFromAnswer(text: string, pais: CountryCode): string | null {
+  const streetWordPattern = COUNTRIES[pais].streetWordPattern;
   const lines = text
     .split(/\n|\s{3,}|\s*\|\s*/)
     .map((l) => l.trim())
     .filter(Boolean);
-  const candidate = lines.find((l) => STREET_WORD_PATTERN.test(l) && /\d/.test(l));
+  const candidate = lines.find((l) => streetWordPattern.test(l) && /\d/.test(l));
   if (!candidate) return null;
   // Una linea que es solo un numero largo con una palabra suelta no es una direccion.
   if (candidate.replace(/\D/g, "").length > 12) return null;
@@ -535,11 +538,11 @@ export function extractAddressFromAnswer(text: string): string | null {
 // El nombre dentro de una respuesta combinada: se queda solo con el tramo alfabetico antes del primer
 // numero o etiqueta ("Sebastián montealegre sotelo        CC: 1004074880" -> "Sebastián montealegre
 // sotelo") y lo pasa por el mismo filtro estricto que el resto de los nombres.
-export function extractNameFromDeliveryAnswer(text: string): string | null {
+export function extractNameFromDeliveryAnswer(text: string, pais: CountryCode): string | null {
   const head = text.split(/\d/)[0] ?? "";
   const cleaned = head
-    .replace(ID_LABEL_PATTERN, " ")
-    .replace(PHONE_LABEL_PATTERN, " ")
+    .replace(COUNTRIES[pais].idLabelPattern, " ")
+    .replace(COUNTRIES[pais].phoneLabelPattern, " ")
     .replace(/[^A-Za-zÀ-ÿ'\-\s]/g, " ")
     .trim();
   if (!cleaned) return null;
@@ -952,13 +955,13 @@ export async function generateReply(
         // Respuesta combinada (texto + numeros). Cada dato se identifica por su propia etiqueta/forma,
         // asi que ya no importa que el bot haya pedido varios a la vez - ver
         // extractDeliveryDataFromAnswer.
-        const found = extractDeliveryDataFromAnswer(customerText);
-        const address = extractAddressFromAnswer(customerText) ?? undefined;
+        const found = extractDeliveryDataFromAnswer(customerText, negocio.countryCode);
+        const address = extractAddressFromAnswer(customerText, negocio.countryCode) ?? undefined;
         if (found.idNumber || found.deliveryPhone || address) {
           await runCatalogTool(context, "save_customer_contact_info", { ...found, address });
         }
         if (nameSavedThisTurn === 0) {
-          const combinedName = extractNameFromDeliveryAnswer(customerText);
+          const combinedName = extractNameFromDeliveryAnswer(customerText, negocio.countryCode);
           // save_customer_name ya protege por su cuenta el nombre viejo cuando el nuevo es el del
           // destinatario y no una correccion del cliente (ver ese case en tools.ts).
           if (combinedName) {
