@@ -1,7 +1,10 @@
 // Prompt compartido por DeepSeek (src/ai/vision.ts) y la escalacion a Anthropic
 // (src/ai/visionEscalation.ts) - mismo formato de respuesta (COMPROBANTE:/PRODUCTO:/
 // PRODUCTO_POCO_CLARO:/OTRO:) para que el caller pueda tratar ambas fuentes igual.
-export function buildVisionPrompt(catalogHint: string): string {
+// Fase 11 del plan maestro (2026-09-15): "Nequi, Daviplata" estaba escrito a mano como ejemplo de
+// comprobante. Los ejemplos salen de los metodos de pago reales del negocio (ver
+// catalog/paymentMethods.ts) - un negocio mexicano ve SPEI y OXXO, no dos billeteras colombianas.
+export function buildVisionPrompt(catalogHint: string, paymentExamples: string): string {
   const catalogSection = catalogHint
     ? `\n\nCONTEXTO DEL NEGOCIO: este negocio vende: ${catalogHint}. Buscá activamente si alguno de
 estos productos aparece en la imagen, aunque lo principal que se vea sea una persona (puesto,
@@ -14,7 +17,7 @@ producto puesto o en la mano.`
 
 Primero decidi que tipo de imagen es:
 
-1. COMPROBANTE DE PAGO (transferencia bancaria, Nequi, Daviplata, etc): describi en 1-2 frases el monto,
+1. COMPROBANTE DE PAGO (transferencia bancaria, ${paymentExamples}, etc): describi en 1-2 frases el monto,
 el metodo/banco y la fecha si se alcanzan a leer. Si el monto o los datos no se leen bien, decilo
 explicitamente.
 

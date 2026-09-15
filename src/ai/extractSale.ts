@@ -2,7 +2,12 @@ import { deepseek, DEEPSEEK_MODEL } from "./client";
 import { getRecentHistory } from "../conversation/service";
 import { listActiveProducts } from "../catalog/products";
 import { logAiUsage } from "./usage";
+import { getPaymentExamples } from "../catalog/paymentMethods";
+import { getBusinessLocale } from "../config/businessConfig";
 
+// Fase 11 del plan maestro (2026-09-15): los ejemplos de forma de pago y la palabra "cedula" salian
+// escritos a mano aca. Ahora los pone el caller con los metodos reales del negocio y la etiqueta de
+// documento de su pais - ver catalog/paymentMethods.ts y config/countries.ts.
 const EXTRACT_PROMPT = `Sos un asistente que lee una conversacion de ventas por WhatsApp entre un negocio y un
 cliente, y extrae los datos de un pedido que se cerro (o esta por cerrarse) para que el dueno del negocio
 lo revise y confirme antes de registrarlo - vos solo prellenas un formulario, no cerras nada por tu cuenta.
@@ -25,12 +30,12 @@ Devolve SOLO un JSON con esta forma exacta, sin texto adicional:
   escribio o menciono el negocio en la conversacion.
 - "shippingAddress": la direccion de entrega si se menciono (ciudad, barrio, direccion exacta). null si
   no se menciono.
-- "paymentMethodLabel": la forma de pago acordada (ej: "Nequi", "Contraentrega", "Bancolombia"). null si
+- "paymentMethodLabel": la forma de pago acordada (ej: {{METODOS_PAGO}}). null si
   no quedo claro.
 - "shippingCost": el costo de envio en numero (sin simbolos ni puntos, ej 9000) si se menciono o cobro
   explicitamente. null si no se menciono ningun costo de envio o si es gratis (en ese caso usa 0, no
   null, si el negocio dijo explicitamente "envio gratis").
-- "idNumber": el numero de cedula del cliente si lo dio. null si no se menciono.
+- "idNumber": {{DOCUMENTO}} del cliente si lo dio. null si no se menciono.
 - "deliveryPhone": el celular de contacto para la entrega si lo dio (puede ser distinto al numero de
   WhatsApp). null si no se menciono.
 - "notes": cualquier pedido especial del cliente que no encaje en los campos anteriores (ej: horario o
@@ -73,14 +78,24 @@ export async function extractSaleDetails(businessId: string, conversationId: str
   if (history.length === 0) return EMPTY_RESULT;
 
   const transcript = history.map((m) => `${m.role}: ${m.content}`).join("\n");
-  const products = await listActiveProducts(businessId);
+  const [products, paymentExamples, negocio] = await Promise.all([
+    listActiveProducts(businessId),
+    getPaymentExamples(businessId),
+    getBusinessLocale(businessId),
+  ]);
   const catalogNames = products.map((p) => p.name).join(", ") || "(catalogo vacio)";
 
   const response = await deepseek.chat.completions.create({
     model: DEEPSEEK_MODEL,
     max_tokens: 500,
     messages: [
-      { role: "system", content: EXTRACT_PROMPT },
+      {
+        role: "system",
+        content: EXTRACT_PROMPT.split("{{METODOS_PAGO}}")
+          .join(paymentExamples)
+          .split("{{DOCUMENTO}}")
+          .join(`el ${negocio.country.documentLabel}`),
+      },
       { role: "user", content: `Nombres reales del catalogo de este negocio: ${catalogNames}\n\nConversacion:\n${transcript}` },
     ],
     response_format: { type: "json_object" },

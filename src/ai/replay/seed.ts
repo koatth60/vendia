@@ -1,5 +1,6 @@
 import { prisma } from "../../db/client";
 import { normalizeForMatch } from "../../search/text";
+import { formatPaymentExamples } from "../../catalog/paymentMethods";
 import type { BotPersonality } from "../prompts/systemPrompt";
 import catalogFixture from "../regression/fixtures/catalog.json";
 
@@ -109,6 +110,8 @@ export async function seedReplayBusiness(catalogName: string, opts?: { saleState
     category: business.businessCategory,
     shippingRatesConfigured,
     saleStateEnabled: business.saleStateEnabled,
+    // Fase 11: mismo dato que arma routes/whatsapp.ts para una conversacion real.
+    paymentExamples: formatPaymentExamples(fixture.paymentMethods.filter((m) => m.active).map((m) => m.label)),
   };
 
   return { businessId: business.id, personality };

@@ -300,7 +300,7 @@ export const catalogTools: OpenAI.Chat.ChatCompletionTool[] = [
     function: {
       name: "get_shipping_payment_modalities",
       description:
-        "Obtiene las modalidades reales de pago del ENVIO que ofrece este negocio (ej: todo anticipado, producto anticipado + envio contraentrega, todo contraentrega) - distinto del canal de pago (Nequi/tarjeta/etc, ver get_payment_methods). Usar cuando el cliente este por confirmar una compra y el negocio tiene esto configurado.",
+        "Obtiene las modalidades reales de pago del ENVIO que ofrece este negocio (ej: todo anticipado, producto anticipado + envio contraentrega, todo contraentrega) - distinto del canal de pago ({{METODOS_PAGO}}/etc, ver get_payment_methods). Usar cuando el cliente este por confirmar una compra y el negocio tiene esto configurado.",
       parameters: {
         type: "object",
         properties: {},
@@ -477,7 +477,7 @@ export const catalogTools: OpenAI.Chat.ChatCompletionTool[] = [
           },
           paymentMethodLabel: {
             type: "string",
-            description: "SOLO para outcome=SOLD: el nombre de la forma de pago elegida (ej: 'Nequi', 'Contraentrega'), tal como la devolvio get_payment_methods.",
+            description: "SOLO para outcome=SOLD: el nombre de la forma de pago elegida (ej: {{METODOS_PAGO}}), tal como la devolvio get_payment_methods.",
           },
           shippingCost: {
             type: "number",
@@ -533,6 +533,24 @@ export const catalogTools: OpenAI.Chat.ChatCompletionTool[] = [
 // Fase 2 del plan maestro (2026-09-15): solo se agregan al array de herramientas que ve el modelo para
 // un negocio con Business.saleStateEnabled=true (ver agent.ts) - un negocio sin la bandera no paga el
 // costo de tokens de estas 4 herramientas ni puede llamarlas.
+// Fase 11 del plan maestro (2026-09-15): las cuatro descripciones de arriba traian "Nequi" escrito a
+// mano como ejemplo de canal de pago. Nequi no existe en Mexico, y un negocio que solo cobra
+// contraentrega tampoco gana nada con ese ejemplo. buildTools lo sustituye por los metodos reales del
+// negocio antes de mandar las herramientas al modelo.
+const PAYMENT_EXAMPLES_MARKER = "{{METODOS_PAGO}}";
+
+function withPaymentExamples(tool: OpenAI.Chat.ChatCompletionTool, examples: string): OpenAI.Chat.ChatCompletionTool {
+  const raw = JSON.stringify(tool);
+  if (!raw.includes(PAYMENT_EXAMPLES_MARKER)) return tool;
+  return JSON.parse(raw.split(PAYMENT_EXAMPLES_MARKER).join(examples)) as OpenAI.Chat.ChatCompletionTool;
+}
+
+/** Las herramientas que ve el modelo este turno, con los ejemplos de pago reales de este negocio. */
+export function buildTools(opts: { saleStateEnabled: boolean; paymentExamples: string }): OpenAI.Chat.ChatCompletionTool[] {
+  const base = opts.saleStateEnabled ? [...catalogTools, ...saleStateTools] : catalogTools;
+  return base.map((tool) => withPaymentExamples(tool, opts.paymentExamples));
+}
+
 export const saleStateTools: OpenAI.Chat.ChatCompletionTool[] = [
   {
     type: "function",
@@ -570,7 +588,7 @@ export const saleStateTools: OpenAI.Chat.ChatCompletionTool[] = [
     type: "function",
     function: {
       name: "set_shipping_modality",
-      description: "Guarda la modalidad de pago del ENVIO que eligio el cliente (ver get_shipping_payment_modalities para las opciones reales de este negocio). Distinto del metodo de pago (Nequi/tarjeta/etc, ver set_payment_method).",
+      description: "Guarda la modalidad de pago del ENVIO que eligio el cliente (ver get_shipping_payment_modalities para las opciones reales de este negocio). Distinto del metodo de pago ({{METODOS_PAGO}}/etc, ver set_payment_method).",
       parameters: {
         type: "object",
         properties: {
@@ -584,7 +602,7 @@ export const saleStateTools: OpenAI.Chat.ChatCompletionTool[] = [
     type: "function",
     function: {
       name: "set_payment_method",
-      description: "Guarda el metodo de pago (Nequi/tarjeta/contraentrega/etc) que eligio el cliente para este pedido. El id tiene que ser el real que te devolvio get_payment_methods EN ESTA conversacion.",
+      description: "Guarda el metodo de pago ({{METODOS_PAGO}}/etc) que eligio el cliente para este pedido. El id tiene que ser el real que te devolvio get_payment_methods EN ESTA conversacion.",
       parameters: {
         type: "object",
         properties: {

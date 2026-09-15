@@ -2,6 +2,7 @@ import { Router } from "express";
 import { Prisma } from "@prisma/client";
 import { env } from "../config/env";
 import { toBusinessLocale } from "../config/businessConfig";
+import { getPaymentExamples } from "../catalog/paymentMethods";
 import { prisma } from "../db/client";
 import {
   sendAlertToOwner,
@@ -447,6 +448,9 @@ async function runGenerateAndSend(conversationId: string, items: ReplyBurstItem[
   const { business, customer, credentials, from } = last;
 
   const shippingRatesConfigured = (await prisma.shippingRate.count({ where: { businessId: business.id } })) > 0;
+  // Fase 11: los ejemplos de canal de pago del prompt y de las herramientas salen de los metodos reales
+  // de este negocio, no de un "Nequi" escrito a mano.
+  const paymentExamples = await getPaymentExamples(business.id);
 
   const reply = await generateReply(
     conversationId,
@@ -475,6 +479,7 @@ async function runGenerateAndSend(conversationId: string, items: ReplyBurstItem[
       shippingPaymentModalities: business.shippingPaymentModalities,
       shippingRatesConfigured,
       saleStateEnabled: business.saleStateEnabled,
+      paymentExamples,
     },
     combinedRawText
   );

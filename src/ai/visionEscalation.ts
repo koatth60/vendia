@@ -36,7 +36,8 @@ export async function escalateToAnthropicVision(
   conversationId: string,
   imageUrl: string,
   caption: string,
-  catalogHint: string
+  catalogHint: string,
+  paymentExamples: string
 ): Promise<string | null> {
   if (!anthropic) return null;
 
@@ -56,7 +57,7 @@ export async function escalateToAnthropicVision(
     const mediaType = normalizeMediaType(imageResponse.headers.get("content-type"));
     const base64 = Buffer.from(await imageResponse.arrayBuffer()).toString("base64");
 
-    const prompt = buildVisionPrompt(catalogHint);
+    const prompt = buildVisionPrompt(catalogHint, paymentExamples);
     const response = await anthropic.messages.create({
       model: ANTHROPIC_VISION_MODEL,
       max_tokens: 256,

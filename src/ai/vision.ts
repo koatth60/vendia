@@ -3,9 +3,10 @@ import { logAiUsage } from "./usage";
 import { escalateToAnthropicVision } from "./visionEscalation";
 import { buildVisionPrompt } from "./visionPrompt";
 import { recordAgentIncident } from "./incidents";
+import { getPaymentExamples } from "../catalog/paymentMethods";
 
-async function analyzeOnce(imageUrl: string, caption: string, catalogHint: string) {
-  const prompt = buildVisionPrompt(catalogHint);
+async function analyzeOnce(imageUrl: string, caption: string, catalogHint: string, paymentExamples: string) {
+  const prompt = buildVisionPrompt(catalogHint, paymentExamples);
   const response = await deepseek.chat.completions.create({
     model: DEEPSEEK_VISION_MODEL,
     max_tokens: 256,
@@ -38,9 +39,13 @@ export async function analyzeCustomerImage(
   caption: string,
   catalogHint = ""
 ): Promise<string> {
+  // Fase 11: los ejemplos de comprobante salen de los metodos de pago reales del negocio, no de dos
+  // billeteras colombianas escritas a mano en el prompt.
+  const paymentExamples = await getPaymentExamples(businessId);
+
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
-      const { text, usage } = await analyzeOnce(imageUrl, caption, catalogHint);
+      const { text, usage } = await analyzeOnce(imageUrl, caption, catalogHint, paymentExamples);
       await logAiUsage({ businessId, conversationId, kind: "VISION", model: DEEPSEEK_VISION_MODEL, usage });
       const result = text || "No se pudo analizar la imagen.";
 
@@ -53,7 +58,7 @@ export async function analyzeCustomerImage(
       // es preguntarle siempre al modelo que ve mejor. A ~4.4 fotos de producto por dia y ~USD 0.01 por
       // llamada, son centavos al mes por negocio.
       if (result.startsWith("PRODUCTO_POCO_CLARO:") || result.startsWith("PRODUCTO:")) {
-        const escalated = await escalateToAnthropicVision(businessId, conversationId, imageUrl, caption, catalogHint);
+        const escalated = await escalateToAnthropicVision(businessId, conversationId, imageUrl, caption, catalogHint, paymentExamples);
         // Si el modelo fuerte tambien pudo identificarlo, su respuesta manda. Si no pudo (devuelve
         // POCO_CLARO) o la llamada fallo (null), nos quedamos con la de DeepSeek: nunca se pierde
         // informacion por escalar.

@@ -1,7 +1,7 @@
 import type OpenAI from "openai";
 import { deepseek, DEEPSEEK_MODEL } from "./client";
 import { createChatCompletion } from "./modelFailover";
-import { catalogTools, saleStateTools, runCatalogTool, type ToolContext } from "./tools";
+import { buildTools, runCatalogTool, type ToolContext } from "./tools";
 import { getRecentHistory, findOpenPendingOwnerQuestionsForConversation } from "../conversation/service";
 import { logAiUsage } from "./usage";
 import { prisma } from "../db/client";
@@ -25,6 +25,8 @@ import { tokenize, normalizeForMatch } from "../search/text";
 import { buildSystemPrompt, type BotPersonality } from "./prompts/systemPrompt";
 import { formatPrice } from "../config/money";
 import { getBusinessLocale } from "../config/businessConfig";
+import { formatBusinessHours, closedDays } from "../config/businessHours";
+import { formatPaymentExamples } from "../catalog/paymentMethods";
 import { COUNTRIES, type CountryCode } from "../config/countries";
 import { CLOSING_MESSAGE_PROMPT } from "./prompts/closingMessage";
 import {
@@ -772,8 +774,12 @@ export async function generateReply(
   const saleState = personality?.saleStateEnabled ? await getSaleState(conversationId) : null;
   const saleStateText = saleState ? formatSaleStateForPrompt(saleState) : "";
   // Herramientas nuevas solo visibles (y llamables) para un negocio con la bandera activa - el resto no
-  // paga el costo de tokens de un tool que no puede usar.
-  const tools = personality?.saleStateEnabled ? [...catalogTools, ...saleStateTools] : catalogTools;
+  // paga el costo de tokens de un tool que no puede usar. Fase 11: los ejemplos de canal de pago que
+  // traen cuatro de sus descripciones son los metodos reales de ESTE negocio, no "Nequi" para todos.
+  const tools = buildTools({
+    saleStateEnabled: Boolean(personality?.saleStateEnabled),
+    paymentExamples: personality?.paymentExamples || formatPaymentExamples([]),
+  });
 
   // Fase 4 del plan maestro (2026-09-15), correccion causa raiz C2: si esta conversacion ya tiene una
   // pregunta sin responder del dueno AL EMPEZAR este turno, se lo decimos al modelo como dato de estado
@@ -788,7 +794,18 @@ export async function generateReply(
     : [];
 
   const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
-    { role: "system", content: buildSystemPrompt(personality) },
+    {
+      role: "system",
+      // Fase 11: lo que el prompt sabia de Colombia (como se llama el documento) y lo que tenia escrito a
+      // mano (los ejemplos de pago) sale del negocio. El horario, si lo cargo.
+      content: buildSystemPrompt({
+        ...personality,
+        documentLabel: personality?.documentLabel ?? negocio.country.documentLabel,
+        businessHoursText:
+          personality?.businessHoursText ?? (negocio.businessHours ? formatBusinessHours(negocio.businessHours) : ""),
+        closedDaysText: personality?.closedDaysText ?? (negocio.businessHours ? closedDays(negocio.businessHours).join(", ") : ""),
+      }),
+    },
     ...(contextSummary
       ? [
           {

@@ -144,7 +144,7 @@ Apenas sepas el nombre de la persona con la que estas hablando (porque se presen
 usa save_customer_name una vez. El nombre que te dan PARA EL ENVIO puede ser el de otra persona (quien
 recibe): ese va en los datos del pedido, no en save_customer_name. Si el cliente esquiva la pregunta del
 nombre y contesta otra cosa, no guardes esa respuesta como nombre - volve a preguntarlo mas adelante, una
-sola vez y sin insistir. Si este negocio pide numero de identificacion (cedula) o un celular de
+sola vez y sin insistir. Si este negocio pide {{DOCUMENTO}} o un telefono de
 contacto para el envio (revisa sus instrucciones especificas), usa save_customer_contact_info apenas tengas
 cada dato, aunque el cliente te los haya mandado todos juntos en un mismo mensaje. A medida que la conversacion avanza, usa update_conversation_status
 para reflejar el momento real: INTERESTED apenas muestre interes concreto en un producto, QUOTED cuando ya
@@ -376,6 +376,12 @@ entrada, es el ultimo recurso despues de intentar resolverlo vos mismo con el cl
 - "OTRO:" (no es ni comprobante ni producto) - respondele naturalmente sin inventar que es un producto o
 un pago.`;
 
+// Los cinco rubros que el panel ofrece como atajo, con su nombre completo en boca del modelo. Fase 11
+// del plan maestro (2026-09-15): dejo de ser el conjunto de rubros POSIBLES y paso a ser solo una tabla
+// de expansiones. Antes, un negocio fuera de estos cinco (una ferreteria, una farmacia, una floristeria)
+// quedaba con category cargado en la base y CATEGORY_LABELS devolviendo undefined: el prompt se armaba
+// sin ninguna linea de rubro, como si el dueno no hubiera contestado. Ahora cualquier texto que el dueno
+// escriba llega al prompt tal cual.
 const CATEGORY_LABELS: Record<string, string> = {
   ropa: "moda y ropa",
   electronica: "electrónica y tecnología",
@@ -383,6 +389,12 @@ const CATEGORY_LABELS: Record<string, string> = {
   servicios: "servicios (belleza, salud u otros servicios agendables)",
   joyeria: "joyería y accesorios",
 };
+
+export function categoryLabel(category: string | null | undefined): string | null {
+  const raw = category?.trim();
+  if (!raw) return null;
+  return CATEGORY_LABELS[raw] ?? raw;
+}
 
 export interface BotPersonality {
   // Real production bug (2026-09-14/15): a conversation spanning a business rename (old messages still
@@ -417,6 +429,19 @@ export interface BotPersonality {
   // Fase 2 del plan maestro (2026-09-15), causa raiz C1: bandera de reversion por negocio para el
   // motor de venta ejecutable (SaleState). Off por defecto - ver Business.saleStateEnabled.
   saleStateEnabled?: boolean;
+  // Fase 11 del plan maestro (2026-09-15), causa raiz C5. Todo lo de abajo lo resuelve el caller
+  // (src/config/businessConfig.ts + catalog/paymentMethods.ts) y se lo pasa ya hecho, igual que
+  // shippingRatesConfigured: este archivo arma texto, no lee la base.
+  //
+  // Como se llama el documento de identidad para los clientes de este negocio ("número de cédula" en
+  // Colombia, "identificación" en Mexico). Antes decia "cedula" en el prompt para todo el mundo.
+  documentLabel?: string;
+  /** Ejemplos de canal de pago, sacados de los metodos REALES del negocio - ver formatPaymentExamples. */
+  paymentExamples?: string;
+  /** Horario de atencion ya formateado, o vacio si el negocio no cargo ninguno. */
+  businessHoursText?: string;
+  /** Dias en que no se atiende, ya en palabras. Solo se usa si businessHoursText tiene algo. */
+  closedDaysText?: string;
 }
 
 export function buildSystemPrompt(personality?: BotPersonality | null): string {
@@ -436,13 +461,23 @@ export function buildSystemPrompt(personality?: BotPersonality | null): string {
       .replace("{{FOTOS}}", photoDirective)
       .replace("{{COMPROBANTES}}", comprobanteDirective)
       .replace("{{TARIFAS_ENVIO}}", shippingRatesDirective)
-      .replace("{{PEDIDO_DATOS}}", pedidoDatosDirective),
+      .replace("{{PEDIDO_DATOS}}", pedidoDatosDirective)
+      .replace("{{DOCUMENTO}}", personality?.documentLabel?.trim() || "un documento de identidad"),
     PRODUCT_IMAGE_DIRECTIVE,
   ];
 
-  const categoryLabel = personality?.category ? CATEGORY_LABELS[personality.category] : undefined;
-  if (categoryLabel) {
-    parts.push(`RUBRO DEL NEGOCIO: este negocio es de ${categoryLabel}. Ten esto en cuenta para el tipo de preguntas que hacés y cómo describís los productos.`);
+  const rubro = categoryLabel(personality?.category);
+  if (rubro) {
+    parts.push(`RUBRO DEL NEGOCIO: este negocio es de ${rubro}. Ten esto en cuenta para el tipo de preguntas que hacés y cómo describís los productos.`);
+  }
+
+  // Fase 11: el horario sale de Business.businessHours, no de la prosa de customInstructions. Solo entra
+  // al prompt si el negocio lo cargo - un negocio sin horario no paga un solo token por esta linea.
+  if (personality?.businessHoursText?.trim()) {
+    const cerrado = personality.closedDaysText?.trim() ? ` No se atiende ${personality.closedDaysText.trim()}.` : "";
+    parts.push(
+      `HORARIO DE ATENCION: ${personality.businessHoursText.trim()}.${cerrado} Es el horario del negocio para despachar y atender, no el tuyo: vos contestas siempre. Si el cliente pregunta por el horario, este es el dato real - no lo inventes ni lo deduzcas de otra cosa.`
+    );
   }
 
   if (personality?.businessName?.trim()) {
@@ -492,8 +527,7 @@ inmediato al genero indicado y segui asi el resto de la conversacion.`
     parts.push(
       `MODALIDAD DE PAGO DEL ENVIO: este negocio ofrece estas modalidades reales: ${options}. Cuando el
 cliente este por confirmar una compra, usa get_shipping_payment_modalities para mostrarle EXACTAMENTE esas
-opciones (nunca inventes ni asumas cual eligio) y espera su respuesta explicita antes de seguir. Esto es
-distinto del canal de pago (Nequi, tarjeta, etc, ver get_payment_methods) - son dos preguntas separadas.`
+opciones (nunca inventes ni asumas cual eligio) y espera su respuesta explicita antes de seguir.`
     );
   }
 
