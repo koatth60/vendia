@@ -2,6 +2,9 @@
 // necesita comprobar que reintenta, no cuanto duerme. Se define ANTES de importar la capa, que lee la
 // variable al cargarse.
 process.env.WHATSAPP_RETRY_BACKOFF_MS = "0";
+// Misma razon que arriba: la pausa entre los dos envios de un mensaje partido (Fase 10) no tiene
+// por que hacer esperar de verdad a una prueba.
+process.env.WHATSAPP_SPLIT_PAUSE_MS = "0";
 
 import { test, before, after, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
@@ -9,9 +12,12 @@ import { randomUUID } from "node:crypto";
 import { prisma } from "../db/client";
 import {
   classifyOutboundError,
+  computeTypingDelayMs,
   drainOutboundQueue,
+  markCustomerMessageSeen,
   sendAlertToOwner,
   sendToCustomer,
+  splitLongMessage,
   MAX_QUEUE_ATTEMPTS,
   META_ERROR_CODES,
   GraphApiError,
@@ -32,7 +38,7 @@ let customerPhone: string;
 let originalFetch: typeof fetch;
 
 // Cada llamada al Graph API que hizo la capa, en orden, para poder contar intentos.
-let calls: { type: string; to: string }[] = [];
+let calls: { type: string; to: string; text?: string }[] = [];
 
 before(async () => {
   const business = await prisma.business.create({
@@ -86,7 +92,7 @@ function stubFetch(responder: (body: { type: string; to: string }, call: number)
   globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
     const parsed = JSON.parse(String(init?.body ?? "{}"));
     const to = parsed.to ?? parsed.recipient ?? "";
-    calls.push({ type: parsed.type, to });
+    calls.push({ type: parsed.type, to, text: parsed.text?.body });
     const outcome = responder({ type: parsed.type, to }, calls.length);
     if ("ok" in outcome) {
       return { ok: true, json: async () => ({ messages: [{ id: `wamid.${randomUUID()}` }] }) } as Response;
@@ -346,4 +352,114 @@ test("un fallo transitorio en la cola agenda el proximo intento en vez de rendir
   assert.equal(row.attempts, 1);
   assert.equal(row.failedAt, null);
   assert.ok(row.nextAttemptAt.getTime() > Date.now(), "el proximo intento queda agendado a futuro");
+});
+
+// ---------------------------------------------------------------------------
+// Fase 10 del plan maestro (2026-09-15), eje 19: acuse de recibo, largo del mensaje y ritmo
+// ---------------------------------------------------------------------------
+
+test("splitLongMessage deja intacto un texto corto", () => {
+  assert.deepEqual(splitLongMessage("Hola, ¿cómo estás?"), ["Hola, ¿cómo estás?"]);
+});
+
+test("splitLongMessage parte un texto largo en exactamente dos pedazos, cortando en un espacio", () => {
+  const first = "Primera parte. ".repeat(50); // 750 caracteres, todo con espacios
+  const second = "Segunda parte.";
+  const [chunk1, chunk2] = splitLongMessage(first + second, 700);
+
+  assert.equal(chunk1.length <= 700, true, `el primer pedazo no deberia superar el limite (midio ${chunk1.length})`);
+  assert.equal(chunk1.endsWith(" "), false, "no deberia dejar espacio colgando al final");
+  assert.equal((chunk1 + " " + chunk2).includes("Segunda parte."), true);
+  // Ninguna palabra queda partida a la mitad: el primer caracter del segundo pedazo empieza una
+  // palabra nueva, no continua la ultima del primero.
+  assert.notEqual(chunk2[0], " ");
+});
+
+test("splitLongMessage prefiere cortar en un salto de parrafo antes que en un espacio suelto", () => {
+  const text = "A".repeat(300) + "\n\n" + "B".repeat(500);
+  const [chunk1, chunk2] = splitLongMessage(text, 700);
+  assert.equal(chunk1, "A".repeat(300));
+  assert.equal(chunk2, "B".repeat(500));
+});
+
+test("splitLongMessage corta duro si no hay ningun espacio (una sola palabra larga)", () => {
+  const text = "A".repeat(900);
+  const chunks = splitLongMessage(text, 700);
+  assert.equal(chunks.length, 2);
+  assert.equal(chunks[0].length, 700);
+  assert.equal(chunks[1].length, 200);
+});
+
+test("computeTypingDelayMs tiene piso, techo, y crece con el largo del mensaje", () => {
+  assert.equal(computeTypingDelayMs(0), 500);
+  const short = computeTypingDelayMs(10);
+  const long = computeTypingDelayMs(100);
+  assert.ok(short < long, "un mensaje mas largo tiene que dar una demora mayor o igual");
+  assert.equal(computeTypingDelayMs(5000), 4000, "nunca deberia superar el tope de ~4s");
+});
+
+test("markCustomerMessageSeen manda status=read con el indicador de escribiendo", async () => {
+  const bodies: unknown[] = [];
+  globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
+    bodies.push(JSON.parse(String(init?.body ?? "{}")));
+    return { ok: true, json: async () => ({}) } as Response;
+  }) as typeof fetch;
+
+  await markCustomerMessageSeen(credentials, "wamid.XYZ");
+
+  assert.equal(bodies.length, 1);
+  assert.deepEqual(bodies[0], {
+    messaging_product: "whatsapp",
+    status: "read",
+    message_id: "wamid.XYZ",
+    typing_indicator: { type: "text" },
+  });
+});
+
+test("markCustomerMessageSeen no revienta el turno si Meta rechaza el acuse", async () => {
+  globalThis.fetch = (async () => ({ ok: false, status: 500, text: async () => "{}" })) as unknown as typeof fetch;
+  await assert.doesNotReject(() => markCustomerMessageSeen(credentials, "wamid.XYZ"));
+});
+
+test("sendToCustomer parte un texto largo en dos envios reales, con una pausa entre ellos, y registra los dos", async () => {
+  stubFetch(() => ({ ok: true }));
+  const longText = ("Detalle del producto. ".repeat(40) + "Cierre final.").trim(); // > 700 caracteres
+
+  const result = await sendToCustomer({
+    businessId,
+    conversationId,
+    credentials,
+    to: customerPhone,
+    content: { kind: "text", text: longText },
+    recordAs: { text: longText },
+  });
+
+  assert.equal(calls.length, 2, "un mensaje largo tiene que salir en dos llamadas al Graph API");
+  assert.equal(result.delivered, true);
+  assert.equal(result.outcome, "SENT");
+
+  const messages = await prisma.message.findMany({ where: { conversationId, role: "ASSISTANT" }, orderBy: { createdAt: "asc" } });
+  assert.equal(messages.length, 2, "los dos pedazos se registran como dos mensajes separados");
+});
+
+test("sendToCustomer no manda el segundo pedazo si el primero no se pudo entregar", async () => {
+  stubFetch(() => ({ status: 500 }));
+  const longText = "Primera parte. ".repeat(50) + "Segunda parte que no deberia salir.";
+
+  const result = await sendToCustomer({
+    businessId,
+    conversationId,
+    credentials,
+    to: customerPhone,
+    content: { kind: "text", text: longText },
+    recordAs: { text: longText },
+  });
+
+  assert.equal(result.delivered, false);
+  assert.ok(
+    calls.every((c) => !c.text?.includes("Segunda parte")),
+    "no deberia intentar mandar el segundo pedazo tras agotar los reintentos del primero"
+  );
+  const messages = await prisma.message.findMany({ where: { conversationId, role: "ASSISTANT" } });
+  assert.equal(messages.length, 0, "nada se registra si nada se entrego");
 });

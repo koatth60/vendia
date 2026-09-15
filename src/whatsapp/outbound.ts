@@ -16,6 +16,7 @@
 import { prisma } from "../db/client";
 import {
   GraphApiError,
+  markAsReadWithTypingIndicator,
   sendImageMessage,
   sendInteractiveButtonsMessage,
   sendOwnerAlert,
@@ -125,7 +126,67 @@ const BACKOFF_MS: Record<"TRANSIENT" | "RATE_LIMITED", number[]> = {
 // define y la escalera manda.
 const BACKOFF_OVERRIDE_MS = process.env.WHATSAPP_RETRY_BACKOFF_MS ? Number(process.env.WHATSAPP_RETRY_BACKOFF_MS) : null;
 
+// Pausa entre los dos envios de un mensaje partido (Fase 10, ver splitLongMessage/sendTextInChunks
+// mas abajo). Mismo motivo que BACKOFF_OVERRIDE_MS: que las pruebas no tengan que esperar de verdad.
+const SPLIT_PAUSE_MS = process.env.WHATSAPP_SPLIT_PAUSE_MS ? Number(process.env.WHATSAPP_SPLIT_PAUSE_MS) : 600;
+
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// ---------------------------------------------------------------------------
+// Fase 10 del plan maestro (2026-09-15), eje 19: acuse de recibo, largo del mensaje y ritmo
+// ---------------------------------------------------------------------------
+
+// El acuse de recibo no es critico para el turno: si Meta lo rechaza, el cliente simplemente no ve
+// el "visto" ni el indicador de escribiendo para ESE mensaje puntual, pero el bot sigue
+// respondiendo igual. No vale la pena un DeliveryFailure ni un reintento por esto.
+export async function markCustomerMessageSeen(credentials: WhatsappCredentials, messageId: string): Promise<void> {
+  try {
+    await markAsReadWithTypingIndicator(credentials, messageId);
+  } catch (error) {
+    console.error("No se pudo marcar el mensaje como leido / mostrar 'escribiendo':", error);
+  }
+}
+
+const MAX_MESSAGE_LENGTH = 700;
+
+// Sin expresiones regulares (regla del plan maestro): busca el mejor punto de corte antes de
+// maxLen con indexOf/lastIndexOf, misma tecnica que importedModule en outbound.arch.test.ts.
+// Prefiere partir en un salto de parrafo, despues en fin de oracion, despues en cualquier salto de
+// linea o espacio; si nada de eso aparece (una sola palabra mas larga que maxLen) corta duro.
+function findBreakPoint(text: string, maxLen: number): number {
+  const window = text.slice(0, maxLen + 1);
+  const paragraphBreak = window.lastIndexOf("\n\n");
+  if (paragraphBreak > 0) return paragraphBreak + 2;
+  const sentenceBreak = window.lastIndexOf(". ");
+  if (sentenceBreak > 0) return sentenceBreak + 2;
+  const lineBreak = window.lastIndexOf("\n");
+  if (lineBreak > 0) return lineBreak + 1;
+  const spaceBreak = window.lastIndexOf(" ");
+  if (spaceBreak > 0) return spaceBreak + 1;
+  return maxLen;
+}
+
+// Un mensaje largo se siente como un muro de texto. Se parte en dos envios (nunca a mitad de
+// palabra) con una pausa corta entre ellos - ver sendTextInChunks mas abajo.
+export function splitLongMessage(text: string, maxLen = MAX_MESSAGE_LENGTH): string[] {
+  if (text.length <= maxLen) return [text];
+  const breakPoint = findBreakPoint(text, maxLen);
+  const first = text.slice(0, breakPoint).trimEnd();
+  const rest = text.slice(breakPoint).trimStart();
+  if (!rest) return [first];
+  return [first, rest];
+}
+
+const TYPING_DELAY_FLOOR_MS = 500;
+const TYPING_DELAY_MS_PER_CHAR = 18;
+const TYPING_DELAY_CAP_MS = 4000;
+
+// Se siente mas humano si la respuesta no sale instantanea. Proporcional al largo de lo que se va
+// a mandar (una respuesta corta no necesita el tope completo), con un piso para que ni un "sí"
+// salga en 0ms, y un techo de ~4s para no demorar de mas.
+export function computeTypingDelayMs(replyLength: number): number {
+  return Math.min(TYPING_DELAY_CAP_MS, TYPING_DELAY_FLOOR_MS + replyLength * TYPING_DELAY_MS_PER_CHAR);
+}
 
 interface AttemptResult {
   wamid: string | null;
@@ -279,11 +340,40 @@ function failed(failure: OutboundFailure, attempts: number, windowOpen: boolean 
   };
 }
 
-// Unico camino para hablarle a un cliente. Verifica la ventana ANTES de intentar: Meta acepta un texto
-// libre fuera de ventana y devuelve un wamid real, y recien reporta el 131047 horas despues por el
-// webhook de estados - para entonces la duena ya creyo que el mensaje salio (incidente real del
-// 2026-09-14, dos mensajes "enviados" que nadie recibio).
+// >700 caracteres se manda en dos WhatsApp separados en vez de un solo muro de texto (Fase 10). Si
+// el primer pedazo no se entrega, no tiene sentido mandar el segundo. `attempts` se suma entre
+// pedazos para que el llamador siga viendo cuanto le costo el envio completo.
+async function sendTextInChunks(params: SendToCustomerParams, chunks: string[]): Promise<OutboundResult> {
+  let result: OutboundResult | null = null;
+  let totalAttempts = 0;
+  for (let i = 0; i < chunks.length; i++) {
+    result = await sendSingleContentToCustomer({
+      ...params,
+      content: { kind: "text", text: chunks[i] },
+      recordAs: params.recordAs ? { text: chunks[i] } : null,
+    });
+    totalAttempts += result.attempts;
+    if (!result.delivered) break;
+    if (i < chunks.length - 1) await sleep(SPLIT_PAUSE_MS);
+  }
+  return { ...result!, attempts: totalAttempts };
+}
+
+// Unico camino para hablarle a un cliente. Texto largo se parte en varios envios (sendTextInChunks
+// arriba); todo lo demas pasa directo a sendSingleContentToCustomer.
 export async function sendToCustomer(params: SendToCustomerParams): Promise<OutboundResult> {
+  if (params.content.kind === "text") {
+    const chunks = splitLongMessage(params.content.text);
+    if (chunks.length > 1) return sendTextInChunks(params, chunks);
+  }
+  return sendSingleContentToCustomer(params);
+}
+
+// Verifica la ventana ANTES de intentar: Meta acepta un texto libre fuera de ventana y devuelve un
+// wamid real, y recien reporta el 131047 horas despues por el webhook de estados - para entonces
+// la duena ya creyo que el mensaje salio (incidente real del 2026-09-14, dos mensajes "enviados"
+// que nadie recibio).
+async function sendSingleContentToCustomer(params: SendToCustomerParams): Promise<OutboundResult> {
   const { businessId, conversationId, credentials, to, content } = params;
   const policy = params.onWindowClosed ?? "template";
 
