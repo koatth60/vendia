@@ -45,6 +45,12 @@ export interface FixtureTurnExpectation {
   // turnos de listado: un turno que ademas muestre un costo de envio o un total traeria cifras que no
   // son del catalogo y esta asercion las marcaria como inventadas.
   catalogFidelity?: boolean;
+  // Igual que catalogFidelity, pero para un turno que lista un SUBCONJUNTO del catalogo
+  // (find_products_by_attributes filtrando por categoria o color). Los nombres declarados aca son el
+  // universo permitido de ese turno: la respuesta no puede traer el precio ni el nombre de ningun otro
+  // producto del negocio, y tiene que traer todos estos. Se declaran a mano a proposito - si el filtro
+  // deja de devolver lo que corresponde, la lista deja de coincidir y el turno falla.
+  catalogFidelityScope?: string[];
   textMustContain?: string[];
   // Bloqueador de produccion (2026-09-15, seguimiento de f9b994b): herramientas que generateReply
   // FORZO via tool_choice este turno, en orden. Es lo unico del forzado que un replay determinista puede
@@ -409,6 +415,18 @@ export function assertTurn(
   const label = `${fixtureName} turno ${turnIndex}`;
 
   if (expect_.catalogFidelity) assertCatalogFidelity(label, result.reply, catalog);
+
+  if (expect_.catalogFidelityScope) {
+    const scoped = catalog.filter((product) => expect_.catalogFidelityScope!.includes(product.name));
+    assert.equal(
+      scoped.length,
+      expect_.catalogFidelityScope.length,
+      `${label}: catalogFidelityScope nombra productos que no existen en el catalogo sembrado: ${expect_.catalogFidelityScope
+        .filter((name) => !catalog.some((product) => product.name === name))
+        .join(", ")}`
+    );
+    assertCatalogFidelity(label, result.reply, scoped);
+  }
 
   if (expect_.toolSequence) {
     assert.deepEqual(result.toolSequence, expect_.toolSequence, `${label}: secuencia de herramientas no coincide`);

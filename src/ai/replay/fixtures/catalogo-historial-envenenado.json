@@ -52,6 +52,48 @@
         ]
       },
       "note": "El turno del incidente. La lista falsa ya esta en el historial: sin forzar la herramienta el modelo la copia y nunca ve la instruccion de la marca."
+    },
+    {
+      "customer": "y qué audífonos tienen?",
+      "modelResponses": [
+        {
+          "toolCalls": [
+            {
+              "name": "find_products_by_attributes",
+              "arguments": {
+                "category": "audifonos"
+              }
+            }
+          ]
+        },
+        {
+          "content": "Estos son los que tenemos en audio:\n\n{{BLOQUE_CATALOGO}}\n\n¿Cuál te muestro?"
+        }
+      ],
+      "expect": {
+        "forcedTools": [
+          "find_products_by_attributes"
+        ],
+        "toolSequence": [
+          "find_products_by_attributes"
+        ],
+        "catalogFidelityScope": [
+          "AIRPODS PRO 2",
+          "PARLANTE TIPO ALEXA",
+          "Audifonos Q70 Earcuff",
+          "AIRPODS SERIE 4",
+          "AIRPODS PRO 3",
+          "Combo k11 Mini",
+          "AIRPODS MAX"
+        ],
+        "textMustNotContain": [
+          "{{BLOQUE_CATALOGO}}",
+          "Audífonos Xiaomi",
+          "Bombox 4",
+          "Smartwatch V20 Caballero"
+        ]
+      },
+      "note": "Una lista FILTRADA tambien es una lista. Este es el camino mas transitado ('que relojes tienen' es mucho mas comun que 'muestrame todo el catalogo') y hasta ahora quedaba como prosa libre del modelo: find_products_by_attributes no devolvia la nota de la marca. Nota tambien la precedencia: el mensaje dice 'que tienen', que por si solo forzaria list_all_products, pero como ademas nombra una categoria configurada gana la busqueda acotada."
     }
   ]
 }

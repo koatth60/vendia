@@ -1299,6 +1299,25 @@ export async function generateReply(
             catalogListThisTurn = rows.map((p) => ({ name: p.name, price: p.price, stock: p.stock }));
           }
         }
+        // Mismo bloqueador, para la lista FILTRADA (find_products_by_attributes). Un match es por
+        // variante, asi que el nombre de la fila lleva la variante cuando existe ("... (Negro)"): sin eso
+        // un producto de tres colores saldria tres veces con el mismo nombre y el cliente no podria
+        // elegir por numero.
+        if (call.function.name === "find_products_by_attributes" && Array.isArray(result?.matches) && result.matches.length > 1) {
+          const rows = (result.matches as unknown[]).filter(
+            (m): m is { productName: string; variantLabel: string | null; price: string; stock: number } => {
+              const row = m as { productName?: unknown; price?: unknown; stock?: unknown };
+              return typeof row?.productName === "string" && typeof row?.price === "string" && typeof row?.stock === "number";
+            }
+          );
+          if (rows.length > 1) {
+            catalogListThisTurn = rows.map((m) => ({
+              name: m.variantLabel ? `${m.productName} (${m.variantLabel})` : m.productName,
+              price: m.price,
+              stock: m.stock,
+            }));
+          }
+        }
         if (call.function.name === "get_payment_methods" && Array.isArray(result?.methods)) {
           paymentMethodsThisTurn = result.methods;
         }

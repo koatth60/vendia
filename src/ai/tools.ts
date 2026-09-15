@@ -911,6 +911,13 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
       // match's photos.
       const ambiguousAcrossCategories = !category && categoriesFound.length > 1;
 
+      // Mismo bloqueador de produccion que list_all_products/search_products (2026-09-15): una lista
+      // filtrada tambien es una lista, y hasta ahora este camino la dejaba como prosa libre del modelo -
+      // es ademas el camino MAS transitado ("que relojes tienen" es mucho mas comun que "muestrame todo
+      // el catalogo"). Mismo criterio: desde 2 resultados se renderiza desde la base, uno solo se sigue
+      // redactando en prosa. Se reusa CATALOG_LIST_NOTE tal cual, sin prosa nueva en el payload.
+      const listNote = matches.length > 1 ? ` ${CATALOG_LIST_NOTE}` : "";
+
       return {
         matches: matches.map((m) => ({
           productId: m.productId,
@@ -925,8 +932,8 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
         })),
         ambiguousAcrossCategories,
         note: ambiguousAcrossCategories
-          ? "Estos resultados son de VARIAS categorias distintas - no asumas cual quiere el cliente ni mandes fotos todavia. Mostrale las opciones agrupadas por categoria (usa 'productName' y 'category' de cada una) y preguntale cual es, antes de llamar send_product_media."
-          : "Estos son los productos/variantes reales que cumplen lo que pidio el cliente - no menciones ni mandes fotos de ningun otro color/categoria que no este en esta lista.",
+          ? `Estos resultados son de VARIAS categorias distintas - no asumas cual quiere el cliente ni mandes fotos todavia. Preguntale cual categoria es (usa 'category' de cada uno para nombrarlas) antes de llamar send_product_media.${listNote}`
+          : `Estos son los productos/variantes reales que cumplen lo que pidio el cliente - no menciones ni mandes fotos de ningun otro color/categoria que no este en esta lista.${listNote}`,
       };
     }
     case "search_products": {
