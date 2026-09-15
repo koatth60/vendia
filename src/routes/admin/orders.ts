@@ -10,6 +10,7 @@ import {
 import { recordMessage } from "../../conversation/service";
 import { sendToCustomer, formatForWhatsapp, type WhatsappCredentials } from "../../whatsapp/outbound";
 import { uploadMedia } from "../../media/s3";
+import { requireOwner } from "../../auth/requireOwner";
 import { upload, businessIdOf, isUnsupportedImageType } from "./shared";
 
 export const ordersRouter = Router();
@@ -119,7 +120,10 @@ ordersRouter.put("/api/orders/:id/ship", upload.single("file"), async (req, res)
   res.json({ ok: true, mediaError });
 });
 
-ordersRouter.put("/api/orders/:id/cancel", async (req, res) => {
+// Fase 8, punto 4 (decision D5): marcar un pedido como enviado es trabajo de bandeja y lo puede hacer
+// un EMPLOYEE. Cancelarlo no: le avisa al cliente por WhatsApp que su pedido se cayo y deja el pedido
+// en CANCELED sin vuelta atras desde el panel. Esa es una decision del dueno.
+ordersRouter.put("/api/orders/:id/cancel", requireOwner, async (req, res) => {
   const businessId = businessIdOf(req);
   const order = await getOrderForBusiness(businessId, String(req.params.id));
   if (!order) {

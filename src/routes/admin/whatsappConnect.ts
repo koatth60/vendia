@@ -7,6 +7,7 @@ import {
   registerPhoneNumber,
   getPhoneNumberInfo,
 } from "../../whatsapp/embeddedSignup";
+import { requireOwner } from "../../auth/requireOwner";
 import { businessIdOf } from "./shared";
 
 export const whatsappConnectRouter = Router();
@@ -49,7 +50,12 @@ whatsappConnectRouter.get("/api/whatsapp/connection", async (req, res) => {
 // El popup de Embedded Signup devuelve tres cosas: un `code` de un solo uso, y el par
 // phone_number_id / waba_id que el cliente eligio. Los tres hacen falta: el code da el token, y los
 // otros dos dicen SOBRE QUE cuenta vale ese token.
-whatsappConnectRouter.post("/api/whatsapp/connect", async (req, res) => {
+// Fase 8, punto 4 (decision D5 del diagnostico): esta es la ruta mas grave de las que no tenian
+// requireOwner. Un EMPLOYEE puede usar la bandeja y el catalogo; conectar WhatsApp no. Completar este
+// flujo reemplaza el phoneNumberId y el token del negocio: en el mejor caso le cambia el numero al
+// bot, en el peor apunta el WhatsApp del cliente a una cuenta ajena. No es una accion de uso diario de
+// nadie que no sea el dueno.
+whatsappConnectRouter.post("/api/whatsapp/connect", requireOwner, async (req, res) => {
   const code = String(req.body?.code ?? "").trim();
   const phoneNumberId = String(req.body?.phoneNumberId ?? "").trim();
   const wabaId = String(req.body?.wabaId ?? "").trim();

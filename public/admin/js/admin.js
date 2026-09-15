@@ -2686,7 +2686,7 @@ function pendingOrderCard(o) {
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7"/></svg>
       Marcar enviado
     </button>
-    <button class="btn-secondary" type="button" onclick="cancelOrder('${o.id}')">Cancelar</button>`;
+    ${isOwner ? `<button class="btn-secondary" type="button" onclick="cancelOrder('${o.id}')">Cancelar</button>` : ''}`;
   return `
     <div class="order-card" data-order-id="${o.id}">
       ${orderCardTop(o, actions)}
@@ -2782,7 +2782,13 @@ async function confirmShipOrder(id) {
   }
 }
 
+// Fase 8, punto 4 (decision D5): cancelar un pedido es del dueno. Marcar enviado si lo puede hacer un
+// empleado - es trabajo de bandeja.
 async function cancelOrder(id) {
+  if (!isOwner) {
+    setStatus('Cancelar un pedido es una acción del dueño de la cuenta', true);
+    return;
+  }
   if (!confirm('¿Cancelar este pedido? El cliente no recibe ningún mensaje automático.')) return;
   try {
     await apiFetch(`/admin/api/orders/${id}/cancel`, { method: 'PUT' });
@@ -4636,6 +4642,14 @@ async function loadWhatsappConnection() {
   }
 }
 
+// Fase 8, punto 4: POST /api/whatsapp/connect ahora exige OWNER. El panel no le muestra al empleado
+// un boton que solo puede terminar en 403 - el estado de la conexion sigue siendo visible para todos,
+// porque saber si el bot esta conectado es parte de trabajar en la bandeja.
+function connectButton(label) {
+  if (!isOwner) return '';
+  return `<button class="btn-primary" type="button" onclick="startWhatsappSignup()">${label}</button>`;
+}
+
 function renderWhatsappConnection(conn) {
   const stateEl = document.getElementById('wa-connect-state');
   if (!stateEl) return;
@@ -4650,7 +4664,7 @@ function renderWhatsappConnection(conn) {
       stateEl.innerHTML = `
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--onix-danger)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5v5.5"/><circle cx="12" cy="16.2" r="0.15" fill="var(--onix-danger)"/></svg>
         <span>Conexión caída — <strong>${label}</strong>. El token de WhatsApp venció o fue revocado, volvé a conectar desde acá.</span>
-        <button class="btn-primary" type="button" onclick="startWhatsappSignup()">Reconectar WhatsApp</button>`;
+        ${connectButton('Reconectar WhatsApp')}`;
       return;
     }
 
@@ -4664,7 +4678,7 @@ function renderWhatsappConnection(conn) {
       stateEl.innerHTML = `
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--onix-warn)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5v5.5"/><circle cx="12" cy="16.2" r="0.15" fill="var(--onix-warn)"/></svg>
         <span>Conectado — <strong>${label}</strong>. El token expira en ${daysLeft} día${daysLeft === 1 ? '' : 's'}, volvé a conectar antes de esa fecha para que no se corte.</span>
-        <button class="btn-primary" type="button" onclick="startWhatsappSignup()">Reconectar WhatsApp</button>`;
+        ${connectButton('Reconectar WhatsApp')}`;
       return;
     }
 
@@ -4679,10 +4693,15 @@ function renderWhatsappConnection(conn) {
     return;
   }
 
-  stateEl.innerHTML = '<button class="btn-primary" type="button" onclick="startWhatsappSignup()">Conectar WhatsApp</button>';
+  stateEl.innerHTML = connectButton('Conectar WhatsApp')
+    || '<span class="hint">La conexión de WhatsApp la configura el dueño de la cuenta.</span>';
 }
 
 function startWhatsappSignup() {
+  if (!isOwner) {
+    setStatus('La conexión de WhatsApp la configura el dueño de la cuenta', true);
+    return;
+  }
   if (!waConnectConfig || !waConnectConfig.ready) {
     setStatus('La conexión automática no está configurada en el servidor todavía', true);
     return;
