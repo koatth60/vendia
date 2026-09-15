@@ -12,6 +12,7 @@
     --green: #1fa855; --green-dark: #16803f; --green-light: #e6f7ec;
     --ink: #14181c; --muted: #6b7480; --border: #e4e7eb; --bg: #f4f6f8; --card: #ffffff;
     --danger: #e5484d; --danger-light: #fdecec;
+    --warn: #b7791f; --warn-light: #fdf3dc;
   }
   * { box-sizing: border-box; }
   body { font-family: "Segoe UI", system-ui, sans-serif; background: var(--bg); margin: 0; color: var(--ink); }
@@ -26,6 +27,7 @@
   .badge { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; }
   .badge-yes { background: var(--green-light); color: var(--green-dark); }
   .badge-no { background: var(--danger-light); color: var(--danger); }
+  .badge-warn { background: var(--warn-light); color: var(--warn); }
   .badge-active { background: var(--green-light); color: var(--green-dark); }
   .badge-inactive { background: #f1f2f4; color: var(--muted); }
   .edit-btn { border: 1px solid var(--border); background: var(--card); border-radius: 7px; padding: 5px 12px; font-size: 12px; cursor: pointer; }
@@ -182,6 +184,19 @@ async function checkAuth() {
   return true;
 }
 
+// Fase 7 del plan maestro (2026-09-15): "Conectado" antes no distinguia una conexion sana de una caida
+// (token vencido/revocado, error 190) o a punto de vencer - Zaqi solo se enteraba por un cliente
+// reclamando o tailando `pm2 logs` (ver jobs/tokenExpiry.ts, que ademas deja un log tageado "ZAQI ALERT").
+function connectionBadge(b) {
+  if (!b.whatsappPhoneNumberId) return `<span class="badge badge-no">Sin conectar</span>`;
+  if (b.whatsappConnectionBrokenAt) return `<span class="badge badge-no">Conexión caída</span>`;
+  if (b.whatsappTokenExpiresAt) {
+    const daysLeft = Math.ceil((new Date(b.whatsappTokenExpiresAt).getTime() - Date.now()) / (24 * 60 * 60 * 1000));
+    if (daysLeft <= 7) return `<span class="badge badge-warn">Token vence en ${daysLeft}d</span>`;
+  }
+  return `<span class="badge badge-yes">Conectado</span>`;
+}
+
 function renderBusinesses(businesses) {
   const table = document.getElementById('businesses-table');
   const empty = document.getElementById('empty-state');
@@ -201,7 +216,7 @@ function renderBusinesses(businesses) {
       <td>${escapeHtml(b.planTier)}</td>
       <td><span class="badge ${b.active ? 'badge-active' : 'badge-inactive'}">${b.active ? 'Activa' : 'Inactiva'}</span></td>
       <td>
-        <span class="badge ${b.whatsappPhoneNumberId ? 'badge-yes' : 'badge-no'}">${b.whatsappPhoneNumberId ? 'Conectado' : 'Sin conectar'}</span>
+        ${connectionBadge(b)}
         ${b.whatsappPhoneNumber ? `<br><span style="color:var(--muted);font-size:12px;">${escapeHtml(b.whatsappPhoneNumber)}</span>` : ''}
       </td>
       <td>

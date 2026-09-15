@@ -200,6 +200,9 @@ test("190: no se reintenta, se registra como critico y no se finge que el mensaj
   assert.ok(failure);
   assert.equal(failure!.errorCode, META_ERROR_CODES.TOKEN_EXPIRED);
   assert.equal(failure!.critical, true, "la conexion del negocio esta caida: tiene que saltar arriba en el panel");
+
+  const business = await prisma.business.findUniqueOrThrow({ where: { id: businessId } });
+  assert.ok(business.whatsappConnectionBrokenAt, "un 190 tiene que marcar la conexion como caida para que el panel lo muestre");
 });
 
 test("190 avisando al dueno: tampoco se pierde en silencio", async () => {

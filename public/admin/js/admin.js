@@ -4642,10 +4642,32 @@ function renderWhatsappConnection(conn) {
 
   if (conn.connected) {
     const label = conn.phoneNumber ? escapeHtml(conn.phoneNumber) : `ID ${escapeHtml(conn.phoneNumberId || '')}`;
-    // A proposito SIN boton de reconectar. Un negocio conectado y funcionando no tiene ninguna razon
-    // de rutina para volver a pasar por este flujo, y el unico resultado posible de un clic de mas es
-    // dejarlo apuntando a otro numero - o sea, romperle el bot a un cliente que estaba bien. Cambiar
-    // de numero es una operacion rara y deliberada: se hace desde la consola de plataforma.
+
+    // Fase 7 del plan maestro: error 190 de Meta (token vencido/revocado) marca la conexion como caida
+    // (whatsappConnectionBrokenAt). Sin esto el dueno solo se entera cuando un cliente le reclama que el
+    // bot dejo de contestar.
+    if (conn.connectionBroken) {
+      stateEl.innerHTML = `
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--onix-danger)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5v5.5"/><circle cx="12" cy="16.2" r="0.15" fill="var(--onix-danger)"/></svg>
+        <span>Conexión caída — <strong>${label}</strong>. El token de WhatsApp venció o fue revocado, volvé a conectar desde acá.</span>
+        <button class="btn-primary" type="button" onclick="startWhatsappSignup()">Reconectar WhatsApp</button>`;
+      return;
+    }
+
+    // A proposito SIN boton de reconectar cuando esta sana. Un negocio conectado y funcionando no tiene
+    // ninguna razon de rutina para volver a pasar por este flujo, y el unico resultado posible de un
+    // clic de mas es dejarlo apuntando a otro numero - o sea, romperle el bot a un cliente que estaba
+    // bien. Cambiar de numero es una operacion rara y deliberada: se hace desde la consola de plataforma.
+    const expiresAt = conn.tokenExpiresAt ? new Date(conn.tokenExpiresAt) : null;
+    const daysLeft = expiresAt ? Math.ceil((expiresAt.getTime() - Date.now()) / (24 * 60 * 60 * 1000)) : null;
+    if (daysLeft !== null && daysLeft <= 7) {
+      stateEl.innerHTML = `
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--onix-warn)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5v5.5"/><circle cx="12" cy="16.2" r="0.15" fill="var(--onix-warn)"/></svg>
+        <span>Conectado — <strong>${label}</strong>. El token expira en ${daysLeft} día${daysLeft === 1 ? '' : 's'}, volvé a conectar antes de esa fecha para que no se corte.</span>
+        <button class="btn-primary" type="button" onclick="startWhatsappSignup()">Reconectar WhatsApp</button>`;
+      return;
+    }
+
     stateEl.innerHTML = `
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--onix-success)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="m8.5 12 2.5 2.5 4.5-5"/></svg>
       <span>Conectado — <strong>${label}</strong></span>`;

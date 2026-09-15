@@ -12,6 +12,7 @@ import { runFollowUpJob } from "./jobs/followUp";
 import { runEscalationReminderJob } from "./jobs/escalationReminder";
 import { runConversationHealthJob, HEALTH_CHECK_INTERVAL_MS } from "./jobs/conversationHealth";
 import { runOutboundQueueJob, OUTBOUND_QUEUE_INTERVAL_MS } from "./jobs/outboundQueue";
+import { runTokenExpiryJob, TOKEN_EXPIRY_CHECK_INTERVAL_MS } from "./jobs/tokenExpiry";
 
 const app = express();
 app.set("trust proxy", 1);
@@ -79,3 +80,8 @@ setInterval(() => {
 setInterval(() => {
   runOutboundQueueJob().catch((error) => console.error("Error drenando la cola de salida:", error));
 }, OUTBOUND_QUEUE_INTERVAL_MS);
+
+// Fase 7: aviso de vencimiento de token de WhatsApp. Ver src/jobs/tokenExpiry.ts.
+setInterval(() => {
+  runTokenExpiryJob().catch((error) => console.error("Error corriendo el chequeo de vencimiento de token:", error));
+}, TOKEN_EXPIRY_CHECK_INTERVAL_MS);

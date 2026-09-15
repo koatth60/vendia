@@ -53,6 +53,8 @@ platformAdminRouter.get("/businesses", async (_req, res) => {
       whatsappPhoneNumberId: true,
       whatsappPhoneNumber: true,
       whatsappBusinessAccountId: true,
+      whatsappTokenExpiresAt: true,
+      whatsappConnectionBrokenAt: true,
       createdAt: true,
     },
   });

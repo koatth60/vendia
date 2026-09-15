@@ -49,6 +49,16 @@ model Business {
   whatsappBusinessAccountId String?
   whatsappPhoneNumber       String?
   whatsappAccessToken       String?
+  // Fase 7 del plan maestro (2026-09-15): los tokens de Embedded Signup expiran a los 60 dias (ver
+  // whatsapp/embeddedSignup.ts) y hasta ahora nada guardaba esa fecha ni avisaba. whatsappConnect.ts
+  // la setea al conectar; jobs/tokenExpiry.ts avisa al dueno y a Zaqi 7 dias antes y limpia
+  // whatsappTokenExpiryNotifiedAt en cada reconexion para que la proxima expiracion vuelva a avisar.
+  whatsappTokenExpiresAt        DateTime?
+  whatsappTokenExpiryNotifiedAt DateTime?
+  // Error 190 de Meta (token vencido o revocado) marca la conexion como caida - src/whatsapp/outbound.ts
+  // la setea al clasificar ese error, whatsappConnect.ts la limpia al reconectar. Distinto de un token
+  // que todavia no vencio pero que Meta igual rechazo (revocado a mano, WABA desconectada).
+  whatsappConnectionBrokenAt    DateTime?
   followUpTemplateName      String?
   followUpTemplateLanguage  String                    @default("es")
   followUpDelayHours        Int                       @default(24)
@@ -668,6 +678,13 @@ model Message {
   imageAnalysis     String?
   whatsappMessageId String?      @unique
   relatedProductId  String?
+  // Fase 7 del plan maestro (2026-09-15): Meta manda el estado de entrega (sent/delivered/read/failed)
+  // via el webhook de `statuses`, matcheado por whatsappMessageId - antes se descartaba en un
+  // console.log (whatsapp.ts) y el panel no podia mostrar si un mensaje llego. Solo aplica a mensajes
+  // ASSISTANT (los unicos que salen con un wamid propio); "failed" ya se registra aparte como
+  // DeliveryFailure, asi que ese estado no vive aca.
+  deliveryStatus    MessageDeliveryStatus?
+  deliveryStatusAt  DateTime?
   createdAt         DateTime     @default(now())
 }
 
@@ -675,6 +692,12 @@ enum MessageRole {
   CUSTOMER
   ASSISTANT
   SYSTEM
+}
+
+enum MessageDeliveryStatus {
+  SENT
+  DELIVERED
+  READ
 }
 
 enum AiUsageKind {

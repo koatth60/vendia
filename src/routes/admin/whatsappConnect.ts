@@ -27,13 +27,22 @@ whatsappConnectRouter.get("/api/whatsapp/connect-config", (_req, res) => {
 whatsappConnectRouter.get("/api/whatsapp/connection", async (req, res) => {
   const business = await prisma.business.findUnique({
     where: { id: businessIdOf(req) },
-    select: { whatsappPhoneNumberId: true, whatsappBusinessAccountId: true, whatsappPhoneNumber: true, whatsappAccessToken: true },
+    select: {
+      whatsappPhoneNumberId: true,
+      whatsappBusinessAccountId: true,
+      whatsappPhoneNumber: true,
+      whatsappAccessToken: true,
+      whatsappTokenExpiresAt: true,
+      whatsappConnectionBrokenAt: true,
+    },
   });
   res.json({
     connected: Boolean(business?.whatsappPhoneNumberId && business?.whatsappAccessToken),
     phoneNumberId: business?.whatsappPhoneNumberId ?? null,
     wabaId: business?.whatsappBusinessAccountId ?? null,
     phoneNumber: business?.whatsappPhoneNumber ?? null,
+    tokenExpiresAt: business?.whatsappTokenExpiresAt ?? null,
+    connectionBroken: Boolean(business?.whatsappConnectionBrokenAt),
   });
 });
 
@@ -103,6 +112,10 @@ whatsappConnectRouter.post("/api/whatsapp/connect", async (req, res) => {
       console.error("No se pudo leer el numero conectado (no bloqueante):", error);
     }
 
+    // expiresInSeconds llega null si Meta no lo informa - mejor no guardar una fecha inventada que
+    // frenar la conexion por eso; jobs/tokenExpiry.ts simplemente no avisa para ese negocio.
+    const tokenExpiresAt = expiresInSeconds ? new Date(Date.now() + expiresInSeconds * 1000) : null;
+
     await prisma.business.update({
       where: { id: businessId },
       data: {
@@ -110,6 +123,11 @@ whatsappConnectRouter.post("/api/whatsapp/connect", async (req, res) => {
         whatsappBusinessAccountId: wabaId,
         whatsappAccessToken: accessToken,
         whatsappPhoneNumber: phoneNumber,
+        whatsappTokenExpiresAt: tokenExpiresAt,
+        // Reconectar es la unica forma de arreglar un token vencido/revocado o de reiniciar el aviso de
+        // los 7 dias para el nuevo vencimiento - limpiar estos dos es parte de "quedo conectado".
+        whatsappTokenExpiryNotifiedAt: null,
+        whatsappConnectionBrokenAt: null,
       },
     });
 

@@ -249,6 +249,21 @@ async function noteFailure(businessId: string, to: string, failure: OutboundFail
   } catch (error) {
     console.error("No se pudo registrar el fallo de entrega:", error);
   }
+  if (failure.kind === "TOKEN_EXPIRED") await markConnectionBroken(businessId);
+}
+
+// Error 190 de Meta: token vencido o revocado. `updateMany` con el filtro en `whatsappConnectionBrokenAt:
+// null` evita reescribir la fecha en cada envio que siga fallando mientras la conexion sigue caida - se
+// guarda el momento en que se cayo, no el ultimo intento fallido.
+async function markConnectionBroken(businessId: string): Promise<void> {
+  try {
+    await prisma.business.updateMany({
+      where: { id: businessId, whatsappConnectionBrokenAt: null },
+      data: { whatsappConnectionBrokenAt: new Date() },
+    });
+  } catch (error) {
+    console.error("No se pudo marcar la conexion de WhatsApp como caida:", error);
+  }
 }
 
 function failed(failure: OutboundFailure, attempts: number, windowOpen: boolean | null): OutboundResult {
