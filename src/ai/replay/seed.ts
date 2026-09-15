@@ -3,6 +3,7 @@ import { normalizeForMatch } from "../../search/text";
 import { formatPaymentExamples } from "../../catalog/paymentMethods";
 import type { BotPersonality } from "../prompts/systemPrompt";
 import catalogFixture from "../regression/fixtures/catalog.json";
+import catalogMxFixture from "./catalog-mx.json";
 
 // Fase 1 del plan maestro (2026-09-15): reusa el mismo catalogo real que ya usa
 // scripts/run-regression-suite.ts (src/ai/regression/fixtures/catalog.json), en vez de mantener una
@@ -11,6 +12,14 @@ import catalogFixture from "../regression/fixtures/catalog.json";
 // que la conversacion original paso.
 interface CatalogBusiness {
   name: string;
+  // Fase 11 del plan maestro (2026-09-15): un catalogo puede declarar su pais. Los de
+  // regression/fixtures/catalog.json no lo traen y quedan en el default colombiano, que es lo que eran.
+  countryCode?: "CO" | "MX";
+  currency?: string;
+  timezone?: string;
+  requiresIdDocument?: boolean;
+  idDocumentExemptZones?: string[];
+  businessHours?: Record<string, string[]> | null;
   customInstructions: string | null;
   assistantName: string | null;
   botTone: string | null;
@@ -38,7 +47,10 @@ interface CatalogBusiness {
   faqEntries: { question: string; answer: string }[];
 }
 
-const catalogs = catalogFixture as CatalogBusiness[];
+// El catalogo mexicano vive en su propio archivo a proposito: regression/fixtures/catalog.json es la
+// grabacion real que usa scripts/run-regression-suite.ts y no se toca. Y va FUERA de fixtures/, porque
+// replay.test.ts trata cada .json de ese directorio como una conversacion.
+const catalogs = [...(catalogFixture as CatalogBusiness[]), ...(catalogMxFixture as unknown as CatalogBusiness[])];
 
 export interface SeededBusiness {
   businessId: string;
@@ -64,6 +76,12 @@ export async function seedReplayBusiness(catalogName: string, opts?: { saleState
       contactPhone: "573000000000",
       contactName: "Dueno de prueba",
       saleStateEnabled: opts?.saleStateEnabled ?? false,
+      countryCode: fixture.countryCode ?? "CO",
+      currency: fixture.currency ?? "COP",
+      timezone: fixture.timezone ?? "America/Bogota",
+      requiresIdDocument: fixture.requiresIdDocument ?? true,
+      idDocumentExemptZones: fixture.idDocumentExemptZones ?? [],
+      businessHours: fixture.businessHours ?? undefined,
       customInstructions: fixture.customInstructions,
       assistantName: fixture.assistantName,
       botTone: fixture.botTone,

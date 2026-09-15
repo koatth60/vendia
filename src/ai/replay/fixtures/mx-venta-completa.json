@@ -1,0 +1,183 @@
+{
+  "name": "mx-venta-completa",
+  "note": "Criterio de aceptacion de la Fase 11 del plan maestro (2026-09-15): un negocio mexicano sembrado con MXN, SPEI/OXXO y direccion con colonia y codigo postal completa una venta sin un solo cambio de codigo. Las respuestas del modelo estan escritas para este fixture (no son una grabacion de produccion, el negocio no existe todavia); lo que la prueba verifica no es el texto sino el ESTADO real que queda en la base y las cifras que pone el sistema: que el telefono de 10 digitos se guarde como telefono y no como documento, que el checkout quede completo sin pedir identificacion, que la direccion con colonia y C.P. cuente como despachable, y que el total salga formateado en MXN.",
+  "seed": {
+    "catalogName": "Bazar Colibrí",
+    "saleStateEnabled": true
+  },
+  "turns": [
+    {
+      "customer": "Hola, me interesa la bolsa de palma",
+      "modelResponses": [
+        {
+          "content": "",
+          "toolCalls": [
+            {
+              "name": "search_products",
+              "arguments": {
+                "query": "bolsa de palma"
+              }
+            }
+          ]
+        },
+        {
+          "content": "¡Hola! Soy Sofi 😊 Sí, tenemos la Bolsa artesanal de palma, tejida a mano, con asas de piel y forro de manta. ¿Te la aparto?",
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "customer": "Sí, quiero una",
+      "note": "El pedido pasa a ser estado real: set_order_item con el productId del catalogo recien sembrado (ver resolvePlaceholders en replay.ts).",
+      "modelResponses": [
+        {
+          "content": "",
+          "toolCalls": [
+            {
+              "name": "set_order_item",
+              "arguments": {
+                "productId": "{{product:Bolsa artesanal de palma}}",
+                "quantity": 1
+              }
+            }
+          ]
+        },
+        {
+          "content": "¡Listo! Te aparté una 🌾 Para mandártela necesito tus datos de entrega: tu nombre y apellido, tu teléfono de contacto, y tu calle y número con la colonia y el código postal.",
+          "toolCalls": []
+        }
+      ],
+      "expect": {
+        "toolSequence": [
+          "set_order_item"
+        ],
+        "saleState": {
+          "itemsCount": 1,
+          "subtotal": 1299
+        }
+      }
+    },
+    {
+      "customer": "Ana Lopez Ramirez   Celular 5512345678   Av. Insurgentes Sur 300, Col. Roma Norte, C.P. 06700, Ciudad de Mexico",
+      "note": "El caso que la Fase 11 arregla. Con la heuristica colombiana, 5512345678 (10 digitos que no arrancan en 3) se guardaba como numero de cedula y el telefono quedaba vacio. Y la direccion, sin ninguna palabra de via colombiana pero con colonia y C.P., no contaba como despachable.",
+      "modelResponses": [
+        {
+          "content": "",
+          "toolCalls": [
+            {
+              "name": "save_customer_contact_info",
+              "arguments": {
+                "deliveryPhone": "5512345678",
+                "address": "Av. Insurgentes Sur 300, Col. Roma Norte, C.P. 06700, Ciudad de Mexico"
+              }
+            },
+            {
+              "name": "save_customer_name",
+              "arguments": {
+                "name": "Ana Lopez Ramirez"
+              }
+            }
+          ]
+        },
+        {
+          "content": "¡Gracias, Ana! Ya tengo tus datos ✨ Solo falta que me digas cómo prefieres pagar.",
+          "toolCalls": []
+        }
+      ],
+      "expect": {
+        "toolSequence": [
+          "save_customer_contact_info",
+          "save_customer_name"
+        ],
+        "state": {
+          "customerName": "Ana Lopez Ramirez",
+          "customerDeliveryPhone": "5512345678",
+          "customerIdNumber": null
+        }
+      }
+    },
+    {
+      "customer": "¿Cómo puedo pagar?",
+      "modelResponses": [
+        {
+          "content": "",
+          "toolCalls": [
+            {
+              "name": "get_payment_methods",
+              "arguments": {}
+            }
+          ]
+        },
+        {
+          "content": "Puedes pagar así 👇\n\n{{BLOQUE_PAGO}}\n\n¿Cuál te queda mejor?",
+          "toolCalls": []
+        }
+      ],
+      "expect": {
+        "toolSequence": [
+          "get_payment_methods"
+        ],
+        "textMustContain": [
+          "CLABE 012180001234567890",
+          "OXXO"
+        ],
+        "textMustNotContain": [
+          "BLOQUE_PAGO",
+          "Nequi"
+        ]
+      }
+    },
+    {
+      "customer": "Por SPEI",
+      "note": "Con el metodo de pago guardado, el checkout mexicano queda COMPLETO: no pide identificacion (la paqueteria mexicana no la exige y el negocio tiene requiresIdDocument en false), y la direccion con colonia y C.P. ya cuenta como despachable.",
+      "modelResponses": [
+        {
+          "content": "",
+          "toolCalls": [
+            {
+              "name": "set_payment_method",
+              "arguments": {
+                "paymentMethodId": "{{payment:SPEI}}"
+              }
+            }
+          ]
+        },
+        {
+          "content": "",
+          "toolCalls": [
+            {
+              "name": "show_order_summary",
+              "arguments": {}
+            }
+          ]
+        },
+        {
+          "content": "¡Perfecto! Te paso el resumen para que lo confirmes:\n\n{{BLOQUE_RESUMEN}}\n\n¿Está correcto tu pedido?",
+          "toolCalls": []
+        }
+      ],
+      "expect": {
+        "toolSequence": [
+          "set_payment_method",
+          "show_order_summary"
+        ],
+        "saleState": {
+          "itemsCount": 1,
+          "missing": [],
+          "subtotal": 1299,
+          "total": 1398
+        },
+        "textMustContain": [
+          "1,299.00",
+          "99.00",
+          "1,398.00"
+        ],
+        "textMustNotContain": [
+          "BLOQUE_RESUMEN",
+          "1.299",
+          "1.398"
+        ]
+      }
+    }
+  ]
+}

@@ -95,6 +95,39 @@ interface CapturedSend {
   to: string | null;
 }
 
+// Fase 11 del plan maestro (2026-09-15). Un fixture no puede traer escrito el productId ni el
+// paymentMethodId reales: la suite siembra un negocio NUEVO en cada corrida y esos ids cambian. Hasta
+// ahora eso se veia en bf5c4k-cierre-feliz, donde set_order_item quedo apuntando a un id de la grabacion
+// original y el pedido se quedaba sin items para siempre (ver la nota de su turno 20). Un fixture nuevo
+// escribe "{{product:Nombre exacto del catalogo}}" o "{{payment:Etiqueta}}" y esto lo resuelve contra el
+// negocio recien sembrado. No cambia ningun fixture existente: sin marcas, la sustitucion no hace nada.
+async function buildIdPlaceholders(businessId: string): Promise<Map<string, string>> {
+  const [products, methods] = await Promise.all([
+    prisma.product.findMany({ where: { businessId }, select: { id: true, name: true } }),
+    prisma.paymentMethod.findMany({ where: { businessId }, select: { id: true, label: true } }),
+  ]);
+  const map = new Map<string, string>();
+  for (const p of products) map.set(`{{product:${p.name}}}`, p.id);
+  for (const m of methods) map.set(`{{payment:${m.label}}}`, m.id);
+  return map;
+}
+
+function resolvePlaceholders(response: FixtureModelResponse, ids: Map<string, string>): FixtureModelResponse {
+  if (!response.toolCalls?.length) return response;
+  let raw = JSON.stringify(response);
+  if (!raw.includes("{{product:") && !raw.includes("{{payment:")) return response;
+  for (const [marker, id] of ids) raw = raw.split(marker).join(id);
+  const resolved = JSON.parse(raw) as FixtureModelResponse;
+  for (const call of resolved.toolCalls ?? []) {
+    for (const [key, value] of Object.entries(call.arguments ?? {})) {
+      if (typeof value === "string" && value.startsWith("{{")) {
+        throw new Error(`Fixture: "${value}" (argumento "${key}" de ${call.name}) no existe en el catalogo sembrado`);
+      }
+    }
+  }
+  return resolved;
+}
+
 function toChatCompletion(response: FixtureModelResponse) {
   const toolCalls = (response.toolCalls ?? []).map((tc) => ({
     id: `call_${randomUUID()}`,
@@ -158,6 +191,7 @@ export async function runFixture(fixture: ConversationFixture): Promise<ReplayRe
     recipientPhone: customer.phoneNumber,
   };
 
+  const idPlaceholders = await buildIdPlaceholders(businessId);
   const originalCreate = deepseek.chat.completions.create.bind(deepseek.chat.completions);
   const originalFetch = globalThis.fetch;
   const turns: TurnResult[] = [];
@@ -177,8 +211,9 @@ export async function runFixture(fixture: ConversationFixture): Promise<ReplayRe
             `Fixture "${fixture.name}": generateReply pidio mas respuestas del modelo de las que el turno "${turn.customer.slice(0, 40)}" tiene grabadas`
           );
         }
-        for (const tc of next.toolCalls ?? []) toolSequence.push(tc.name);
-        return toChatCompletion(next);
+        const resolved = resolvePlaceholders(next, idPlaceholders);
+        for (const tc of resolved.toolCalls ?? []) toolSequence.push(tc.name);
+        return toChatCompletion(resolved);
       };
 
       const sends: CapturedSend[] = [];

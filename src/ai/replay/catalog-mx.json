@@ -1,0 +1,55 @@
+[
+  {
+    "name": "Bazar Colibrí",
+    "countryCode": "MX",
+    "currency": "MXN",
+    "timezone": "America/Mexico_City",
+    "requiresIdDocument": false,
+    "idDocumentExemptZones": [],
+    "businessHours": { "mon": ["09:00", "18:00"], "tue": ["09:00", "18:00"], "wed": ["09:00", "18:00"], "thu": ["09:00", "18:00"], "fri": ["09:00", "18:00"], "sat": ["10:00", "14:00"] },
+    "customInstructions": null,
+    "assistantName": "Sofi",
+    "botTone": "cercano",
+    "botDialect": "mexico",
+    "botGreeting": null,
+    "botNeverSay": null,
+    "autoSendPhotoOnQuote": true,
+    "requirePaymentProof": true,
+    "businessCategory": "artesanías y decoración",
+    "products": [
+      {
+        "name": "Bolsa artesanal de palma",
+        "description": "Bolsa tejida a mano en palma natural, asas de piel, forro interior de manta.",
+        "price": "1299.00",
+        "currency": "MXN",
+        "stock": 10,
+        "category": "Bolsas",
+        "active": true
+      },
+      {
+        "name": "Rebozo de algodón",
+        "description": "Rebozo tejido en telar de pedal, algodón 100%, dos metros de largo.",
+        "price": "890.50",
+        "currency": "MXN",
+        "stock": 6,
+        "category": "Textiles",
+        "active": true
+      }
+    ],
+    "paymentMethods": [
+      { "type": "TRANSFERENCIA", "label": "SPEI", "details": "CLABE 012180001234567890\nA nombre de: Bazar Colibrí SA de CV", "active": true },
+      { "type": "EFECTIVO", "label": "OXXO", "details": "Referencia 9876 5432 1098 7654, pago en cualquier tienda OXXO.", "active": true }
+    ],
+    "shippingRates": [
+      { "label": "CDMX", "cost": "99.00", "sortOrder": 0 },
+      { "label": "Nacional", "cost": "180.00", "sortOrder": 1 }
+    ],
+    "shippingCityRules": [
+      { "city": "Ciudad de Mexico", "label": "CDMX" },
+      { "city": "Guadalajara", "label": "Nacional" }
+    ],
+    "faqEntries": [
+      { "question": "¿Cuánto tarda el envío?", "answer": "En CDMX llega en 2 días hábiles; al resto del país, de 3 a 5 días hábiles." }
+    ]
+  }
+]
