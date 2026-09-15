@@ -318,6 +318,35 @@ Datos reales de este pedido:
 // Rodriguez" pasan limpios. Se suman los colores (canonicalColors, el mismo vocabulario cerrado que usa
 // find_products_by_attributes) porque responder el color cuando el bot pregunto color Y nombre en el
 // mismo mensaje es el caso que mas se repitio.
+// Bloqueador de produccion (2026-09-15, seguimiento inmediato de f9b994b): el arreglo del catalogo no
+// se estaba ejecutando. La instruccion de poner {{BLOQUE_CATALOGO}} viaja DENTRO de la `note` que
+// devuelven list_all_products/search_products, asi que si el modelo no llama la herramienta nunca ve la
+// instruccion - y un turno real ("muestrame todo el catalogo completo con precios") quedo registrado
+// con 1 sola llamada CHAT y cero tool calls: el modelo copio una lista inventada que ya venia en su
+// propio historial de la conversacion. El arreglo era circular. Esto lo cierra forzando la herramienta
+// con el mismo mecanismo que shouldForceAttributeFilter/shouldForcePhotoEscalation: se fuerza CUAL
+// herramienta llamar en la iteracion 0, nunca los argumentos ni la redaccion.
+//
+// Sin expresiones regulares nuevas (regla del repositorio): los sustantivos se buscan con `tokenize`,
+// el mismo tokenizador de la busqueda, que ya baja a minusculas, saca acentos y puntuacion y descarta
+// stopwords; las formas verbales que tokenize descarta justamente por ser stopwords ("que tienen",
+// "que hay") se buscan con un `includes` literal sobre el texto normalizado por `normalizeForMatch`.
+const CATALOG_REQUEST_WORDS = new Set([
+  "catalogo", "catalogos", "lista", "listado", "productos", "inventario", "portafolio", "mercancia",
+  "articulos", "surtido",
+]);
+
+const CATALOG_REQUEST_PHRASES = [
+  "que tienen", "que tienes", "que tenes", "que hay", "que venden", "que vendes", "que manejan",
+  "que manejas", "que ofrecen",
+];
+
+export function looksLikeCatalogRequest(text: string): boolean {
+  if (tokenize(text).some((word) => CATALOG_REQUEST_WORDS.has(word))) return true;
+  const normalized = normalizeForMatch(text);
+  return CATALOG_REQUEST_PHRASES.some((phrase) => normalized.includes(phrase));
+}
+
 const NAME_PARTICLES = new Set(["de", "del", "la", "las", "los", "y"]);
 
 const CLOSED_CLASS_WORDS = new Set([
@@ -1085,15 +1114,23 @@ export async function generateReply(
       negocio.country.askPhonePattern.test(priorAskForForcing) ||
       negocio.country.askDeliveryDataPattern.test(priorAskForForcing));
 
+  // Ver looksLikeCatalogRequest: el cliente esta pidiendo la lista/el catalogo/los productos. Va DESPUES
+  // de shouldForceAttributeFilter a proposito - si el mensaje ademas trae un color o una categoria
+  // configurada ("que relojes negros tienen"), la busqueda acotada sigue siendo la herramienta correcta y
+  // esta no le gana.
+  const shouldForceCatalogList = !!customerText && looksLikeCatalogRequest(customerText);
+
   const forcedToolChoice = shouldForcePhotoEscalation
     ? "ask_owner_about_photo"
     : shouldForceAttributeFilter
       ? "find_products_by_attributes"
-      : shouldForceSaveName
-        ? "save_customer_name"
-        : shouldForceContactInfo
-          ? "save_customer_contact_info"
-          : null;
+      : shouldForceCatalogList
+        ? "list_all_products"
+        : shouldForceSaveName
+          ? "save_customer_name"
+          : shouldForceContactInfo
+            ? "save_customer_contact_info"
+            : null;
 
   try {
     for (let iteration = 0; iteration < 5; iteration++) {

@@ -46,6 +46,13 @@ export interface FixtureTurnExpectation {
   // son del catalogo y esta asercion las marcaria como inventadas.
   catalogFidelity?: boolean;
   textMustContain?: string[];
+  // Bloqueador de produccion (2026-09-15, seguimiento de f9b994b): herramientas que generateReply
+  // FORZO via tool_choice este turno, en orden. Es lo unico del forzado que un replay determinista puede
+  // medir de verdad: las respuestas del modelo estan grabadas, asi que si el fixture programa la llamada
+  // a la herramienta, que aparezca en toolSequence no prueba nada por si solo. Lo que si prueba algo es
+  // que el motor haya pedido tool_choice para ese mensaje del cliente - sin el forzado, el modelo real
+  // es libre de no llamarla, que es exactamente el defecto que se esta arreglando.
+  forcedTools?: string[];
   // Efectos laterales reales contados via el fetch mockeado (envios a la Graph API de WhatsApp) y la
   // base (PendingOwnerQuestion). No incluye la respuesta principal del turno - esa siempre es 1 y la
   // devuelve generateReply directamente, no pasa por fetch.
@@ -167,6 +174,7 @@ export interface TurnState {
 export interface TurnResult {
   reply: string;
   toolSequence: string[];
+  forcedTools: string[];
   sends: CapturedSend[];
   ownerQuestionsCreated: number;
   state: TurnState;
@@ -219,9 +227,14 @@ export async function runFixture(fixture: ConversationFixture): Promise<ReplayRe
 
       const queue = [...turn.modelResponses];
       const toolSequence: string[] = [];
+      const forcedTools: string[] = [];
       // @ts-expect-error test stub, narrower shape than the real SDK type - same pattern as
       // agent.loopExhaustion.test.ts.
-      deepseek.chat.completions.create = async () => {
+      deepseek.chat.completions.create = async (params: { tool_choice?: unknown }) => {
+        const choice = params?.tool_choice;
+        if (choice && typeof choice === "object" && "function" in choice) {
+          forcedTools.push(String((choice as { function: { name: string } }).function.name));
+        }
         const next = queue.shift();
         if (!next) {
           throw new Error(
@@ -277,7 +290,7 @@ export async function runFixture(fixture: ConversationFixture): Promise<ReplayRe
           : null,
       };
 
-      turns.push({ reply, toolSequence, sends, ownerQuestionsCreated: pendingAfter - pendingBefore, state });
+      turns.push({ reply, toolSequence, forcedTools, sends, ownerQuestionsCreated: pendingAfter - pendingBefore, state });
     }
   } finally {
     deepseek.chat.completions.create = originalCreate;
@@ -399,6 +412,13 @@ export function assertTurn(
 
   if (expect_.toolSequence) {
     assert.deepEqual(result.toolSequence, expect_.toolSequence, `${label}: secuencia de herramientas no coincide`);
+  }
+  if (expect_.forcedTools) {
+    assert.deepEqual(
+      result.forcedTools,
+      expect_.forcedTools,
+      `${label}: las herramientas forzadas via tool_choice no coinciden`
+    );
   }
   for (const forbidden of expect_.textMustNotContain ?? []) {
     assert.ok(!result.reply.includes(forbidden), `${label}: la respuesta no debia contener "${forbidden}" pero dice: "${result.reply}"`);
