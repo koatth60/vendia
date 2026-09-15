@@ -570,7 +570,7 @@ test("la cola de salida guarda, lista, cancela y se cuenta por conversacion", as
   const first = await queueOutboundMessage(businessId, conversation.id, "Tu pedido sale el lunes", "PANEL");
   await queueOutboundMessage(businessId, conversation.id, "Confirmame la direccion", "OWNER_ANSWER");
 
-  let pending = await listQueuedOutbound(conversation.id);
+  let pending = await listQueuedOutbound(businessId, conversation.id);
   assert.deepEqual(
     pending.map((q) => q.body),
     ["Tu pedido sale el lunes", "Confirmame la direccion"],
@@ -579,7 +579,7 @@ test("la cola de salida guarda, lista, cancela y se cuenta por conversacion", as
   assert.equal(await countConversationsWithQueuedOutbound(businessId), 1, "cuenta conversaciones, no mensajes");
 
   assert.equal(await cancelQueuedOutbound(businessId, first.id), true);
-  pending = await listQueuedOutbound(conversation.id);
+  pending = await listQueuedOutbound(businessId, conversation.id);
   assert.deepEqual(pending.map((q) => q.body), ["Confirmame la direccion"], "lo cancelado no se entrega nunca");
 
   assert.equal(await cancelQueuedOutbound(businessId, first.id), false, "cancelar dos veces no hace nada");

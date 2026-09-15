@@ -183,13 +183,25 @@ conversationsRouter.post("/api/conversations/:id/messages", upload.single("file"
 // Deja al dueno sacar de la cola algo que ya no quiere mandar (se arrepintio, o el tema se resolvio por
 // telefono) - si no, el mensaje se entregaria solo semanas despues, cuando el cliente vuelva a escribir
 // por cualquier otra cosa.
+//
+// Fase 8, punto 3 (IDOR): esta era la unica de las seis rutas del archivo que usaba req.params.id sin
+// pasarlo por getConversationForBusiness. cancelQueuedOutbound ya filtraba por negocio, pero la
+// respuesta devolvia listQueuedOutbound(req.params.id) con el id crudo: con la sesion del negocio A y
+// el id de una conversacion del negocio B se leia la cola de salida de B. Ahora la conversacion se
+// valida primero, igual que en el resto del archivo, y un id ajeno da 404.
 conversationsRouter.delete("/api/conversations/:id/queued/:queuedId", async (req, res) => {
-  const cancelled = await cancelQueuedOutbound(businessIdOf(req), String(req.params.queuedId));
+  const businessId = businessIdOf(req);
+  const conversation = await getConversationForBusiness(businessId, String(req.params.id));
+  if (!conversation) {
+    res.status(404).json({ error: "Conversación no encontrada" });
+    return;
+  }
+  const cancelled = await cancelQueuedOutbound(businessId, String(req.params.queuedId));
   if (!cancelled) {
     res.status(404).json({ error: "Ese mensaje en cola ya no existe" });
     return;
   }
-  res.json({ ok: true, queuedOutbound: await listQueuedOutbound(String(req.params.id)) });
+  res.json({ ok: true, queuedOutbound: await listQueuedOutbound(businessId, String(req.params.id)) });
 });
 
 // The only way to reach a customer once their 24h window has closed (see the check above) - an

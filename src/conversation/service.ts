@@ -48,9 +48,13 @@ export async function queueOutboundMessage(
   });
 }
 
-export async function listQueuedOutbound(conversationId: string) {
+// Fase 8, punto 3: recibe businessId y filtra por el. Antes bastaba con el id de una conversacion
+// para leer lo que estaba encolado en ella, viniera de donde viniera la llamada - y el id de una
+// conversacion no dice de quien es. Con el negocio en el filtro, pedir la cola de una conversacion
+// ajena devuelve vacio en vez de datos de otro cliente.
+export async function listQueuedOutbound(businessId: string, conversationId: string) {
   return prisma.queuedOutboundMessage.findMany({
-    where: { conversationId, sentAt: null, cancelledAt: null, failedAt: null },
+    where: { businessId, conversationId, sentAt: null, cancelledAt: null, failedAt: null },
     orderBy: { createdAt: "asc" },
   });
 }
@@ -853,7 +857,7 @@ export async function getConversationForBusiness(businessId: string, conversatio
     unreadCount: conversation.unreadCount,
     windowOpen: windowState.windowOpen,
     hoursSinceLastCustomerMessage: windowState.hoursSinceLastCustomerMessage,
-    queuedOutbound: await listQueuedOutbound(conversationId),
+    queuedOutbound: await listQueuedOutbound(businessId, conversationId),
     customer: {
       id: conversation.customer.id,
       phoneNumber: conversation.customer.phoneNumber,
@@ -1046,7 +1050,7 @@ export async function getCustomerThreadForBusiness(businessId: string, customerI
     cycles,
     windowOpen: windowState.windowOpen,
     hoursSinceLastCustomerMessage: windowState.hoursSinceLastCustomerMessage,
-    queuedOutbound: await listQueuedOutbound(activeConversationId),
+    queuedOutbound: await listQueuedOutbound(businessId, activeConversationId),
     messages: await attachDeliveryFailures(businessId, messagesWithMedia),
   };
 }
