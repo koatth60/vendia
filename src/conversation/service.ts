@@ -143,7 +143,21 @@ export async function getOrCreateOpenConversation(businessId: string, customerId
     orderBy: { updatedAt: "desc" },
   });
 
-  if (existing) return existing;
+  if (existing) {
+    // Fase 9 del plan maestro (2026-09-15): ABANDONED no es un rechazo como LOST, es solo que el cliente
+    // dejo de escribir - si vuelve, seguimos usando ESTA conversacion (no una nueva) para no perder el
+    // SaleState/carrito que ya tenia armado. El status vuelve a NEW: mostrarla todavia como "Abandonada"
+    // en el panel mientras el cliente esta escribiendo de nuevo mentiria. cartRecoverySentAt se limpia
+    // para que un abandono posterior pueda volver a mandar la plantilla de recuperacion.
+    if (existing.status === "ABANDONED") {
+      const reopened = await prisma.conversation.update({
+        where: { id: existing.id },
+        data: { status: "NEW", cartRecoverySentAt: null },
+      });
+      return reopened;
+    }
+    return existing;
+  }
 
   const conversation = await prisma.conversation.create({
     data: { customerId, status: "NEW", contextSummary: await summarizePreviousPurchase(customerId) },
@@ -381,11 +395,15 @@ export async function setCustomerTags(businessId: string, customerId: string, ta
 export async function setConversationIntent(
   businessId: string,
   conversationId: string,
-  intent: "PQR" | "DEVOLUCION" | "NO_RECIBIDO" | "SOLICITA_AGENTE"
+  intent: "PQR" | "DEVOLUCION" | "NO_RECIBIDO" | "SOLICITA_AGENTE",
+  // Fase 9 del plan maestro (2026-09-15): si el cliente lo pidio con sus propias palabras o si el modelo
+  // lo dedujo del contexto (ver Conversation.intentExplicit) - null para el caller viejo que todavia no
+  // manda este dato, para no fingir certeza que no existe.
+  explicit: boolean | null = null
 ) {
   const conversation = await prisma.conversation.update({
     where: { id: conversationId },
-    data: { intent },
+    data: { intent, intentExplicit: explicit },
     include: { customer: true },
   });
   emitConversationUpdated(businessId, formatConversationRow(conversation));
@@ -405,7 +423,7 @@ export async function clearConversationIntent(businessId: string, conversationId
   if (!existing) return null;
   const conversation = await prisma.conversation.update({
     where: { id: conversationId },
-    data: { intent: null },
+    data: { intent: null, intentExplicit: null },
     include: { customer: true },
   });
   emitConversationUpdated(businessId, formatConversationRow(conversation));
@@ -577,7 +595,7 @@ export async function findOpenPendingConfirmationsForBusiness(businessId: string
 export async function findPendingOwnerQuestionsPastTimeout(businessId: string, olderThan: Date) {
   const pending = await prisma.pendingOwnerQuestion.findMany({
     where: {
-      conversation: { customer: { businessId }, status: { notIn: ["SOLD", "LOST"] } },
+      conversation: { customer: { businessId }, status: { notIn: ["SOLD", "LOST", "ABANDONED"] } },
       createdAt: { lte: olderThan },
     },
     include: { conversation: { include: { customer: true } } },
@@ -606,7 +624,7 @@ export async function findPendingOwnerQuestionsDueForReminder(businessId: string
       // humanControl gate silently excluded almost every ask_owner reminder and only ever fired for
       // ask_owner_about_photo (the one case that does set humanControl). status is the real "still open"
       // signal regardless of which escalation path set it.
-      conversation: { customer: { businessId }, status: { notIn: ["SOLD", "LOST"] } },
+      conversation: { customer: { businessId }, status: { notIn: ["SOLD", "LOST", "ABANDONED"] } },
       remindedAt: null,
       createdAt: { lte: olderThan },
     },
@@ -637,6 +655,9 @@ export type StalledConversation = {
   conversationId: string;
   customer: { id: string; name: string | null; whatsappProfileName: string | null; phoneNumber: string };
   intent: string | null;
+  // Fase 9: null para conversaciones estancadas por PendingOwnerQuestion (no aplica) o por una fila
+  // anterior a esta fase (nunca se le pregunto al modelo) - ver Conversation.intentExplicit.
+  intentExplicit: boolean | null;
   nextStage: 1 | 2;
   openQuestion: string | null;
 };
@@ -662,7 +683,7 @@ export async function findStalledConversationsDueForReminder(
     where: {
       customer: { businessId },
       humanControl: true,
-      status: { notIn: ["SOLD", "LOST"] },
+      status: { notIn: ["SOLD", "LOST", "ABANDONED"] },
       humanControlSince: { not: null },
       OR: [{ stalledReminderStage: 0 }, { stalledReminderStage: 1, stalledReminderSentAt: { lte: stage1Before } }],
     },
@@ -694,13 +715,13 @@ export async function findStalledConversationsDueForReminder(
     const hasQuestionThisEscalation = c.pendingOwnerQuestions.some((q) => q.createdAt >= c.humanControlSince!);
     if (c.stalledReminderStage === 0) {
       if (!hasQuestionThisEscalation && waitingSince <= stage1Before) {
-        result.push({ conversationId: c.id, customer: c.customer, intent: c.intent, nextStage: 1, openQuestion: null });
+        result.push({ conversationId: c.id, customer: c.customer, intent: c.intent, intentExplicit: c.intentExplicit, nextStage: 1, openQuestion: null });
       } else if (waitingSince <= stage2Before) {
         const openQuestion = c.pendingOwnerQuestions.find((q) => !q.remindedAt)?.question ?? c.pendingOwnerQuestions[0]?.question ?? null;
-        result.push({ conversationId: c.id, customer: c.customer, intent: c.intent, nextStage: 2, openQuestion });
+        result.push({ conversationId: c.id, customer: c.customer, intent: c.intent, intentExplicit: c.intentExplicit, nextStage: 2, openQuestion });
       }
     } else if (c.stalledReminderStage === 1 && c.stalledReminderSentAt! <= stage2Before) {
-      result.push({ conversationId: c.id, customer: c.customer, intent: c.intent, nextStage: 2, openQuestion: null });
+      result.push({ conversationId: c.id, customer: c.customer, intent: c.intent, intentExplicit: c.intentExplicit, nextStage: 2, openQuestion: null });
     }
   }
   return result;
@@ -710,6 +731,105 @@ export async function markStalledReminderSent(conversationId: string, stage: 1 |
   await prisma.conversation.update({
     where: { id: conversationId },
     data: { stalledReminderStage: stage, stalledReminderSentAt: new Date() },
+  });
+}
+
+export type IntentEscalationTimeout = {
+  conversationId: string;
+  customer: { id: string; name: string | null; whatsappProfileName: string | null; phoneNumber: string };
+  intent: string | null;
+  intentExplicit: boolean | null;
+};
+
+// Fase 9 del plan maestro (2026-09-15): findStalledConversationsDueForReminder de arriba ya avisa al
+// dueno dos veces (a las Business.ownerReminderMinutes y de nuevo a las 24h) cuando flag_conversation_intent
+// dejo una conversacion muda esperandolo - pero si nunca responde, esa conversacion queda humanControl:true
+// para siempre. Mismo patron de escape que findPendingOwnerQuestionsPastTimeout mas abajo (ask_owner): pasadas
+// Business.intentEscalationTimeoutHours sin que humanControlSince se refresque (el dueno nunca respondio
+// desde el panel - cada mensaje suyo lo refresca, ver setHumanControl), el bot recupera el control solo.
+// `intent: { not: null }` es justamente lo que distingue este origen de una toma de control manual (esa
+// deja intent en null) y de ask_owner (ese no toca intent en absoluto, usa PendingOwnerQuestion).
+export async function findFlagIntentEscalationsPastTimeout(
+  businessId: string,
+  timeoutBefore: Date
+): Promise<IntentEscalationTimeout[]> {
+  const conversations = await prisma.conversation.findMany({
+    where: {
+      customer: { businessId },
+      humanControl: true,
+      intent: { not: null },
+      status: { notIn: ["SOLD", "LOST", "ABANDONED"] },
+      humanControlSince: { lte: timeoutBefore },
+    },
+    include: { customer: true },
+  });
+  return conversations.map((c) => ({
+    conversationId: c.id,
+    customer: c.customer,
+    intent: c.intent,
+    intentExplicit: c.intentExplicit,
+  }));
+}
+
+export type AbandonedConversationCandidate = {
+  id: string;
+  customer: { id: string; name: string | null; whatsappProfileName: string | null; phoneNumber: string };
+};
+
+// Fase 9 del plan maestro (2026-09-15), causa raiz C1+eje 18: el 61% de las conversaciones NEW no cerraba
+// nunca y no contaba como perdida - esta es la consulta que jobs/abandonment.ts usa para encontrarlas.
+// Mide por el ULTIMO MENSAJE DEL CLIENTE, no por Conversation.updatedAt: ese campo lo tocan tambien los
+// jobs de recordatorio (stalledReminderSentAt, etc), asi que una conversacion que el propio sistema
+// sigue "tocando" nunca se veria vieja aunque el cliente lleve semanas en silencio. groupBy en vez de una
+// consulta por conversacion (como getWindowState) porque esto corre sobre TODAS las conversaciones
+// abiertas de un negocio, potencialmente miles en el caso que motivo esta fase.
+export async function findConversationsDueForAbandonment(
+  businessId: string,
+  olderThan: Date
+): Promise<AbandonedConversationCandidate[]> {
+  const candidates = await prisma.conversation.findMany({
+    where: { customer: { businessId }, status: { notIn: ["SOLD", "LOST", "ABANDONED"] } },
+    select: { id: true, createdAt: true, customer: true },
+  });
+  if (candidates.length === 0) return [];
+
+  const lastCustomerMessages = await prisma.message.groupBy({
+    by: ["conversationId"],
+    where: { conversationId: { in: candidates.map((c) => c.id) }, role: "CUSTOMER" },
+    _max: { createdAt: true },
+  });
+  const lastByConversation = new Map(lastCustomerMessages.map((m) => [m.conversationId, m._max.createdAt!]));
+
+  return candidates
+    .filter((c) => (lastByConversation.get(c.id) ?? c.createdAt) <= olderThan)
+    .map((c) => ({ id: c.id, customer: c.customer }));
+}
+
+export async function markConversationAbandoned(businessId: string, conversationId: string) {
+  const conversation = await prisma.conversation.update({
+    where: { id: conversationId },
+    data: { status: "ABANDONED" },
+    include: { customer: true },
+  });
+  emitConversationUpdated(businessId, formatConversationRow(conversation));
+  return conversation;
+}
+
+// Solo las que ya estan ABANDONED y con la plantilla sin mandar - deliberadamente separada de
+// findConversationsDueForAbandonment de arriba (esa decide el status, esta decide el reintento del
+// envio) para que un fallo de entrega (rate limit, plantilla no aprobada) se reintente en la proxima
+// pasada del job sin volver a re-evaluar inactividad, igual que findConversationsDueForFollowUp.
+export async function findConversationsDueForCartRecovery(businessId: string) {
+  return prisma.conversation.findMany({
+    where: { customer: { businessId }, status: "ABANDONED", cartRecoverySentAt: null },
+    include: { customer: true },
+  });
+}
+
+export async function markCartRecoverySent(conversationId: string) {
+  return prisma.conversation.update({
+    where: { id: conversationId },
+    data: { cartRecoverySentAt: new Date() },
   });
 }
 

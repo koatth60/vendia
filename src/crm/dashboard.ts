@@ -89,7 +89,7 @@ export async function getDashboardSummary(businessId: string) {
       select: { csatRating: true },
     }),
     prisma.conversation.count({
-      where: { customer: { businessId }, status: { notIn: ["SOLD", "LOST"] } },
+      where: { customer: { businessId }, status: { notIn: ["SOLD", "LOST", "ABANDONED"] } },
     }),
     getAgentIncidentSummary(businessId),
     getConfigHealth(businessId),

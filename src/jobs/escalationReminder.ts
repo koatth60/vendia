@@ -10,6 +10,8 @@ import {
   setHumanControl,
   findStalledConversationsDueForReminder,
   markStalledReminderSent,
+  findFlagIntentEscalationsPastTimeout,
+  clearConversationIntent,
   recordMessage,
   CUSTOMER_FOLLOWUP_TEXT,
   getWindowState,
@@ -49,10 +51,15 @@ const INTENT_LABELS: Record<string, string> = {
   SOLICITA_AGENTE: "que pidio hablar con un asesor",
 };
 
-function describeStalledOrigin(conversation: { intent: string | null; openQuestion: string | null }): string {
+function describeStalledOrigin(conversation: { intent: string | null; intentExplicit: boolean | null; openQuestion: string | null }): string {
   if (conversation.openQuestion) return `sigue sin respuesta tuya la pregunta: "${conversation.openQuestion}"`;
   if (conversation.intent && INTENT_LABELS[conversation.intent]) {
-    return `reporto ${INTENT_LABELS[conversation.intent]} y el bot dejo de responderle, quedo esperando por vos`;
+    // Fase 9 del plan maestro (2026-09-15): un intent que el MODELO dedujo (no que el cliente pidio con
+    // sus palabras) puede ser una falsa alarma - "cerrar conversation" leido como SOLICITA_AGENTE fue el
+    // caso real que motivo esto. Sin esta distincion el dueno no tiene forma de saber, desde el aviso,
+    // si vale la pena entrar corriendo o si primero conviene revisar el chat.
+    const inferredNote = conversation.intentExplicit === false ? " (el bot lo dedujo del contexto, no te confies del todo)" : "";
+    return `reporto ${INTENT_LABELS[conversation.intent]}${inferredNote} y el bot dejo de responderle, quedo esperando por vos`;
   }
   return "escribio y sigue esperando respuesta tuya";
 }
@@ -155,6 +162,38 @@ export async function runEscalationReminderJob(): Promise<void> {
       await clearPendingOwnerQuestionsForConversation(pending.conversationId);
       await setHumanControl(business.id, pending.conversationId, true);
       await recordAgentIncident(business.id, "OWNER_QUESTION_TIMEOUT", text, pending.conversationId, "owner_question_timeout");
+    }
+
+    // Fase 9 del plan maestro (2026-09-15): flag_conversation_intent (PQR/devolucion/no_recibido/pide
+    // agente) deja el bot mudo hasta que el dueno responda - el bloque de "stalled" de abajo ya lo avisa
+    // dos veces (ownerReminderMinutes y 24h), pero si el dueno NUNCA contesta la conversacion se queda
+    // asi para siempre. Defecto real encontrado el 2026-09-15: el modelo llamo esto con SOLICITA_AGENTE
+    // porque el cliente escribio "Cerrar conversation" - nunca pidio un asesor. El bot quedo mudo y el
+    // dueno recibio una alerta falsa sin forma de volver salvo entrar al panel. Mismo patron de escape
+    // que el bloque de arriba (ownerQuestionTimeoutHours): pasadas Business.intentEscalationTimeoutHours
+    // sin que humanControlSince se refresque, el bot recupera el control solo - asi una falsa alarma se
+    // cura sola en vez de silenciar la conversacion para siempre.
+    const intentTimeoutBefore = new Date(Date.now() - business.intentEscalationTimeoutHours * 60 * 60 * 1000);
+    const timedOutIntents = await findFlagIntentEscalationsPastTimeout(business.id, intentTimeoutBefore);
+    for (const conversation of timedOutIntents) {
+      const label = (conversation.intent && INTENT_LABELS[conversation.intent]) ?? "una escalacion";
+      const inferredNote =
+        conversation.intentExplicit === false
+          ? " El bot la dedujo del contexto, el cliente no lo pidio con esas palabras - revisa si fue una falsa alarma."
+          : "";
+      const text = `La conversacion con ${customerDisplayName(conversation.customer)} quedo escalada por ${label} y pasaron ${business.intentEscalationTimeoutHours}h sin que la atendieras. Se la devolvimos al bot para que no quede muda.${inferredNote}`;
+      const alert = await sendAlertToOwner(business.id, credentials, business.contactPhone, text);
+      await recordOwnerMessage(business.id, {
+        direction: "OUT",
+        body: text,
+        success: alert.delivered,
+        errorMessage: alert.failure?.message ?? null,
+      });
+      if (!alert.delivered) console.error(`No se pudo enviar aviso de timeout de intent (conversation=${conversation.conversationId}):`, alert.failure?.message);
+
+      await setHumanControl(business.id, conversation.conversationId, false);
+      await clearConversationIntent(business.id, conversation.conversationId);
+      await recordAgentIncident(business.id, "INTENT_ESCALATION_TIMEOUT", text, conversation.conversationId, "intent_escalation_timeout");
     }
 
     const stalled = await findStalledConversationsDueForReminder(business.id, stage1Before, stage2Before);

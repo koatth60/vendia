@@ -16,6 +16,7 @@ import { runEscalationReminderJob } from "./jobs/escalationReminder";
 import { runConversationHealthJob, HEALTH_CHECK_INTERVAL_MS } from "./jobs/conversationHealth";
 import { runOutboundQueueJob, OUTBOUND_QUEUE_INTERVAL_MS } from "./jobs/outboundQueue";
 import { runTokenExpiryJob, TOKEN_EXPIRY_CHECK_INTERVAL_MS } from "./jobs/tokenExpiry";
+import { runAbandonmentJob, ABANDONMENT_CHECK_INTERVAL_MS } from "./jobs/abandonment";
 
 const app = express();
 app.set("trust proxy", 1);
@@ -105,6 +106,12 @@ setInterval(() => {
 setInterval(() => {
   runTokenExpiryJob().catch((error) => console.error("Error corriendo el chequeo de vencimiento de token:", error));
 }, TOKEN_EXPIRY_CHECK_INTERVAL_MS);
+
+// Fase 9: conversaciones inactivas pasan a ABANDONED y su carrito (si tenia) recibe la plantilla de
+// recuperacion. Ver src/jobs/abandonment.ts.
+setInterval(() => {
+  runAbandonmentJob().catch((error) => console.error("Error corriendo el job de abandono de conversaciones:", error));
+}, ABANDONMENT_CHECK_INTERVAL_MS);
 
 // Fase 7 del plan maestro (2026-09-15): sin esto, cada `pm2 restart` mataba el proceso a mitad de un
 // turno (webhook -> generateReply -> envio) sin ningun registro - y como el webhook ya habia respondido

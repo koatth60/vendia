@@ -7,7 +7,9 @@ export type AgentIncidentKind =
   | "DEGRADED_REPLY"
   | "EXTERNAL_API_FAILURE"
   | "STALE_REPLY_DISCARDED"
-  | "OWNER_QUESTION_TIMEOUT";
+  | "OWNER_QUESTION_TIMEOUT"
+  | "CONVERSATION_ABANDONED"
+  | "INTENT_ESCALATION_TIMEOUT";
 
 // Fase F, 2026-09-13 audit (F9): none of agent.ts's backend safety nets left any queryable trace before
 // this - only a console.error/warn nobody reads unless tailing production logs. Best-effort on purpose:
@@ -90,7 +92,7 @@ export async function getAgentIncidentSummary(businessId: string, sinceDays = 7)
       _count: { _all: true },
     }),
     prisma.conversation.count({
-      where: { customer: { businessId }, humanControl: true, status: { notIn: ["SOLD", "LOST"] } },
+      where: { customer: { businessId }, humanControl: true, status: { notIn: ["SOLD", "LOST", "ABANDONED"] } },
     }),
     // Estancada Y fuera de ventana: no tiene NINGUN mensaje del cliente dentro de las ultimas 24h, asi
     // que cualquier texto libre que se le mande desde el panel se pierde en silencio.
@@ -98,7 +100,9 @@ export async function getAgentIncidentSummary(businessId: string, sinceDays = 7)
       where: {
         customer: { businessId },
         humanControl: true,
-        status: { notIn: ["SOLD", "LOST"] },
+        // Fase 9: ABANDONED ya tiene su propio contador (P1 del funnel) - contarla tambien aca duplicaria
+        // el mismo caso dos veces con dos nombres distintos.
+        status: { notIn: ["SOLD", "LOST", "ABANDONED"] },
         messages: { none: { role: "CUSTOMER", createdAt: { gte: windowCutoff } } },
       },
     }),

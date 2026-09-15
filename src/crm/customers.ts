@@ -245,6 +245,18 @@ export async function updateCustomerProfile(
   });
 }
 
+// Fase 9 del plan maestro (2026-09-15): CustomerStage.INACTIVO existia en el enum desde antes pero nada
+// lo escribia nunca (comentario del propio schema.prisma:520). jobs/abandonment.ts llama esto cuando una
+// de las conversaciones del cliente pasa a ABANDONED por inactividad. Solo baja NUEVO/ACTIVO - un cliente
+// que ya es COMPRADOR/RECURRENTE no pierde ese historial porque UNA conversacion se enfrio; su etapa la
+// sigue decidiendo el dueno a mano desde el panel.
+export async function markCustomerInactive(businessId: string, customerId: string): Promise<void> {
+  await prisma.customer.updateMany({
+    where: { id: customerId, businessId, stage: { in: ["NUEVO", "ACTIVO"] } },
+    data: { stage: "INACTIVO" },
+  });
+}
+
 export async function addCustomerNote(
   businessId: string,
   customerId: string,

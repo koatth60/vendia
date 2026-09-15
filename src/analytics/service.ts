@@ -1,7 +1,11 @@
 import { prisma } from "../db/client";
 import { getBackstopInterventionsByGuard } from "../ai/incidents";
 
-const STATUSES = ["NEW", "INTERESTED", "QUOTED", "NEGOTIATING", "SOLD", "LOST"] as const;
+// ABANDONED sumado en la Fase 9 del plan maestro (2026-09-15): antes el 61% de las conversaciones NEW
+// desaparecia del embudo sin dejar rastro - ni vendida ni perdida, solo silencio. No entra en
+// intentConversations abajo (eso lo prohibe la Fase 0: ese denominador queda intacto) - es su propia
+// columna informativa, no un resultado de la tasa de conversion.
+const STATUSES = ["NEW", "INTERESTED", "QUOTED", "NEGOTIATING", "SOLD", "LOST", "ABANDONED"] as const;
 
 export async function getAnalyticsSummary(businessId: string, days = 30) {
   const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
