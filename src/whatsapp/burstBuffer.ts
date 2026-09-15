@@ -37,8 +37,16 @@ export interface BurstBuffer<TItem> {
   // silencio, salvo que ya se haya llegado a `maxWaitMs` desde el primer item, en cuyo caso
   // descarga de inmediato.
   add(key: string, item: TItem): void;
-  // Cuantas rafagas estan esperando ahora mismo (solo para pruebas/diagnostico).
+  // Cuantas rafagas estan esperando ahora mismo (solo para pruebas/diagnostico, y para el apagado
+  // ordenado - ver flushAll).
   pendingCount(): number;
+  // Fuerza la descarga inmediata de TODAS las rafagas pendientes, sin esperar el resto de su
+  // ventana de silencio. Lo usa el apagado ordenado (src/shutdown.ts): un item que quedo esperando
+  // su ventana ya esta grabado en la base y Meta ya recibio el 200 - si el proceso se reinicia
+  // antes de que el timer normal dispare, se pierde en silencio. Resuelve cuando todas las
+  // descargas forzadas terminaron (nunca rechaza: un flush que revienta ya se reporta via
+  // onError/console.error, igual que en una descarga normal).
+  flushAll(): Promise<void>;
 }
 
 export function createBurstBuffer<TItem>(
@@ -49,11 +57,15 @@ export function createBurstBuffer<TItem>(
   const maxWaitMs = options.maxWaitMs ?? DEFAULT_MAX_WAIT_MS;
   const pending = new Map<string, PendingBurst<TItem>>();
 
-  function runFlush(key: string): void {
+  // Descarga `key` ya mismo (cancela su timer si tenia uno pendiente) y devuelve una promesa que
+  // nunca rechaza - un flush que revienta ya se reporta via onError/console.error, no hace falta
+  // que el llamador (add, ni flushAll) tambien lo maneje.
+  function flushKey(key: string): Promise<void> {
     const entry = pending.get(key);
-    if (!entry) return;
+    if (!entry) return Promise.resolve();
+    clearTimeout(entry.timer);
     pending.delete(key);
-    flush(key, entry.items).catch((error) => {
+    return flush(key, entry.items).catch((error) => {
       if (options.onError) options.onError(key, error);
       else console.error(`Error procesando rafaga agrupada de ${key}:`, error);
     });
@@ -67,7 +79,7 @@ export function createBurstBuffer<TItem>(
       pending.set(key, {
         items: [item],
         firstArrivedAt: now,
-        timer: setTimeout(() => runFlush(key), windowMs),
+        timer: setTimeout(() => void flushKey(key), windowMs),
       });
       return;
     }
@@ -80,15 +92,21 @@ export function createBurstBuffer<TItem>(
     if (remainingBeforeCap <= 0) {
       // Ya se llego al tope de espera: descargar ahora, no tiene sentido programar otro timer que
       // solo agregaria demora sin agrupar nada mas.
-      runFlush(key);
+      void flushKey(key);
       return;
     }
 
-    existing.timer = setTimeout(() => runFlush(key), Math.min(windowMs, remainingBeforeCap));
+    existing.timer = setTimeout(() => void flushKey(key), Math.min(windowMs, remainingBeforeCap));
+  }
+
+  function flushAll(): Promise<void> {
+    const keys = [...pending.keys()];
+    return Promise.all(keys.map((key) => flushKey(key))).then(() => undefined);
   }
 
   return {
     add,
     pendingCount: () => pending.size,
+    flushAll,
   };
 }

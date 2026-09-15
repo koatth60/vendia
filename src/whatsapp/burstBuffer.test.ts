@@ -109,6 +109,74 @@ test("un flush que revienta no rompe rafagas futuras de la misma clave", async (
   assert.equal(calls, 2, "la siguiente rafaga de la misma conversacion tiene que seguir funcionando");
 });
 
+test("flushAll descarga de inmediato lo pendiente, sin esperar el resto de la ventana", async () => {
+  const flushes: number[][] = [];
+  const buffer = createBurstBuffer<number>(async (_key, items) => void flushes.push(items), { windowMs: 5000 });
+
+  buffer.add("conv-1", 1);
+  buffer.add("conv-1", 2);
+  assert.equal(flushes.length, 0);
+
+  await buffer.flushAll();
+
+  assert.equal(flushes.length, 1, "flushAll tiene que descargar sin esperar los 5s de ventana");
+  assert.deepEqual(flushes[0], [1, 2]);
+  assert.equal(buffer.pendingCount(), 0);
+});
+
+test("flushAll descarga todas las claves pendientes, no solo una", async () => {
+  const flushed: string[] = [];
+  const buffer = createBurstBuffer<number>(
+    async (key) => {
+      flushed.push(key);
+    },
+    { windowMs: 5000 }
+  );
+
+  buffer.add("conv-a", 1);
+  buffer.add("conv-b", 1);
+  buffer.add("conv-c", 1);
+
+  await buffer.flushAll();
+
+  assert.deepEqual(flushed.sort(), ["conv-a", "conv-b", "conv-c"]);
+});
+
+test("flushAll espera a que las descargas forzadas terminen antes de resolver", async () => {
+  let processed = false;
+  const buffer = createBurstBuffer<number>(
+    async () => {
+      await delay(20);
+      processed = true;
+    },
+    { windowMs: 5000 }
+  );
+
+  buffer.add("conv-1", 1);
+  await buffer.flushAll();
+
+  assert.equal(processed, true, "flushAll no deberia resolver antes de que termine el flush real");
+});
+
+test("flushAll nunca rechaza, aunque el flush reviente - ya quedo reportado via onError", async () => {
+  const errors: unknown[] = [];
+  const buffer = createBurstBuffer<number>(
+    async () => {
+      throw new Error("boom");
+    },
+    { windowMs: 5000, onError: (_key, error) => errors.push(error) }
+  );
+
+  buffer.add("conv-1", 1);
+  await assert.doesNotReject(() => buffer.flushAll());
+  assert.equal(errors.length, 1);
+});
+
+test("flushAll con nada pendiente no hace nada", async () => {
+  const buffer = createBurstBuffer<number>(async () => {}, { windowMs: 5000 });
+  await assert.doesNotReject(() => buffer.flushAll());
+});
+
 test("pendingCount refleja rafagas en espera", async () => {
   const buffer = createBurstBuffer<number>(async () => {}, { windowMs: 20 });
   assert.equal(buffer.pendingCount(), 0);

@@ -7,7 +7,8 @@ import { sessionMiddleware } from "./auth/sessionMiddleware";
 import { securityHeaders } from "./security/headers";
 import { captureRawBody } from "./whatsapp/webhookSignature";
 import { setupRealtime } from "./realtime/socket";
-import { whatsappRouter, getActiveTurnCount } from "./routes/whatsapp";
+import { whatsappRouter, getActiveTurnCount, flushPendingReplyBursts, getPendingReplyBurstCount } from "./routes/whatsapp";
+import { createOrderedShutdown } from "./shutdown";
 import { adminRouter } from "./routes/admin";
 import { authRouter } from "./routes/auth";
 import { platformAdminRouter } from "./routes/platformAdmin";
@@ -120,33 +121,26 @@ setInterval(() => {
 // espera a que los turnos ya en vuelo (withConversationLock, ver routes/whatsapp.ts) terminen solos,
 // hasta un tope - despues de ese tope se registra explicitamente cuantos quedaron sin terminar en vez de
 // matarlos en silencio.
-const SHUTDOWN_GRACE_MS = 20_000;
-const SHUTDOWN_POLL_MS = 250;
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-let shuttingDown = false;
-
-async function shutdown(signal: string): Promise<void> {
-  if (shuttingDown) return;
-  shuttingDown = true;
-  console.log(`${signal} recibido: cerrando ordenadamente (esperando turnos en vuelo, tope ${SHUTDOWN_GRACE_MS}ms)...`);
-
-  server.close((error) => {
-    if (error) console.error("Error cerrando el servidor HTTP:", error);
-  });
-
-  const deadline = Date.now() + SHUTDOWN_GRACE_MS;
-  while (getActiveTurnCount() > 0 && Date.now() < deadline) {
-    await sleep(SHUTDOWN_POLL_MS);
-  }
-
-  const stillActive = getActiveTurnCount();
-  if (stillActive > 0) {
-    console.error(`Apagado con ${stillActive} turno(s) en vuelo sin terminar (se agoto el tope de ${SHUTDOWN_GRACE_MS}ms)`);
-  } else {
-    console.log("Todos los turnos en vuelo terminaron, apagado limpio");
-  }
-  process.exit(0);
-}
+//
+// Fase 10, eje 19: extendido para tambien vaciar el buffer de agrupacion de rafaga antes de esperar
+// esos turnos (ver src/shutdown.ts) - un mensaje esperando su ventana de ~8s ya esta grabado en la
+// base y Meta ya recibio el 200, asi que dejarlo esperando el timer normal y morir antes de que
+// dispare lo perdia en silencio. La logica en si vive en shutdown.ts (separada para poder probarla
+// sin levantar este servidor de verdad); aca solo se conecta con las dependencias reales.
+const shutdown = createOrderedShutdown({
+  closeServer: () =>
+    server.close((error) => {
+      if (error) console.error("Error cerrando el servidor HTTP:", error);
+    }),
+  getActiveTurnCount,
+  flushPendingBursts: flushPendingReplyBursts,
+  getPendingBurstCount: getPendingReplyBurstCount,
+  sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  now: () => Date.now(),
+  log: (message) => console.log(message),
+  logError: (message) => console.error(message),
+  exit: (code) => process.exit(code),
+});
 
 process.on("SIGTERM", () => void shutdown("SIGTERM"));
 process.on("SIGINT", () => void shutdown("SIGINT"));

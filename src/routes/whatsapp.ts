@@ -529,6 +529,17 @@ const replyBurstBuffer = createBurstBuffer<ReplyBurstItem>(
   { windowMs: Number(process.env.WHATSAPP_BURST_WINDOW_MS ?? "") || 8000 }
 );
 
+// El apagado ordenado (src/shutdown.ts) necesita poder vaciar esto ANTES de esperar los locks: un
+// mensaje esperando su ventana de rafaga ya esta grabado en la base y Meta ya recibio el 200 - si
+// el proceso se reinicia antes de que el timer normal (hasta 8s) dispare, se pierde en silencio.
+export function flushPendingReplyBursts(): Promise<void> {
+  return replyBurstBuffer.flushAll();
+}
+
+export function getPendingReplyBurstCount(): number {
+  return replyBurstBuffer.pendingCount();
+}
+
 whatsappRouter.get("/webhook", (req, res) => {
   const mode = req.query["hub.mode"];
   const token = req.query["hub.verify_token"];
