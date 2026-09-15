@@ -26,19 +26,39 @@ export async function buildCheckoutState(conversationId: string): Promise<Checko
       customer: {
         select: { businessId: true, name: true, idNumber: true, deliveryPhone: true, address: true },
       },
-      order: { select: { paymentMethodLabel: true, shippingAddress: true } },
+      order: {
+        select: {
+          paymentMethodLabel: true,
+          shippingAddress: true,
+          items: { select: { productName: true, quantity: true, variantLabel: true } },
+        },
+      },
     },
   });
   if (!conversation) return null;
 
+  // Los productos salen del pedido ya creado si existe, y si no de pendingOrderItems.
+  //
+  // Hallazgo de la etapa de observacion (2026-09-15): ninguna de las dos fuentes se llena mientras la
+  // venta esta EN CURSO. pendingOrderItems solo se escribe en el paso de confirmacion, y el Order recien
+  // existe al cerrar - o sea que hoy no hay ningun lugar que registre que producto esta eligiendo el
+  // cliente: eso vive solo en la cabeza del modelo. Es la pieza que falta para la etapa 2 y no se puede
+  // resolver leyendo mejor la base, hay que capturarlo cuando el cliente elige.
   const rawItems = Array.isArray(conversation.pendingOrderItems) ? (conversation.pendingOrderItems as PendingItem[]) : [];
-  const productos = rawItems
-    .filter((i) => typeof i?.productName === "string")
-    .map((i) => ({
-      nombre: String(i.productName),
-      cantidad: Number(i.quantity) || 1,
-      variante: typeof i.variantLabel === "string" && i.variantLabel.trim() ? String(i.variantLabel) : null,
-    }));
+  const productos =
+    conversation.order?.items && conversation.order.items.length > 0
+      ? conversation.order.items.map((i) => ({
+          nombre: i.productName,
+          cantidad: i.quantity,
+          variante: i.variantLabel?.trim() ? i.variantLabel : null,
+        }))
+      : rawItems
+          .filter((i) => typeof i?.productName === "string")
+          .map((i) => ({
+            nombre: String(i.productName),
+            cantidad: Number(i.quantity) || 1,
+            variante: typeof i.variantLabel === "string" && i.variantLabel.trim() ? String(i.variantLabel) : null,
+          }));
 
   // Si algun producto pedido tiene variantes activas y todavia no se eligio cual, falta el color/talla.
   let varianteFaltante = false;
