@@ -1,56 +1,48 @@
-import { test } from "node:test";
+import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { countUnresolvedPhotoIdStreak, PHOTO_ID_CLARIFY_PATTERN } from "./agent";
+import { randomUUID } from "node:crypto";
+import { prisma } from "../db/client";
+import { getPhotoIdStreak, bumpPhotoIdStreak, resetPhotoIdStreak, getMediaSent, recordMediaSent } from "../orders/saleState";
 
-// Real production incident (2026-09-13/14): a customer sent 4 photos in a row trying to identify a
-// product, and the bot asked "¿me confirmas cuál de estos dos es?" every single time without ever
-// resolving it or escalating to the owner - the sale stalled and eventually needed a human to take over.
-// countUnresolvedPhotoIdStreak is what forces ask_owner_about_photo once that loop has already happened
-// twice (see shouldForcePhotoEscalation in generateReply).
+// Fase 5 del plan maestro (2026-09-15), causa raiz C2: countUnresolvedPhotoIdStreak/PHOTO_ID_CLARIFY_PATTERN
+// (agent.ts) escaneaban el historial buscando la frase del modelo "no logro identificar..." - se
+// borraron enteros junto con el resto del backstop de medios. La racha ahora es estado real
+// (SaleState.photoIdStreak), subido/resetado por generateReply (ver customerSentMediaThisTurn y
+// shouldForcePhotoEscalation en agent.ts) segun si el turno realmente resolvio la foto (un envio real o
+// una escalacion a ask_owner_about_photo), nunca leyendo texto.
 
-function msg(role: "CUSTOMER" | "ASSISTANT", content: string, mediaType: string | null = null) {
-  return { role, content, mediaType };
-}
+let conversationId: string;
 
-test("PHOTO_ID_CLARIFY_PATTERN matches real bot clarifying phrasings", () => {
-  assert.equal(PHOTO_ID_CLARIFY_PATTERN.test("¿Me confirmas cuál de los dos es? Así te lo aparto"), true);
-  assert.equal(
-    PHOTO_ID_CLARIFY_PATTERN.test("Carlos, para no equivocarme con el modelo, ¿me confirmas cuál de estos dos es?"),
-    true
-  );
-  assert.equal(
-    PHOTO_ID_CLARIFY_PATTERN.test("el reloj negro cuadrado que me muestras podría ser uno de estos"),
-    true
-  );
-  assert.equal(PHOTO_ID_CLARIFY_PATTERN.test("¡Perfecto! Tenemos el Smartwatch Serie 11 Mini a $145.000"), false);
+before(async () => {
+  const business = await prisma.business.create({
+    data: { name: `Test PhotoIdStreak ${randomUUID()}`, email: `test-photoid-${randomUUID()}@example.com`, passwordHash: "x" },
+  });
+  const customer = await prisma.customer.create({ data: { businessId: business.id, phoneNumber: `573003${Date.now()}` } });
+  const conversation = await prisma.conversation.create({ data: { customerId: customer.id } });
+  conversationId = conversation.id;
 });
 
-test("countUnresolvedPhotoIdStreak counts consecutive unresolved photo-identify rounds", () => {
-  const history = [
-    msg("CUSTOMER", "Hola"),
-    msg("ASSISTANT", "¡Hola! ¿En qué te ayudo?"),
-    msg("CUSTOMER", "Quiero ese", "IMAGE"),
-    msg("ASSISTANT", "¿Me confirmas cuál de los dos es? Por lo que veo, se parece a estos dos..."),
-    msg("CUSTOMER", "", "IMAGE"),
-    msg("ASSISTANT", "Para no equivocarme con el modelo, ¿me confirmas cuál de estos dos es?"),
-  ];
-  assert.equal(countUnresolvedPhotoIdStreak(history), 2);
+after(async () => {
+  await prisma.saleState.deleteMany({ where: { conversationId } });
+  await prisma.conversation.deleteMany({ where: { id: conversationId } });
 });
 
-test("countUnresolvedPhotoIdStreak stops counting once the bot actually resolves a match", () => {
-  const history = [
-    msg("CUSTOMER", "Quiero ese", "IMAGE"),
-    msg("ASSISTANT", "¿Me confirmas cuál de los dos es?"),
-    msg("CUSTOMER", "El primero"),
-    msg("ASSISTANT", "¡Perfecto! Ese es el Smartwatch V20 Caballero, $140.000."),
-    msg("CUSTOMER", "quiero esto", "IMAGE"),
-    msg("ASSISTANT", "podría ser uno de estos: Smartwatch gen 9 o Combo k11 Mini"),
-  ];
-  // The resolved exchange in the middle breaks the streak - only the most recent unresolved round counts.
-  assert.equal(countUnresolvedPhotoIdStreak(history), 1);
+test("photoIdStreak starts at 0 for a conversation with no SaleState row yet", async () => {
+  assert.equal(await getPhotoIdStreak(conversationId), 0);
 });
 
-test("countUnresolvedPhotoIdStreak is 0 when the customer never sent media", () => {
-  const history = [msg("CUSTOMER", "Hola"), msg("ASSISTANT", "¿Con quién tengo el gusto?")];
-  assert.equal(countUnresolvedPhotoIdStreak(history), 0);
+test("bumpPhotoIdStreak increments across calls, resetPhotoIdStreak brings it back to 0", async () => {
+  await bumpPhotoIdStreak(conversationId);
+  assert.equal(await getPhotoIdStreak(conversationId), 1);
+  await bumpPhotoIdStreak(conversationId);
+  assert.equal(await getPhotoIdStreak(conversationId), 2);
+  await resetPhotoIdStreak(conversationId);
+  assert.equal(await getPhotoIdStreak(conversationId), 0);
+});
+
+test("recordMediaSent dedupes and getMediaSent reads it back in order", async () => {
+  await recordMediaSent(conversationId, "Smartwatch V20 Caballero");
+  await recordMediaSent(conversationId, "Smartwatch gen 9");
+  await recordMediaSent(conversationId, "Smartwatch V20 Caballero");
+  assert.deepEqual(await getMediaSent(conversationId), ["Smartwatch V20 Caballero", "Smartwatch gen 9"]);
 });

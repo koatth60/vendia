@@ -8,10 +8,18 @@ import { prisma } from "../db/client";
 import { sendOwnerAlert } from "../whatsapp/client";
 import { recordOwnerMessage } from "../delivery/ownerLog";
 import { recordAgentIncident } from "./incidents";
-import { listActiveProducts, textMentionsConfiguredCategory } from "../catalog/products";
+import { textMentionsConfiguredCategory } from "../catalog/products";
 import { listActivePaymentMethods } from "../catalog/paymentMethods";
 import { buildCheckoutState } from "../orders/checkoutStateFromDb";
-import { getSaleState, formatSaleStateForPrompt, getBlockedBy } from "../orders/saleState";
+import {
+  getSaleState,
+  formatSaleStateForPrompt,
+  getBlockedBy,
+  getMediaSent,
+  getPhotoIdStreak,
+  bumpPhotoIdStreak,
+  resetPhotoIdStreak,
+} from "../orders/saleState";
 import { canonicalColors } from "../catalog/attributeTaxonomy";
 import { tokenize, normalizeForMatch } from "../search/text";
 import { buildSystemPrompt, type BotPersonality } from "./prompts/systemPrompt";
@@ -156,86 +164,18 @@ export async function getOrRefreshContextSummary(conversationId: string, busines
   }
 }
 
-// Safety net for when the model claims "ya te la mande" without actually calling the tool - fires
-// only if nothing was sent this turn AND either the customer explicitly asked for media, or the
-// model's own reply text claims to have sent some, so it never overrides or duplicates what the model
-// already did on its own.
-export const PHOTO_REQUEST_PATTERN =
-  /\b(foto|fotos|imagen|imagenes|imágenes|video|videos|muestra|muéstrame|muestrame|enseñ|ense[nñ]a|mandame|mándame|manda la|envia la|envía la|pasame|pásame|regal[aá]me|regala la)\b/i;
-// Real production bug (2026-09-13): PHOTO_REQUEST_PATTERN's bare verbs (muestra/enseña/manda) match
-// ordinary Spanish that has nothing to do with photos - "ese reloj no me MUESTRA la distancia" (a screen
-// complaint) fired the media backstop and blasted 8 unrequested photos. Used ONLY for the customer's own
-// message (never for the bot's text, which stays on PHOTO_REQUEST_PATTERN below) - requires either a media
-// noun, or a send-verb bound to a clitic object ("muéstramela", "me la mandes"). A bare verb alone no
-// longer qualifies, so callers must ALSO check CUSTOMER_PHOTO_NEGATION_PATTERN to reject "no me
-// muestra/enseña..." before treating this as a real request.
-export const CUSTOMER_PHOTO_REQUEST_PATTERN =
-  /\b(foto|fotos|imagen|imagenes|imágenes|video|videos)\b|\b(mu[eé]stra(me)?la|mu[eé]stramelas?|ens[eé][ñn]a(me)?la|ens[eé][ñn]amelas?|m[aá]ndamela|m[aá]ndamelas|p[aá]samela|p[aá]samelas|me la (muestras|muestres|ense[ñn]as|ense[ñn]es|enseñaras|enseñara|mandas|mandes|pasas|pases)|me las (muestras|muestres|ense[ñn]as|ense[ñn]es|mandas|mandes|pasas|pases))\b/i;
-export const CUSTOMER_PHOTO_NEGATION_PATTERN = /\bno me (muestra|ense[nñ]a)\b/i;
-// Broadened beyond "te mand.." to also catch phrasings without "te" ("ya la mande", "ahi la envio") and
-// "aca"/"aqui esta(n)" - a real conversation slipped through the narrower pattern with "ya se la mande".
-// H10 (2026-09-13 incident): "(mand|envi|pas|mostr)ar(te|le)" catches the enclitic-pronoun phrasing
-// ("Déjame mandarte la foto", "voy a enviarte las fotos") that none of the other alternatives cover -
-// "te (mand|envi|pas)" only matches when "te" comes BEFORE the verb, not attached after it as a suffix.
-// A real production case ("Déjame mandarte la foto 👇... ¿Te lo llevas?") fell through every existing
-// alternative, so the promise was never backed by a real send_product_media call.
-export const PHOTO_CLAIM_PATTERN =
-  /\b(te (mand|envi|pas)|ya (te |se la |la |lo )?(mand|envi|pas)\w*|aqu[ií] (te|va|van|est[aá])|ac[aá] (te|va|van|est[aá])|ah[ií] (te|va|van)|(mand|envi|pas|mostr)ar(te|le)\b)/i;
-// "te (mand|envi|pas)" above also matches a conditional offer inside a still-open clarifying question
-// ("Dime el número o el nombre y te paso fotos y detalles, ¿cuál prefieres?") - that's a promise
-// contingent on the customer's answer, not a claim that photos already went out. Real production bug
-// (2026-09-12): bot listed 4 options with that exact phrasing on the FIRST turn (nothing asked yet by
-// the customer), the claim pattern fired anyway, and the media backstop below matched all 4 option
-// names present in the bot's own reply text - sending 4 unrequested photos, several not even matching
-// what the customer asked for, before the customer had picked one.
-export const OPEN_CLARIFYING_QUESTION_PATTERN =
-  /\bcu[aá]l\b.{0,30}\b(prefer|interes|te (gust|llam))|\bdime\b.{0,20}\b(n[uú]mero|nombre)\b/i;
-// The model sometimes fabricates a bracket-shaped media-confirmation caption without ever calling
-// send_product_media - a copy-the-pattern hallucination, not a natural-language claim, so it doesn't
-// match PHOTO_CLAIM_PATTERN above. Catch it directly. Broadened 2026-09-13 (second occurrence of the same
-// incident class): the original pattern only caught the exact "[Foto de X]" shape recordMessage writes -
-// a same-day fix that summarized several sends as "[Se envio 1 foto/video: X]" got imitated by the model
-// in its OWN reply text, and that different bracket shape slipped past this pattern uncaught. Broadened to
-// match ANY bracketed text mentioning foto(s)/video(s), regardless of the exact wording around it - the
-// model has no real caption format worth preserving here, only real sends do, and those never appear
-// inside the model's own generated `text`.
-// Not every "foto" in a reply is a CATALOG photo. A courier tracking slip ("te paso la foto de la guía
-// apenas se realice el envío") and a payment receipt ("mandame la foto del comprobante") both match the
-// claim patterns above word for word, but neither is something send_product_media could ever deliver -
-// the first is a future promise about a document that does not exist yet, the second is a photo the
-// CUSTOMER sends US. Real regression (2026-09-15): the guía phrasing dragged the whole media backstop in
-// mid-purchase and appended a "no logré cargar las fotos" retraction to a perfectly correct shipping
-// answer. Checked before the backstop engages at all.
-export const NON_PRODUCT_PHOTO_PATTERN =
-  /\b(gu[ií]a|comprobante|recibo|soporte|transferencia|pago)\b/i;
-
-export const FAKE_MEDIA_TAG_PATTERN = /\[[^\]]{0,60}\b(?:fotos?|videos?)\b[^\]]{0,60}\]/i;
+// Fase 5 del plan maestro (2026-09-15), causa raiz C2: los medios pasan a ser una decision de
+// herramienta, nunca de texto - las nueve capas de regex que vivian aca (PHOTO_REQUEST_PATTERN,
+// CUSTOMER_PHOTO_REQUEST_PATTERN, CUSTOMER_PHOTO_NEGATION_PATTERN, PHOTO_CLAIM_PATTERN,
+// OPEN_CLARIFYING_QUESTION_PATTERN, NON_PRODUCT_PHOTO_PATTERN, FAKE_MEDIA_TAG_PATTERN,
+// PHOTO_ID_CLARIFY_PATTERN, VARIANT_DENIAL_PATTERN), mas findMentionedProductsForMediaBackstop,
+// honorOrRetractMediaPromise y OFFER_OR_PENDING_CONFIRMATION_PATTERN, se borraron enteras junto con
+// el bloque de finalizeTurn que las usaba. send_product_media (tools.ts) es el unico camino real;
+// cuando un producto no tiene foto, la herramienta devuelve sent:false y el modelo lo dice con sus
+// propias palabras, sin ningun parche de texto encima. MEDIA_TAG_STRIP_PATTERN y MEDIA_CAPTION_PATTERN
+// se conservan mas abajo, solo como saneamiento de la respuesta final (nunca para decidir si mandar
+// algo).
 export const MEDIA_TAG_STRIP_PATTERN = /\[[^\]]{0,60}\b(?:fotos?|videos?)\b[^\]]{0,60}\]/gi;
-
-// Guard for the media claim patterns below: catches a dropped-promise bug (model says it'll do
-// something, never calls the real tool), but the same claim wording also shows up inside a conditional
-// OFFER still awaiting the customer's go-ahead ("Dime el numero y te paso fotos", "...en cuanto
-// confirmes el pedido") - not a claim that the action already happened. The escalation/payment/catalog/
-// shipping-modality siblings this guard used to also cover were deleted in Fase 4 of the plan maestro
-// (2026-09-15): escalation is now a real state (PendingOwnerQuestion + SaleState.blockedBy, see
-// finalizeTurn) instead of prose the model could claim without ever calling the tool, so there is no
-// claim text left to guard against for those three.
-export const OFFER_OR_PENDING_CONFIRMATION_PATTERN =
-  /\b(si (quieres|prefieres|gustas|deseas)|(quieres|prefieres|gustar[ií]as?|gustas|deseas)\b.{0,15}\bque\b|en cuanto (confirmes|me digas|decidas|me cuentes))/i;
-
-// Real production bug (2026-09-15): the model told a customer "Ese modelo... no tiene variantes de
-// color cargadas" for a product that had 3 real active color variants with stock, seconds after
-// get_product_details itself returned that data. Not a dropped-promise pattern like the ones above (no
-// tool call is missing here), so this is checked separately in finalizeTurn against hasVariantsThisTurn
-// - the real, just-fetched answer.
-export const VARIANT_DENIAL_PATTERN =
-  /no tiene variantes|no maneja(mos)? variantes|no hay variantes|una sola presentaci[oó]n|no viene en (otros? )?colores?|no tenemos (otros? )?colores?/i;
-
-// The model's own "I can't tell which product this photo is" clarifying question - used to detect a
-// repeated identify-by-photo loop (see shouldForcePhotoEscalation in generateReply) so it escalates to
-// ask_owner_about_photo instead of asking the same question a third/fourth time.
-export const PHOTO_ID_CLARIFY_PATTERN =
-  /no logro identificar|no pude identificar|no logr[eé] identificar|cu[aá]l de (estos|los|las)\b.{0,20}\bes\b|me confirmas cu[aá]l|podr[ií]a ser uno de estos|para no equivocarme con el modelo/i;
 
 // Same failure mode again, this time for save_customer_name: the bot asks "a nombre de quien hago el
 // pedido?", the customer answers with just their name, and the bot's next reply acknowledges it
@@ -684,92 +624,6 @@ function looksLikeIdOrPhone(text: string): boolean {
   return /\d{6,}/.test(trimmed.replace(/\D/g, ""));
 }
 
-// Strips numbered-list markers ("1. ", "2) ", "3- ") at the start of a line before tokenizing - a real
-// production bug (2026-09-12): the bot's own numbered option list ("1. Serie 11 Mini... 4. Smartwatch
-// V20 Caballero") left a bare "4" token in the haystack, which then coincidentally matched the literal
-// "4" in an unrelated product's actual name ("AIRPODS SERIE 4") - combined with "Serie" being a shared
-// brand word across both categories in this catalog, that unrelated product crossed the 0.6 overlap
-// threshold and got its photo sent alongside the real watches. List numbering was never meant to carry
-// matching evidence; the product's real name text (what follows the marker) still does.
-const LIST_MARKER_PATTERN = /^\s*\d+[.):]\s*/gm;
-
-// A numbered list written with keycap emoji ("1️⃣ Producto A... 4️⃣ Producto D") isn't caught by
-// LIST_MARKER_PATTERN above (no literal "."/")"/":" character - it's a digit followed by the Unicode
-// variation-selector + combining-keycap marks). tokenize's generic non-alphanumeric strip removes those
-// marks but KEEPS the bare digit as its own token. Real production incident (2026-09-13): a numbered list
-// "1️⃣...4️⃣" left a bare "4" in the haystack, which matched the literal "4" in an unrelated real
-// product's name ("AIRPODS SERIE 4") - same bug class as the plain-marker case, different Unicode shape.
-const KEYCAP_DIGIT_PATTERN = /[0-9]️?⃣/g;
-
-// A business's own marketing subtitle in parentheses ("Reloj... Serie 12 Ultra 3 (Edición Deportiva /
-// Robusta)") is never repeated when the bot or customer refers to the product in shorthand - counting
-// those extra words in the ratio's denominator systematically under-scores exactly the long, real,
-// wordy names this business uses (verified against production data: a 10-token full name where the bot's
-// own shorthand mention only ever repeats the 5-6 words BEFORE the parenthetical scored 0.5, just under
-// the 0.6 threshold, so the real watches the customer was shown never matched while the bug above sent
-// unrelated earbuds instead). Stripped only for THIS scoring calculation, never from the name actually
-// shown to the customer.
-const NAME_PARENTHETICAL_SUFFIX_PATTERN = /\s*\([^)]*\)\s*$/;
-
-// Token-overlap match (not exact substring - the model paraphrases names constantly, e.g. "Boombox 4
-// LED" for "Parlante Bluetooth Portatil Boombox 4 LED") against a haystack that should already include
-// the customer's message, the bot's current reply, AND the bot's prior turn (see the photo-claim
-// backstop in finalizeTurn for why the prior turn matters). Exported as a pure function for a cheap
-// regression test - no DB/LLM needed to verify the matching decision itself.
-export function findMentionedProductsForMediaBackstop<
-  T extends { name: string; media: unknown[]; category?: string | null; variants?: { media: unknown[] }[] }
->(products: T[], haystack: string): T[] {
-  const haystackTokens = new Set(tokenize(haystack.replace(KEYCAP_DIGIT_PATTERN, " ").replace(LIST_MARKER_PATTERN, " ")));
-  const scored = products
-    .map((p) => {
-      // Real production bug (2026-09-15): checking only p.media (general/unassigned photos) made this
-      // backstop blind to any product whose photos are all assigned to color variants (a real case had
-      // all 3 on variants, zero general) - the bot's own claim "aqui van las fotos" never got backed by
-      // a real send, and the customer got nothing. Same combined-media rule send_product_media and
-      // get_product_details already use.
-      const totalMedia = p.media.length + (p.variants?.reduce((sum, v) => sum + v.media.length, 0) ?? 0);
-      if (totalMedia === 0) return null;
-      const nameTokens = tokenize(p.name.replace(NAME_PARENTHETICAL_SUFFIX_PATTERN, ""));
-      if (nameTokens.length === 0) return null;
-      const hits = nameTokens.filter((t) => haystackTokens.has(t)).length;
-      // A short name (1-2 tokens) crossing 0.6 on a single shared word is too weak on its own - real
-      // production bug (2026-09-13): "serie" alone (1/3 tokens of a 3-token name, well under 0.6 anyway,
-      // but a shorter 2-token name sharing just its generic first word would cross threshold with only 1
-      // hit). Require at least 2 matched tokens, or a full match for a genuinely 1-token name.
-      if (hits < Math.min(2, nameTokens.length)) return null;
-      const ratio = hits / nameTokens.length;
-      return ratio >= 0.6 ? { product: p, ratio } : null;
-    })
-    .filter((x): x is { product: T; ratio: number } => x !== null);
-  const matched = scored.map((s) => s.product);
-
-  // Defense in depth beyond the list-marker fix above: once the matches clearly settle on ONE dominant
-  // category, drop any WEAK minority-category outlier - a shared generic word or any other future token
-  // collision can drag in a product from a totally different category, and the real intent behind "show
-  // me photos of the ones you just listed" is usually "more of the same kind of thing", never a silent
-  // category switch. Only acts on a clear majority (strictly more matches in one category than any
-  // other) - on a tie, stay silent rather than guess which category the customer actually meant.
-  //
-  // Never drops a NEAR-EXACT name match (ratio >= 0.9) regardless of category - a real production case
-  // (2026-09-13): a business's own "combo" lineup spans categories on purpose (a watch combo and an
-  // earbuds combo both fully named in the same list), and the customer/bot naming one by its complete
-  // real name is far stronger evidence of real intent than a same-category headcount. The original bug
-  // this guard fixed matched its outlier through a stray shared token (a brand word plus a coincidental
-  // list-number digit), never the product's full name - that distinction is exactly what ratio captures.
-  const categoryCounts = new Map<string, number>();
-  for (const p of matched) {
-    if (p.category) categoryCounts.set(p.category, (categoryCounts.get(p.category) ?? 0) + 1);
-  }
-  const sortedCategories = [...categoryCounts.entries()].sort((a, b) => b[1] - a[1]);
-  if (sortedCategories.length < 2 || sortedCategories[0][1] > sortedCategories[1][1]) {
-    const dominantCategory = sortedCategories[0]?.[0];
-    if (dominantCategory) {
-      return scored.filter((s) => !s.product.category || s.product.category === dominantCategory || s.ratio >= 0.9).map((s) => s.product);
-    }
-  }
-  return matched;
-}
-
 // Strips WhatsApp markdown emphasis (*bold*, _italic_) - real production bug (2026-09-13): the bot wrote
 // "¿Me confirmas tu *nombre*, por favor?" (bold per its own ESTILO), and ASK_NAME_PATTERN/ASK_ID_PATTERN/
 // ASK_PHONE_PATTERN below look for the literal phrase as contiguous text ("tu nombre, por favor") - the
@@ -782,8 +636,8 @@ export function stripMarkdownEmphasis(text: string): string {
 
 // Nombres de herramientas internas escritos dentro del mensaje al cliente. Real (2026-09-15): una
 // clienta recibio "Aquí van las fotos del Combo Pareja 📸 [send_product_media: Combo Pareja]". El modelo
-// imita el formato de los tool calls que ve en su propio contexto. FAKE_MEDIA_TAG_PATTERN no lo
-// agarraba porque ese patron exige la palabra foto/video adentro del corchete, y aca el corchete lleva
+// imita el formato de los tool calls que ve en su propio contexto. MEDIA_TAG_STRIP_PATTERN no lo
+// agarra porque ese patron exige la palabra foto/video adentro del corchete, y aca el corchete lleva
 // el nombre tecnico de la herramienta.
 const TOOL_CALL_LEAK_PATTERN = /\[\s*(?:send_product_media|get_product_details|search_products|find_products_by_attributes|ask_owner(?:_about_photo)?|save_customer_(?:name|contact_info)|get_faq|get_payment_methods|get_shipping_[a-z_]+|show_order_summary|close_sale|update_conversation_status|flag_conversation_intent|cancel_order|get_previous_conversation|list_all_products)\b[^\]]*\]/gi;
 
@@ -798,35 +652,13 @@ export function stripInternalLeaks(text: string): string {
   return text
     .replace(TOOL_CALL_LEAK_PATTERN, "")
     .replace(INTERNAL_STATE_PATTERN, "tu pago todavía lo está verificando el equipo")
+    // Fase 5 del plan maestro (2026-09-15): saneamiento puro, nunca una decision - si el modelo escribe
+    // un corchete tipo "[Foto de X]"/"[3 fotos]" en su propia respuesta (nunca es un envio real, eso lo
+    // decide send_product_media), se borra sin agregar ninguna retractacion ni reintentar nada.
+    .replace(MEDIA_TAG_STRIP_PATTERN, "")
     .replace(/[ \t]{2,}/g, " ")
     .replace(/[ \t]+\n/g, "\n")
     .trim();
-}
-
-// Counts how many times, back-to-back at the END of `history`, the customer sent a photo/video and the
-// bot immediately replied with an "I can't tell which product this is" clarifying question - see
-// shouldForcePhotoEscalation in generateReply. Exported as a pure function for a cheap regression test.
-// `history` here should NOT include the current turn's own trailing customer message - that message is
-// what the caller is deciding whether to escalate, not part of the PRIOR streak being measured.
-export function countUnresolvedPhotoIdStreak(
-  history: { role: string; content: string; mediaType: string | null }[]
-): number {
-  let streak = 0;
-  let j = history.length - 1;
-  while (j >= 1) {
-    const assistantMsg = history[j];
-    const priorCustomerMsg = history[j - 1];
-    if (
-      assistantMsg.role === "ASSISTANT" &&
-      priorCustomerMsg.role === "CUSTOMER" &&
-      (priorCustomerMsg.mediaType === "IMAGE" || priorCustomerMsg.mediaType === "VIDEO") &&
-      PHOTO_ID_CLARIFY_PATTERN.test(stripMarkdownEmphasis(assistantMsg.content))
-    ) {
-      streak++;
-      j -= 2;
-    } else break;
-  }
-  return streak;
 }
 
 function lastAssistantText(history: { role: string; content: string }[]): string {
@@ -860,25 +692,6 @@ async function alertOwnerOfDegradedReply(context: ToolContext, reason: string): 
   await recordAgentIncident(context.businessId, "DEGRADED_REPLY", reason, context.conversationId, "degraded_reply_fallback");
 }
 
-// Invariant added 2026-09-15 (real incident: the bot promised photos twice in the same conversation,
-// mediaSentThisTurn stayed 0 both times, and NOTHING recorded it anywhere - no AgentIncident, no owner
-// alert, no trace except the customer eventually asking a human to send them by hand). Both media
-// backstop branches above call this whenever they tried to send (or had a real candidate to send) and
-// still ended the turn with zero actual sends - the model's own text already claims photos went out, so
-// leaving it as-is would ship a dropped promise with no record and no honest correction. There is no
-// "just call the tool again" fix here - the tool already ran and failed/found nothing - so this alerts
-// the owner for real (the text below only says "avise al equipo" because it's about to be true) and
-// appends an honest, non-promising line instead of leaving the false claim standing alone.
-async function honorOrRetractMediaPromise(context: ToolContext, conversationId: string, text: string): Promise<string> {
-  const reason = `El bot prometio fotos/video pero no logro enviar ninguno. Texto: "${text.slice(0, 200)}"`;
-  await recordAgentIncident(context.businessId, "BACKSTOP_INTERVENTION", reason, conversationId, "media_promise_retraction");
-  await alertOwner(
-    context,
-    "Aviso: el bot le prometio fotos/video a un cliente pero no logro mandar ninguna (revisa si el producto tiene fotos cargadas, incluidas las de sus variantes). Revisa esa conversacion en el panel."
-  );
-  return `${text}\n\nUy, no logré cargar las fotos en este momento - ya le avisé al equipo para que te las mande. 🙏`;
-}
-
 export async function generateReply(
   conversationId: string,
   context: ToolContext,
@@ -892,8 +705,20 @@ export async function generateReply(
   // backward and stops at the first CUSTOMER row either way).
   const history = await getRecentHistory(conversationId, 30);
   const contextSummary = await getOrRefreshContextSummary(conversationId, context.businessId);
-  const { history: mediaFreeHistory, photosSent } = extractMediaHistory(history);
+  const { history: mediaFreeHistory } = extractMediaHistory(history);
   const modelFacingHistory = mediaFreeHistory.slice(-20);
+
+  // Fase 5 del plan maestro (2026-09-15), causa raiz C2: la lista de "ya enviado" viene de SaleState
+  // (escrita por tools.ts en el momento real del envio), no de reconstruirla leyendo el historial con
+  // MEDIA_CAPTION_PATTERN. Independiente de saleStateEnabled, igual que blockedBy.
+  const mediaSent = await getMediaSent(conversationId);
+
+  const lastHistoryEntry = history[history.length - 1];
+  const customerSentMediaThisTurn =
+    !!lastHistoryEntry && lastHistoryEntry.role === "CUSTOMER" && (lastHistoryEntry.mediaType === "IMAGE" || lastHistoryEntry.mediaType === "VIDEO");
+  // Fase 5: racha de rondas de identificacion por foto sin resolver, leida como estado real (ver
+  // shouldForcePhotoEscalation abajo) en vez de escanear el historial buscando una frase del modelo.
+  const photoIdStreakAtTurnStart = customerSentMediaThisTurn ? await getPhotoIdStreak(conversationId) : 0;
 
   // Fase 2 del plan maestro (2026-09-15), causa raiz C1: el estado real del pedido en curso, calculado
   // de la base (nunca de lo que diga el modelo), inyectado como mensaje system - mismo canal que ya usa
@@ -930,11 +755,11 @@ export async function generateReply(
     ...(saleStateText
       ? [{ role: "system" as const, content: saleStateText }]
       : []),
-    ...(photosSent.length > 0
+    ...(mediaSent.length > 0
       ? [
           {
             role: "system" as const,
-            content: `FOTOS/VIDEOS YA ENVIADOS en esta conversacion (no los vuelvas a ofrecer ni a decir que los mandaste de nuevo, salvo que el cliente los pida explicitamente): ${photosSent.join(", ")}`,
+            content: `FOTOS/VIDEOS YA ENVIADOS en esta conversacion (no los vuelvas a ofrecer ni a decir que los mandaste de nuevo, salvo que el cliente los pida explicitamente): ${mediaSent.join(", ")}`,
           },
         ]
       : []),
@@ -954,6 +779,9 @@ export async function generateReply(
 
   let lastText = "";
   let mediaSentThisTurn = 0;
+  // Fase 5: junto con mediaSentThisTurn, decide si esta ronda de identificacion por foto quedo resuelta
+  // (ver el bump/reset de SaleState.photoIdStreak al final de finalizeTurn).
+  let photoEscalatedThisTurn = 0;
   let nameSavedThisTurn = 0;
   let contactSavedThisTurn = 0;
   let intentFlaggedThisTurn = 0;
@@ -976,11 +804,6 @@ export async function generateReply(
   // guard below also catch a stale productId when THIS tool, not find_products_by_attributes, is what
   // actually scoped the product this turn (reliability plan Phase 2, item 3, 2026-09-13).
   let searchScopedThisTurn: { productId: string; productName: string; variantId: string | null }[] | null = null;
-  // Set whenever get_product_details resolves this turn - lets finalizeTurn correct a false "no tiene
-  // variantes" claim against the product it JUST looked up (with the real colors, not a generic stall),
-  // instead of trusting the model to have read its own tool result correctly.
-  let hasVariantsThisTurn: boolean | null = null;
-  let variantColorsThisTurn: string[] = [];
   // Fase 3: resultado completo de show_order_summary de ESTE turno (no solo el total) - fuente de
   // {{BLOQUE_TOTAL}} y {{BLOQUE_RESUMEN}}. null si no corrio o si todavia no esta ready.
   let orderSummaryThisTurn: FixedBlockData["orderSummary"] = null;
@@ -1016,21 +839,6 @@ export async function generateReply(
         conversationId,
         "fixed_block_missing_data"
       );
-    }
-
-    // hasVariantsThisTurn === true means get_product_details JUST returned real variants for the
-    // product being discussed - if the model denies that anyway, its own tool result already proves it
-    // wrong, so correct it deterministically instead of leaving a false statement with the customer.
-    if (hasVariantsThisTurn === true && VARIANT_DENIAL_PATTERN.test(text)) {
-      await recordAgentIncident(
-        context.businessId,
-        "BACKSTOP_INTERVENTION",
-        `El bot nego variantes de color que si existen. Texto: "${text.slice(0, 200)}"`,
-        conversationId,
-        "variant_denial"
-      );
-      const colorList = variantColorsThisTurn.length > 0 ? variantColorsThisTurn.join(", ") : "varios colores";
-      text = text.replace(VARIANT_DENIAL_PATTERN, `sí viene en estos colores: ${colorList}`);
     }
 
     if (intentFlaggedThisTurn === 0 && customerText && customerRequestsHuman(customerText)) {
@@ -1092,151 +900,19 @@ export async function generateReply(
       }
     }
 
-    if (mediaSentThisTurn > 0) return text;
-
-    // 2026-09-13 audit incident: PHOTO_REQUEST_PATTERN's bare verbs matched "ese reloj no me MUESTRA la
-    // distancia" (a screen complaint, not a photo request) and blasted 8 unrequested photos - use the
-    // stricter CUSTOMER_PHOTO_REQUEST_PATTERN here, plus an explicit negation guard.
-    const customerAsked =
-      !!customerText &&
-      CUSTOMER_PHOTO_REQUEST_PATTERN.test(customerText) &&
-      !CUSTOMER_PHOTO_NEGATION_PATTERN.test(customerText);
-    const fakeMediaTag = FAKE_MEDIA_TAG_PATTERN.test(stripMarkdownEmphasis(text));
-    // Same incident, blast 1: the bot's own reply was a CONDITIONAL OFFER ("Si quieres te mando fotos de
-    // los que te gusten") - PHOTO_CLAIM_PATTERN's "te mand.." matched it as if the send already happened.
-    // OFFER_OR_PENDING_CONFIRMATION_PATTERN already exists for exactly this bug class and already guards
-    // the payment/catalog/escalation backstops - it was never applied here. Deliberately NOT applied to
-    // fakeMediaTag: a literal fabricated "[Foto de X]" tag is unambiguous regardless of nearby offer
-    // language, unlike a natural-language claim.
-    const modelClaimsSent =
-      (PHOTO_CLAIM_PATTERN.test(text) &&
-        PHOTO_REQUEST_PATTERN.test(text) &&
-        !OPEN_CLARIFYING_QUESTION_PATTERN.test(text) &&
-        !NON_PRODUCT_PHOTO_PATTERN.test(text) &&
-        !OFFER_OR_PENDING_CONFIRMATION_PATTERN.test(stripMarkdownEmphasis(text))) ||
-      fakeMediaTag;
-    if (!customerAsked && !modelClaimsSent) return text;
-
-    // The model can only have fabricated this tag, never really sent it (mediaSentThisTurn === 0 here) -
-    // strip it so the customer doesn't see a broken "[Foto de X]" label alongside the real photos we're
-    // about to send below.
-    if (fakeMediaTag) {
-      text = text.replace(MEDIA_TAG_STRIP_PATTERN, "").trim();
-    }
-
-    // Prefer this turn's ALREADY-SCOPED find_products_by_attributes result over re-deriving "which
-    // products" by scanning prose - that scan is blind to category/color (any product NAME mention
-    // counts), which is exactly how "reloj negro" used to also send airpods and non-black watches (real
-    // production bug, 2026-09-12): the bot's own clarifying reply lists every candidate by name, so the
-    // prose scan matched all of them regardless of color. When the model called the real filter this
-    // turn, trust its result instead of re-guessing from text.
-    if (attributeMatchThisTurn && attributeMatchThisTurn.length <= 3) {
-      let sentAny = false;
-      for (let i = 0; i < attributeMatchThisTurn.length; i++) {
-        if (i > 0) await new Promise((resolve) => setTimeout(resolve, 1200));
-        const m = attributeMatchThisTurn[i];
-        // A real WhatsApp send failure here (expired token, transient 5xx) used to throw uncaught all
-        // the way out of generateReply - the text reply already generated for this turn never reached
-        // the customer at all, not even the fallback apology, since this runs in the return path outside
-        // generateReply's own try/catch. Degrade instead: log and keep going, so one failed photo never
-        // silences the whole turn or blocks the rest of the batch.
-        try {
-          const result = (await runCatalogTool(context, "send_product_media", {
-            productId: m.productId,
-            variantId: m.variantId ?? undefined,
-            skipIfAlreadySent: true,
-          })) as { sent?: boolean; skipped?: boolean };
-          // `skipped` significa que esas fotos YA se le mandaron antes en esta conversacion - el cliente
-          // las tiene, no se cayo nada. Contarlo como fallo hacia que el bot se disculpara por fotos que
-          // el cliente ya habia recibido (mismo texto de disculpa que ya causo tres mensajes raros en
-          // produccion el 2026-09-15, esta vez por la rama de atributos).
-          if (result?.sent || result?.skipped) sentAny = true;
-        } catch (error) {
-          console.error("Fallo el envio de una foto en el backstop de atributos:", error);
-        }
-      }
-      return sentAny ? text : await honorOrRetractMediaPromise(context, conversationId, text);
-    }
-
-    // Fallback for everything else (direct product-name requests, vague follow-ups like "y los otros
-    // productos?") - scanning the customer's message, the model's own reply, AND the bot's own PRIOR turn
-    // (token-overlap, not exact substring - the model paraphrases names constantly, e.g. "Boombox 4 LED"
-    // for "Parlante Bluetooth Portatil Boombox 4 LED"). Blind to color/category by design (it only knows
-    // product NAMES), which is exactly why the branch above takes priority whenever it's available.
-    //
-    // The prior-turn scan matters for a real, reported failure: bot lists 4 numbered smartwatch options
-    // ("1. Serie 11 Mini... 2. Serie 12 Ultra 3...") and asks which one; customer replies "Muestrame
-    // fotos" with no name at all, since they haven't seen any yet and can't name one sight-unseen - the
-    // reasonable read of that is "show me all 4 you just listed", not "pick one for me" or a clarifying
-    // question that would just repeat the same dead end. The specific names only live in the bot's PRIOR
-    // message, never in this turn's customerText/text, so without this the code below found zero matches
-    // and fell back to calling send_product_media with the raw customer text ("Muestrame fotos") as if it
-    // were a product name - never matches anything, so the bot's false "aqui van las fotos" claim went
-    // out with nothing actually sent.
-    //
-    // Must compare whole tokens, not substrings: haystack.includes(t) on the raw normalized string used
-    // to match "pro" (from "AirPods Pro 2") against the "pro" inside "producto", and single-digit tokens
-    // like "2"/"3" against any stray digit in a price - false-positiving completely unrelated products
-    // into a customer message that never mentioned them.
-    const products = await listActiveProducts(context.businessId);
-    // Strip bare media-tag captions ("[Foto de X]") from the PRIOR turn before folding it into the
-    // haystack - a real production bug (2026-09-12): the bot's prior reply was just such a tag (a
-    // hallucinated empty answer to an unrelated question), and its product name kept matching turn
-    // after turn even though the customer had moved on to asking about a completely different product
-    // ("Tienen airpods blancos?" got the earlier watch photo resent). This scan was only ever meant to
-    // catch a numbered PROSE list of options ("1. Serie 11 Mini... 2. ..."), never a photo caption -
-    // a caption carries no "here's what I just offered you" intent worth re-matching.
-    const priorAssistantText = lastAssistantText(history).replace(MEDIA_TAG_STRIP_PATTERN, "");
-    const haystack = `${customerText ?? ""} ${text} ${priorAssistantText}`;
-    const matched = findMentionedProductsForMediaBackstop(products, haystack);
-
-    // A generic "muestrame el catalogo" also matches PHOTO_REQUEST_PATTERN (it contains "muestrame"),
-    // and if the model answers by listing the whole catalog by name, every product matches the
-    // token-overlap check above - this used to blast every product's photos at once. Distinguish that
-    // from a real request for several specific products (e.g. "mandame fotos de estos 3") by comparing
-    // against how many active products exist at all: matching (almost) the entire catalog means "show
-    // me everything", not an itemized request, so only that case stays text-only. A flat cap of 2 used
-    // to silently drop legitimate 3+ product requests.
-    const wholeCatalogMatch = products.length > 1 && matched.length === products.length;
-    if (matched.length > 5 || wholeCatalogMatch) return text;
-
-    // Zero candidates does NOT mean a dropped product-photo promise - far more often it means the
-    // "claim" was never about a catalog photo at all. Real regression this caused within minutes of
-    // shipping (2026-09-15): "te paso la foto de la guía apenas se realice el envío" (a courier tracking
-    // slip, promised for the FUTURE) matched PHOTO_CLAIM_PATTERN + PHOTO_REQUEST_PATTERN, matched no
-    // product (correctly - there is none), and got the retraction line glued onto an otherwise perfect
-    // shipping answer, in front of a customer mid-purchase. The retraction only makes sense when we had
-    // a real product to send and the send itself failed; with nothing to send, stay quiet and just leave
-    // the incident for the panel.
-    if (matched.length === 0) {
-      await recordAgentIncident(
-        context.businessId,
-        "BACKSTOP_INTERVENTION",
-        `Texto parecia prometer fotos pero no se identifico ningun producto para mandar: "${text.slice(0, 160)}"`,
-        conversationId,
-        "media_backstop_no_candidate"
-      );
-      return text;
-    }
-
-    let sentAny = false;
-    for (let i = 0; i < matched.length; i++) {
-      if (i > 0) await new Promise((resolve) => setTimeout(resolve, 1200));
-      // Same reasoning as the attribute-match loop above: never let one failed send take the whole
-      // turn's reply down with it.
-      try {
-        const result = (await runCatalogTool(context, "send_product_media", {
-          productName: matched[i].name,
-          skipIfAlreadySent: true,
-        })) as { sent?: boolean; skipped?: boolean };
-        // Mismo criterio que la rama de atributos: ya enviadas antes = el cliente las tiene.
-        if (result?.sent || result?.skipped) sentAny = true;
-      } catch (error) {
-        console.error("Fallo el envio de una foto en el backstop de nombres:", error);
+    // Fase 5 del plan maestro (2026-09-15): racha real (no de regex) de rondas de identificacion por
+    // foto sin resolver - se resuelve apenas se manda una foto de verdad o se escala al dueno, sino
+    // sigue subiendo. Solo se toca cuando el cliente mando una foto/video este turno (ver
+    // shouldForcePhotoEscalation).
+    if (customerSentMediaThisTurn) {
+      if (mediaSentThisTurn > 0 || photoEscalatedThisTurn > 0) {
+        await resetPhotoIdStreak(conversationId);
+      } else {
+        await bumpPhotoIdStreak(conversationId);
       }
     }
 
-    return sentAny ? text : await honorOrRetractMediaPromise(context, conversationId, text);
+    return text;
   }
 
   const FALLBACK_TEXT = "Disculpa, tuve un problema procesando tu consulta. Un asesor te va a contactar pronto.";
@@ -1269,13 +945,9 @@ export async function generateReply(
   // actually reach for it instead of asking the customer to try again. Force it once the customer has
   // already sent a photo/video at least twice in a row without the bot ever resolving which product it
   // is - mirrors the shouldForceAttributeFilter pattern above (force tool_choice, model still owns the
-  // real question text).
-  const lastHistoryEntry = history[history.length - 1];
-  const shouldForcePhotoEscalation =
-    !!lastHistoryEntry &&
-    lastHistoryEntry.role === "CUSTOMER" &&
-    (lastHistoryEntry.mediaType === "IMAGE" || lastHistoryEntry.mediaType === "VIDEO") &&
-    countUnresolvedPhotoIdStreak(history.slice(0, -1)) >= 2;
+  // real question text). photoIdStreakAtTurnStart is real state (SaleState.photoIdStreak), bumped/reset
+  // below in finalizeTurn - Fase 5 replaced the old regex scan of the bot's own clarifying phrasing.
+  const shouldForcePhotoEscalation = customerSentMediaThisTurn && photoIdStreakAtTurnStart >= 2;
 
   // Fase 2 seguimiento (2026-09-15): regrabar bf5c4k con SaleState activo mostro que el empujon de
   // prompt solo no alcanza - en una conversacion real el modelo jamas llamo save_customer_name ni
@@ -1446,18 +1118,9 @@ export async function generateReply(
           total?: number;
           shippingCost?: number;
           items?: { productName: string; variantLabel?: string | null; quantity: number; lineTotal: number }[];
-          id?: string;
-          variants?: { id: string; color: string | null; size: string | null }[];
         };
         if (result?.mediaJustSent || result?.sent) mediaSentThisTurn++;
-        // Tracks whether THIS product genuinely has variants, straight from formatProduct's own output -
-        // used below to correct a "no tiene variantes" claim the model makes right after actually seeing
-        // real variant data (2026-09-15 incident: get_product_details returned 3 real active color
-        // variants and the model still told the customer "no tiene variantes de color cargadas").
-        if (call.function.name === "get_product_details" && typeof result?.id === "string") {
-          hasVariantsThisTurn = Array.isArray(result.variants) && result.variants.length > 0;
-          variantColorsThisTurn = (result.variants ?? []).map((v) => v.color).filter((c): c is string => !!c);
-        }
+        if (call.function.name === "ask_owner_about_photo" && result?.asked) photoEscalatedThisTurn++;
         if (call.function.name === "save_customer_name") nameSavedThisTurn++;
         if (call.function.name === "save_customer_contact_info") contactSavedThisTurn++;
         if (call.function.name === "flag_conversation_intent") intentFlaggedThisTurn++;
