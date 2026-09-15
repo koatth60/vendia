@@ -302,23 +302,47 @@ export async function sendOwnerAlert(credentials: WhatsappCredentials, to: strin
   }
 }
 
+// Mismo problema que callGraphApi (ver GRAPH_TIMEOUT_MS arriba), y peor: esto corre DENTRO del lock por
+// conversacion (withConversationLock en src/routes/whatsapp.ts) mientras se procesa una imagen, video o
+// audio entrante. Sin timeout, un `fetch` colgado a Meta deja esa conversacion muda para siempre - el
+// lock nunca se libera y ningun mensaje nuevo de ese cliente se procesa hasta reiniciar el proceso.
+async function fetchWithTimeout(url: string, init: RequestInit, errorPrefix: string): Promise<Response> {
+  let response: Response;
+  try {
+    response = await fetch(url, { ...init, signal: AbortSignal.timeout(GRAPH_TIMEOUT_MS) });
+  } catch (error) {
+    const timedOut = error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");
+    throw new GraphApiError({
+      message: timedOut
+        ? `${errorPrefix} sin respuesta despues de ${GRAPH_TIMEOUT_MS} ms`
+        : `${errorPrefix} inalcanzable: ${error instanceof Error ? error.message : String(error)}`,
+      timedOut,
+    });
+  }
+  return response;
+}
+
 export async function downloadMedia(
   credentials: WhatsappCredentials,
   mediaId: string
 ): Promise<{ buffer: Buffer; mimeType: string }> {
-  const metaResponse = await fetch(`${GRAPH_BASE_URL}/${mediaId}`, {
-    headers: { Authorization: `Bearer ${credentials.accessToken}` },
-  });
+  const metaResponse = await fetchWithTimeout(
+    `${GRAPH_BASE_URL}/${mediaId}`,
+    { headers: { Authorization: `Bearer ${credentials.accessToken}` } },
+    "WhatsApp API (metadata de medio)"
+  );
   if (!metaResponse.ok) {
-    throw new Error(`WhatsApp API error fetching media metadata (${metaResponse.status}): ${await metaResponse.text()}`);
+    throw graphErrorFromBody(metaResponse.status, await metaResponse.text());
   }
   const meta = (await metaResponse.json()) as { url: string; mime_type: string };
 
-  const fileResponse = await fetch(meta.url, {
-    headers: { Authorization: `Bearer ${credentials.accessToken}` },
-  });
+  const fileResponse = await fetchWithTimeout(
+    meta.url,
+    { headers: { Authorization: `Bearer ${credentials.accessToken}` } },
+    "WhatsApp API (descarga de medio)"
+  );
   if (!fileResponse.ok) {
-    throw new Error(`WhatsApp API error downloading media (${fileResponse.status}): ${await fileResponse.text()}`);
+    throw graphErrorFromBody(fileResponse.status, await fileResponse.text());
   }
 
   const buffer = Buffer.from(await fileResponse.arrayBuffer());
