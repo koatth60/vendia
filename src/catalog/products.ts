@@ -2,6 +2,7 @@ import { prisma } from "../db/client";
 import { getPresignedMediaUrl, deleteMedia as deleteMediaFromS3 } from "../media/s3";
 import { tokenize, normalizeForMatch } from "../search/text";
 import { canonicalColors, canonicalizeCategoryWord } from "./attributeTaxonomy";
+import { formatPrice } from "../config/money";
 
 async function withFreshMediaUrls<T extends { media: { s3Key: string; url: string }[] }>(
   products: T[]
@@ -29,14 +30,6 @@ async function withFreshVariantMediaUrls<T extends { variants: { media: { s3Key:
   return products;
 }
 
-// Real production bug (2026-09-14): the raw price.toString() (no thousands separator) reached the model
-// as-is - it usually added "." on its own by convention, but a fresh reply once read "$145000 COP"
-// instead of "$145.000 COP". Formatting it once here, at the source, removes the whole failure class
-// instead of relying on the model to always remember - shared by every caller that surfaces a price
-// (formatProduct in tools.ts, findProductsByAttributes below).
-export function formatCopPrice(price: { toString(): string }): string {
-  return Math.round(Number(price.toString())).toLocaleString("es-CO");
-}
 
 // `media: true` here would relate purely on productId and return EVERY photo the product has,
 // including ones that belong to a specific variant (ProductMedia.variantId is just an extra column,
@@ -297,7 +290,10 @@ function formatVariantLabel(color: string | null | undefined, size: string | nul
 // returns only the black one, with only that color's own photos), never the whole product blindly.
 export async function findProductsByAttributes(
   businessId: string,
-  attrs: { category?: string; color?: string; freeText?: string }
+  attrs: { category?: string; color?: string; freeText?: string },
+  // Fase 11: el locale del negocio (src/config/businessConfig.ts). El precio se formatea con la moneda
+  // del producto y este locale, no en es-CO para todos.
+  locale: string
 ): Promise<{ matches: AttributeMatch[]; categoriesFound: string[] }> {
   const targetColors = new Set([...canonicalColors(attrs.color ?? ""), ...canonicalColors(attrs.freeText ?? "")]);
 
@@ -349,7 +345,7 @@ export async function findProductsByAttributes(
           category: product.category,
           variantId: variant.id,
           variantLabel: formatVariantLabel(variant.color, variant.size),
-          price: formatCopPrice(product.price),
+          price: formatPrice(product.price, product.currency, locale),
           currency: product.currency,
           stock: variant.stock,
           mediaCount: media.length,
@@ -376,7 +372,7 @@ export async function findProductsByAttributes(
       category: product.category,
       variantId: null,
       variantLabel: formatVariantLabel(product.color, product.size),
-      price: formatCopPrice(product.price),
+      price: formatPrice(product.price, product.currency, locale),
       currency: product.currency,
       stock: product.stock,
       mediaCount: product.media.length,

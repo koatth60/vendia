@@ -23,6 +23,8 @@ import {
 import { canonicalColors } from "../catalog/attributeTaxonomy";
 import { tokenize, normalizeForMatch } from "../search/text";
 import { buildSystemPrompt, type BotPersonality } from "./prompts/systemPrompt";
+import { formatPrice } from "../config/money";
+import { getBusinessLocale } from "../config/businessConfig";
 import { CLOSING_MESSAGE_PROMPT } from "./prompts/closingMessage";
 import {
   PAYMENT_BLOCK_MARKER,
@@ -561,11 +563,12 @@ export function matchesConfiguredPaymentMethod(label: string, realMethods: { lab
   });
 }
 
-function formatPesos(n: number): string {
-  return Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
-}
-
 export interface FixedBlockData {
+  // Fase 11 del plan maestro (2026-09-15): las cifras de estos bloques se escribian con un separador de
+  // miles "." cableado en el codigo - correcto en Colombia, mal en Mexico. La moneda y el locale son los
+  // del negocio (ver src/config/businessConfig.ts).
+  currency: string;
+  locale: string;
   paymentMethods: { label: string; details: string }[] | null;
   shippingRate: { label: string; cost: string } | null;
   orderSummary: {
@@ -602,7 +605,7 @@ export function renderFixedBlocks(text: string, data: FixedBlockData): { text: s
 
   if (text.includes(SHIPPING_BLOCK_MARKER)) {
     if (data.shippingRate) {
-      text = text.split(SHIPPING_BLOCK_MARKER).join(`$${formatPesos(parseFloat(data.shippingRate.cost))}`);
+      text = text.split(SHIPPING_BLOCK_MARKER).join(`$${formatPrice(parseFloat(data.shippingRate.cost), data.currency, data.locale)}`);
     } else {
       missingBlocks.push("envio");
       text = text.split(SHIPPING_BLOCK_MARKER).join("");
@@ -611,7 +614,7 @@ export function renderFixedBlocks(text: string, data: FixedBlockData): { text: s
 
   if (text.includes(TOTAL_BLOCK_MARKER)) {
     if (data.orderSummary) {
-      text = text.split(TOTAL_BLOCK_MARKER).join(`$${formatPesos(data.orderSummary.total)}`);
+      text = text.split(TOTAL_BLOCK_MARKER).join(`$${formatPrice(data.orderSummary.total, data.currency, data.locale)}`);
     } else {
       missingBlocks.push("total");
       text = text.split(TOTAL_BLOCK_MARKER).join("");
@@ -633,10 +636,10 @@ export function renderFixedBlocks(text: string, data: FixedBlockData): { text: s
       const lines = [
         ...data.orderSummary.items.map(
           (item) =>
-            `${item.quantity}x ${item.productName}${item.variantLabel ? ` (${item.variantLabel})` : ""} — $${formatPesos(item.lineTotal)}`
+            `${item.quantity}x ${item.productName}${item.variantLabel ? ` (${item.variantLabel})` : ""} — $${formatPrice(item.lineTotal, data.currency, data.locale)}`
         ),
-        data.orderSummary.shippingCost > 0 ? `Envío: $${formatPesos(data.orderSummary.shippingCost)}` : "Envío: gratis",
-        `Total: $${formatPesos(data.orderSummary.total)}`,
+        data.orderSummary.shippingCost > 0 ? `Envío: $${formatPrice(data.orderSummary.shippingCost, data.currency, data.locale)}` : "Envío: gratis",
+        `Total: $${formatPrice(data.orderSummary.total, data.currency, data.locale)}`,
       ];
       text = text.split(ORDER_SUMMARY_BLOCK_MARKER).join(lines.join("\n"));
     } else {
@@ -735,6 +738,13 @@ export async function generateReply(
   // `history` itself (raw, unfiltered) is still used below for lastAssistantText, which needs the real
   // prior text - growing its window from 20 to 30 doesn't change that function's result (it scans
   // backward and stops at the first CUSTOMER row either way).
+  // Fase 11 del plan maestro (2026-09-15): pais, moneda, locale y horario del negocio, una sola lectura
+  // por turno. Va al ToolContext para que ninguna herramienta tenga que resolverlo de nuevo, y a los
+  // bloques fijos para que las cifras salgan con el separador de esa moneda y no siempre con el
+  // colombiano.
+  const negocio = await getBusinessLocale(context.businessId);
+  context = { ...context, locale: negocio.locale };
+
   const history = await getRecentHistory(conversationId, 30);
   const contextSummary = await getOrRefreshContextSummary(conversationId, context.businessId);
   const { history: mediaFreeHistory } = extractMediaHistory(history);
@@ -862,6 +872,8 @@ export async function generateReply(
     const resolvedShippingRate =
       cityShippingRateThisTurn ?? (shippingRatesListThisTurn?.length === 1 ? shippingRatesListThisTurn[0] : null);
     const { text: renderedText, missingBlocks } = renderFixedBlocks(text, {
+      currency: negocio.currency,
+      locale: negocio.locale,
       paymentMethods: paymentMethodsThisTurn,
       shippingRate: resolvedShippingRate,
       orderSummary: orderSummaryThisTurn,

@@ -6,7 +6,6 @@ import {
   searchProducts,
   findConfidentProductMatch,
   findProductsByAttributes,
-  formatCopPrice,
 } from "../catalog/products";
 import {
   PAYMENT_BLOCK_MARKER,
@@ -20,6 +19,8 @@ import { listShippingRates, resolveShippingRateForCity } from "../catalog/shippi
 import { recordAgentIncident } from "./incidents";
 import { getSaleGate } from "./configHealth";
 import { normalizeForMatch } from "../search/text";
+import { formatPrice } from "../config/money";
+import { getBusinessLocale } from "../config/businessConfig";
 
 // Shared with agent.ts (both the tool result here and the system-prompt directive there need the same
 // Spanish wording for each modality) - defined once here since agent.ts already imports from this file,
@@ -711,7 +712,7 @@ function truncateForList(description: string): string {
     : description;
 }
 
-function formatProduct(product: Awaited<ReturnType<typeof getProductById>>, opts?: { forList?: boolean }) {
+function formatProduct(product: Awaited<ReturnType<typeof getProductById>>, locale: string, opts?: { forList?: boolean }) {
   if (!product) return null;
   // hasMedia and hasVariantMedia both need to fold in variant-level photos, not just product.media
   // (variantId: null only - see PRODUCT_INCLUDE) - a real product can have EVERY photo assigned to a
@@ -723,7 +724,7 @@ function formatProduct(product: Awaited<ReturnType<typeof getProductById>>, opts
     id: product.id,
     name: product.name,
     description: opts?.forList ? truncateForList(product.description) : product.description,
-    price: formatCopPrice(product.price),
+    price: formatPrice(product.price, product.currency, locale),
     currency: product.currency,
     stock: totalStock(product),
     category: product.category,
@@ -754,6 +755,8 @@ function formatProduct(product: Awaited<ReturnType<typeof getProductById>>, opts
 
 export interface ToolContext {
   businessId: string;
+  /** Locale de formateo del negocio (ver src/config/businessConfig.ts). Opcional: se resuelve si falta. */
+  locale?: string;
   conversationId: string;
   customerId: string;
   credentials: WhatsappCredentials;
@@ -826,6 +829,10 @@ function describeZodIssues(error: z.ZodError): string {
 
 export async function runCatalogTool(context: ToolContext, name: string, input: Record<string, unknown>) {
   const { businessId } = context;
+  // Fase 11: como se escribe un precio depende del negocio (moneda + locale del pais), no de es-CO. El
+  // caller real ya lo trae en el contexto; si no vino (un test que arma el ToolContext a mano) se resuelve
+  // de la base una sola vez para toda la llamada.
+  const locale = context.locale ?? (await getBusinessLocale(businessId)).locale;
 
   const schema = TOOL_INPUT_SCHEMAS[name];
   if (schema) {
@@ -863,7 +870,7 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
       const category = input.category ? String(input.category).trim() : undefined;
       const color = input.color ? String(input.color).trim() : undefined;
       const freeText = input.freeText ? String(input.freeText).trim() : undefined;
-      const { matches, categoriesFound } = await findProductsByAttributes(businessId, { category, color, freeText });
+      const { matches, categoriesFound } = await findProductsByAttributes(businessId, { category, color, freeText }, locale);
 
       if (matches.length === 0) {
         return {
@@ -898,14 +905,14 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
     }
     case "search_products": {
       const results = await searchProducts(businessId, String(input.query ?? ""));
-      if (results.length > 0) return results.map((p) => formatProduct(p, { forList: true }));
+      if (results.length > 0) return results.map((p) => formatProduct(p, locale, { forList: true }));
 
       // No hubo coincidencia por palabra clave - el catalogo suele ser chico por negocio, asi que en
       // vez de decir "no existe" le mostramos todo lo activo para que lo revise por significado (el
       // cliente puede estar describiendo el producto con otras palabras que las del catalogo).
       const all = await listActiveProducts(businessId);
       return {
-        results: all.map((p) => formatProduct(p, { forList: true })),
+        results: all.map((p) => formatProduct(p, locale, { forList: true })),
         note:
           all.length > 0
             ? "No hubo coincidencia exacta por palabra clave. Revisa este catalogo completo por significado antes de decir que no tenes el producto."
@@ -914,7 +921,7 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
     }
     case "get_product_details": {
       const product = await getProductById(businessId, String(input.productId ?? ""));
-      if (!product) return formatProduct(product);
+      if (!product) return formatProduct(product, locale);
 
       await prisma.product.update({ where: { id: product.id }, data: { inquiryCount: { increment: 1 } } });
 
@@ -960,11 +967,11 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
         }
       }
 
-      return { ...formatProduct(product), mediaJustSent };
+      return { ...formatProduct(product, locale), mediaJustSent };
     }
     case "list_all_products": {
       const results = await listActiveProducts(businessId);
-      return results.map((p) => formatProduct(p, { forList: true }));
+      return results.map((p) => formatProduct(p, locale, { forList: true }));
     }
     case "send_product_media": {
       // Internal-only, never in the JSON schema the model sees (zero prompt-token cost) - set ONLY by

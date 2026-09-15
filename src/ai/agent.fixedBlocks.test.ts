@@ -20,6 +20,8 @@ const REAL_METHODS = [
 
 test("sustituye la marca de pago por los datos reales configurados", () => {
   const { text, missingBlocks } = renderFixedBlocks(`Perfecto, aca los datos:\n\n${PAYMENT_BLOCK_MARKER}`, {
+    currency: "COP",
+    locale: "es-CO",
     paymentMethods: REAL_METHODS,
     shippingRate: null,
     orderSummary: null,
@@ -33,6 +35,8 @@ test("sustituye la marca de pago por los datos reales configurados", () => {
 
 test("borra la marca de pago sin dejar rastro si get_payment_methods no corrio este turno", () => {
   const { text, missingBlocks } = renderFixedBlocks(`Aca los datos: ${PAYMENT_BLOCK_MARKER}`, {
+    currency: "COP",
+    locale: "es-CO",
     paymentMethods: null,
     shippingRate: null,
     orderSummary: null,
@@ -44,6 +48,8 @@ test("borra la marca de pago sin dejar rastro si get_payment_methods no corrio e
 
 test("sustituye la marca de envio por la tarifa real", () => {
   const { text, missingBlocks } = renderFixedBlocks(`El envio cuesta ${SHIPPING_BLOCK_MARKER} y llega pronto.`, {
+    currency: "COP",
+    locale: "es-CO",
     paymentMethods: null,
     shippingRate: { label: "Estandar", cost: "15000" },
     orderSummary: null,
@@ -55,6 +61,8 @@ test("sustituye la marca de envio por la tarifa real", () => {
 
 test("no inventa una tarifa de envio ambigua (2+ tarifas, ninguna resuelta por ciudad)", () => {
   const { text, missingBlocks } = renderFixedBlocks(`El envio cuesta ${SHIPPING_BLOCK_MARKER}.`, {
+    currency: "COP",
+    locale: "es-CO",
     paymentMethods: null,
     shippingRate: null,
     orderSummary: null,
@@ -66,6 +74,8 @@ test("no inventa una tarifa de envio ambigua (2+ tarifas, ninguna resuelta por c
 
 test("sustituye la marca de total por el total real de show_order_summary", () => {
   const { text, missingBlocks } = renderFixedBlocks(`Tu total es ${TOTAL_BLOCK_MARKER}. Confirmame para cerrar.`, {
+    currency: "COP",
+    locale: "es-CO",
     paymentMethods: null,
     shippingRate: null,
     orderSummary: { items: [], shippingCost: 20900, total: 165900 },
@@ -77,6 +87,8 @@ test("sustituye la marca de total por el total real de show_order_summary", () =
 
 test("borra la marca de total si show_order_summary no corrio este turno - nunca deja pasar una cifra de memoria", () => {
   const { text, missingBlocks } = renderFixedBlocks(`Tu total es ${TOTAL_BLOCK_MARKER}.`, {
+    currency: "COP",
+    locale: "es-CO",
     paymentMethods: null,
     shippingRate: null,
     orderSummary: null,
@@ -88,6 +100,8 @@ test("borra la marca de total si show_order_summary no corrio este turno - nunca
 
 test("arma el resumen completo con items, envio y total", () => {
   const { text } = renderFixedBlocks(ORDER_SUMMARY_BLOCK_MARKER, {
+    currency: "COP",
+    locale: "es-CO",
     paymentMethods: null,
     shippingRate: null,
     orderSummary: {
@@ -105,6 +119,8 @@ test("arma el resumen completo con items, envio y total", () => {
 
 test("el resumen dice envio gratis cuando el costo es 0", () => {
   const { text } = renderFixedBlocks(ORDER_SUMMARY_BLOCK_MARKER, {
+    currency: "COP",
+    locale: "es-CO",
     paymentMethods: null,
     shippingRate: null,
     orderSummary: {
@@ -119,6 +135,8 @@ test("el resumen dice envio gratis cuando el costo es 0", () => {
 
 test("sustituye la marca de venta bloqueada por el ofrecimiento fijo con lo que falta", () => {
   const { text, missingBlocks } = renderFixedBlocks(`Antes de seguir: ${SALE_BLOCKED_BLOCK_MARKER}`, {
+    currency: "COP",
+    locale: "es-CO",
     paymentMethods: null,
     shippingRate: null,
     orderSummary: null,
@@ -131,6 +149,8 @@ test("sustituye la marca de venta bloqueada por el ofrecimiento fijo con lo que 
 
 test("borra la marca de venta bloqueada si ninguna herramienta quedo bloqueada este turno", () => {
   const { text, missingBlocks } = renderFixedBlocks(`Antes de seguir: ${SALE_BLOCKED_BLOCK_MARKER}`, {
+    currency: "COP",
+    locale: "es-CO",
     paymentMethods: null,
     shippingRate: null,
     orderSummary: null,
@@ -142,6 +162,8 @@ test("borra la marca de venta bloqueada si ninguna herramienta quedo bloqueada e
 
 test("texto sin ninguna marca queda intacto", () => {
   const { text, missingBlocks } = renderFixedBlocks("Hola, ¿en que te ayudo?", {
+    currency: "COP",
+    locale: "es-CO",
     paymentMethods: null,
     shippingRate: null,
     orderSummary: null,

@@ -4,6 +4,7 @@ import { touchCustomerLastContact } from "../crm/customers";
 import { getPresignedMediaUrl } from "../media/s3";
 import { emitNewMessage, emitNewConversation, emitConversationUpdated, type ConversationRow, type CustomerRow } from "../realtime/events";
 import { clearBlockedByIfNoPendingQuestions } from "../orders/saleState";
+import { getBusinessLocale } from "../config/businessConfig";
 
 // WhatsApp only allows free-form text/media within 24h of the customer's last message (Meta's
 // "customer service window") - past that, only an approved template gets through (error 131047
@@ -160,7 +161,7 @@ export async function getOrCreateOpenConversation(businessId: string, customerId
   }
 
   const conversation = await prisma.conversation.create({
-    data: { customerId, status: "NEW", contextSummary: await summarizePreviousPurchase(customerId) },
+    data: { customerId, status: "NEW", contextSummary: await summarizePreviousPurchase(businessId, customerId) },
     include: { customer: true },
   });
   emitNewConversation(businessId, formatConversationRow(conversation));
@@ -175,7 +176,7 @@ export async function getOrCreateOpenConversation(businessId: string, customerId
 // Una sola frase y solo de lo reciente - no es el historial completo, es el hilo que no hay que soltar.
 const PREVIOUS_PURCHASE_WINDOW_DAYS = 7;
 
-async function summarizePreviousPurchase(customerId: string): Promise<string | null> {
+async function summarizePreviousPurchase(businessId: string, customerId: string): Promise<string | null> {
   const since = new Date(Date.now() - PREVIOUS_PURCHASE_WINDOW_DAYS * 24 * 60 * 60 * 1000);
   const order = await prisma.order.findFirst({
     where: { customerId, createdAt: { gte: since } },
@@ -185,7 +186,10 @@ async function summarizePreviousPurchase(customerId: string): Promise<string | n
   if (!order) return null;
 
   const productos = order.items.map((i) => `${i.quantity}x ${i.productName}`).join(", ");
-  const cuando = order.createdAt.toLocaleDateString("es-CO", { day: "numeric", month: "long" });
+  // Fase 11: la fecha se escribe en el locale y la zona horaria del negocio, no siempre en es-CO. Un
+  // pedido de las 23:00 en Ciudad de Mexico no es del dia siguiente.
+  const { locale, timezone } = await getBusinessLocale(businessId);
+  const cuando = order.createdAt.toLocaleDateString(locale, { day: "numeric", month: "long", timeZone: timezone });
   const estado =
     order.fulfillmentStatus === "SHIPPED"
       ? "ya fue despachado"

@@ -298,7 +298,7 @@ test("findProductsByAttributes: category+color only returns products that actual
       ],
     });
 
-    const result = await findProductsByAttributes(business.id, { category: "reloj", color: "negro" });
+    const result = await findProductsByAttributes(business.id, { category: "reloj", color: "negro" }, "es-CO");
     assert.equal(result.matches.length, 2, "must match the two black/dark watches, not the blue one or the headphones");
     const names = result.matches.map((m) => m.productName).sort();
     assert.deepEqual(names, ["Smartwatch Gen 9", "Smartwatch Serie 11"]);
@@ -353,7 +353,7 @@ test("findProductsByAttributes: matches a compound real-world category string, n
       ],
     });
 
-    const result = await findProductsByAttributes(business.id, { category: "reloj", color: "negro" });
+    const result = await findProductsByAttributes(business.id, { category: "reloj", color: "negro" }, "es-CO");
     assert.equal(result.matches.length, 1, "must match only the black watch, not the gold watch or the black headphones");
     assert.equal(result.matches[0].productName, "Smartwatch Serie 11");
   } finally {
@@ -380,7 +380,7 @@ test("findProductsByAttributes: a business's own CategoryAlias links a vertical-
       ],
     });
 
-    const result = await findProductsByAttributes(business.id, { category: "guineo" });
+    const result = await findProductsByAttributes(business.id, { category: "guineo" }, "es-CO");
     assert.equal(result.matches.length, 1, "the alias should resolve 'guineo' to the product categorized as 'Bananos'");
     assert.equal(result.matches[0].productName, "Guineo criollo");
   } finally {
@@ -407,7 +407,7 @@ test("findProductsByAttributes: a variant-level match returns only that variant,
     await createProductVariant(business.id, product.id, { color: "Amarillo", stock: 1 });
     await createProductVariant(business.id, product.id, { color: "Verde", stock: 3 });
 
-    const result = await findProductsByAttributes(business.id, { color: "rojo" });
+    const result = await findProductsByAttributes(business.id, { color: "rojo" }, "es-CO");
     assert.equal(result.matches.length, 1);
     assert.equal(result.matches[0].variantId, red.id);
     assert.equal(result.matches[0].variantLabel, "Rojo");
@@ -432,7 +432,7 @@ test("findProductsByAttributes: a color with no category, present in several cat
       ],
     });
 
-    const result = await findProductsByAttributes(business.id, { color: "rosadito" });
+    const result = await findProductsByAttributes(business.id, { color: "rosadito" }, "es-CO");
     assert.equal(result.matches.length, 3);
     assert.deepEqual(new Set(result.categoriesFound), new Set(["audifonos", "diademas", "smartwatch"]));
   } finally {
@@ -465,10 +465,10 @@ test("findProductsByAttributes: a bundle product whose description lists many co
       },
     });
 
-    const grisResult = await findProductsByAttributes(business.id, { color: "gris" });
+    const grisResult = await findProductsByAttributes(business.id, { color: "gris" }, "es-CO");
     assert.equal(grisResult.matches.length, 0, "must not match 'gris' just because the description lists it as a bundled strap color");
 
-    const rojoResult = await findProductsByAttributes(business.id, { color: "rojo" });
+    const rojoResult = await findProductsByAttributes(business.id, { color: "rojo" }, "es-CO");
     assert.equal(rojoResult.matches.length, 0, "must not match every other color mentioned in the description either");
   } finally {
     await prisma.product.deleteMany({ where: { businessId: business.id } });
@@ -477,7 +477,7 @@ test("findProductsByAttributes: a bundle product whose description lists many co
 });
 
 test("findProductsByAttributes: refuses to dump the whole catalog when neither color nor category is given", async () => {
-  const result = await findProductsByAttributes(businessId, {});
+  const result = await findProductsByAttributes(businessId, {}, "es-CO");
   assert.deepEqual(result, { matches: [], categoriesFound: [] });
 });
 
