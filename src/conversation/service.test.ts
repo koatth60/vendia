@@ -23,6 +23,7 @@ import {
   countConversationsWithQueuedOutbound,
   customerDisplayName,
   getOrCreateCustomer,
+  recordMessageDeliveryStatus,
 } from "./service";
 import { realtimeEvents } from "../realtime/events";
 
@@ -629,4 +630,61 @@ test("getOrCreateCustomer refresca el perfil de WhatsApp sin tocar el nombre aut
   assert.equal(noProfile.whatsappProfileName, "caro 2026 ✨", "sin dato nuevo, se conserva el anterior");
 
   await prisma.customer.deleteMany({ where: { id: first.id } });
+});
+
+// Fase 7 del plan maestro (2026-09-15): antes el webhook de `statuses` de Meta solo pasaba por un
+// console.log - el panel no podia mostrar si un mensaje realmente llego.
+test("recordMessageDeliveryStatus guarda sent/delivered/read matcheando por wamid", async () => {
+  const conversation = await prisma.conversation.create({ data: { customerId } });
+  const wamid = `wamid.delivery-${randomUUID()}`;
+  const message = await prisma.message.create({
+    data: { conversationId: conversation.id, role: "ASSISTANT", content: "Hola", whatsappMessageId: wamid },
+  });
+
+  await recordMessageDeliveryStatus(wamid, "sent");
+  let updated = await prisma.message.findUniqueOrThrow({ where: { id: message.id } });
+  assert.equal(updated.deliveryStatus, "SENT");
+  assert.ok(updated.deliveryStatusAt);
+
+  await recordMessageDeliveryStatus(wamid, "delivered");
+  updated = await prisma.message.findUniqueOrThrow({ where: { id: message.id } });
+  assert.equal(updated.deliveryStatus, "DELIVERED");
+
+  await prisma.message.deleteMany({ where: { conversationId: conversation.id } });
+  await prisma.conversation.deleteMany({ where: { id: conversation.id } });
+});
+
+test("recordMessageDeliveryStatus no deja que un sent tardio pise un read mas reciente", async () => {
+  const conversation = await prisma.conversation.create({ data: { customerId } });
+  const wamid = `wamid.delivery-order-${randomUUID()}`;
+  const message = await prisma.message.create({
+    data: { conversationId: conversation.id, role: "ASSISTANT", content: "Hola", whatsappMessageId: wamid },
+  });
+
+  await recordMessageDeliveryStatus(wamid, "read");
+  await recordMessageDeliveryStatus(wamid, "sent");
+
+  const updated = await prisma.message.findUniqueOrThrow({ where: { id: message.id } });
+  assert.equal(updated.deliveryStatus, "READ", "Meta no garantiza el orden de los webhooks de estado");
+
+  await prisma.message.deleteMany({ where: { conversationId: conversation.id } });
+  await prisma.conversation.deleteMany({ where: { id: conversation.id } });
+});
+
+test("recordMessageDeliveryStatus ignora un wamid desconocido o un status que no es de entrega", async () => {
+  await recordMessageDeliveryStatus(`wamid.unknown-${randomUUID()}`, "sent"); // no debe tirar
+  const conversation = await prisma.conversation.create({ data: { customerId } });
+  const wamid = `wamid.delivery-failed-${randomUUID()}`;
+  const message = await prisma.message.create({
+    data: { conversationId: conversation.id, role: "ASSISTANT", content: "Hola", whatsappMessageId: wamid },
+  });
+
+  // "failed" se registra aparte como DeliveryFailure (ver src/routes/whatsapp.ts) - no es un
+  // MessageDeliveryStatus valido.
+  await recordMessageDeliveryStatus(wamid, "failed");
+  const updated = await prisma.message.findUniqueOrThrow({ where: { id: message.id } });
+  assert.equal(updated.deliveryStatus, null);
+
+  await prisma.message.deleteMany({ where: { conversationId: conversation.id } });
+  await prisma.conversation.deleteMany({ where: { id: conversation.id } });
 });

@@ -27,6 +27,7 @@ import {
   getRelatedProductNameForMessage,
   customerDisplayName,
   saveCustomerContactInfo,
+  recordMessageDeliveryStatus,
 } from "../conversation/service";
 import { generateReply, generateClosingMessage, extractDeliveryDataFromAnswer, extractAddressFromAnswer } from "../ai/agent";
 import { analyzeCustomerImage } from "../ai/vision";
@@ -424,6 +425,13 @@ whatsappRouter.post("/webhook", async (req, res) => {
         }
       } else {
         console.log("WhatsApp status:", status.status, status.id, status.recipient_id);
+        if (status.id) {
+          try {
+            await recordMessageDeliveryStatus(status.id, status.status);
+          } catch (error) {
+            console.error("No se pudo persistir el estado de entrega:", error);
+          }
+        }
       }
       return;
     }

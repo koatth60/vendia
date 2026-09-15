@@ -264,6 +264,29 @@ export async function recordMessage(
   );
 }
 
+// Fase 7 del plan maestro (2026-09-15): Meta manda sent/delivered/read via el webhook de `statuses`,
+// matcheado por whatsappMessageId - antes se descartaba en un console.log y el panel no podia mostrar si
+// un mensaje llego. El rank evita que un "sent" que llegue tarde o duplicado pise un "read" mas reciente;
+// Meta no garantiza el orden de entrega de los webhooks de estado.
+const DELIVERY_STATUS_RANK: Record<"SENT" | "DELIVERED" | "READ", number> = { SENT: 1, DELIVERED: 2, READ: 3 };
+
+export async function recordMessageDeliveryStatus(whatsappMessageId: string, status: string): Promise<void> {
+  const mapped = status.toUpperCase();
+  if (mapped !== "SENT" && mapped !== "DELIVERED" && mapped !== "READ") return;
+
+  const existing = await prisma.message.findUnique({
+    where: { whatsappMessageId },
+    select: { id: true, deliveryStatus: true },
+  });
+  if (!existing) return;
+  if (existing.deliveryStatus && DELIVERY_STATUS_RANK[existing.deliveryStatus] >= DELIVERY_STATUS_RANK[mapped]) return;
+
+  await prisma.message.update({
+    where: { id: existing.id },
+    data: { deliveryStatus: mapped, deliveryStatusAt: new Date() },
+  });
+}
+
 export async function getRelatedProductNameForMessage(whatsappMessageId: string): Promise<string | null> {
   const message = await prisma.message.findUnique({
     where: { whatsappMessageId },
