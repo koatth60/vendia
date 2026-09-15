@@ -337,9 +337,18 @@ model QueuedOutboundMessage {
   createdAt      DateTime     @default(now())
   sentAt         DateTime?
   cancelledAt    DateTime?
+  // Fase 7: la cola dejo de ser "se intenta una vez cuando el cliente escribe". Un item que fallaba
+  // cortaba el drenaje entero de ese cliente y no dejaba rastro. Ahora cada item lleva su propio
+  // contador, su proximo intento y el ultimo error, y al agotarse se marca en failedAt (dead-letter)
+  // con un DeliveryFailure asociado, en vez de reintentarse para siempre en silencio.
+  attempts       Int          @default(0)
+  nextAttemptAt  DateTime     @default(now())
+  lastError      String?
+  failedAt       DateTime?
 
   @@index([conversationId, sentAt])
   @@index([businessId, sentAt])
+  @@index([sentAt, nextAttemptAt])
 }
 
 enum QueuedOutboundOrigin {
