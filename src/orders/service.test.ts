@@ -174,3 +174,122 @@ test("resolveOrderItems: a product with no variants at all resolves exactly as b
 
   await prisma.product.delete({ where: { id: product.id } });
 });
+
+// Bug de produccion (2026-09-15, MAGByLizN): dos productos casi identicos empataban en
+// findConfidentProductMatch (puntaje por nombre) y el cierre de venta por nombre libre se rechazaba
+// aunque el producto elegido si existiera en el catalogo. El panel ahora manda el productId real, que
+// resuelve directo sin puntaje ni empate posible - estas pruebas cubren esa ruta.
+test("resolveOrderItems: productId resolves directly even when two products would tie by name score", async () => {
+  const a = await createProduct(businessId, {
+    name: "Smartwatch Serie 11 Mini",
+    description: "Reloj inteligente",
+    price: 145000,
+    currency: "COP",
+    stock: 5,
+  });
+  const b = await createProduct(businessId, {
+    name: "Smartwatch Serie 11 Max",
+    description: "Reloj inteligente",
+    price: 165000,
+    currency: "COP",
+    stock: 5,
+  });
+
+  // Por nombre libre, "Smartwatch Serie 11" empata entre los dos (mismo puntaje, misma descripcion) -
+  // confirma que el escenario de empate existe antes de probar que productId lo evita.
+  const byName = await resolveOrderItems(businessId, [{ productName: "Smartwatch Serie 11", quantity: 1 }]);
+  assert.equal(byName.items.length, 0);
+  assert.equal(byName.unresolved.length, 1, "ambiguo por nombre debe caer en unresolved, no resolverse a ciegas");
+
+  const byId = await resolveOrderItems(businessId, [{ productId: b.id, productName: "Smartwatch Serie 11", quantity: 1 }]);
+  assert.equal(byId.unresolved.length, 0);
+  assert.equal(byId.items.length, 1);
+  assert.equal(byId.items[0].productId, b.id);
+  assert.equal(byId.items[0].productName, "Smartwatch Serie 11 Max");
+
+  await prisma.product.deleteMany({ where: { id: { in: [a.id, b.id] } } });
+});
+
+test("resolveOrderItems: a productId belonging to another business is rejected, not resolved cross-tenant", async () => {
+  const otherBusiness = await prisma.business.create({
+    data: { name: `Other Business ${randomUUID()}`, email: `other-${randomUUID()}@example.com`, passwordHash: "x" },
+  });
+  const otherProduct = await createProduct(otherBusiness.id, {
+    name: "Producto De Otro Negocio",
+    description: "No deberia ser visible para businessId",
+    price: 10000,
+    currency: "COP",
+    stock: 5,
+  });
+
+  const result = await resolveOrderItems(businessId, [
+    { productId: otherProduct.id, productName: "Producto De Otro Negocio", quantity: 1 },
+  ]);
+  assert.equal(result.items.length, 0, "no debe resolver un productId de otro negocio");
+  assert.equal(result.unresolved.length, 1);
+
+  await prisma.product.delete({ where: { id: otherProduct.id } });
+  await prisma.business.delete({ where: { id: otherBusiness.id } });
+});
+
+test("resolveOrderItems: an inactive product's id is rejected, not resolved", async () => {
+  const product = await createProduct(businessId, {
+    name: "Producto Descontinuado Test",
+    description: "Ya no se vende",
+    price: 20000,
+    currency: "COP",
+    stock: 0,
+  });
+  await prisma.product.update({ where: { id: product.id }, data: { active: false } });
+
+  const result = await resolveOrderItems(businessId, [{ productId: product.id, productName: "Producto Descontinuado Test", quantity: 1 }]);
+  assert.equal(result.items.length, 0);
+  assert.equal(result.unresolved.length, 1);
+
+  await prisma.product.delete({ where: { id: product.id } });
+});
+
+test("resolveOrderItems: variantId resolves directly without needing a variantLabel guess", async () => {
+  const product = await createProduct(businessId, {
+    name: "Diadema M4 Test Id",
+    description: "Diadema bluetooth en varios colores",
+    price: 45000,
+    currency: "COP",
+    stock: 0,
+  });
+  const red = await createProductVariant(businessId, product.id, { color: "Rojo", stock: 2 });
+  await createProductVariant(businessId, product.id, { color: "Amarillo", stock: 1 });
+
+  const result = await resolveOrderItems(businessId, [{ productId: product.id, variantId: red.id, quantity: 1 }]);
+  assert.equal(result.needsAttribute.length, 0);
+  assert.equal(result.items.length, 1);
+  assert.equal(result.items[0].variantId, red.id);
+  assert.equal(result.items[0].variantLabel, "Rojo");
+
+  await prisma.product.delete({ where: { id: product.id } });
+});
+
+test("resolveOrderItems: a variantId that doesn't belong to the product falls into needsAttribute, not a wrong variant", async () => {
+  const productA = await createProduct(businessId, {
+    name: "Diadema M4 Test Id A",
+    description: "Diadema bluetooth",
+    price: 45000,
+    currency: "COP",
+    stock: 0,
+  });
+  const productB = await createProduct(businessId, {
+    name: "Diadema M4 Test Id B",
+    description: "Otra diadema",
+    price: 45000,
+    currency: "COP",
+    stock: 0,
+  });
+  await createProductVariant(businessId, productA.id, { color: "Rojo", stock: 2 });
+  const variantOfB = await createProductVariant(businessId, productB.id, { color: "Azul", stock: 2 });
+
+  const result = await resolveOrderItems(businessId, [{ productId: productA.id, variantId: variantOfB.id, quantity: 1 }]);
+  assert.equal(result.items.length, 0);
+  assert.equal(result.needsAttribute.length, 1);
+
+  await prisma.product.deleteMany({ where: { id: { in: [productA.id, productB.id] } } });
+});

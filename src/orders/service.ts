@@ -1,6 +1,6 @@
 import { prisma } from "../db/client";
 import type { OrderFulfillmentStatus } from "@prisma/client";
-import { findConfidentProductMatch } from "../catalog/products";
+import { findConfidentProductMatch, getProductById } from "../catalog/products";
 import { canonicalColors } from "../catalog/attributeTaxonomy";
 import { normalizeForMatch, escapeForRegExp } from "../search/text";
 import { sendToCustomer, type WhatsappCredentials } from "../whatsapp/outbound";
@@ -18,11 +18,21 @@ export interface ResolvedOrderItem {
 }
 
 export interface OrderItemInput {
-  productName: string;
+  // Nombre libre (fuzzy match via findConfidentProductMatch) - unico dato disponible cuando viene del
+  // modelo (nunca conoce el productId real) o del cuerpo viejo de close-sale (compatibilidad).
+  productName?: string;
+  // Cuando el llamador ya conoce el producto real (el panel, con su selector) - resuelve por id, sin
+  // puntaje ni empate posible. Se valida que sea de este negocio y este activo (getProductById no filtra
+  // por active, a diferencia de findConfidentProductMatch). productName se usa igual como texto para
+  // `unresolved` si este id no resuelve.
+  productId?: string;
+  // Igual que productId pero para la variante (color/talla) - se valida que pertenezca a ese producto y
+  // este activa. Si se da, reemplaza el matching por variantLabel de abajo.
+  variantId?: string;
   quantity: number;
-  // Free text describing which color/size the customer picked (e.g. "rojo", "rojo talla M") - only
-  // meaningful when the matched product has variants (see ProductVariant in schema.prisma). Matched by
-  // the same color-synonym canonicalization used for catalog search, not exact string equality.
+  // Free text describing which color/size the customer picked (e.g. "rojo", "rojo talla M") - solo se usa
+  // cuando no vino variantId. Matched by the same color-synonym canonicalization used for catalog search,
+  // not exact string equality.
   variantLabel?: string;
 }
 
@@ -97,26 +107,47 @@ export async function resolveOrderItems(businessId: string, items: OrderItemInpu
   for (const item of items) {
     const quantity = Math.max(1, Math.floor(Number(item.quantity) || 1));
     const rawName = String(item.productName ?? "").trim();
-    if (!rawName) continue;
 
-    const match = await findConfidentProductMatch(businessId, rawName);
-    if (!match.product) {
-      unresolved.push(rawName);
+    let product: Awaited<ReturnType<typeof getProductById>> | null = null;
+    if (item.productId) {
+      // Resuelve por id, no por puntaje - lo usa el panel, que ya sabe exactamente que producto eligio
+      // el dueno (Fase de correccion, 2026-09-15): sin esto, dos productos casi identicos empataban en
+      // findConfidentProductMatch y la venta se rechazaba aunque el producto si existiera en el catalogo.
+      // getProductById no filtra por `active` (a diferencia de findConfidentProductMatch), asi que un
+      // producto desactivado igual se validaria aca sin este chequeo explicito - no se puede vender.
+      const found = await getProductById(businessId, item.productId);
+      if (found && found.active) product = found;
+    } else if (rawName) {
+      const match = await findConfidentProductMatch(businessId, rawName);
+      product = match.product;
+    }
+
+    if (!product) {
+      unresolved.push(rawName || item.productId || "(producto sin nombre)");
       continue;
     }
 
-    const product = match.product;
     let variantId: string | null = null;
     let variantLabel: string | null = null;
 
     if (product.variants.length > 0) {
-      const { variant, ambiguous } = matchVariant(product.variants, item.variantLabel ?? "");
-      if (!variant) {
-        needsAttribute.push(`${product.name}${ambiguous ? " (color/talla ambiguo)" : ""}`);
-        continue;
+      if (item.variantId) {
+        const variant = product.variants.find((v) => v.id === item.variantId && v.active) ?? null;
+        if (!variant) {
+          needsAttribute.push(`${product.name} (variante invalida o inactiva)`);
+          continue;
+        }
+        variantId = variant.id;
+        variantLabel = formatVariantLabel(variant.color, variant.size);
+      } else {
+        const { variant, ambiguous } = matchVariant(product.variants, item.variantLabel ?? "");
+        if (!variant) {
+          needsAttribute.push(`${product.name}${ambiguous ? " (color/talla ambiguo)" : ""}`);
+          continue;
+        }
+        variantId = variant.id;
+        variantLabel = formatVariantLabel(variant.color, variant.size);
       }
-      variantId = variant.id;
-      variantLabel = formatVariantLabel(variant.color, variant.size);
     }
 
     const key = `${product.id}|${variantId ?? ""}`;

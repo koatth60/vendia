@@ -28,6 +28,7 @@ import {
   createOrder,
   askForCsat,
   getOrderByConversationId,
+  type OrderItemInput,
 } from "../../orders/service";
 import { uploadMedia } from "../../media/s3";
 import { upload, businessIdOf, isUnsupportedImageType } from "./shared";
@@ -286,7 +287,7 @@ conversationsRouter.get("/api/conversations/:id/extract-sale-details", async (re
 
 conversationsRouter.post("/api/conversations/:id/close-sale", async (req, res) => {
   const businessId = businessIdOf(req);
-  const itemLines: string[] = Array.isArray(req.body?.items) ? req.body.items : [];
+  const rawItems: unknown[] = Array.isArray(req.body?.items) ? req.body.items : [];
   const shippingAddress = req.body?.shippingAddress ? String(req.body.shippingAddress).trim() : null;
   const paymentMethodLabel = req.body?.paymentMethodLabel ? String(req.body.paymentMethodLabel).trim() : null;
   const notes = String(req.body?.notes ?? "").trim();
@@ -295,13 +296,30 @@ conversationsRouter.post("/api/conversations/:id/close-sale", async (req, res) =
   const deliveryPhone = req.body?.deliveryPhone ? String(req.body.deliveryPhone).trim() : undefined;
   const customerMessage = String(req.body?.customerMessage ?? "").trim();
 
-  const parsedItems = itemLines
-    .map((line) => String(line).trim())
-    .filter(Boolean)
-    .map((line) => {
-      const match = line.match(/^(\d+)\s*x\s*(.+)$/i);
-      return match ? { productName: match[2].trim(), quantity: Number(match[1]) } : { productName: line, quantity: 1 };
-    });
+  // El panel manda filas estructuradas {productId, variantId?, quantity} desde el selector de catalogo
+  // (Fase de correccion, 2026-09-15) - resuelve por id, no por nombre, asi que no hay puntaje ni empate
+  // posible. El string "NxNombre" solo se acepta por compatibilidad de despliegue (un cliente viejo del
+  // panel todavia en cache del navegador durante el rollout) y reusa la regex que ya existia aca.
+  const parsedItems: OrderItemInput[] = rawItems
+    .map((raw): OrderItemInput | null => {
+      if (typeof raw === "string") {
+        const line = raw.trim();
+        if (!line) return null;
+        const match = line.match(/^(\d+)\s*x\s*(.+)$/i);
+        return match ? { productName: match[2].trim(), quantity: Number(match[1]) } : { productName: line, quantity: 1 };
+      }
+      if (raw && typeof raw === "object") {
+        const obj = raw as Record<string, unknown>;
+        const productId = typeof obj.productId === "string" && obj.productId ? obj.productId : undefined;
+        const variantId = typeof obj.variantId === "string" && obj.variantId ? obj.variantId : undefined;
+        const productName = typeof obj.productName === "string" ? obj.productName.trim() : undefined;
+        if (!productId && !productName) return null;
+        const quantity = Math.max(1, Math.floor(Number(obj.quantity) || 1));
+        return { productId, variantId, productName, quantity };
+      }
+      return null;
+    })
+    .filter((item): item is OrderItemInput => item !== null);
   if (parsedItems.length === 0) {
     res.status(400).json({ error: "Agrega al menos un producto" });
     return;
@@ -323,7 +341,16 @@ conversationsRouter.post("/api/conversations/:id/close-sale", async (req, res) =
     accessToken: business.whatsappAccessToken,
   };
 
-  const { items, unresolved } = await resolveOrderItems(businessId, parsedItems);
+  const { items, unresolved, needsAttribute } = await resolveOrderItems(businessId, parsedItems);
+  // Chequeo separado de `unresolved` a proposito (bug de produccion, 2026-09-15): un producto con
+  // variantes sin color/talla elegido caia aca antes, ni entraba a `items` ni a `unresolved`, y la ruta
+  // solo miraba esas dos listas - la linea desaparecia del pedido sin ningun error visible.
+  if (needsAttribute.length > 0) {
+    res.status(400).json({
+      error: `Falta elegir color/talla de: ${needsAttribute.join(", ")}`,
+    });
+    return;
+  }
   if (items.length === 0) {
     res.status(400).json({ error: "Ningún producto coincidió con el catálogo - revisa los nombres" });
     return;
