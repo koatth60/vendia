@@ -357,13 +357,18 @@ export const catalogTools: OpenAI.Chat.ChatCompletionTool[] = [
     function: {
       name: "flag_conversation_intent",
       description:
-        "Usa UNA SOLA VEZ cuando el cliente trae PQR (queja/reclamo), DEVOLUCION, NO_RECIBIDO (no le llego el pedido), o SOLICITA_AGENTE (pide hablar con una persona/asesor/humano). Ver PQR/DEVOLUCIONES en tus instrucciones para el flujo completo.",
+        "Usa UNA SOLA VEZ cuando el cliente trae PQR (queja/reclamo), DEVOLUCION, NO_RECIBIDO (no le llego el pedido), o SOLICITA_AGENTE (pide hablar con una persona/asesor/humano). Ver PQR/DEVOLUCIONES en tus instrucciones para el flujo completo. Esto SILENCIA el bot para esta conversacion, asi que solo se justifica cuando hay una razon real - no la uses por una frase ambigua.",
       parameters: {
         type: "object",
         properties: {
           intent: { type: "string", enum: ["PQR", "DEVOLUCION", "NO_RECIBIDO", "SOLICITA_AGENTE"] },
+          explicit: {
+            type: "boolean",
+            description:
+              "true SOLO si el cliente lo pidio o lo dijo con sus propias palabras (ej: 'quiero hablar con un asesor', 'quiero devolver el producto'). false si vos lo dedujiste del contexto o del tono sin que el cliente lo haya dicho asi. El dueno ve esta diferencia en la alerta que recibe.",
+          },
         },
-        required: ["intent"],
+        required: ["intent", "explicit"],
       },
     },
   },
@@ -1205,7 +1210,11 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
       const intent = validIntents.includes(input.intent as (typeof validIntents)[number])
         ? (input.intent as (typeof validIntents)[number])
         : "PQR";
-      await setConversationIntent(businessId, context.conversationId, intent);
+      // Fase 9 del plan maestro (2026-09-15): null cuando el modelo no manda el campo (no deberia pasar,
+      // es required en el schema, pero un caller viejo como el backstop de agent.ts puede seguir sin
+      // mandarlo) - distinto de false, que es una afirmacion real de "esto lo deduje yo".
+      const explicit = input.explicit === true ? true : input.explicit === false ? false : null;
+      await setConversationIntent(businessId, context.conversationId, intent, explicit);
       await setHumanControl(businessId, context.conversationId, true);
 
       const business = await prisma.business.findUnique({ where: { id: businessId } });
@@ -1218,7 +1227,12 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
         }[intent];
         const greeting = business.contactName ? `Hola ${business.contactName}` : "Hola";
         const customerLabel = await describeCustomer(context.customerId, context.recipientPhone);
-        const intentAlertText = `${greeting}, el cliente ${customerLabel} reporto ${label}. El bot dejo de responderle, toma el control vos directamente.`;
+        // Defecto real (2026-09-15): el modelo escalo SOLICITA_AGENTE porque el cliente escribio "Cerrar
+        // conversation" - nunca pidio un asesor. Sin esta nota el dueno no puede distinguir una alerta
+        // real de una que el bot dedujo mal, y la unica forma de darse cuenta era leer el chat entero.
+        const inferredNote =
+          explicit === false ? " OJO: el bot lo dedujo del contexto, el cliente no lo pidio con esas palabras - confirma antes de asumir." : "";
+        const intentAlertText = `${greeting}, el cliente ${customerLabel} reporto ${label}.${inferredNote} El bot dejo de responderle, toma el control vos directamente.`;
         const intentAlert = await sendAlertToOwner(businessId, context.credentials, business.contactPhone, intentAlertText);
         await recordOwnerMessage(businessId, {
           direction: "OUT",

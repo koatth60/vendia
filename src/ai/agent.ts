@@ -879,7 +879,9 @@ export async function generateReply(
     }
 
     if (intentFlaggedThisTurn === 0 && customerText && customerRequestsHuman(customerText)) {
-      await runCatalogTool(context, "flag_conversation_intent", { intent: "SOLICITA_AGENTE" });
+      // El regex solo matchea frases explicitas ("quiero hablar con una persona", etc), asi que esto
+      // siempre es un pedido real del cliente, nunca una deduccion - ver Fase 9 del plan maestro.
+      await runCatalogTool(context, "flag_conversation_intent", { intent: "SOLICITA_AGENTE", explicit: true });
     }
 
     // F1 del diagnostico: detector sin efecto. Si el texto promete consultar al dueno pero no hay
