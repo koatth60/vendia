@@ -101,6 +101,9 @@
   --onix-series-bot: #0E7C5A;
   --onix-series-lost: #B03A26;
   --onix-series-open: #9AA8A2;
+  /* Fase 9: mismo ámbar que --onix-warn (no es "en curso" ni un rechazo, es una conversación que se
+     enfrió sola) - reusa el valor ya validado en vez de sumar un tono nuevo sin auditar. */
+  --onix-series-abandoned: #9A650A;
 
   /* Burbujas de conversación */
   --onix-bubble-in: #EDF2EE;
@@ -180,6 +183,7 @@
     --onix-series-bot: #1EA162;
     --onix-series-lost: #C9503A;
     --onix-series-open: #4A5A54;
+    --onix-series-abandoned: #E0A33C;
 
     --onix-bubble-in: #1E2523;
     --onix-bubble-in-ink: #C3CCC7;
@@ -245,6 +249,7 @@
   --onix-series-bot: #1EA162;
   --onix-series-lost: #C9503A;
   --onix-series-open: #4A5A54;
+  --onix-series-abandoned: #E0A33C;
 
   --onix-bubble-in: #1E2523;
   --onix-bubble-in-ink: #C3CCC7;

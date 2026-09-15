@@ -348,6 +348,9 @@
           </div>
         </div>
         <div class="hint">Pasado el recordatorio, el bot te vuelve a escribir. Pasado el vencimiento, la conversación pasa a control manual para que la revises directamente.</div>
+        <label style="margin-top:10px;">Vencimiento de una queja/PQR/pedido de agente sin atender (horas)</label>
+        <input id="business-intent-escalation-timeout-hours" type="number" min="1" placeholder="48" />
+        <div class="hint">Si reportás una PQR, devolución, pedido no recibido o pedido de agente y no la atendés en este tiempo, el bot recupera el control solo en vez de quedar mudo para siempre.</div>
       </div>
 
       <div class="section-title owner-only">Zona de peligro</div>
@@ -683,6 +686,31 @@
         </div>
         <label>Horas después de la venta para enviarlo</label>
         <input id="business-followup-hours" type="number" min="1" placeholder="24" />
+        <div class="actions-row-end">
+          <button class="btn-primary owner-only" onclick="saveBusiness()">Guardar cambios</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="settings-group-title" style="margin-top:0;">Recuperación de carrito abandonado</div>
+        <p class="settings-desc">Si un cliente arma un pedido y deja de responder, esto pasa su conversación a "Abandonado" y le manda una plantilla de WhatsApp para retomarlo (ej: "¿seguís interesado? tu pedido sigue guardado"). Necesita una plantilla <strong>aprobada por Meta</strong>, igual que el seguimiento post-venta. Dejá el nombre vacío para desactivar el envío (la conversación igual pasa a "Abandonado" para que el embudo la refleje).</p>
+        <div class="grid-2">
+          <div>
+            <label>Plantilla aprobada</label>
+            <select id="business-cart-recovery-template" onchange="onCartRecoveryTemplateChange()"><option value="">-- Sin recuperacion de carrito (desactivado) --</option></select>
+            <div class="hint" id="cart-recovery-template-hint"></div>
+            <div id="cart-recovery-template-preview" class="hint" style="display:none; margin-top:8px; padding:10px; border:1px solid var(--border-soft); border-radius:8px; background:var(--border-soft); white-space:pre-wrap;"></div>
+          </div>
+          <div>
+            <label>Código de idioma de la plantilla</label>
+            <input id="business-cart-recovery-language" placeholder="Ej: es o es_CO" />
+          </div>
+        </div>
+        <div class="actions-row" style="margin-top:0;">
+          <button type="button" class="btn-secondary" onclick="loadCartRecoveryTemplates()" style="font-size:12.5px; padding:6px 12px;">🔄 Actualizar lista de plantillas</button>
+        </div>
+        <label>Horas sin que el cliente escriba antes de considerarla abandonada</label>
+        <input id="business-abandoned-after-hours" type="number" min="1" placeholder="72" />
         <div class="actions-row-end">
           <button class="btn-primary owner-only" onclick="saveBusiness()">Guardar cambios</button>
         </div>

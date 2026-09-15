@@ -479,6 +479,7 @@
   .status-NEGOTIATING { background: var(--funnel-negotiating-light); color: var(--funnel-negotiating); }
   .status-SOLD { background: var(--brand-light); color: var(--brand-dark); }
   .status-LOST { background: var(--danger-light); color: var(--danger); }
+  .status-ABANDONED { background: var(--warn-light); color: var(--warn); }
   /* Pide asesor es una solicitud, no una queja - color distinto del resto de los intents. */
   .intent-badge { background: var(--danger-light); color: var(--danger); }
   .intent-badge.intent-SOLICITA_AGENTE { background: var(--warn-light); color: var(--warn); }

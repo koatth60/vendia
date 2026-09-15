@@ -187,10 +187,15 @@ async function loadBusiness() {
     document.getElementById('business-contact-phone').value = business.contactPhone || '';
     document.getElementById('business-owner-reminder-minutes').value = business.ownerReminderMinutes || 180;
     document.getElementById('business-owner-question-timeout-hours').value = business.ownerQuestionTimeoutHours || 24;
+    document.getElementById('business-intent-escalation-timeout-hours').value = business.intentEscalationTimeoutHours || 48;
     document.getElementById('business-followup-template').dataset.saved = business.followUpTemplateName || '';
     document.getElementById('business-followup-language').value = business.followUpTemplateLanguage || 'es';
     document.getElementById('business-followup-hours').value = business.followUpDelayHours || 24;
+    document.getElementById('business-abandoned-after-hours').value = business.abandonedAfterHours || 72;
+    document.getElementById('business-cart-recovery-template').dataset.saved = business.cartRecoveryTemplateName || '';
+    document.getElementById('business-cart-recovery-language').value = business.cartRecoveryTemplateLanguage || 'es';
     loadWhatsappTemplates();
+    loadCartRecoveryTemplates();
     loadTemplateList();
   } catch (err) {
     setStatus(`No se pudo cargar el negocio: ${err.message}`, true);
@@ -234,23 +239,36 @@ function watchBusinessDirty() {
   });
 }
 
-async function loadWhatsappTemplates() {
-  const select = document.getElementById('business-followup-template');
-  const hint = document.getElementById('followup-template-hint');
+// Fase 9 del plan maestro (2026-09-15): la recuperacion de carrito necesita el mismo selector de
+// plantilla-aprobada-con-vista-previa que el seguimiento post-venta ya tenia - generalizado por prefijo
+// (`followup` / `cart-recovery`) en vez de copiar y pegar las dos funciones de abajo para el segundo caso.
+function templateSelectIds(prefix) {
+  return {
+    select: `business-${prefix}-template`,
+    hint: `${prefix}-template-hint`,
+    preview: `${prefix}-template-preview`,
+    language: `business-${prefix}-language`,
+  };
+}
+
+async function loadWhatsappTemplatesInto(prefix, emptyLabel) {
+  const ids = templateSelectIds(prefix);
+  const select = document.getElementById(ids.select);
+  const hint = document.getElementById(ids.hint);
   const savedValue = select.dataset.saved ?? select.value;
   hint.textContent = 'Cargando plantillas...';
   try {
     const res = await apiFetch('/admin/api/whatsapp-templates');
     const data = await res.json();
     const templates = data.templates || [];
-    select.innerHTML = '<option value="">-- Sin seguimiento (desactivado) --</option>'
+    select.innerHTML = `<option value="">${emptyLabel}</option>`
       + templates.map((t) => `<option value="${escapeHtml(t.name)}" data-lang="${escapeHtml(t.language)}" data-body="${escapeHtml(t.bodyText)}">${escapeHtml(t.name)} (${escapeHtml(t.language)})</option>`).join('');
     if (savedValue && !templates.some((t) => t.name === savedValue)) {
       select.insertAdjacentHTML('beforeend', `<option value="${escapeHtml(savedValue)}">${escapeHtml(savedValue)} (no encontrada o no aprobada)</option>`);
     }
     select.value = savedValue || '';
     hint.textContent = data.note || (templates.length === 0 ? 'No se encontraron plantillas aprobadas en tu cuenta de WhatsApp.' : 'Elegí una plantilla para ver exactamente qué dice.');
-    onFollowupTemplateChange();
+    onTemplateSelectChange(prefix);
   } catch (err) {
     hint.textContent = `No se pudo cargar la lista de plantillas: ${err.message}`;
   }
@@ -259,19 +277,33 @@ async function loadWhatsappTemplates() {
 // Nombres como "seguimiento_post_venta" no dicen nada por sí solos - esto muestra el texto real
 // aprobado por Meta (con el {{1}} tal cual, para que quede claro qué parte es dinámica), así el dueño
 // sabe exactamente qué le va a llegar al cliente antes de activarlo.
-function onFollowupTemplateChange() {
-  const select = document.getElementById('business-followup-template');
-  const preview = document.getElementById('followup-template-preview');
+function onTemplateSelectChange(prefix) {
+  const ids = templateSelectIds(prefix);
+  const select = document.getElementById(ids.select);
+  const preview = document.getElementById(ids.preview);
   const opt = select.selectedOptions[0];
   const lang = opt?.dataset?.lang;
   const body = opt?.dataset?.body;
-  if (lang) document.getElementById('business-followup-language').value = lang;
+  if (lang) document.getElementById(ids.language).value = lang;
   if (body) {
     preview.textContent = body;
     preview.style.display = 'block';
   } else {
     preview.style.display = 'none';
   }
+}
+
+function loadWhatsappTemplates() {
+  return loadWhatsappTemplatesInto('followup', '-- Sin seguimiento (desactivado) --');
+}
+function onFollowupTemplateChange() {
+  onTemplateSelectChange('followup');
+}
+function loadCartRecoveryTemplates() {
+  return loadWhatsappTemplatesInto('cart-recovery', '-- Sin recuperacion de carrito (desactivado) --');
+}
+function onCartRecoveryTemplateChange() {
+  onTemplateSelectChange('cart-recovery');
 }
 
 // Mirrors normalizeTemplateName in src/whatsapp/client.ts - Meta only accepts lowercase
@@ -477,9 +509,13 @@ async function saveBusiness() {
   const contactPhone = document.getElementById('business-contact-phone').value.trim();
   const ownerReminderMinutes = Number(document.getElementById('business-owner-reminder-minutes').value) || 180;
   const ownerQuestionTimeoutHours = Number(document.getElementById('business-owner-question-timeout-hours').value) || 24;
+  const intentEscalationTimeoutHours = Number(document.getElementById('business-intent-escalation-timeout-hours').value) || 48;
   const followUpTemplateName = document.getElementById('business-followup-template').value.trim();
   const followUpTemplateLanguage = document.getElementById('business-followup-language').value.trim() || 'es';
   const followUpDelayHours = Number(document.getElementById('business-followup-hours').value) || 24;
+  const abandonedAfterHours = Number(document.getElementById('business-abandoned-after-hours').value) || 72;
+  const cartRecoveryTemplateName = document.getElementById('business-cart-recovery-template').value.trim();
+  const cartRecoveryTemplateLanguage = document.getElementById('business-cart-recovery-language').value.trim() || 'es';
   const genderedAddressEnabled = document.getElementById('bot-gendered-address').checked;
   const femaleAddressTerm = document.getElementById('bot-female-term').value.trim();
   const maleAddressTerm = document.getElementById('bot-male-term').value.trim();
@@ -496,8 +532,9 @@ async function saveBusiness() {
       body: JSON.stringify({
         name, description, customInstructions, assistantName, botTone, botDialect, botGreeting, botNeverSay,
         autoSendPhotoOnQuote, offerPhotosBeforeSending, requirePaymentProof, businessCategory, contactName, contactPhone,
-        ownerReminderMinutes, ownerQuestionTimeoutHours,
+        ownerReminderMinutes, ownerQuestionTimeoutHours, intentEscalationTimeoutHours,
         followUpTemplateName, followUpTemplateLanguage, followUpDelayHours,
+        abandonedAfterHours, cartRecoveryTemplateName, cartRecoveryTemplateLanguage,
         genderedAddressEnabled, femaleAddressTerm, maleAddressTerm, shippingPaymentModalities,
       }),
     });
@@ -1434,7 +1471,7 @@ async function deleteMedia(mediaId) {
 
 const STATUS_LABELS = {
   NEW: 'Nuevo', INTERESTED: 'Interesado', QUOTED: 'Cotizado',
-  NEGOTIATING: 'Negociando', SOLD: 'Vendido', LOST: 'Perdido',
+  NEGOTIATING: 'Negociando', SOLD: 'Vendido', LOST: 'Perdido', ABANDONED: 'Abandonado',
 };
 
 const INTENT_LABELS = { PQR: '⚠️ PQR', DEVOLUCION: '↩️ Devolución', NO_RECIBIDO: '📦 No recibido', SOLICITA_AGENTE: '🙋 Pide agente' };
@@ -3060,13 +3097,14 @@ async function loadAnalytics() {
     analyticsLast = s;
 
     // --- Embudo por estado -------------------------------------------------
-    // Vendido y Perdido llevan color de estado; el resto es "en curso" y va en
-    // gris: son etapas, no resultados, y pintarlas de colores solo hace ruido.
+    // Vendido y Perdido llevan color de estado, Abandonado va en ambar (Fase 9: tampoco es "en
+    // curso", es una conversacion que se enfrio sola) y el resto si es "en curso" y va en gris.
     const statusEntries = Object.entries(s.byStatus);
     const statusMax = Math.max(1, ...statusEntries.map(([, c]) => c));
     const statusBars = statusEntries.map(([status, count]) => {
       const tone = status === 'SOLD' ? 'var(--onix-series-bot)'
         : status === 'LOST' ? 'var(--onix-series-lost)'
+        : status === 'ABANDONED' ? 'var(--onix-series-abandoned)'
         : 'var(--onix-series-open)';
       const pct = (count / statusMax) * 100;
       return `
@@ -3147,6 +3185,7 @@ async function loadAnalytics() {
           <div class="chart-legend">
             <span class="legend-item"><span class="legend-dot" style="background:var(--onix-series-bot);"></span>Vendido</span>
             <span class="legend-item"><span class="legend-dot" style="background:var(--onix-series-lost);"></span>Perdido</span>
+            <span class="legend-item"><span class="legend-dot" style="background:var(--onix-series-abandoned);"></span>Abandonado</span>
             <span class="legend-item"><span class="legend-dot" style="background:var(--onix-series-open);"></span>En curso</span>
           </div>
         </section>
@@ -3390,7 +3429,10 @@ const OWNER_ONLY_INPUT_IDS = [
   'bot-category', 'bot-assistant-name', 'bot-tone', 'bot-dialect', 'bot-greeting', 'bot-never-say', 'bot-photo-mode', 'bot-require-proof',
   'business-contact-name',
   'business-contact-phone', 'business-owner-reminder-minutes', 'business-owner-question-timeout-hours',
+  'business-intent-escalation-timeout-hours',
   'business-followup-template', 'business-followup-language', 'business-followup-hours',
+  'business-abandoned-after-hours',
+  'business-cart-recovery-template', 'business-cart-recovery-language',
   'pm-type', 'pm-label', 'pm-details',
   'faq-question', 'faq-answer',
   'team-name', 'team-email', 'team-password',
