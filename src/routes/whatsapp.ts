@@ -12,6 +12,7 @@ import {
   type WhatsappCredentials,
 } from "../whatsapp/outbound";
 import { uploadMedia } from "../media/s3";
+import { checkWebhookSignature, signatureHeaderOf } from "../whatsapp/webhookSignature";
 import {
   getOrCreateCustomer,
   getOrCreateOpenConversation,
@@ -400,6 +401,21 @@ whatsappRouter.get("/webhook", (req, res) => {
 });
 
 whatsappRouter.post("/webhook", async (req, res) => {
+  // Fase 8, punto 1: verificacion de la firma de Meta. Arranca en MODO REGISTRO - se anota la firma
+  // invalida y la entrega se procesa igual. El rechazo 401 se prende con WEBHOOK_SIGNATURE_ENFORCE
+  // recien cuando los logs confirmen que las entregas reales validan bien (ver config/env.ts).
+  const signature = checkWebhookSignature(req.rawBody, signatureHeaderOf(req), env.facebook.appSecret);
+  if (!signature.valid) {
+    const enforcing = env.webhookSignature.enforce && signature.reason !== "sin-app-secret";
+    console.error(`Webhook con firma invalida (${signature.reason}) - modo ${enforcing ? "rechazo" : "registro"}`);
+    // "sin-app-secret" es una falla de configuracion nuestra, no una entrega falsa: rechazar por eso
+    // dejaria al bot mudo para todos los clientes por un .env incompleto.
+    if (enforcing) {
+      res.sendStatus(401);
+      return;
+    }
+  }
+
   res.sendStatus(200);
   const webhookReceivedAt = Date.now();
 

@@ -25,6 +25,14 @@ export const env = {
     appSecret: process.env.FACEBOOK_APP_SECRET ?? "",
     configId: process.env.FACEBOOK_CONFIG_ID ?? "",
   },
+  // Fase 8, punto 1: el rechazo por firma invalida arranca APAGADO a proposito. Se despliega primero
+  // en modo registro (se loguea "firma invalida" y la entrega se procesa igual), y recien cuando 48h
+  // de logs confirmen que las entregas reales de Meta validan bien se prende esta bandera en un cambio
+  // aparte. Al reves, un error de configuracion del app secret dejaria al bot sin recibir nada y sin
+  // que nadie se entere, porque Meta no reintenta indefinidamente.
+  webhookSignature: {
+    enforce: process.env.WEBHOOK_SIGNATURE_ENFORCE === "true",
+  },
   platformAdmin: {
     email: process.env.PLATFORM_ADMIN_EMAIL ?? "",
     password: process.env.PLATFORM_ADMIN_PASSWORD ?? "",
