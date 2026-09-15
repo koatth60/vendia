@@ -13,6 +13,7 @@ import {
 } from "../whatsapp/outbound";
 import { uploadMedia } from "../media/s3";
 import { checkWebhookSignature, signatureHeaderOf } from "../whatsapp/webhookSignature";
+import { maskPhone } from "../whatsapp/logging";
 import {
   getOrCreateCustomer,
   getOrCreateOpenConversation,
@@ -432,7 +433,10 @@ whatsappRouter.post("/webhook", async (req, res) => {
     const status = value?.statuses?.[0];
     if (status && !message) {
       if (status.status === "failed") {
-        console.error("WhatsApp delivery FAILED:", JSON.stringify({ id: status.id, recipient: status.recipient_id, errors: status.errors }));
+        // Fase 8, punto 9: el telefono del cliente va enmascarado. El numero completo sigue quedando
+        // en DeliveryFailure.recipientPhone, que es donde tiene que estar: el panel lo necesita para
+        // decir a quien no le llego el mensaje, y esa tabla tiene control de acceso; el registro no.
+        console.error("WhatsApp delivery FAILED:", JSON.stringify({ id: status.id, recipient: maskPhone(status.recipient_id), errors: status.errors }));
         // Meta reports this asynchronously, after the original send call already returned a wamid that
         // looked successful - previously this only reached a pm2 log nobody watches. Persist it so the
         // admin panel can surface it live instead (see src/delivery/failures.ts).
@@ -453,7 +457,7 @@ whatsappRouter.post("/webhook", async (req, res) => {
           });
         }
       } else {
-        console.log("WhatsApp status:", status.status, status.id, status.recipient_id);
+        console.log("WhatsApp status:", status.status, status.id, maskPhone(status.recipient_id));
         if (status.id) {
           try {
             await recordMessageDeliveryStatus(status.id, status.status);
@@ -492,7 +496,10 @@ whatsappRouter.post("/webhook", async (req, res) => {
     const whatsappMessageId: string | undefined = message.id;
 
     if (!from) {
-      console.log("Mensaje sin remitente (from) valido, ignorado:", JSON.stringify(message));
+      // Fase 8, punto 9: antes se volcaba el mensaje entero, que ademas del telefono lleva el texto
+      // que escribio el cliente. Para diagnosticar este caso alcanza con saber que tipo de mensaje
+      // era y su id.
+      console.log("Mensaje sin remitente (from) valido, ignorado:", JSON.stringify({ type: message.type, id: message.id }));
       return;
     }
 
