@@ -69,6 +69,24 @@ model Business {
   // conversacion a control humano y avisa al dueno y al panel. Configurable por negocio, igual que
   // ownerReminderMinutes arriba.
   ownerQuestionTimeoutHours Int                       @default(24)
+  // Fase 9 del plan maestro (2026-09-15): flag_conversation_intent (PQR/devolucion/no_recibido/pide
+  // agente) deja el bot mudo (humanControl=true) hasta que el dueno responda, sin salida si nunca lo hace
+  // - un intent que el MODELO dedujo mal (ver Conversation.intentExplicit) deja al cliente sin respuesta
+  // para siempre y sin forma de volver salvo que alguien entre al panel. Mismo patron de escape que
+  // ownerQuestionTimeoutHours arriba: pasadas estas horas sin que humanControlSince se refresque (el
+  // dueno nunca respondio desde el panel), jobs/escalationReminder.ts devuelve el control al bot solo.
+  // Default mas largo que ownerQuestionTimeoutHours porque aca no hay una pregunta puntual bloqueando el
+  // checkout, es la conversacion entera, y el stage-2 del watchdog de estancadas ya avisa a las 24h.
+  intentEscalationTimeoutHours Int                     @default(48)
+  // Fase 9: umbral de inactividad del CLIENTE (no del dueno) antes de que la conversacion pase a
+  // ABANDONED - ver jobs/abandonment.ts. Configurable porque un negocio de ticket alto puede querer un
+  // umbral mas largo que uno de compra impulsiva.
+  abandonedAfterHours       Int                       @default(72)
+  // Fase 9: plantilla aprobada para recuperar un carrito (SaleState con items) cuando su conversacion
+  // pasa a ABANDONED - distinta de followUpTemplateName (esa es post-venta, esta es pre-venta). Vacio =
+  // desactivado, mismo patron que followUpTemplateName.
+  cartRecoveryTemplateName     String?
+  cartRecoveryTemplateLanguage String                 @default("es")
   // Gendered address tone (ej: alternar el nombre con "linda"/"bella" para mujeres, "Sr."/"Señor" para
   // hombres) - encontrado en el prompt de MAGByLizN, promovido a mecanismo core (detectar genero,
   // corregir si el cliente se queja) pero las palabras exactas quedan opt-in por negocio: off por
@@ -598,6 +616,11 @@ model Conversation {
   channel                      Channel                @default(WHATSAPP)
   status                       ConversationStatus     @default(NEW)
   intent                       ConversationIntent?
+  // Fase 9 del plan maestro (2026-09-15): flag_conversation_intent silenciaba el bot sin que el dueno
+  // supiera si el cliente lo pidio con sus propias palabras o si el modelo lo dedujo del contexto - un
+  // "cerrar conversation" mal leido como SOLICITA_AGENTE se veia identico a un pedido real. Lo llena
+  // setConversationIntent; null para toda fila anterior a esta fase (nunca se le pregunto al modelo).
+  intentExplicit               Boolean?
   humanControl                 Boolean                @default(false)
   humanControlAckSent          Boolean                @default(false)
   // Set/reset by setHumanControl every time humanControl flips (either direction) - the clock the
@@ -608,6 +631,12 @@ model Conversation {
   stalledReminderStage         Int                    @default(0)
   stalledReminderSentAt        DateTime?
   followUpSentAt               DateTime?
+  // Fase 9: una vez que la conversacion paso a ABANDONED con items en SaleState, jobs/abandonment.ts
+  // manda la plantilla de recuperacion de carrito UNA sola vez - este flag evita reenviarla en cada
+  // pasada del job mientras siga sin entregarse marcada como exitosa (mismo patron que followUpSentAt).
+  // Se limpia si la conversacion se reactiva (getOrCreateOpenConversation), para que un abandono
+  // posterior pueda volver a mandarla.
+  cartRecoverySentAt           DateTime?
   pendingConfirmationMessageId String?                @unique
   pendingOrderSummary          String?
   pendingOrderItems            Json?
@@ -658,6 +687,12 @@ enum ConversationStatus {
   NEGOTIATING
   SOLD
   LOST
+  // Fase 9 del plan maestro (2026-09-15), causa raiz C1+eje 18: el 61% de las conversaciones se quedaba
+  // en NEW para siempre - nada las cerraba y no contaban como perdida. Distinto de LOST (rechazo
+  // EXPLICITO del cliente): esta la pone jobs/abandonment.ts cuando el cliente deja de escribir por
+  // Business.abandonedAfterHours. No es terminal como LOST - getOrCreateOpenConversation la reabre (vuelve
+  // a NEW) si el cliente vuelve a escribir, para no perder el SaleState/carrito que ya tenia armado.
+  ABANDONED
 }
 
 enum ConversationIntent {
@@ -762,6 +797,12 @@ enum AgentIncidentKind {
   // Business.ownerQuestionTimeoutHours sin respuesta del dueno. blockedBy se limpia solo (ver
   // saleState.ts) y la conversacion pasa a humanControl - antes se quedaba muda para siempre.
   OWNER_QUESTION_TIMEOUT
+  // Fase 9: jobs/abandonment.ts paso esta conversacion a ABANDONED por inactividad del cliente.
+  CONVERSATION_ABANDONED
+  // Fase 9: una escalacion de flag_conversation_intent (PQR/devolucion/no_recibido/pide agente) paso
+  // Business.intentEscalationTimeoutHours sin que el dueno respondiera - se le devolvio el control al
+  // bot solo, ver conversationIntent en jobs/escalationReminder.ts.
+  INTENT_ESCALATION_TIMEOUT
 }
 
 // Fase 8, punto 5 del plan maestro (2026-09-15): las sesiones del panel vivian en la memoria del
