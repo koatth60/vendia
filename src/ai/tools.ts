@@ -8,10 +8,17 @@ import {
   findProductsByAttributes,
   formatCopPrice,
 } from "../catalog/products";
-import { PAYMENT_BLOCK_MARKER, SHIPPING_BLOCK_MARKER, TOTAL_BLOCK_MARKER, ORDER_SUMMARY_BLOCK_MARKER } from "./fixedBlockMarkers";
+import {
+  PAYMENT_BLOCK_MARKER,
+  SHIPPING_BLOCK_MARKER,
+  TOTAL_BLOCK_MARKER,
+  ORDER_SUMMARY_BLOCK_MARKER,
+  SALE_BLOCKED_BLOCK_MARKER,
+} from "./fixedBlockMarkers";
 import { listActivePaymentMethods } from "../catalog/paymentMethods";
 import { listShippingRates, resolveShippingRateForCity } from "../catalog/shippingRates";
 import { recordAgentIncident } from "./incidents";
+import { getSaleGate } from "./configHealth";
 import { normalizeForMatch } from "../search/text";
 
 // Shared with agent.ts (both the tool result here and the system-prompt directive there need the same
@@ -813,6 +820,29 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
     const parsed = schema.safeParse(input);
     if (!parsed.success) {
       return { error: `Input invalido para ${name}: ${describeZodIssues(parsed.error)}. Corrige el formato y volve a intentar.` };
+    }
+  }
+
+  // Fase 6 del plan maestro (2026-09-15), causa raiz C5: sin metodos de pago, tarifa de envio o telefono
+  // de contacto reales, estas tres herramientas no tienen con que cerrar una venta real - dejarlas correr
+  // igual es lo que hoy termina en el bot prometiendo datos bancarios o un total que nadie configuro.
+  // close_conversation con outcome LOST no vende nada, asi que queda afuera de la compuerta.
+  const isClosingSale = name === "close_conversation" && input.outcome !== "LOST";
+  if (name === "show_order_summary" || name === "set_payment_method" || isClosingSale) {
+    const gate = await getSaleGate(businessId);
+    if (!gate.canSell) {
+      // El booleano de "no paso" varia por herramienta (ready/ok/closed) - cada caller de runCatalogTool
+      // en agent.ts y en los tests ya lee ese campo especifico, asi que la respuesta bloqueada lo respeta
+      // en vez de dejarlo undefined.
+      const outcomeField =
+        name === "show_order_summary" ? { ready: false } : name === "set_payment_method" ? { ok: false } : { closed: false };
+      return {
+        ...outcomeField,
+        error: `Este negocio todavia no puede procesar la venta: falta configurar ${gate.missing.join(", ")}. No se ejecuto nada.`,
+        blocked: true,
+        missing: gate.missing,
+        note: `No inventes datos de pago ni un total - pone la marca ${SALE_BLOCKED_BLOCK_MARKER} donde quieras ofrecerle al cliente dejar el pedido anotado para que el dueno lo confirme directamente, y redacta alrededor.`,
+      };
     }
   }
 

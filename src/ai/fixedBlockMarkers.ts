@@ -7,3 +7,8 @@ export const PAYMENT_BLOCK_MARKER = "{{BLOQUE_PAGO}}";
 export const SHIPPING_BLOCK_MARKER = "{{BLOQUE_ENVIO}}";
 export const TOTAL_BLOCK_MARKER = "{{BLOQUE_TOTAL}}";
 export const ORDER_SUMMARY_BLOCK_MARKER = "{{BLOQUE_RESUMEN}}";
+// Fase 6 (2026-09-15): la compuerta de configuracion en tools.ts instruye al modelo a poner esta marca
+// cuando show_order_summary/set_payment_method/close_conversation quedaron bloqueadas por config
+// incompleta - agent.ts la sustituye por el ofrecimiento fijo de dejar el pedido anotado, nunca por una
+// cifra o dato de pago inventado.
+export const SALE_BLOCKED_BLOCK_MARKER = "{{BLOQUE_VENTA_BLOQUEADA}}";

@@ -29,9 +29,16 @@ import {
   SHIPPING_BLOCK_MARKER,
   TOTAL_BLOCK_MARKER,
   ORDER_SUMMARY_BLOCK_MARKER,
+  SALE_BLOCKED_BLOCK_MARKER,
 } from "./fixedBlockMarkers";
 
-export { PAYMENT_BLOCK_MARKER, SHIPPING_BLOCK_MARKER, TOTAL_BLOCK_MARKER, ORDER_SUMMARY_BLOCK_MARKER };
+export {
+  PAYMENT_BLOCK_MARKER,
+  SHIPPING_BLOCK_MARKER,
+  TOTAL_BLOCK_MARKER,
+  ORDER_SUMMARY_BLOCK_MARKER,
+  SALE_BLOCKED_BLOCK_MARKER,
+};
 
 // Track C item 1 (ONIX-RELIABILITY-PLAN.md): prompt template literals (BASE_SYSTEM_PROMPT and its
 // directives, buildSystemPrompt, CLOSING_MESSAGE_PROMPT) live in ./prompts/ now, separate from the
@@ -566,6 +573,10 @@ export interface FixedBlockData {
     shippingCost: number;
     total: number;
   } | null;
+  // Fase 6 del plan maestro (2026-09-15): lista de lo que falta configurar, solo si una de
+  // show_order_summary/set_payment_method/close_conversation quedo bloqueada ESTE turno por la
+  // compuerta de configHealth.getSaleGate. null cuando ninguna corrio bloqueada.
+  saleBlocked: string[] | null;
 }
 
 // Fase 3 del plan maestro (2026-09-15), causa raiz C2: reemplaza los tres guards que LEIAN la prosa ya
@@ -604,6 +615,16 @@ export function renderFixedBlocks(text: string, data: FixedBlockData): { text: s
     } else {
       missingBlocks.push("total");
       text = text.split(TOTAL_BLOCK_MARKER).join("");
+    }
+  }
+
+  if (text.includes(SALE_BLOCKED_BLOCK_MARKER)) {
+    if (data.saleBlocked && data.saleBlocked.length > 0) {
+      const block = `Por ahora no puedo confirmarte el pago ni el total (falta configurar ${data.saleBlocked.join(", ")}). Puedo dejar tu pedido anotado tal como esta para que el dueño te confirme esos datos directamente.`;
+      text = text.split(SALE_BLOCKED_BLOCK_MARKER).join(block);
+    } else {
+      missingBlocks.push("venta_bloqueada");
+      text = text.split(SALE_BLOCKED_BLOCK_MARKER).join("");
     }
   }
 
@@ -816,6 +837,10 @@ export async function generateReply(
   // Fase 3: resultado completo de show_order_summary de ESTE turno (no solo el total) - fuente de
   // {{BLOQUE_TOTAL}} y {{BLOQUE_RESUMEN}}. null si no corrio o si todavia no esta ready.
   let orderSummaryThisTurn: FixedBlockData["orderSummary"] = null;
+  // Fase 6: lo que falta configurar, si show_order_summary/set_payment_method/close_conversation
+  // quedaron bloqueadas por getSaleGate en algun llamado de este turno - fuente de
+  // {{BLOQUE_VENTA_BLOQUEADA}}.
+  let saleBlockedThisTurn: string[] | null = null;
 
   async function finalizeTurn(text: string): Promise<string> {
     text = stripInternalLeaks(text);
@@ -838,6 +863,7 @@ export async function generateReply(
       paymentMethods: paymentMethodsThisTurn,
       shippingRate: resolvedShippingRate,
       orderSummary: orderSummaryThisTurn,
+      saleBlocked: saleBlockedThisTurn,
     });
     text = renderedText;
     if (missingBlocks.length > 0) {
@@ -1144,7 +1170,10 @@ export async function generateReply(
           total?: number;
           shippingCost?: number;
           items?: { productName: string; variantLabel?: string | null; quantity: number; lineTotal: number }[];
+          blocked?: boolean;
+          missing?: string[];
         };
+        if (result?.blocked && Array.isArray(result.missing)) saleBlockedThisTurn = result.missing;
         if (result?.mediaJustSent || result?.sent) mediaSentThisTurn++;
         if (call.function.name === "ask_owner_about_photo" && result?.asked) photoEscalatedThisTurn++;
         if (call.function.name === "save_customer_name") nameSavedThisTurn++;
