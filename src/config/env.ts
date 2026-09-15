@@ -13,6 +13,12 @@ export const env = {
   groqApiKey: process.env.GROQ_API_KEY ?? "",
   anthropicApiKey: process.env.ANTHROPIC_API_KEY ?? "",
   sessionSecret: process.env.SESSION_SECRET ?? "dev-secret-change-me",
+  // Fase 8, punto 2: clave para cifrar Business.whatsappAccessToken en reposo (ver
+  // src/crypto/secretBox.ts). Es `required()` a proposito: si fuera opcional, un despliegue sin la
+  // variable volveria a guardar los tokens en texto plano sin que nadie lo note, que es exactamente el
+  // estado que esta fase vino a cerrar. Se lee tambien desde process.env en secretBox, esta entrada
+  // existe para que el proceso muera al arrancar y no a la primera escritura.
+  tokenEncryptionKey: required("TOKEN_ENCRYPTION_KEY"),
   whatsapp: {
     verifyToken: process.env.WHATSAPP_VERIFY_TOKEN ?? "",
   },

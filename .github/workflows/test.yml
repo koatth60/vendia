@@ -26,6 +26,7 @@ jobs:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/vendia_test?schema=public
       DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
       SESSION_SECRET: ci-test-secret
+      TOKEN_ENCRYPTION_KEY: ci-test-token-encryption-key
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
