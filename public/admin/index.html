@@ -334,6 +334,42 @@
         <div class="hint">Un número distinto al del bot. Cuando un cliente mande el comprobante de pago, el bot te va a escribir a este número pidiendo que confirmes si el pago llegó antes de cerrarle la venta al cliente.</div>
       </div>
 
+      <div class="settings-group">
+        <div class="settings-group-title">País y moneda</div>
+        <p class="settings-desc">Define cómo escribe los precios el bot, qué forma tiene un teléfono y un documento de identidad en las respuestas de tus clientes, y cómo les pide la dirección de entrega.</p>
+        <div class="grid-2">
+          <div>
+            <label>País</label>
+            <select id="business-country-code" onchange="onCountryChanged()"></select>
+          </div>
+          <div>
+            <label>Moneda</label>
+            <input id="business-currency" placeholder="Ej: COP" />
+          </div>
+        </div>
+        <label>Zona horaria</label>
+        <input id="business-timezone" placeholder="Ej: America/Bogota" />
+        <div class="hint">Al cambiar el país, la moneda y la zona horaria se ajustan solas; podés dejarlas distintas si tu negocio cobra en otra moneda.</div>
+
+        <label class="toggle-row">
+          <input type="checkbox" id="business-requires-id-document" onchange="toggleIdExemptZones()" />
+          <div>
+            <div class="toggle-title">Pedir documento de identidad para despachar</div>
+            <div class="toggle-desc" id="business-document-label-desc">La transportadora lo exige en algunos destinos.</div>
+          </div>
+        </label>
+        <label>Zonas donde NO se pide el documento</label>
+        <input id="business-id-exempt-zones" placeholder="Ej: Bogota, Soacha" />
+        <div class="hint">Separadas por coma, con el mismo nombre que usás en tus tarifas de envío. En esas zonas el bot no le pide el documento al cliente; en el resto sí.</div>
+      </div>
+
+      <div class="settings-group">
+        <div class="settings-group-title">Horario de atención</div>
+        <p class="settings-desc">El bot contesta siempre, a cualquier hora. Esto es el horario real del negocio para atender y despachar, y es lo que le responde a un cliente que pregunta a qué hora abren. Dejá un día vacío si ese día no atendés.</p>
+        <div id="business-hours-rows"></div>
+        <div class="hint">Formato de 24 horas (09:00, 18:30). Si no cargás ninguno, el bot simplemente no habla de horarios.</div>
+      </div>
+
       <div class="settings-group settings-group-last">
         <div class="settings-group-title">Escalación al dueño</div>
         <p class="settings-desc">Cuando el bot te pregunta algo que no puede resolver solo, esto controla cuánto espera antes de avisarte de nuevo y cuándo da por vencida la espera.</p>

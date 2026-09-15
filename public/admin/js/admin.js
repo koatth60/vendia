@@ -194,6 +194,14 @@ async function loadBusiness() {
     document.getElementById('business-abandoned-after-hours').value = business.abandonedAfterHours || 72;
     document.getElementById('business-cart-recovery-template').dataset.saved = business.cartRecoveryTemplateName || '';
     document.getElementById('business-cart-recovery-language').value = business.cartRecoveryTemplateLanguage || 'es';
+    // Fase 11: pais, moneda, zona horaria, documento y horario de atencion.
+    await renderCountryOptions(business.countryCode || 'CO');
+    document.getElementById('business-currency').value = business.currency || '';
+    document.getElementById('business-timezone').value = business.timezone || '';
+    document.getElementById('business-requires-id-document').checked = business.requiresIdDocument !== false;
+    document.getElementById('business-id-exempt-zones').value = (business.idDocumentExemptZones || []).join(', ');
+    toggleIdExemptZones();
+    renderBusinessHours(business.businessHours);
     loadWhatsappTemplates();
     loadCartRecoveryTemplates();
     loadTemplateList();
@@ -519,6 +527,15 @@ async function saveBusiness() {
   const genderedAddressEnabled = document.getElementById('bot-gendered-address').checked;
   const femaleAddressTerm = document.getElementById('bot-female-term').value.trim();
   const maleAddressTerm = document.getElementById('bot-male-term').value.trim();
+  const countryCode = document.getElementById('business-country-code').value;
+  const currency = document.getElementById('business-currency').value.trim().toUpperCase();
+  const timezone = document.getElementById('business-timezone').value.trim();
+  const requiresIdDocument = document.getElementById('business-requires-id-document').checked;
+  const idDocumentExemptZones = document.getElementById('business-id-exempt-zones').value
+    .split(',')
+    .map((z) => z.trim())
+    .filter(Boolean);
+  const businessHours = readBusinessHours();
   const shippingPaymentModalities = [
     document.getElementById('ship-modality-prepaid-all').checked ? 'PREPAID_ALL' : null,
     document.getElementById('ship-modality-prepaid-product-cod-shipping').checked ? 'PREPAID_PRODUCT_COD_SHIPPING' : null,
@@ -536,6 +553,7 @@ async function saveBusiness() {
         followUpTemplateName, followUpTemplateLanguage, followUpDelayHours,
         abandonedAfterHours, cartRecoveryTemplateName, cartRecoveryTemplateLanguage,
         genderedAddressEnabled, femaleAddressTerm, maleAddressTerm, shippingPaymentModalities,
+        countryCode, currency, timezone, requiresIdDocument, idDocumentExemptZones, businessHours,
       }),
     });
     setStatus('Negocio guardado ✓');
@@ -634,6 +652,114 @@ function updateTallaFieldVisibility() {
 function toggleGenderedAddressFields() {
   const fields = document.getElementById('gendered-address-fields');
   if (fields) fields.hidden = !document.getElementById('bot-gendered-address').checked;
+}
+
+// ---------------------------------------------------------------------------
+// Fase 11 del plan maestro (2026-09-15): pais, moneda, zona horaria y horario
+// ---------------------------------------------------------------------------
+// La lista de paises la sirve el backend (GET /admin/api/countries) para que el panel no mantenga su
+// propia copia que se desincronice de src/config/countries.ts.
+
+const DIAS_SEMANA = [
+  ['mon', 'Lunes'],
+  ['tue', 'Martes'],
+  ['wed', 'Miércoles'],
+  ['thu', 'Jueves'],
+  ['fri', 'Viernes'],
+  ['sat', 'Sábado'],
+  ['sun', 'Domingo'],
+];
+
+let countriesCache = null;
+
+async function renderCountryOptions(selected) {
+  const select = document.getElementById('business-country-code');
+  if (!select) return;
+  if (!countriesCache) {
+    try {
+      const res = await apiFetch('/admin/api/countries');
+      countriesCache = (await res.json()).countries || [];
+    } catch (err) {
+      countriesCache = [];
+    }
+  }
+  select.innerHTML = countriesCache.map((c) => `<option value="${c.code}">${escapeHtml(c.label)}</option>`).join('');
+  select.value = selected;
+  updateDocumentLabelHint();
+}
+
+function countryByCode(code) {
+  return (countriesCache || []).find((c) => c.code === code) || null;
+}
+
+function updateDocumentLabelHint() {
+  const desc = document.getElementById('business-document-label-desc');
+  const country = countryByCode(document.getElementById('business-country-code').value);
+  if (!desc || !country) return;
+  desc.textContent = `En este país el bot lo llama «${country.documentLabel}».`;
+}
+
+// Cambiar de país reajusta moneda y zona horaria SOLO si estaban en los valores del país anterior o
+// vacías - un negocio que puso su propia moneda a mano no la pierde por tocar el selector.
+function onCountryChanged() {
+  const country = countryByCode(document.getElementById('business-country-code').value);
+  if (!country) return;
+  const currency = document.getElementById('business-currency');
+  const timezone = document.getElementById('business-timezone');
+  const knownCurrencies = (countriesCache || []).map((c) => c.defaultCurrency);
+  const knownTimezones = (countriesCache || []).map((c) => c.defaultTimezone);
+  if (!currency.value.trim() || knownCurrencies.includes(currency.value.trim().toUpperCase())) {
+    currency.value = country.defaultCurrency;
+  }
+  if (!timezone.value.trim() || knownTimezones.includes(timezone.value.trim())) {
+    timezone.value = country.defaultTimezone;
+  }
+  updateDocumentLabelHint();
+}
+
+function toggleIdExemptZones() {
+  const input = document.getElementById('business-id-exempt-zones');
+  if (!input) return;
+  const pide = document.getElementById('business-requires-id-document').checked;
+  input.disabled = !pide;
+  input.previousElementSibling.hidden = !pide;
+  input.hidden = !pide;
+  const hint = input.nextElementSibling;
+  if (hint) hint.hidden = !pide;
+}
+
+function renderBusinessHours(hours) {
+  const container = document.getElementById('business-hours-rows');
+  if (!container) return;
+  const saved = hours && typeof hours === 'object' ? hours : {};
+  container.innerHTML = DIAS_SEMANA.map(([key, label]) => {
+    const value = Array.isArray(saved[key]) ? saved[key] : ['', ''];
+    return `<div class="grid-2" style="align-items:end;">
+      <div>
+        <label>${label} — abre</label>
+        <input id="business-hours-${key}-open" type="time" value="${escapeHtml(value[0] || '')}" />
+      </div>
+      <div>
+        <label>${label} — cierra</label>
+        <input id="business-hours-${key}-close" type="time" value="${escapeHtml(value[1] || '')}" />
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// Devuelve null cuando no se cargo ningun dia completo: el backend lo lee como "sin horario" y borra el
+// que hubiera. Un dia con solo apertura o solo cierre no se manda a medias.
+function readBusinessHours() {
+  const hours = {};
+  let alguno = false;
+  for (const [key] of DIAS_SEMANA) {
+    const open = document.getElementById(`business-hours-${key}-open`);
+    const close = document.getElementById(`business-hours-${key}-close`);
+    if (!open || !close || !open.value || !close.value) continue;
+    hours[key] = [open.value, close.value];
+    alguno = true;
+  }
+  return alguno ? hours : null;
 }
 
 function renderCard(p) {

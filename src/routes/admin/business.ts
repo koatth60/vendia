@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { Prisma } from "@prisma/client";
 import { prisma } from "../../db/client";
 import { requireOwner } from "../../auth/requireOwner";
 import {
@@ -14,6 +15,8 @@ import { deepseek, DEEPSEEK_MODEL } from "../../ai/client";
 import { IMPROVE_INSTRUCTIONS_PROMPT } from "../../ai/prompts/improveInstructions";
 import { logAiUsage } from "../../ai/usage";
 import { upload, businessIdOf } from "./shared";
+import { COUNTRIES, COUNTRY_CODES, isCountryCode } from "../../config/countries";
+import { parseBusinessHours } from "../../config/businessHours";
 
 export const businessRouter = Router();
 
@@ -56,7 +59,20 @@ businessRouter.put("/api/business", requireOwner, async (req, res) => {
     femaleAddressTerm,
     maleAddressTerm,
     shippingPaymentModalities,
+    countryCode,
+    currency,
+    timezone,
+    businessHours,
+    requiresIdDocument,
+    idDocumentExemptZones,
   } = req.body;
+
+  // Fase 11 del plan maestro (2026-09-15): un pais desconocido no se guarda - countryConfig() caeria en
+  // Colombia en cada lectura y el panel mostraria un pais que el bot no esta usando. La moneda y la zona
+  // horaria se dejan libres a proposito (un negocio colombiano que cobra en USD existe), pero si el dueno
+  // cambia de pais y no toca las otras dos, arrancan de los valores de ese pais.
+  const pais = isCountryCode(countryCode) ? COUNTRIES[countryCode] : null;
+  const horario = businessHours === null ? null : parseBusinessHours(businessHours);
   const business = await prisma.business.update({
     where: { id: businessIdOf(req) },
     data: {
@@ -87,10 +103,34 @@ businessRouter.put("/api/business", requireOwner, async (req, res) => {
       femaleAddressTerm: femaleAddressTerm === "" ? null : femaleAddressTerm,
       maleAddressTerm: maleAddressTerm === "" ? null : maleAddressTerm,
       shippingPaymentModalities: Array.isArray(shippingPaymentModalities) ? shippingPaymentModalities : undefined,
+      countryCode: pais?.code,
+      currency: currency ? String(currency).trim().toUpperCase() : pais?.defaultCurrency,
+      timezone: timezone ? String(timezone).trim() : pais?.defaultTimezone,
+      // businessHours:null borra el horario; ausente lo deja como esta; un objeto mal formado tampoco se
+      // guarda a medias (parseBusinessHours devuelve null y se trata como "sin horario").
+      businessHours: businessHours === undefined ? undefined : (horario ?? Prisma.DbNull),
+      requiresIdDocument: requiresIdDocument !== undefined ? Boolean(requiresIdDocument) : undefined,
+      idDocumentExemptZones: Array.isArray(idDocumentExemptZones)
+        ? idDocumentExemptZones.map((z: unknown) => String(z).trim()).filter(Boolean)
+        : undefined,
     },
   });
   const { passwordHash: _hash, whatsappAccessToken: _token, ...safe } = business;
   res.json(safe);
+});
+
+// Los paises que el producto soporta hoy, para que el panel no mantenga su propia copia de la lista.
+businessRouter.get("/api/countries", (_req, res) => {
+  res.json({
+    countries: COUNTRY_CODES.map((code) => ({
+      code,
+      label: COUNTRIES[code].label,
+      defaultCurrency: COUNTRIES[code].defaultCurrency,
+      defaultTimezone: COUNTRIES[code].defaultTimezone,
+      documentLabel: COUNTRIES[code].documentLabel,
+      requiresIdDocumentByDefault: COUNTRIES[code].requiresIdDocumentByDefault,
+    })),
+  });
 });
 
 businessRouter.get("/api/whatsapp-templates", async (req, res) => {
