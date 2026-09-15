@@ -11,6 +11,7 @@ import { platformAdminRouter } from "./routes/platformAdmin";
 import { runFollowUpJob } from "./jobs/followUp";
 import { runEscalationReminderJob } from "./jobs/escalationReminder";
 import { runConversationHealthJob, HEALTH_CHECK_INTERVAL_MS } from "./jobs/conversationHealth";
+import { runOutboundQueueJob, OUTBOUND_QUEUE_INTERVAL_MS } from "./jobs/outboundQueue";
 
 const app = express();
 app.set("trust proxy", 1);
@@ -73,3 +74,8 @@ setInterval(() => {
 setInterval(() => {
   runConversationHealthJob().catch((error) => console.error("Error corriendo el chequeo de conversaciones:", error));
 }, HEALTH_CHECK_INTERVAL_MS);
+
+// Fase 7: la cola de salida deja de depender de que el cliente escriba. Ver src/jobs/outboundQueue.ts.
+setInterval(() => {
+  runOutboundQueueJob().catch((error) => console.error("Error drenando la cola de salida:", error));
+}, OUTBOUND_QUEUE_INTERVAL_MS);

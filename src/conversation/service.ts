@@ -50,7 +50,7 @@ export async function queueOutboundMessage(
 
 export async function listQueuedOutbound(conversationId: string) {
   return prisma.queuedOutboundMessage.findMany({
-    where: { conversationId, sentAt: null, cancelledAt: null },
+    where: { conversationId, sentAt: null, cancelledAt: null, failedAt: null },
     orderBy: { createdAt: "asc" },
   });
 }
@@ -60,14 +60,14 @@ export async function listQueuedOutbound(conversationId: string) {
 // nueva (getOrCreateOpenConversation excluye SOLD/LOST) y lo encolado quedaria huerfano para siempre.
 export async function listQueuedOutboundForCustomer(businessId: string, customerId: string) {
   return prisma.queuedOutboundMessage.findMany({
-    where: { businessId, sentAt: null, cancelledAt: null, conversation: { customerId } },
+    where: { businessId, sentAt: null, cancelledAt: null, failedAt: null, conversation: { customerId } },
     orderBy: { createdAt: "asc" },
   });
 }
 
 export async function cancelQueuedOutbound(businessId: string, id: string) {
   const { count } = await prisma.queuedOutboundMessage.updateMany({
-    where: { id, businessId, sentAt: null, cancelledAt: null },
+    where: { id, businessId, sentAt: null, cancelledAt: null, failedAt: null },
     data: { cancelledAt: new Date() },
   });
   return count > 0;
@@ -82,7 +82,7 @@ export async function markQueuedOutboundSent(id: string) {
 // por chat.
 export async function countConversationsWithQueuedOutbound(businessId: string): Promise<number> {
   const rows = await prisma.queuedOutboundMessage.findMany({
-    where: { businessId, sentAt: null, cancelledAt: null },
+    where: { businessId, sentAt: null, cancelledAt: null, failedAt: null },
     select: { conversationId: true },
     distinct: ["conversationId"],
   });
