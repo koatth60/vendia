@@ -119,6 +119,20 @@ export async function sendTextMessage(credentials: WhatsappCredentials, to: stri
   return result.messages?.[0]?.id ?? "";
 }
 
+// Fase 10 del plan maestro (2026-09-15), eje 19: mismo endpoint /messages que sendTextMessage,
+// distinto body - Meta trata "marcar como leido" y "mostrar el indicador de escribiendo" como una
+// sola llamada (el indicador queda prendido hasta 25s o hasta que le mandemos el proximo mensaje
+// real, lo que pase primero). Sin esto el cliente no tiene ninguna senal de que el mensaje llego
+// mientras el bot agrupa la rafaga y genera la respuesta.
+export async function markAsReadWithTypingIndicator(credentials: WhatsappCredentials, messageId: string): Promise<void> {
+  await callGraphApi(credentials, {
+    messaging_product: "whatsapp",
+    status: "read",
+    message_id: messageId,
+    typing_indicator: { type: "text" },
+  });
+}
+
 export async function sendInteractiveButtonsMessage(
   credentials: WhatsappCredentials,
   to: string,

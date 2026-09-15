@@ -1,6 +1,6 @@
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { listApprovedTemplates, normalizeTemplateName } from "./client";
+import { listApprovedTemplates, markAsReadWithTypingIndicator, normalizeTemplateName } from "./client";
 
 let originalFetch: typeof fetch;
 
@@ -60,6 +60,24 @@ test("listApprovedTemplates returns an empty list (not a crash) when the WABA ha
 
   const templates = await listApprovedTemplates("fake-token", "1400084061566358");
   assert.deepEqual(templates, []);
+});
+
+test("markAsReadWithTypingIndicator posts status=read with the typing indicator in one call", async () => {
+  const calls: unknown[] = [];
+  globalThis.fetch = (async (_url: string, init: RequestInit) => {
+    calls.push(JSON.parse(init.body as string));
+    return { ok: true, json: async () => ({}) };
+  }) as unknown as typeof fetch;
+
+  await markAsReadWithTypingIndicator({ phoneNumberId: "123", accessToken: "fake-token" }, "wamid.ABC");
+
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0], {
+    messaging_product: "whatsapp",
+    status: "read",
+    message_id: "wamid.ABC",
+    typing_indicator: { type: "text" },
+  });
 });
 
 test("normalizeTemplateName produces a name Meta will actually accept", () => {
