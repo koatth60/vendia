@@ -82,3 +82,15 @@ test("un horario mal formado se descarta entero en vez de llegar a medias al pro
   assert.equal(parseBusinessHours({ mon: ["25:00", "18:00"] }), null);
   assert.deepEqual(parseBusinessHours({ mon: ["09:00", "18:00"], tue: "abierto" }), { mon: ["09:00", "18:00"] });
 });
+
+test("las frases con que el bot pide cada dato son las del pais", () => {
+  // Estaban escritas en agent.ts con "cedula" y "celular" adentro: en Mexico ningun turno del bot las
+  // cumplia, asi que un numero pelado no se guardaba nunca.
+  assert.ok(COUNTRIES.CO.askIdPattern.test("¿Me confirmas tu cédula, por favor?"));
+  assert.ok(!COUNTRIES.MX.askIdPattern.test("¿Me confirmas tu cédula, por favor?"));
+  assert.ok(COUNTRIES.MX.askIdPattern.test("¿Me compartes tu INE?"));
+  assert.ok(COUNTRIES.MX.askPhonePattern.test("¿Cuál es tu teléfono de contacto?"));
+  assert.ok(!COUNTRIES.CO.askPhonePattern.test("¿Cuál es tu teléfono de contacto?"), "en Colombia se pide el celular");
+  assert.ok(COUNTRIES.MX.askDeliveryDataPattern.test("Necesito tus datos de entrega"));
+  assert.ok(COUNTRIES.CO.askDeliveryDataPattern.test("Necesito tus datos de entrega"));
+});

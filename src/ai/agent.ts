@@ -453,18 +453,14 @@ export function extractSelfIntroducedName(customerText: string): string | null {
   return looksLikePersonName(candidate) ? candidate : null;
 }
 
-// Same pattern once more, for cedula/celular de contacto - split into two separate patterns since a
+// Same pattern once more, for documento/telefono de contacto - split into two separate patterns since a
 // business can ask for both in the same message ("cedula y celular"), and a single numeric reply in
 // that case is ambiguous about which one it answers, so the net only fires when the prior turn asked
 // for exactly one of the two (safer to miss it than to save a phone number as a cedula or vice versa).
-const ASK_ID_PATTERN = /\b(numero de (identificaci[oó]n|c[eé]dula)|tu c[eé]dula|c[eé]dula,? por favor)\b/i;
-const ASK_PHONE_PATTERN = /\b(numero de celular|tu celular|celular de contacto|celular,? por favor)\b/i;
-
-// Se cumple cuando el turno anterior del bot pidio datos de entrega, en cualquier forma - incluida la
-// lista de varios datos de una sola vez ("Nombre y apellido, cedula, celular, ciudad, barrio..."), que es
-// como este negocio (y el default del producto desde 2026-09-13) los pide.
-const ASK_DELIVERY_DATA_PATTERN =
-  /\b(datos de (entrega|env[ií]o)|nombre y apellido|nombre completo)\b|\bc[eé]dula\b|\bcelular\b|\bidentificaci[oó]n\b/i;
+// Fase 11 del plan maestro (2026-09-15): las tres frases dejaron de ser colombianas. Estaban escritas
+// aca con "cedula" y "celular" adentro, asi que en Mexico ningun turno del bot las cumplia y un numero
+// pelado no se guardaba nunca. Viven en countries.ts (askIdPattern, askPhonePattern,
+// askDeliveryDataPattern), una version por pais - las de CO son las mismas de antes, movidas tal cual.
 
 // Real production incident (2026-09-15, el mas caro del dia): desde que el bot pide TODOS los datos de
 // entrega en un solo mensaje, los clientes contestan mezclando texto y numeros -
@@ -663,8 +659,8 @@ function looksLikeIdOrPhone(text: string): boolean {
 }
 
 // Strips WhatsApp markdown emphasis (*bold*, _italic_) - real production bug (2026-09-13): the bot wrote
-// "¿Me confirmas tu *nombre*, por favor?" (bold per its own ESTILO), and ASK_NAME_PATTERN/ASK_ID_PATTERN/
-// ASK_PHONE_PATTERN below look for the literal phrase as contiguous text ("tu nombre, por favor") - the
+// "¿Me confirmas tu *nombre*, por favor?" (bold per its own ESTILO), and ASK_NAME_PATTERN below plus the
+// askIdPattern/askPhonePattern del pais look for the literal phrase as contiguous text ("tu nombre, por favor") - the
 // asterisks around the key word broke every one of these regexes silently, so save_customer_name/
 // save_customer_contact_info never fired even though the bot's own reply proves it DID ask and the
 // customer DID answer. Confirmed via a real customer stuck as "Mano" in the panel after giving "Carlos".
@@ -957,8 +953,8 @@ export async function generateReply(
 
     if (contactSavedThisTurn === 0 && customerText && !personality?.saleStateEnabled) {
       const priorAsk = lastAssistantText(history);
-      const askedId = ASK_ID_PATTERN.test(priorAsk);
-      const askedPhone = ASK_PHONE_PATTERN.test(priorAsk);
+      const askedId = negocio.country.askIdPattern.test(priorAsk);
+      const askedPhone = negocio.country.askPhonePattern.test(priorAsk);
 
       if (looksLikeIdOrPhone(customerText)) {
         // Respuesta de un solo dato, puro numero: sigue resolviendose por cual fue la pregunta, que es
@@ -968,7 +964,7 @@ export async function generateReply(
         } else if (askedPhone && !askedId) {
           await runCatalogTool(context, "save_customer_contact_info", { deliveryPhone: customerText.trim() });
         }
-      } else if (ASK_DELIVERY_DATA_PATTERN.test(priorAsk)) {
+      } else if (negocio.country.askDeliveryDataPattern.test(priorAsk)) {
         // Respuesta combinada (texto + numeros). Cada dato se identifica por su propia etiqueta/forma,
         // asi que ya no importa que el bot haya pedido varios a la vez - ver
         // extractDeliveryDataFromAnswer.
@@ -1043,7 +1039,7 @@ export async function generateReply(
   // prompt se lo pide. Mismo mecanismo que shouldForceAttributeFilter/shouldForcePhotoEscalation de
   // arriba: se fuerza CUAL herramienta llamar, nunca los argumentos - el modelo sigue siendo quien lee
   // el mensaje del cliente y decide los valores reales. Los patrones reusados (ASK_NAME_PATTERN,
-  // ASK_ID_PATTERN, etc, y extractSelfIntroducedName) son los MISMOS que ya existian para el camino
+  // askIdPattern del pais, etc, y extractSelfIntroducedName) son los MISMOS que ya existian para el camino
   // viejo de inferencia por regex - aca se usan solo como disparador ("le preguntaron esto"), nunca
   // para adivinar el valor, que es justamente la distincion que separa este guard del que la Fase 2
   // vino a apagar. Solo aplica con la bandera activa; sin ella, cero cambio de comportamiento.
@@ -1057,9 +1053,9 @@ export async function generateReply(
     !!personality?.saleStateEnabled &&
     !!customerText &&
     (!saleState?.idNumber || !saleState?.deliveryPhone || !saleState?.address) &&
-    (ASK_ID_PATTERN.test(priorAskForForcing) ||
-      ASK_PHONE_PATTERN.test(priorAskForForcing) ||
-      ASK_DELIVERY_DATA_PATTERN.test(priorAskForForcing));
+    (negocio.country.askIdPattern.test(priorAskForForcing) ||
+      negocio.country.askPhonePattern.test(priorAskForForcing) ||
+      negocio.country.askDeliveryDataPattern.test(priorAskForForcing));
 
   const forcedToolChoice = shouldForcePhotoEscalation
     ? "ask_owner_about_photo"

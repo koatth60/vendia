@@ -38,6 +38,12 @@ export interface CountryConfig {
   detallePattern: RegExp;
   /** Las mismas palabras de via, pero para ubicar la direccion dentro de una respuesta combinada. */
   streetWordPattern: RegExp;
+  // Como suena, en ESTE pais, que el bot haya pedido el documento, el telefono, o los datos de entrega
+  // enteros. Se leen contra el turno anterior del propio bot (ver agent.ts): cuando el cliente contesta
+  // un numero pelado, sin etiqueta, la pregunta es mas confiable que la forma para decidir que es.
+  askIdPattern: RegExp;
+  askPhonePattern: RegExp;
+  askDeliveryDataPattern: RegExp;
   pedir: Record<FieldKey, string>;
   classifyDigits(digits: string): DigitShape;
 }
@@ -63,6 +69,10 @@ const COLOMBIA: CountryConfig = {
   detallePattern: /\b(barrio|conjunto|torre|apto|apartamento|casa|piso|bloque|interior|oficina|local|urbanizaci[oó]n)\b/i,
   streetWordPattern:
     /\b(cra|carrera|cll|calle|kr|kra|av|avenida|diagonal|diag|transversal|trans|tv|manzana|mz|lote|lt|autopista|via|vereda|conjunto|torre|apto|apartamento|casa|piso|barrio|bloque|interior|urbanizaci[oó]n)\b/i,
+  askIdPattern: /\b(numero de (identificaci[oó]n|c[eé]dula)|tu c[eé]dula|c[eé]dula,? por favor)\b/i,
+  askPhonePattern: /\b(numero de celular|tu celular|celular de contacto|celular,? por favor)\b/i,
+  askDeliveryDataPattern:
+    /\b(datos de (entrega|env[ií]o)|nombre y apellido|nombre completo)\b|\bc[eé]dula\b|\bcelular\b|\bidentificaci[oó]n\b/i,
   pedir: {
     productos: "qué producto quieres y cuántas unidades",
     variante: "el color",
@@ -103,6 +113,10 @@ const MEXICO: CountryConfig = {
   detallePattern: /\b(col(onia)?|fracc(ionamiento)?|unidad|manzana|mz|lote|lt|interior|int|depto|departamento|edificio|piso|c\.?p\.?|c[oó]digo postal)\b/i,
   streetWordPattern:
     /\b(calle|av|avenida|blvd|boulevard|bulevar|calzada|calz|privada|priv|cerrada|andador|prolongacion|carretera|carr|eje|circuito|retorno|colonia|col|fraccionamiento|fracc|unidad|manzana|mz|lote|lt|interior|int|depto|departamento|edificio|piso)\b/i,
+  askIdPattern: /\b(tu (ine|curp|rfc|identificaci[oó]n)|numero de identificaci[oó]n|identificaci[oó]n,? por favor)\b/i,
+  askPhonePattern: /\b(numero de (tel[eé]fono|celular)|tu (tel[eé]fono|celular)|tel[eé]fono de contacto|tel[eé]fono,? por favor)\b/i,
+  askDeliveryDataPattern:
+    /\b(datos de (entrega|env[ií]o)|nombre y apellido|nombre completo)\b|\bine\b|\bcurp\b|\btel[eé]fono\b|\bcelular\b|\bidentificaci[oó]n\b/i,
   pedir: {
     productos: "qué producto quieres y cuántas unidades",
     variante: "el color",
