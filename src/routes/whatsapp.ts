@@ -60,11 +60,12 @@ export const whatsappRouter = Router();
 // seconds of each other (confirmed against real conversations: one telling a customer "no manejamos
 // micrófonos" for a typo the OTHER reply correctly read as "audífonos", another saving the wrong name -
 // see looksLikeNonNameAnswer in agent.ts for a related but separate cause). pm2 runs this as a single
-// process (fork mode, not cluster), so a plain in-memory per-conversation queue is enough - no Redis/DB
-// lock needed. Each conversationId gets its own promise chain: a new webhook for that conversation waits
-// for the previous one's full handling (generateReply + the reply send + recordMessage) to finish before
-// it starts, so the two are serialized instead of racing. Different conversations are unaffected and run
-// fully in parallel, same as before.
+// process (fork mode, not cluster - see ecosystem.config.js, `exec_mode: "fork"` + `instances: 1`, versioned
+// as of Fase 7 instead of living only in this comment), so a plain in-memory per-conversation queue is
+// enough - no Redis/DB lock needed. Each conversationId gets its own promise chain: a new webhook for that
+// conversation waits for the previous one's full handling (generateReply + the reply send + recordMessage)
+// to finish before it starts, so the two are serialized instead of racing. Different conversations are
+// unaffected and run fully in parallel, same as before.
 const conversationLocks = new Map<string, Promise<void>>();
 
 // Fase 7 del plan maestro (2026-09-15): cuantos turnos (webhook -> generateReply -> envio -> recordMessage)
