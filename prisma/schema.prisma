@@ -868,7 +868,11 @@ model AgentTurn {
   forcedTool     String?
   // Alcance que resolvio el servidor: "none", "one:<producto>", "group:<categoria> (n)", "all:n".
   scope          String   @default("none")
-  // Texto exacto de cada bloque que se envio, en orden. Es la respuesta real del bot, no la del modelo.
+  // Texto exacto del bloque COMPUESTO POR EL SERVIDOR, en orden - se haya enviado como mensaje aparte o
+  // haya viajado adentro del mensaje del modelo (marca {{BLOQUE_CATALOGO}}, 282c8f1). Se guarda igual en
+  // los dos casos a proposito: la auditoria tiene que poder ver el bloque que compuso el servidor sin
+  // depender de donde termino saliendo. catalogInlined dice cual de los dos casos fue - sin mirarlo, una
+  // fila con blocks no vacio NO significa que el cliente haya recibido un mensaje aparte con ese texto.
   blocks         String[] @default([])
   // true = el modelo puso la marca {{BLOQUE_CATALOGO}} y el bloque de arriba viajo adentro de su mensaje;
   // false = salio como mensaje aparte, o no hubo bloque. Es el denominador de la tasa de omision de la
