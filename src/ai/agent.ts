@@ -8,7 +8,18 @@ import { prisma } from "../db/client";
 import { sendAlertToOwner } from "../whatsapp/outbound";
 import { recordOwnerMessage } from "../delivery/ownerLog";
 import { recordAgentIncident } from "./incidents";
-import { textMentionsConfiguredCategory } from "../catalog/products";
+import { textMentionsConfiguredCategory, getProductById } from "../catalog/products";
+import {
+  resolveProductScope,
+  withSignedMedia,
+  describeScope,
+  looksLikeCatalogRequest,
+  type ProductScope,
+  type ScopeProduct,
+} from "../catalog/scope";
+import { renderCatalog, presentedProductIds, stripNumberedLines, type CatalogBlock } from "../catalog/presenter";
+import { getLastPresentedProductIds, setLastPresentedProductIds } from "../catalog/presentedList";
+import { recordAgentTurn } from "./agentTurns";
 import { listActivePaymentMethods } from "../catalog/paymentMethods";
 import { buildCheckoutState } from "../orders/checkoutStateFromDb";
 import {
@@ -342,21 +353,10 @@ Datos reales de este pedido:
 // el mismo tokenizador de la busqueda, que ya baja a minusculas, saca acentos y puntuacion y descarta
 // stopwords; las formas verbales que tokenize descarta justamente por ser stopwords ("que tienen",
 // "que hay") se buscan con un `includes` literal sobre el texto normalizado por `normalizeForMatch`.
-const CATALOG_REQUEST_WORDS = new Set([
-  "catalogo", "catalogos", "lista", "listado", "productos", "inventario", "portafolio", "mercancia",
-  "articulos", "surtido",
-]);
-
-const CATALOG_REQUEST_PHRASES = [
-  "que tienen", "que tienes", "que tenes", "que hay", "que venden", "que vendes", "que manejan",
-  "que manejas", "que ofrecen",
-];
-
-export function looksLikeCatalogRequest(text: string): boolean {
-  if (tokenize(text).some((word) => CATALOG_REQUEST_WORDS.has(word))) return true;
-  const normalized = normalizeForMatch(text);
-  return CATALOG_REQUEST_PHRASES.some((phrase) => normalized.includes(phrase));
-}
+// Fase B del plan de catalogo y medios (2026-09-16): las palabras y frases que detectan un pedido de
+// catalogo se mudaron a src/catalog/scope.ts, que es ahora quien decide el alcance del turno. Se
+// re-exporta desde aca para no romper a quien ya la importaba de agent.ts.
+export { looksLikeCatalogRequest };
 
 const NAME_PARTICLES = new Set(["de", "del", "la", "las", "los", "y"]);
 
@@ -791,12 +791,23 @@ async function alertOwnerOfDegradedReply(context: ToolContext, reason: string): 
   await recordAgentIncident(context.businessId, "DEGRADED_REPLY", reason, context.conversationId, "degraded_reply_fallback");
 }
 
+/**
+ * Fase B del plan de catalogo y medios (2026-09-16). Un turno ya no devuelve solo texto: devuelve la
+ * frase que escribio el modelo MAS los bloques que compuso el servidor. Los bloques salen literales,
+ * despues de la frase, y son los unicos mensajes que pueden traer un nombre de producto, un precio o una
+ * foto - todos leidos de la base, ninguno de la prosa del modelo.
+ */
+export interface AgentReply {
+  text: string;
+  blocks: CatalogBlock[];
+}
+
 export async function generateReply(
   conversationId: string,
   context: ToolContext,
   personality?: BotPersonality | null,
   customerText?: string
-): Promise<string> {
+): Promise<AgentReply> {
   // Fetch a bigger window than the model actually sees: extractMediaHistory removes several rows (one
   // per photo/video sent) entirely, so 30 raw rows reliably leaves ~20 meaningful entries after that.
   // `history` itself (raw, unfiltered) is still used below for lastAssistantText, which needs the real
@@ -818,6 +829,25 @@ export async function generateReply(
   // (escrita por tools.ts en el momento real del envio), no de reconstruirla leyendo el historial con
   // MEDIA_CAPTION_PATTERN. Independiente de saleStateEnabled, igual que blockedBy.
   const mediaSent = await getMediaSent(conversationId);
+
+  // FASE B, PIEZAS 1-3 (ONIX-PLAN-CATALOGO-Y-MEDIOS.md). El alcance del turno lo decide el servidor,
+  // ANTES de la primera llamada al modelo y solo con datos reales del negocio: que producto, que
+  // categoria o que catalogo completo pidio el cliente. Con kind "none" no es un turno de presentacion y
+  // todo sigue exactamente como antes de esta fase. Con cualquier otro alcance, los mensajes con los
+  // nombres, los precios y las fotos los compone renderCatalog y salen literales: el modelo solo escribe
+  // la frase que los introduce, asi que ya no puede listar un producto que no existe ni prometer una
+  // foto que no sale.
+  const lastPresentedList = await getLastPresentedProductIds(conversationId);
+  const resolvedScope: ProductScope = await withSignedMedia(
+    context.businessId,
+    await resolveProductScope(context.businessId, customerText ?? "", lastPresentedList)
+  );
+  const renderOptions = { currency: negocio.currency, locale: negocio.locale };
+  // Mutable porque hay un segundo momento en el que el servidor puede resolver el alcance: ver
+  // promoteScopeFromIdentifiedPhoto mas abajo.
+  let catalogBlocks = renderCatalog(resolvedScope, renderOptions);
+  let scopeForRecord = resolvedScope;
+  const catalogMediaProductIds = () => catalogBlocks.flatMap((b) => b.media.map((m) => m.productId));
 
   const lastHistoryEntry = history[history.length - 1];
   const customerSentMediaThisTurn =
@@ -892,6 +922,21 @@ export async function generateReply(
           },
         ]
       : []),
+    ...(catalogBlocks.length > 0
+      ? [
+          {
+            role: "system" as const,
+            content:
+              `MENSAJES QUE YA VAN A SALIR (los manda el sistema con datos reales del catalogo, vos no los escribis ni los podes cambiar):\n\n` +
+              catalogBlocks.map((b) => b.text).join("\n---\n") +
+              (catalogMediaProductIds().length > 0 ? `\n\nLas fotos de ese producto tambien salen solas, en este mismo turno.` : "") +
+              `\n\nEscribi UNA sola frase corta de introduccion y nada mas. No repitas la lista, ni nombres, ni precios, ni stock` +
+              (catalogMediaProductIds().length > 0
+                ? `, y no ofrezcas ni prometas fotos: ya van.`
+                : `. Si el cliente quiere fotos, el mensaje del sistema ya se las ofrece.`),
+          },
+        ]
+      : []),
     ...(pendingOwnerQuestionsAtTurnStart.length > 0
       ? [
           {
@@ -948,6 +993,15 @@ export async function generateReply(
   async function finalizeTurn(text: string): Promise<string> {
     text = stripInternalLeaks(text);
 
+    // Fase B: con bloques compuestos por el servidor, la frase del modelo es SOLO la introduccion. Una
+    // lista numerada dentro de ella es, en el mejor caso, la misma informacion dos veces y, en el peor,
+    // la version inventada de la lista real que sale justo abajo - se le quita. La marca
+    // {{BLOQUE_CATALOGO}} tambien sobra: el catalogo ya no se sustituye dentro de la prosa, va en sus
+    // propios mensajes.
+    if (catalogBlocks.length > 0) {
+      text = stripNumberedLines(text.split(CATALOG_BLOCK_MARKER).join(""));
+    }
+
     // Etapa 1 del estado de pedido: se calcula y se registra, NO se usa. Sirve para comparar durante unos
     // dias lo que el estado dice que falta contra lo que el bot realmente pidio, y corregirlo antes de
     // que empiece a decidir respuestas. Nunca puede romper el turno: si falla, se loguea y sigue.
@@ -968,7 +1022,14 @@ export async function generateReply(
       paymentMethods: paymentMethodsThisTurn,
       shippingRate: resolvedShippingRate,
       orderSummary: orderSummaryThisTurn,
-      catalog: catalogListThisTurn,
+      // Solo como camino de respaldo para los turnos SIN alcance resuelto (kind "none"): ahi nada
+      // cambio respecto de antes de la Fase B y el bloque fijo sigue siendo lo unico que impide que la
+      // lista la escriba el modelo. Con alcance resuelto la lista ya salio en sus propios mensajes.
+      // Un cliente que manda una FOTO no esta pidiendo el catalogo: una lista nunca es la respuesta
+      // correcta a una foto, y eso el servidor lo sabe sin leer una sola palabra (mediaType es metadato
+      // estructurado). Caso real del 2026-09-15/16: foto de UN reloj, respuesta con 11 productos. La
+      // marca se borra y queda registrado el incidente, igual que cualquier otro bloque sin respaldo.
+      catalog: catalogBlocks.length > 0 || customerSentMediaThisTurn ? null : catalogListThisTurn,
       saleBlocked: saleBlockedThisTurn,
     });
     text = renderedText;
@@ -1139,11 +1200,17 @@ export async function generateReply(
   // esta no le gana.
   const shouldForceCatalogList = !!customerText && looksLikeCatalogRequest(customerText);
 
+  // Fase B: cuando el servidor ya resolvio el alcance, forzar find_products_by_attributes o
+  // list_all_products no aporta nada - la lista real ya esta compuesta y va a salir igual, llame el
+  // modelo lo que llame. Se ahorra una vuelta entera del lazo y se deja de depender de un forzado que,
+  // medido en produccion el 2026-09-15, el modelo no siempre honra. Los otros forzados (foto sin
+  // resolver, guardar nombre/datos) no tienen nada que ver con el catalogo y siguen igual.
+  const catalogScopeResolved = catalogBlocks.length > 0;
   const forcedToolChoice = shouldForcePhotoEscalation
     ? "ask_owner_about_photo"
-    : shouldForceAttributeFilter
+    : shouldForceAttributeFilter && !catalogScopeResolved
       ? "find_products_by_attributes"
-      : shouldForceCatalogList
+      : shouldForceCatalogList && !catalogScopeResolved
         ? "list_all_products"
         : shouldForceSaveName
           ? "save_customer_name"
@@ -1155,9 +1222,19 @@ export async function generateReply(
   // cuando la verificacion de efectos requeridos dice que el turno no hizo lo que su texto dice que hizo
   // (ver la escalera mas abajo). Mismo `messages`, mismos contadores *ThisTurn: es una continuacion del
   // turno, no un turno nuevo. Devuelve el texto final; finalizeTurn se aplica una sola vez, al final.
+  // Fase B, pieza 7: lo que se registra en AgentTurn al terminar. Se acumula a traves de los reintentos
+  // de la escalera de efectos requeridos, porque siguen siendo el mismo turno.
+  let loopIterations = 0;
+  const toolsCalledThisTurn: string[] = [];
+  // Productos que el modelo pidio en detalle este turno, por id real de la base (ver el registro dentro
+  // del lazo). Cuales de esos ya mandaron sus fotos desde la propia herramienta, para no repetirlas.
+  const detailedProductIdsThisTurn: string[] = [];
+  const mediaAlreadySentThisTurn = new Set<string>();
+
   async function runModelLoop(forcedFirstTool: string | null): Promise<string> {
   try {
     for (let iteration = 0; iteration < 5; iteration++) {
+      loopIterations++;
       const response = await createChatCompletion({
         max_tokens: 1024,
         messages,
@@ -1194,6 +1271,7 @@ export async function generateReply(
 
       for (const call of toolCalls) {
         if (call.type !== "function") continue;
+        toolsCalledThisTurn.push(call.function.name);
         let input: Record<string, unknown> = {};
         try {
           input = JSON.parse(call.function.arguments || "{}");
@@ -1296,6 +1374,14 @@ export async function generateReply(
           products?: { name?: unknown; price?: unknown; stock?: unknown }[];
         };
         if (result?.blocked && Array.isArray(result.missing)) saleBlockedThisTurn = result.missing;
+        // Fase B: el productId con el que se llamo get_product_details es un dato ESTRUCTURADO ya
+        // resuelto contra la base (la herramienta devuelve null si no existe), no prosa - por eso puede
+        // servir de disparador. Ver promoteScopeFromIdentifiedPhoto.
+        if (call.function.name === "get_product_details" && typeof input.productId === "string" && result) {
+          const detailedId = input.productId.trim();
+          if (detailedId && !detailedProductIdsThisTurn.includes(detailedId)) detailedProductIdsThisTurn.push(detailedId);
+          if (result.mediaJustSent) mediaAlreadySentThisTurn.add(detailedId);
+        }
         if (result?.mediaJustSent || result?.sent) mediaSentThisTurn++;
         if (call.function.name === "ask_owner_about_photo" && result?.asked) photoEscalatedThisTurn++;
         if (call.function.name === "save_customer_name") nameSavedThisTurn++;
@@ -1509,5 +1595,56 @@ export async function generateReply(
     return text;
   }
 
-  return finalizeTurn(await runTurnWithRequiredEffects());
+  const rawText = await runTurnWithRequiredEffects();
+
+  // FASE B, SEGUNDO MOMENTO DE ALCANCE. Un cliente que manda la FOTO de un producto no escribe su
+  // nombre, asi que resolveProductScope no tiene con que resolver y el turno queda "none". Caso real de
+  // produccion (2026-09-15/16): el bot identifico bien el Serie 11 Mini y despues le pego 11 productos,
+  // incluidos AIRPODS SERIE 4 y PARLANTE TIPO ALEXA.
+  //
+  // El disparador es determinista y no lee prosa de nadie: el mensaje del cliente trajo mediaType
+  // IMAGE/VIDEO (metadato estructurado, el mismo que ya admite la tabla de efectos requeridos) y el
+  // modelo pidio UN producto por su id real con get_product_details - un id que la herramienta ya
+  // resolvio contra la base, no un nombre escrito en una frase. Con eso el servidor compone la ficha de
+  // ese producto y sus fotos, y la lista se acaba: dejo de ser el modelo quien decide cuantos productos
+  // le llegan al cliente que mando una foto.
+  if (catalogBlocks.length === 0 && customerSentMediaThisTurn && detailedProductIdsThisTurn.length === 1) {
+    const identifiedId = detailedProductIdsThisTurn[0];
+    const identified = await getProductById(context.businessId, identifiedId);
+    if (identified) {
+      const product = identified as unknown as ScopeProduct;
+      // Si la propia herramienta ya mando las fotos (autoSendPhotoOnQuote), el bloque sale sin medios:
+      // repetirlas seria mandarle al cliente las mismas tres fotos dos veces en el mismo turno.
+      const sinMedios = mediaAlreadySentThisTurn.has(identifiedId);
+      const scope: ProductScope = {
+        kind: "one",
+        product: sinMedios ? { ...product, media: [], variants: product.variants.map((v) => ({ ...v, media: [] })) } : product,
+        variant: null,
+      };
+      catalogBlocks = renderCatalog(scope, renderOptions);
+      scopeForRecord = scope;
+    }
+  }
+
+  const text = await finalizeTurn(rawText);
+
+  // La lista que el cliente REALMENTE vio, en el orden en que salio numerada: es contra esto que el
+  // proximo turno resuelve "el 3". Se guarda solo cuando hubo bloques - un turno sin presentacion no
+  // borra la lista anterior, que sigue siendo la ultima que vio.
+  if (catalogBlocks.length > 0) {
+    await setLastPresentedProductIds(conversationId, presentedProductIds(catalogBlocks));
+  }
+
+  await recordAgentTurn({
+    businessId: context.businessId,
+    conversationId,
+    iterations: loopIterations,
+    toolsCalled: toolsCalledThisTurn,
+    forcedTool: forcedToolChoice,
+    scope: describeScope(scopeForRecord),
+    blocks: catalogBlocks.map((b) => b.text),
+    mediaProductIds: catalogMediaProductIds(),
+  });
+
+  return { text, blocks: catalogBlocks };
 }

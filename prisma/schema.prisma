@@ -137,6 +137,7 @@ model Business {
   learnedFaqCandidates      LearnedFaqCandidate[]
   deliveryFailures          DeliveryFailure[]
   agentIncidents            AgentIncident[]
+  agentTurns                AgentTurn[]
   customerNotes             CustomerNote[]
   customerTags              CustomerTag[]
   ownerMessageLogs          OwnerMessageLog[]
@@ -715,6 +716,11 @@ model Conversation {
   contextSummary               String?
   contextSummarizedUpTo        Int?
   mediaSentProductIds          String[]               @default([])
+  // Fase B del plan de catalogo y medios (2026-09-16), pieza 4: los ids de producto que el servidor
+  // REALMENTE le presento al cliente en el ultimo bloque de catalogo, en el mismo orden en que salieron
+  // numerados. Es contra esto que se resuelve "el 3" del turno siguiente - antes eso dependia de que el
+  // modelo se acordara de su propia lista, que es justo lo que esta fase le quita de las manos.
+  lastPresentedProductIds      String[]               @default([])
   unreadCount                  Int                    @default(0)
   order                        Order?
   saleState                    SaleState?
@@ -843,6 +849,35 @@ model AiUsageLog {
 // applyClaimBackstops repairs) left any queryable trace before this - only a console.error/warn nobody
 // reads unless they happen to be tailing production logs. One row per intervention, cheap and
 // best-effort (recordAgentIncident in agent.ts never lets a logging failure break the real reply).
+// Fase B del plan de catalogo y medios (2026-09-16), pieza 7 (adelantada de la Fase A): una fila por
+// turno del agente. Hasta ahora, saber que hizo un turno exigia cruzar AiUsageLog, Message y
+// mediaSentProductIds y deducir; eso es arqueologia, y es lo que dejo vivir dias al defecto de catalogo
+// sin que nadie lo viera. Se escribe best-effort: un fallo al registrar NUNCA rompe la respuesta real
+// (mismo patron que recordAgentIncident).
+model AgentTurn {
+  id             String   @id @default(cuid())
+  business       Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  businessId     String
+  conversationId String
+  // Cuantas vueltas dio el lazo de tool-calling antes de devolver texto.
+  iterations     Int      @default(0)
+  // Herramientas llamadas EN ORDEN, incluidos los repetidos - "search_products, send_product_media".
+  toolsCalled    String[] @default([])
+  // Herramienta que se forzo por tool_choice en la primera llamada, si se forzo alguna. Junto con
+  // toolsCalled es lo que permite medir la tasa de cumplimiento de tool_choice, que hoy no tiene numero.
+  forcedTool     String?
+  // Alcance que resolvio el servidor: "none", "one:<producto>", "group:<categoria> (n)", "all:n".
+  scope          String   @default("none")
+  // Texto exacto de cada bloque que se envio, en orden. Es la respuesta real del bot, no la del modelo.
+  blocks         String[] @default([])
+  // Ids de producto cuyos medios salieron con los bloques de este turno.
+  mediaProductIds String[] @default([])
+  createdAt      DateTime @default(now())
+
+  @@index([businessId, createdAt])
+  @@index([conversationId, createdAt])
+}
+
 model AgentIncident {
   id             String            @id @default(cuid())
   business       Business          @relation(fields: [businessId], references: [id], onDelete: Cascade)

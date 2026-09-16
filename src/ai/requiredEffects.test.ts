@@ -201,7 +201,7 @@ test("estado real de Milena (saleStateEnabled=false, solo mediaSent): la duena q
     textOnly("Ya casi, confirmando con el equipo."),
   ]);
 
-  const reply = await generateReply(conversationId, context, personality, "");
+  const { text: reply } = await generateReply(conversationId, context, personality, "");
 
   // LO QUE IMPORTA: la duena quedo avisada, y esta probado contra la base, no contra el resultado de una
   // funcion.
@@ -276,7 +276,7 @@ test("la bandera apagada deja el turno exactamente igual que hoy", async () => {
   await customerSendsReceiptPhoto();
   const model = programModel([textOnly("Estoy validando tu comprobante, dame un momento.")]);
 
-  const reply = await generateReply(conversationId, context, personality, "");
+  const { text: reply } = await generateReply(conversationId, context, personality, "");
 
   assert.equal(model.calls, 1, "sin la bandera no hay reintento: una sola llamada al modelo");
   assert.match(reply, /validando/);
@@ -294,7 +294,7 @@ test("el modelo SI avisa a la duena por su cuenta: no se reintenta ni se avisa d
     textOnly("Le pase tu imagen al equipo, apenas me confirmen te aviso."),
   ]);
 
-  const reply = await generateReply(conversationId, context, personality, "");
+  const { text: reply } = await generateReply(conversationId, context, personality, "");
 
   assert.deepEqual(model.forced, [], "no se fuerza nada cuando el efecto ya ocurrio");
   assert.equal(model.calls, 2, "las dos llamadas del turno normal, ni una mas");
@@ -312,7 +312,7 @@ test("no se puede avisar a la duena de ninguna forma: se escala y la respuesta n
   globalThis.fetch = (async () => ({ ok: false, status: 500, json: async () => ({}), text: async () => "boom" }) as unknown as Response) as typeof fetch;
   programModel([textOnly("Estoy validando."), textOnly("Sigo validando."), textOnly("Ya casi.")]);
 
-  const reply = await generateReply(conversationId, context, personality, "");
+  const { text: reply } = await generateReply(conversationId, context, personality, "");
 
   assert.equal(reply, ESCALATION_TEXT, "no puede salir un texto que afirme que algo paso");
   assert.equal(requiredEffectStats.fallbackUsed, 1);
@@ -422,7 +422,7 @@ test("el reintento cierra la venta cuando el pedido esta completo", async () => 
     textOnly("Listo, ya le pase tu comprobante al equipo."),
   ]);
 
-  const reply = await generateReply(conversationId, context, personality, "");
+  const { text: reply } = await generateReply(conversationId, context, personality, "");
 
   assert.deepEqual(model.forced, ["close_conversation"]);
   assert.equal(requiredEffectStats.retryResolved, 1);
@@ -440,7 +440,7 @@ test("el fallback por codigo registra el pedido cuando el modelo no lo hace ni f
   await customerSendsReceiptPhoto();
   programModel([textOnly("Estoy validando."), textOnly("Sigo validando."), textOnly("Ya casi.")]);
 
-  const reply = await generateReply(conversationId, context, personality, "");
+  const { text: reply } = await generateReply(conversationId, context, personality, "");
 
   assert.equal(requiredEffectStats.retries, 2);
   assert.equal(requiredEffectStats.retryResolved, 0, "forzar tool_choice no basta - es el defecto medido el 2026-09-15");

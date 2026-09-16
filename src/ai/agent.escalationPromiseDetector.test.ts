@@ -63,7 +63,7 @@ test("records an incident when the model promises to consult the owner without e
   // @ts-expect-error test stub, narrower shape than the real SDK type
   deepseek.chat.completions.create = async () => fakeTextResponse("Dejame confirmar eso con el equipo y te aviso en un momento.");
 
-  const reply = await generateReply(conversationId, context, null, "tienen descuento por volumen?");
+  const { text: reply } = await generateReply(conversationId, context, null, "tienen descuento por volumen?");
 
   assert.match(reply, /confirmar eso con el equipo/, "the detector must never rewrite the model's text");
   const incidents = await prisma.agentIncident.findMany({ where: { conversationId, guard: "escalacion_prometida_sin_herramienta" } });

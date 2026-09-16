@@ -94,7 +94,7 @@ test("generateReply asks for a real final answer instead of returning the dangli
     return fakeFinalResponse("Tenemos envio gratis a Bogota y pago contraentrega.");
   };
 
-  const reply = await generateReply(conversationId, context, null, "que formas de pago tienen?");
+  const { text: reply } = await generateReply(conversationId, context, null, "que formas de pago tienen?");
 
   assert.equal(callCount, 6, "must make exactly one extra untooled call after the 5 tool-calling iterations");
   assert.match(reply, /envio gratis a Bogota/);
@@ -121,7 +121,7 @@ test("generateReply alerts the owner when the loop exhausts and even the final u
     return fakeFinalResponse(null);
   };
 
-  const reply = await generateReply(conversationId, context, null, "que formas de pago tienen?");
+  const { text: reply } = await generateReply(conversationId, context, null, "que formas de pago tienen?");
 
   assert.equal(reply, "Disculpa, tuve un problema procesando tu consulta. Un asesor te va a contactar pronto.");
   assert.ok(

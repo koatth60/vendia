@@ -179,6 +179,13 @@ export interface TurnState {
 
 export interface TurnResult {
   reply: string;
+  // Fase B del plan de catalogo y medios (2026-09-16): los mensajes que compone el SERVIDOR con datos
+  // reales del catalogo y que salen despues de la frase del modelo. Lo que el cliente recibe es
+  // [reply, ...blocks], asi que las aserciones de fidelidad de catalogo miden sobre los dos juntos.
+  blocks: string[];
+  // Cuantas fotos/videos viajan pegados a esos bloques. No pasan por el fetch mockeado porque los manda
+  // el caller real (routes/whatsapp.ts), no generateReply - por eso se cuentan aparte y se suman.
+  blockMediaCount: number;
   toolSequence: string[];
   forcedTools: string[];
   sends: CapturedSend[];
@@ -265,7 +272,7 @@ export async function runFixture(fixture: ConversationFixture): Promise<ReplayRe
       }) as typeof fetch;
 
       const pendingBefore = await prisma.pendingOwnerQuestion.count({ where: { conversationId: conversation.id } });
-      const reply = await generateReply(conversation.id, context, personality, turn.customer);
+      const { text: reply, blocks } = await generateReply(conversation.id, context, personality, turn.customer);
       const pendingAfter = await prisma.pendingOwnerQuestion.count({ where: { conversationId: conversation.id } });
 
       if (queue.length > 0) {
@@ -277,7 +284,12 @@ export async function runFixture(fixture: ConversationFixture): Promise<ReplayRe
       // generateReply no persiste su propia respuesta (el caller real, routes/whatsapp.ts, lo hace
       // despues de mandarla) - sin esto, un fixture de varios turnos le mostraria al modelo del
       // segundo turno una historia sin la respuesta del bot en el primero, que no es realista.
-      await recordMessage(businessId, conversation.id, "ASSISTANT", reply);
+      // El historial del turno siguiente tiene que ver lo mismo que vio el cliente: la frase del modelo
+      // Y los bloques del servidor. Sin los bloques, el modelo del segundo turno no sabria que lista se
+      // le mostro y "el 3" no tendria contra que resolver.
+      for (const enviado of [reply, ...blocks.map((b) => b.text)]) {
+        if (enviado.trim()) await recordMessage(businessId, conversation.id, "ASSISTANT", enviado);
+      }
 
       const [conversationRow, customerRow, orderRow, saleState] = await Promise.all([
         prisma.conversation.findUniqueOrThrow({ where: { id: conversation.id }, select: { status: true } }),
@@ -296,7 +308,16 @@ export async function runFixture(fixture: ConversationFixture): Promise<ReplayRe
           : null,
       };
 
-      turns.push({ reply, toolSequence, forcedTools, sends, ownerQuestionsCreated: pendingAfter - pendingBefore, state });
+      turns.push({
+        reply,
+        blocks: blocks.map((b) => b.text),
+        blockMediaCount: blocks.reduce((acc, b) => acc + b.media.reduce((n, m) => n + m.items.length, 0), 0),
+        toolSequence,
+        forcedTools,
+        sends,
+        ownerQuestionsCreated: pendingAfter - pendingBefore,
+        state,
+      });
     }
   } finally {
     deepseek.chat.completions.create = originalCreate;
@@ -414,7 +435,12 @@ export function assertTurn(
   if (!expect_) return;
   const label = `${fixtureName} turno ${turnIndex}`;
 
-  if (expect_.catalogFidelity) assertCatalogFidelity(label, result.reply, catalog);
+  // Todo lo que el cliente recibe este turno, en orden: la frase del modelo y despues los bloques que
+  // compuso el servidor. Es sobre esto que se mide la fidelidad de catalogo y el texto prohibido -
+  // medir solo `reply` dejaria fuera exactamente los mensajes que traen nombres y precios.
+  const customerFacingText = [result.reply, ...result.blocks].filter((t) => t.trim()).join("\n\n");
+
+  if (expect_.catalogFidelity) assertCatalogFidelity(label, customerFacingText, catalog);
 
   if (expect_.catalogFidelityScope) {
     const scoped = catalog.filter((product) => expect_.catalogFidelityScope!.includes(product.name));
@@ -425,7 +451,7 @@ export function assertTurn(
         .filter((name) => !catalog.some((product) => product.name === name))
         .join(", ")}`
     );
-    assertCatalogFidelity(label, result.reply, scoped);
+    assertCatalogFidelity(label, customerFacingText, scoped);
   }
 
   if (expect_.toolSequence) {
@@ -439,13 +465,14 @@ export function assertTurn(
     );
   }
   for (const forbidden of expect_.textMustNotContain ?? []) {
-    assert.ok(!result.reply.includes(forbidden), `${label}: la respuesta no debia contener "${forbidden}" pero dice: "${result.reply}"`);
+    assert.ok(!customerFacingText.includes(forbidden), `${label}: la respuesta no debia contener "${forbidden}" pero dice: "${customerFacingText}"`);
   }
   for (const required of expect_.textMustContain ?? []) {
-    assert.ok(result.reply.includes(required), `${label}: la respuesta debia contener "${required}" pero dice: "${result.reply}"`);
+    assert.ok(customerFacingText.includes(required), `${label}: la respuesta debia contener "${required}" pero dice: "${customerFacingText}"`);
   }
   if (expect_.sideEffects?.mediaSent !== undefined) {
-    const mediaSent = result.sends.filter((s) => s.type === "image" || s.type === "video").length;
+    const mediaSent =
+      result.sends.filter((s) => s.type === "image" || s.type === "video").length + result.blockMediaCount;
     assert.equal(mediaSent, expect_.sideEffects.mediaSent, `${label}: cantidad de media enviada no coincide`);
   }
   if (expect_.sideEffects?.ownerQuestionsCreated !== undefined) {

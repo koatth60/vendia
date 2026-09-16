@@ -114,7 +114,7 @@ async function runTurn(customerText: string, conversationId?: string) {
     credentials: { phoneNumberId: "test-phone-id", accessToken: "test-token" },
     recipientPhone: "573001112233",
   };
-  const reply = await generateReply(conversation.id, context, undefined, customerText);
+  const { text: reply } = await generateReply(conversation.id, context, undefined, customerText);
   return { conversation, reply };
 }
 
@@ -181,7 +181,7 @@ test("checkout blocked until color is asked: bot asks color before closing a sal
       credentials: { phoneNumberId: "test-phone-id", accessToken: "test-token" },
       recipientPhone: "573001112233",
     };
-    const firstReply = await generateReply(conversation.id, context, undefined, "Hola quiero comprar la diadema M4");
+    const { text: firstReply } = await generateReply(conversation.id, context, undefined, "Hola quiero comprar la diadema M4");
     const orderAfterFirstTurn = await prisma.order.findUnique({ where: { conversationId: conversation.id } });
     assert.equal(orderAfterFirstTurn, null, "must not close a sale before knowing which color");
     assert.match(firstReply, /color|rojo|amarillo|verde/i, "must ask about color, not proceed blindly");

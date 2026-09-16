@@ -166,15 +166,30 @@ function findBreakPoint(text: string, maxLen: number): number {
   return maxLen;
 }
 
-// Un mensaje largo se siente como un muro de texto. Se parte en dos envios (nunca a mitad de
+// Un mensaje largo se siente como un muro de texto. Se parte en varios envios (nunca a mitad de
 // palabra) con una pausa corta entre ellos - ver sendTextInChunks mas abajo.
+//
+// Defecto real corregido en la Fase B del plan de catalogo y medios (2026-09-16): partia UNA sola vez y
+// devolvia [first, rest] sin seguir, asi que el segundo trozo podia superar el limite igual. Medido en
+// produccion el 2026-09-15: un mensaje de 1.068 caracteres con el limite en 700 salio en dos partes, la
+// segunda de 368... y uno de 2.000 habria salido con una segunda parte de 1.300. Ahora se sigue
+// partiendo hasta que no quede nada por encima del limite. El catalogo ya no pasa por aca (sus bloques
+// los corta renderCatalog por categoria), esto es para la prosa normal.
 export function splitLongMessage(text: string, maxLen = MAX_MESSAGE_LENGTH): string[] {
-  if (text.length <= maxLen) return [text];
-  const breakPoint = findBreakPoint(text, maxLen);
-  const first = text.slice(0, breakPoint).trimEnd();
-  const rest = text.slice(breakPoint).trimStart();
-  if (!rest) return [first];
-  return [first, rest];
+  const chunks: string[] = [];
+  let rest = text;
+  while (rest.length > maxLen) {
+    const breakPoint = findBreakPoint(rest, maxLen);
+    const chunk = rest.slice(0, breakPoint).trimEnd();
+    const remainder = rest.slice(breakPoint).trimStart();
+    // findBreakPoint devuelve como minimo 1 caracter de avance (cae a maxLen si no encuentra corte),
+    // asi que el lazo siempre progresa; este chequeo es contra un trozo que quede vacio al recortarlo.
+    if (chunk) chunks.push(chunk);
+    if (!remainder) return chunks.length > 0 ? chunks : [text];
+    rest = remainder;
+  }
+  if (rest) chunks.push(rest);
+  return chunks.length > 0 ? chunks : [text];
 }
 
 const TYPING_DELAY_FLOOR_MS = 500;

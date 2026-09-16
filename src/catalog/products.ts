@@ -115,7 +115,7 @@ export async function getProductById(businessId: string, id: string) {
 // CategoryAlias in schema.prisma and attributeTaxonomy.ts. Shared by every caller that scores products
 // against a category word, so search_products/findConfidentProductMatch see the same synonyms
 // findProductsByAttributes already does (reliability plan Phase 3, item 4, 2026-09-13).
-async function loadCategoryAliasMap(businessId: string): Promise<Map<string, string>> {
+export async function loadCategoryAliasMap(businessId: string): Promise<Map<string, string>> {
   const aliasRows = await prisma.categoryAlias.findMany({ where: { businessId } });
   return new Map(aliasRows.map((a) => [a.normalizedSynonym, canonicalizeCategoryWord(a.canonical)]));
 }
@@ -165,7 +165,7 @@ export async function textMentionsConfiguredCategory(businessId: string, text: s
 // canonicalizeCategoryWord + aliasMap used by findProductsByAttributes, so a synonym like "reloj" for a
 // business whose real category is "Smartwatches" scores here too, not just in the dedicated attribute
 // filter (Phase 3, item 4).
-function relevanceScore(
+export function relevanceScore(
   tokens: string[],
   product: { name: string; description: string; category: string | null },
   categoryAliasMap: ReadonlyMap<string, string>
@@ -216,7 +216,7 @@ export async function searchProducts(businessId: string, query: string) {
 // Below this score, the only evidence for a match is a single incidental word shared with the
 // description (weight 1) - not enough to safely act on (send real photos, record a real order line).
 // A hit on the product's name or category (weight 2-3) is required to trust a single-best-guess pick.
-const MIN_CONFIDENT_SCORE = 2;
+export const MIN_CONFIDENT_SCORE = 2;
 
 export interface ProductMatchResult<T> {
   product: T | null;

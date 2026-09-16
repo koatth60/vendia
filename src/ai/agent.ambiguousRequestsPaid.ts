@@ -86,7 +86,7 @@ async function runTurnAfterHistory(turns: [("CUSTOMER" | "ASSISTANT"), string][]
     credentials: { phoneNumberId: "test-phone-id", accessToken: "test-token" },
     recipientPhone: "573001112233",
   };
-  const reply = await generateReply(conversation.id, context, undefined, lastCustomerText);
+  const { text: reply } = await generateReply(conversation.id, context, undefined, lastCustomerText);
   return { conversation, reply };
 }
 

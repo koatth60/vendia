@@ -1,6 +1,6 @@
 {
   "name": "catalogo pedido de nuevo con el historial ya envenenado",
-  "note": "Bloqueador de produccion (2026-09-15), seguimiento inmediato de f9b994b: el arreglo del catalogo no se ejecutaba. La instruccion de usar {{BLOQUE_CATALOGO}} viaja dentro de la `note` que devuelve list_all_products, asi que si el modelo no llama la herramienta nunca ve la instruccion - y un turno real de produccion donde el cliente pidio 'muestrame todo el catalogo completo con precios' quedo registrado con 1 sola llamada CHAT y cero tool calls: el modelo copio una lista inventada que ya venia en su propio historial. Este fixture reproduce esa condicion: el turno 0 deja en el historial una lista falsa escrita por el bot (los mismos productos inventados del incidente), y en el turno 1 el cliente vuelve a pedir el catalogo. Lo que prueba es que el motor FUERZA list_all_products para ese mensaje (expect.forcedTools, que es lo que no existia) y que el texto que recibe el cliente sale entero del catalogo sembrado, no del historial. Sin el arreglo no hay tool_choice, forcedTools queda vacio, la marca se borra por falta de datos y todos los productos reales faltan en la respuesta.",
+  "note": "Bloqueador de produccion (2026-09-15), seguimiento inmediato de f9b994b: el arreglo del catalogo no se ejecutaba. La instruccion de usar {{BLOQUE_CATALOGO}} viaja dentro de la `note` que devuelve list_all_products, asi que si el modelo no llama la herramienta nunca ve la instruccion - y un turno real de produccion donde el cliente pidio 'muestrame todo el catalogo completo con precios' quedo registrado con 1 sola llamada CHAT y cero tool calls: el modelo copio una lista inventada que ya venia en su propio historial. Este fixture reproduce esa condicion: el turno 0 deja en el historial una lista falsa escrita por el bot (los mismos productos inventados del incidente), y en el turno 1 el cliente vuelve a pedir el catalogo. Lo que prueba es que el motor FUERZA list_all_products para ese mensaje (expect.forcedTools, que es lo que no existia) y que el texto que recibe el cliente sale entero del catalogo sembrado, no del historial. Sin el arreglo no hay tool_choice, forcedTools queda vacio, la marca se borra por falta de datos y todos los productos reales faltan en la respuesta. ACTUALIZADO EN LA FASE B (2026-09-16): el forzado de tool_choice ya no es lo que sostiene este caso, y por eso forcedTools pasa a estar vacio en los dos turnos de listado. El alcance lo resuelve el servidor ANTES de llamar al modelo (resolveProductScope) y la lista la compone el servidor (renderCatalog), asi que ya no importa si el modelo llama la herramienta o no: los productos y los precios salen igual, de la base. Forzar una herramienta cuya salida ya no se usa solo gastaba una vuelta del lazo, y medido en produccion el 2026-09-15 el modelo no siempre honraba el forzado. Lo que este fixture sigue probando, y es lo que importa, es que el cliente recibe SOLO productos reales del catalogo sembrado y ni uno de los inventados que quedaron en el historial.",
   "seed": {
     "catalogName": "MAGByLizN"
   },
@@ -34,9 +34,7 @@
         }
       ],
       "expect": {
-        "forcedTools": [
-          "list_all_products"
-        ],
+        "forcedTools": [],
         "toolSequence": [
           "list_all_products"
         ],
@@ -51,7 +49,7 @@
           "Audífonos Xiaomi"
         ]
       },
-      "note": "El turno del incidente. La lista falsa ya esta en el historial: sin forzar la herramienta el modelo la copia y nunca ve la instruccion de la marca."
+      "note": "El turno del incidente. La lista falsa ya esta en el historial: sin forzar la herramienta el modelo la copia y nunca ve la instruccion de la marca. Fase B: la lista ya no depende de que el modelo llame la herramienta ni de que escriba la marca - el servidor la compone y la manda como mensajes propios. La lista falsa del historial no tiene por donde entrar."
     },
     {
       "customer": "y qué audífonos tienen?",
@@ -71,9 +69,7 @@
         }
       ],
       "expect": {
-        "forcedTools": [
-          "find_products_by_attributes"
-        ],
+        "forcedTools": [],
         "toolSequence": [
           "find_products_by_attributes"
         ],
@@ -93,7 +89,7 @@
           "Smartwatch V20 Caballero"
         ]
       },
-      "note": "Una lista FILTRADA tambien es una lista. Este es el camino mas transitado ('que relojes tienen' es mucho mas comun que 'muestrame todo el catalogo') y hasta ahora quedaba como prosa libre del modelo: find_products_by_attributes no devolvia la nota de la marca. Nota tambien la precedencia: el mensaje dice 'que tienen', que por si solo forzaria list_all_products, pero como ademas nombra una categoria configurada gana la busqueda acotada."
+      "note": "Una lista FILTRADA tambien es una lista. Este es el camino mas transitado ('que relojes tienen' es mucho mas comun que 'muestrame todo el catalogo') y hasta ahora quedaba como prosa libre del modelo: find_products_by_attributes no devolvia la nota de la marca. Nota tambien la precedencia: el mensaje dice 'que tienen', que por si solo forzaria list_all_products, pero como ademas nombra una categoria configurada gana la busqueda acotada. Fase B: 'audifonos' es una palabra de categoria real de este negocio, asi que el alcance resuelve al grupo entero de la categoria y no al producto que casualmente se llama 'Audifonos Bluetooth con parlante integrado'."
     }
   ]
 }

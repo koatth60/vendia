@@ -76,52 +76,7 @@ import { prisma } from "../db/client";
 import { getPresignedMediaUrl } from "../media/s3";
 import { recordOwnerMessage } from "../delivery/ownerLog";
 import { askOwnerToConfirmSale, describeCustomerForOwner } from "../whatsapp/ownerConfirmation";
-
-// WhatsApp sometimes fails to deliver/render an image if it's sent immediately after another one -
-// a short gap between consecutive media sends avoids that collision.
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-// Records each sent image/video as its own Message row (whatsappMessageId + relatedProductId), so that
-// when the customer later replies/quotes that specific WhatsApp message, the webhook can look up which
-// product it was and tell the model directly instead of the model having to guess ("¿cual de los dos?").
-async function sendMediaWithSpacing(
-  businessId: string,
-  credentials: WhatsappCredentials,
-  recipientPhone: string,
-  conversationId: string,
-  productId: string,
-  productName: string,
-  media: { type: string; url: string; s3Key: string }[]
-): Promise<void> {
-  for (let i = 0; i < media.length; i++) {
-    if (i > 0) await sleep(1200);
-    const item = media[i];
-    const mediaType = item.type === "IMAGE" ? "IMAGE" : "VIDEO";
-    const result = await sendToCustomer({
-      businessId,
-      conversationId,
-      credentials,
-      to: recipientPhone,
-      content: mediaType === "IMAGE" ? { kind: "image", url: item.url } : { kind: "video", url: item.url },
-    });
-    // Se propaga como antes: quien llama a esto necesita saber que la foto NO salio, porque si no el
-    // modelo sigue la conversacion como si el cliente ya la estuviera viendo.
-    if (!result.delivered) throw new Error(result.failure?.message ?? "No se pudo enviar el medio del producto");
-    const wamid = result.wamid;
-    await recordMessage(
-      businessId,
-      conversationId,
-      "ASSISTANT",
-      `[${mediaType === "IMAGE" ? "Foto" : "Video"} de ${productName}]`,
-      wamid || undefined,
-      { s3Key: item.s3Key, type: mediaType },
-      undefined,
-      productId
-    );
-  }
-}
+import { sendMediaWithSpacing } from "../whatsapp/productMedia";
 
 async function describeCustomer(customerId: string, recipientPhone: string): Promise<string> {
   const customer = await prisma.customer.findUnique({ where: { id: customerId } });
@@ -693,7 +648,13 @@ const REQUESTED_MEDIA_TYPES = new Map<string, "IMAGE" | "VIDEO">([
 // stock. Mismo patron que los otros bloques fijos: la lista la renderiza agent.ts desde estos mismos
 // datos, el modelo solo redacta alrededor. `products` de aca es lo que agent.ts lee para llenar la
 // marca (ver catalogListThisTurn).
-const CATALOG_LIST_NOTE = `No escribas vos los nombres, los precios ni el stock de estos productos: pone la marca ${CATALOG_BLOCK_MARKER} donde quieras que aparezca la lista y el sistema la reemplaza por el catalogo real (numerado) antes de enviar. Redacta solo alrededor. Los datos de esta lista igual te sirven para decidir y para responder sobre un producto puntual.`;
+const CATALOG_LIST_NOTE = `No escribas vos los nombres, los precios ni el stock de estos productos: pone la marca ${CATALOG_BLOCK_MARKER} donde quieras que aparezca la lista y el sistema la reemplaza por el catalogo real (numerado) antes de enviar. Redacta solo alrededor.`;
+// Fase B del plan de catalogo y medios (2026-09-16): la nota terminaba con "Los datos de esta lista
+// igual te sirven para decidir y para responder sobre un producto puntual". Esa frase era la que
+// autorizaba al modelo a contestar sobre un producto SIN llamar get_product_details - y get_product_details
+// era el unico camino de auto-envio de fotos que existia. Con la ficha de un producto puntual ahora
+// compuesta por el servidor (resolveProductScope + renderCatalog), esa autorizacion solo servia para
+// dejarlo describir de memoria un producto que nadie leyo de la base.
 
 function truncateForList(description: string): string {
   return description.length > LIST_DESCRIPTION_MAX_CHARS

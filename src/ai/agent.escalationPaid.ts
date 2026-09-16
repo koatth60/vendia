@@ -102,7 +102,7 @@ async function runTurnWithReply(customerText: string) {
     recipientPhone: "573001112233",
   };
 
-  const reply = await generateReply(conversation.id, context);
+  const { text: reply } = await generateReply(conversation.id, context);
   return { conversation, reply };
 }
 
@@ -202,7 +202,7 @@ test("bot shows a full order summary with the total and asks for confirmation be
       credentials: { phoneNumberId: "test-phone-id", accessToken: "test-token" },
       recipientPhone: "573001112233",
     };
-    const reply = await generateReply(conversation.id, context);
+    const { text: reply } = await generateReply(conversation.id, context);
 
     // The prompt (RESUMEN Y TOTAL ANTES DE PEDIR EL PAGO) requires showing the real price and asking for
     // confirmation - it never mandates the literal word "total" in the reply. A prior version of this

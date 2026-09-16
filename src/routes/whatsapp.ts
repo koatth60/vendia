@@ -38,6 +38,7 @@ import {
 } from "../conversation/service";
 import { consumeEscalatedTurn } from "../ai/requiredEffects";
 import { generateReply, generateClosingMessage, extractDeliveryDataFromAnswer, extractAddressFromAnswer } from "../ai/agent";
+import { sendCatalogBlocks } from "../whatsapp/catalogBlocks";
 import { analyzeCustomerImage } from "../ai/vision";
 import { transcribeAudio } from "../ai/transcription";
 import { checkPlanCap } from "../ai/usage";
@@ -454,7 +455,7 @@ async function runGenerateAndSend(conversationId: string, items: ReplyBurstItem[
   // de este negocio, no de un "Nequi" escrito a mano.
   const paymentExamples = await getPaymentExamples(business.id);
 
-  const reply = await generateReply(
+  const { text: reply, blocks: catalogBlocks } = await generateReply(
     conversationId,
     {
       businessId: business.id,
@@ -526,14 +527,26 @@ async function runGenerateAndSend(conversationId: string, items: ReplyBurstItem[
   // markCustomerMessageSeen en el handler del POST) cubre esta espera.
   await sleep(computeTypingDelayMs(formattedReply.length));
 
-  await sendToCustomer({
-    businessId: business.id,
-    conversationId,
-    credentials,
-    to: from,
-    content: { kind: "text", text: formattedReply },
-    recordAs: { text: formattedReply },
-  });
+  // Fase B del plan de catalogo y medios (2026-09-16): el modelo escribe SOLO la frase de introduccion.
+  // Puede quedar vacia si no escribio nada util (o si era solo una lista, que finalizeTurn le quita
+  // porque el bloque real la repite) - en ese caso no se manda un mensaje vacio, se va directo a los
+  // bloques, que son la respuesta de verdad.
+  if (formattedReply.trim()) {
+    await sendToCustomer({
+      businessId: business.id,
+      conversationId,
+      credentials,
+      to: from,
+      content: { kind: "text", text: formattedReply },
+      recordAs: { text: formattedReply },
+    });
+  }
+
+  // Y despues los mensajes que compuso el servidor: nombres, precios y fotos leidos de la base, en el
+  // orden y con el corte que decidio renderCatalog. Nada de esto pasa por el modelo.
+  if (catalogBlocks.length > 0) {
+    await sendCatalogBlocks({ businessId: business.id, conversationId, credentials, to: from, blocks: catalogBlocks });
+  }
 }
 
 const replyBurstBuffer = createBurstBuffer<ReplyBurstItem>(
