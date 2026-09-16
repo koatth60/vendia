@@ -857,6 +857,10 @@
                     <svg class="btn-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5 9.5 18 20 6"></path></svg>
                     <span class="btn-label">Cerrar venta</span>
                   </button>
+                  <button class="btn-ghost mobile-icon-btn" type="button" id="agreed-price-btn" onclick="openAgreedPriceForm()" title="Precio especial" aria-label="Precio especial">
+                    <svg class="btn-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4.5v15"></path><path d="M15.8 8.1c-.6-1.2-2-1.9-3.8-1.9-2.2 0-3.6 1-3.6 2.6 0 1.7 1.4 2.3 3.6 2.8 2.4.5 4 1.2 4 3.1 0 1.8-1.6 2.9-4 2.9-2 0-3.5-.8-4.1-2.2"></path></svg>
+                    <span class="btn-label">Precio especial</span>
+                  </button>
                   <button class="btn-ghost mobile-icon-btn" id="modal-handoff-btn" onclick="toggleHandoff()">
                     <svg class="btn-icon icon-take-control" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8.3" r="3.1"></circle><path d="M5.3 19.3c0-3.5 3-5.8 6.7-5.8s6.7 2.3 6.7 5.8"></path></svg>
                     <svg class="btn-icon icon-return-bot" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" hidden><rect x="4" y="7.5" width="16" height="12" rx="3.5"></rect><path d="M12 7.5V4"></path><path d="M9 13h.01M15 13h.01"></path></svg>
@@ -873,6 +877,21 @@
                    "Confirmar venta" quedaba tapado fuera de pantalla y solo se veía haciendo zoom
                    out. Ahora el formulario scrollea solo, y Cancelar/Confirmar viven arriba,
                    pegados (sticky), así nunca dependen de cuánto creció el resto. -->
+              <!-- EL PRECIO ACORDADO (ONIX-PLAN-CATALOGO-Y-MEDIOS.md, seccion 12) - el camino sin
+                   modelo. La dueña fija aquí el precio de la venta abierta sin pasar por el chat: los
+                   productos los pone el servidor (la venta que ya tiene anotada), el panel solo pone el
+                   número, y el servidor lo valida con la misma función que el camino de WhatsApp. -->
+              <div id="agreed-price-form" style="display:none; max-height:70vh; overflow-y:auto; padding:14px 16px; border-bottom:1px solid var(--border); background:var(--bg);">
+                <div class="actions-row" style="position:sticky; top:0; margin:-14px -16px 10px; padding:10px 16px; background:var(--bg); border-bottom:1px solid var(--border); z-index:1;">
+                  <button class="btn-secondary" type="button" onclick="closeAgreedPriceForm()">Cancelar</button>
+                  <button class="btn-primary" type="button" id="agreed-price-save-btn" onclick="saveAgreedPrices()">Guardar precios</button>
+                </div>
+                <div id="agreed-price-status" style="font-size:12px; margin-bottom:10px;"></div>
+                <div id="agreed-price-rows"></div>
+                <div style="font-size:12px; color:var(--onix-muted); margin-top:10px; line-height:1.45;">
+                  El precio que guardes acá es el que Onix le cobra a este cliente: reemplaza al del catálogo en el resumen y en el pedido. Dejá el campo vacío para volver al precio de catálogo.
+                </div>
+              </div>
               <div id="close-sale-form" style="display:none; max-height:70vh; overflow-y:auto; padding:14px 16px; border-bottom:1px solid var(--border); background:var(--bg);">
                 <div class="actions-row" style="position:sticky; top:0; margin:-14px -16px 10px; padding:10px 16px; background:var(--bg); border-bottom:1px solid var(--border); z-index:1;">
                   <button class="btn-secondary" type="button" onclick="closeSaleFormCancel()">Cancelar</button>

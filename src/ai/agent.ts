@@ -31,6 +31,7 @@ import { findShadowCatalogFindings, verifyAgainstCatalog, serializeFinding } fro
 import { listActivePaymentMethods } from "../catalog/paymentMethods";
 import { buildCheckoutState } from "../orders/checkoutStateFromDb";
 import { getCustomerCommerceState } from "../orders/customerCommerceState";
+import { getAgreedPriceFacts } from "../orders/agreedPrices";
 import {
   getSaleState,
   formatSaleStateForPrompt,
@@ -939,6 +940,15 @@ export async function generateReply(
     currency: negocio.currency,
     locale: negocio.locale,
   });
+
+  // EL PRECIO ACORDADO (2026-09-16). Los descuentos que la duena autorizo para esta venta, leidos de la
+  // base antes de la primera llamada al modelo, igual que los pedidos de arriba. El disparador es un
+  // SELECT ("esta conversacion tiene precios acordados"), nunca una lectura de lo que escribio nadie. Sin
+  // precios acordados no sale ningun mensaje, asi que una conversacion normal no paga un solo token.
+  const agreedPriceFacts = await getAgreedPriceFacts(context.businessId, conversationId, {
+    currency: negocio.currency,
+    locale: negocio.locale,
+  });
   // Herramientas nuevas solo visibles (y llamables) para un negocio con la bandera activa - el resto no
   // paga el costo de tokens de un tool que no puede usar. Fase 11: los ejemplos de canal de pago que
   // traen cuatro de sus descripciones son los metodos reales de ESTE negocio, no "Nequi" para todos.
@@ -994,6 +1004,21 @@ export async function generateReply(
               `PEDIDOS DE ESTE CLIENTE, leidos de la base. Estan TODOS los que tiene con este negocio, ` +
               `incluidos los que abrio en otras conversaciones: son los unicos que existen para el.\n\n` +
               JSON.stringify(commerceState.pedidos),
+          },
+        ]
+      : []),
+    // EL PRECIO ACORDADO: dato estructurado, sin ninguna directiva alrededor - misma forma que los
+    // pedidos de arriba y que productFacts. El precio ya sale de la base en el resumen y en el cierre
+    // (ver resolveOrderItems y getSaleState); esto es para que el agente pueda CONTARSELO al cliente sin
+    // tener que acordarse de lo que dijo la duena en el chat, que es exactamente lo que fallo.
+    ...(agreedPriceFacts.length > 0
+      ? [
+          {
+            role: "system" as const,
+            content:
+              `PRECIOS ACORDADOS CON EL DUEÑO PARA ESTE CLIENTE, leidos de la base. Para estos productos ` +
+              `mandan sobre el precio de lista y son los unicos que valen en esta venta:\n\n` +
+              JSON.stringify(agreedPriceFacts),
           },
         ]
       : []),
@@ -1734,7 +1759,10 @@ export async function generateReply(
   // DECISION QUE ESTA FASE LE QUITA AL MODELO: que nombres y que precios llegan al cliente. Hasta hoy
   // salia lo que el modelo escribiera, sin verificar. Desde aca sale lo que existe en la base, o no sale.
   async function enforceAuthoredCatalog(firstAttempt: string): Promise<{ text: string; author: "modelo" | "servidor" }> {
-    const opts = { locale: negocio.locale, currency: negocio.currency };
+    // conversationId: el precio acordado con la duena para ESTA venta es un dato real de la base y tiene
+    // que pasar la verificacion igual que un precio de catalogo. Sin esto un descuento legitimo caia al
+    // fallback y el cliente recibia la ficha del servidor con el precio de lista.
+    const opts = { locale: negocio.locale, currency: negocio.currency, conversationId };
     let text = firstAttempt;
     let check = await verifyAgainstCatalog(context.businessId, [text], opts);
     if (check.verificado && check.findings.length === 0) return { text, author: "modelo" };
@@ -1833,7 +1861,7 @@ export async function generateReply(
     // outgoingBlocks, no catalogBlocks: con la marca puesta el bloque ya esta adentro de `text` y
     // contarlo de nuevo duplicaria cada hallazgo.
     [text, ...outgoingBlocks.map((b) => b.text)],
-    { locale: negocio.locale, currency: negocio.currency }
+    { locale: negocio.locale, currency: negocio.currency, conversationId }
   );
 
   // La lista que el cliente REALMENTE vio, en el orden en que salio numerada: es contra esto que el

@@ -155,6 +155,28 @@ revisar el resto de las descripciones de ese negocio por el mismo pegado.
 
 ---
 
+## 5-bis. Dos límites conocidos del precio acordado (2026-09-16)
+
+Los dos se dejaron así a propósito y ninguno bloquea la fase. Van anotados para no
+redescubrirlos.
+
+1. **La primera pregunta de precio le llega a la dueña en una sola línea.** Sale por el canal de
+   alerta al dueño (`sendOwnerAlert`), que la manda como plantilla aprobada, y el cuerpo de una
+   plantilla de Meta rechaza saltos de línea: `src/whatsapp/client.ts` los colapsa a espacios
+   (error #132018). La lista numerada de productos con su precio queda corrida en un renglón. Las
+   respuestas siguientes del servidor (repregunta, propuesta, confirmación) sí van como texto plano
+   y conservan el formato. Arreglarlo bien es darle a esa alerta su propia plantilla con varios
+   parámetros, o mandar la plantilla corta y el detalle como texto aparte cuando la ventana esté
+   abierta.
+
+2. **El panel muestra la venta abierta, y "abierta" quiere decir `SaleState.items`.** Eso lo
+   escribe el servidor cuando corre `set_order_item` o `show_order_summary`; antes del primer
+   resumen, una conversación no tiene ítems anotados y el bloque de precio especial sale vacío.
+   Para ese caso el camino que ya existe es "Cerrar venta", que arma el pedido a mano. Bajar el
+   momento en que la venta queda anotada es un cambio de otra fase.
+
+---
+
 ## 6. Cerrado recientemente
 
 Para no volver a abrirlos por error.
@@ -165,3 +187,5 @@ Para no volver a abrirlos por error.
 - **2026-09-16** — El reloj de los recordatorios: `ownerReminderMinutes` se cumple de verdad
   y un despliegue ya no atrasa nada (`301ee87`).
 - **2026-09-16** — Tope de subida alineado con los límites reales de WhatsApp.
+- **2026-09-16** — El precio acordado: un descuento que la dueña autoriza es un dato en la base
+  y es el que se cobra, no una frase en el chat que el agente tenía que recordar.

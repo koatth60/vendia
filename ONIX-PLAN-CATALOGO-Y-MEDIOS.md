@@ -484,3 +484,91 @@ volver:
    donde la pregunta es literalmente "¿qué pedido salió de esta conversación?".
 
 Ningún otro lugar del turno mira pedidos por conversación.
+
+## 12. El precio acordado (2026-09-16) — el descuento que la dueña autoriza es un dato, no una frase
+
+### El defecto, medido en producción
+
+Conversación `cmu4gykpm003le82keve7ngck`, negocio MAGByLizN, 2026-09-16.
+
+- 22:57:10 la clienta: "Y depronto tiene algún descuento para los dos".
+- 22:57:23 el agente: "Ya le consulté al equipo sobre el descuento, Mary".
+- 22:58:12 **la dueña, escribiendo en el chat**: "Te dejaría los dos en 135 mil / Pro 3 70 / Alexa $65".
+- 23:03:31 el agente: resumen del pedido con **$75.000 y $70.000** — los precios del catálogo.
+- 23:04:28 la clienta insiste; 23:04:41 el agente pide disculpas y **vuelve a mandar $75.000**.
+- 23:05:26 la clienta termina dictándole los precios ella misma.
+
+`SaleState` de esa conversación sigue hoy con `unitPrice` 75000 y 70000. **Causa raíz: un precio
+acordado no existía en la base.** El descuento vivía únicamente como texto en el chat, así que el
+agente usaba lo único que tenía. Es el mismo defecto de todo el proyecto: un hecho que está en la
+prosa y no en la base.
+
+### Qué se construyó
+
+**`AgreedPrice`** (`src/orders/agreedPrices.ts`, tabla nueva): un precio por conversación, producto y
+variante. Mientras exista esa fila, ESE es el precio del ítem — el catálogo pasa a ser el valor por
+defecto, no la verdad. Se aplica al **leer** (`getSaleState`, `resolveOrderItems`), no al escribir,
+porque la dueña puede autorizar el descuento después de que el ítem ya estaba en el pedido, que es
+exactamente lo que pasó.
+
+**La pregunta lleva las ranuras adentro.** `ask_owner_about_price` (tools.ts) abre una
+`PendingOwnerQuestion` de `kind PRICE` cuyo `payload` trae los ítems exactos y su precio de hoy,
+escritos por el servidor desde `SaleState.items` (o, si no hay venta anotada, desde
+`resolveOrderItems` contra el catálogo real). El modelo elige sobre qué productos se pregunta y
+nunca propone ni acepta un número.
+
+**La interpretación produce una PROPUESTA, nunca un precio vigente.** La respuesta de la dueña se
+resuelve contra N ranuras: un número por ítem, en el orden en que se numeraron. No es lectura libre
+de prosa, es llenar un formulario que el servidor mismo emitió. Y aun así no escribe nada: el
+servidor le devuelve la propuesta ya formateada ("¿Confirmás: AIRPODS PRO 3 $70.000...?") y recién
+con su "si" se escribe en `AgreedPrice`.
+
+**Cuando no cierra, no se escribe nada.** Cantidad de números distinta de la cantidad de ítems,
+cualquier precio menor o igual a cero, o cualquier precio mayor al de catálogo: el servidor rechaza
+todo el conjunto y vuelve a preguntar con formato explícito. Nunca corrige, nunca elige cuáles
+números eran los precios. El mensaje real de la dueña trae **cuatro** números (135, 3, 70, 65) para
+dos ranuras, así que cae acá: el servidor repregunta en vez de adivinar. Medido con el defecto
+reintroducido, adivinar "los últimos N" convierte "Pro 3 70 / Alexa $65" en **$70 y $65** —setenta
+pesos— y el techo contra el catálogo lo acepta sin chistar.
+
+**Un precio dicho por el CLIENTE nunca vale.** Requisito absoluto del dueño del negocio. La tabla
+tiene exactamente dos escritores y los dos son la dueña: la confirmación explícita de una pregunta
+de precio (`handleOwnerReply`) y el panel. No existe camino desde el mensaje de un cliente hasta
+`AgreedPrice`, y hay prueba que lo fija.
+
+**La verificación contra el catálogo lo acepta.** `loadCatalogFacts` recibe la conversación y suma
+los precios acordados al conjunto válido. Sin eso, la escalera de un solo autor (sección 11) marcaba
+un descuento legítimo como precio inexistente y el turno caía al bloque con el precio de lista.
+
+**El fallback sin modelo adentro.** Dos, y ninguno tiene un modelo ni una prosa adentro: el aviso al
+cliente lo compone el servidor con las cifras que acaba de escribir (corre siempre, también cuando
+el turno del agente anduvo bien), y la dueña puede fijar el precio desde el panel sobre la venta
+abierta —`GET`/`PUT /admin/api/conversations/:id/agreed-prices`, botón "Precio especial" en la vista
+de conversación— sin pasar por el chat. El panel usa **la misma función** de validación que el
+camino de WhatsApp y tampoco puede fijarle precio a un producto que no esté en la venta abierta.
+
+### Qué decisión pierde el modelo
+
+**Qué precio se le cobra al cliente.** Hasta hoy salía de lo que el modelo recordara de la
+conversación — por eso el resumen de las 23:03 llevaba los precios de lista aunque la dueña hubiera
+autorizado otros cuarenta minutos antes. Desde acá sale de la base: precio acordado si existe,
+precio de catálogo si no, y nada más. De paso, la rama sin `saleStateEnabled` de
+`show_order_summary` dejó de pedirle al modelo que COPIE las cifras y pasa a usar
+`{{BLOQUE_RESUMEN}}`, igual que la otra: qué cifra se escribe deja de ser una decisión del modelo en
+los **dos** caminos.
+
+### La fila de la tabla de efectos requeridos
+
+| Efecto | Disparador | Admisible |
+|---|---|---|
+| Precio autorizado por la dueña → cobrado a ese cliente | la confirmación de una `PendingOwnerQuestion` de `kind PRICE`, que es un evento estructurado sobre una fila de la base, nunca prosa | **Sí, las tres.** Disparador determinista (un `SELECT` sobre la pregunta abierta y su `payload`, más de qué teléfono vino el mensaje); verificable con una consulta (`AgreedPrice` existe o no existe); y con fallback sin modelo (el panel, más el aviso al cliente compuesto por el servidor). |
+
+**Lo que NO entra a la tabla, a propósito.** "El cliente pidió un descuento → existe una pregunta de
+precio" **no** es admisible: ese disparador es prosa del cliente y sería el guard de clase D que la
+Fase 5 del plan maestro vino a borrar. Por eso el agente sigue decidiendo *cuándo* preguntar, con su
+herramienta, y si no la llama, el comportamiento es exactamente el de hoy. La garantía no está en
+que pregunte: está en que, una vez que el precio existe, sale de la base y de ningún otro lado.
+
+### Prompt
+
+`src/ai/prompts/systemPrompt.ts`: 537 → 534 líneas. Ni una agregada.

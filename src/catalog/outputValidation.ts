@@ -2,6 +2,7 @@ import { prisma } from "../db/client";
 import { formatPrice } from "../config/money";
 import { tokenize } from "../search/text";
 import { startsAsNumberedItem, stripPresentationDecorations } from "./presenter";
+import { getAgreedPrices } from "../orders/agreedPrices";
 
 // Pieza 5 del plan de catalogo y medios (ONIX-PLAN-CATALOGO-Y-MEDIOS.md), EN MODO SOMBRA.
 //
@@ -256,7 +257,17 @@ export function validateAgainstCatalog(
  * reales del negocio y aparecen en lineas con negrita ("*Envío a Bogotá* $12.000"). Marcarlas seria un
  * falso positivo puro.
  */
-export async function loadCatalogFacts(businessId: string, locale: string, currency: string): Promise<CatalogFacts> {
+export async function loadCatalogFacts(
+  businessId: string,
+  locale: string,
+  currency: string,
+  // EL PRECIO ACORDADO (2026-09-16). Un descuento que la duena autorizo es un dato REAL del negocio, tan
+  // leido de la base como el precio de catalogo - pero no esta en Product.price, asi que sin esto la
+  // verificacion de 7efb9f0 marcaba "$70.000" como precio inexistente y un turno legitimo caia al
+  // fallback. Se pasa la conversacion, no una lista de numeros: los precios acordados son de ESTA venta
+  // y no valen para otra.
+  conversationId?: string
+): Promise<CatalogFacts> {
   const [products, shippingRates] = await Promise.all([
     prisma.product.findMany({
       where: { businessId, active: true },
@@ -277,6 +288,9 @@ export async function loadCatalogFacts(businessId: string, locale: string, curre
 
   for (const product of products) addPrice(product.price, product.currency || currency);
   for (const rate of shippingRates) addPrice(rate.cost, currency);
+  if (conversationId) {
+    for (const agreed of (await getAgreedPrices(conversationId)).values()) addPrice(agreed.unitPrice, agreed.currency || currency);
+  }
 
   return {
     priceDigits,
@@ -294,11 +308,11 @@ export async function loadCatalogFacts(businessId: string, locale: string, curre
 export async function findShadowCatalogFindings(
   businessId: string,
   texts: readonly string[],
-  opts: { locale: string; currency: string }
+  opts: { locale: string; currency: string; conversationId?: string }
 ): Promise<CatalogFinding[]> {
   try {
     if (!texts.some((text) => collectCatalogClaims(text).length > 0)) return [];
-    const facts = await loadCatalogFacts(businessId, opts.locale, opts.currency);
+    const facts = await loadCatalogFacts(businessId, opts.locale, opts.currency, opts.conversationId);
     return validateAgainstCatalog(texts, facts);
   } catch (error) {
     // Best-effort igual que recordAgentTurn: en modo sombra esta pieza no puede romper un turno que ya
@@ -321,7 +335,7 @@ export async function findShadowCatalogFindings(
 export async function verifyAgainstCatalog(
   businessId: string,
   texts: readonly string[],
-  opts: { locale: string; currency: string }
+  opts: { locale: string; currency: string; conversationId?: string }
 ): Promise<{ verificado: boolean; findings: CatalogFinding[] }> {
   try {
     // Un texto sin una sola cifra con "$" no afirma ningun precio y no tiene nombre en posicion de
@@ -329,7 +343,7 @@ export async function verifyAgainstCatalog(
     if (!texts.some((text) => collectCatalogClaims(text, { everyPrice: true }).length > 0)) {
       return { verificado: true, findings: [] };
     }
-    const facts = await loadCatalogFacts(businessId, opts.locale, opts.currency);
+    const facts = await loadCatalogFacts(businessId, opts.locale, opts.currency, opts.conversationId);
     return { verificado: true, findings: validateAgainstCatalog(texts, facts, { everyPrice: true }) };
   } catch (error) {
     console.error("No se pudo verificar la salida contra el catalogo:", error);

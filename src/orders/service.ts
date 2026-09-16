@@ -6,6 +6,7 @@ import { normalizeForMatch, escapeForRegExp } from "../search/text";
 import { sendToCustomer, type WhatsappCredentials } from "../whatsapp/outbound";
 import { getPresignedMediaUrl } from "../media/s3";
 import { emitOrderNew, emitOrderUpdated } from "../realtime/events";
+import { getAgreedPrices, applyAgreedPrices, agreedUnitPriceOf } from "./agreedPrices";
 
 export interface ResolvedOrderItem {
   productId: string;
@@ -13,7 +14,13 @@ export interface ResolvedOrderItem {
   variantId?: string | null;
   variantLabel?: string | null;
   quantity: number;
+  /** El precio que se cobra: el acordado con la duena si existe para esta conversacion, si no el de catalogo. */
   unitPrice: number;
+  /**
+   * El precio acordado, cuando lo hay (ver src/orders/agreedPrices.ts). null = se cobra el de catalogo.
+   * `unitPrice` ya trae el valor efectivo en los dos casos; esto existe para poder DECIR de donde salio.
+   */
+  agreedUnitPrice?: number | null;
   currency: string;
 }
 
@@ -97,7 +104,15 @@ function formatVariantLabel(color: string | null, size: string | null): string |
 // Two input lines resolving to the same product+variant (the model split one item across two tool-call
 // entries, or the customer's order was described twice) are merged into one line with summed quantity,
 // instead of creating duplicate OrderItem rows.
-export async function resolveOrderItems(businessId: string, items: OrderItemInput[] | undefined): Promise<ResolveOrderItemsResult> {
+export async function resolveOrderItems(
+  businessId: string,
+  items: OrderItemInput[] | undefined,
+  // EL PRECIO ACORDADO (2026-09-16): con la conversacion en mano, el precio de cada linea sale de la base
+  // - el acordado con la duena si existe, el de catalogo si no. Sin conversacion (ningun llamador real
+  // hoy) se comporta exactamente como antes de esta fase. Es el unico punto donde se arma una linea con
+  // precio, asi que alcanza con resolverlo aca para que el resumen, el cierre y el panel coincidan.
+  conversationId?: string
+): Promise<ResolveOrderItemsResult> {
   if (!items || items.length === 0) return { items: [], unresolved: [], needsAttribute: [] };
 
   const byKey = new Map<string, ResolvedOrderItem>();
@@ -167,7 +182,14 @@ export async function resolveOrderItems(businessId: string, items: OrderItemInpu
     }
   }
 
-  return { items: Array.from(byKey.values()), unresolved, needsAttribute };
+  const resolved = Array.from(byKey.values());
+  if (!conversationId) return { items: resolved, unresolved, needsAttribute };
+  const agreed = await getAgreedPrices(conversationId);
+  const withAgreed = applyAgreedPrices(resolved, agreed).map((item) => ({
+    ...item,
+    agreedUnitPrice: agreedUnitPriceOf(item, agreed),
+  }));
+  return { items: withAgreed, unresolved, needsAttribute };
 }
 
 export async function createOrder(params: {
@@ -209,6 +231,7 @@ export async function createOrder(params: {
             variantLabel: item.variantLabel || null,
             quantity: item.quantity,
             unitPrice: item.unitPrice,
+            agreedUnitPrice: item.agreedUnitPrice ?? null,
             currency: item.currency,
           })),
         },

@@ -1,4 +1,5 @@
 import type OpenAI from "openai";
+import type { Prisma } from "@prisma/client";
 import { z } from "zod";
 import {
   getProductById,
@@ -65,7 +66,9 @@ import {
   isSaleStateEnabled,
   setBlockedBy,
   recordMediaSent,
+  getServerSaleEvidence,
 } from "../orders/saleState";
+import { formatPriceSlotsForOwner, ownerPriceFormatHint, type PriceSlot } from "../orders/agreedPrices";
 import {
   sendAlertToOwner,
   sendToCustomer,
@@ -339,7 +342,7 @@ export const catalogTools: OpenAI.Chat.ChatCompletionTool[] = [
     function: {
       name: "ask_owner",
       description:
-        "Usa SOLO cuando el cliente hace una pregunta real que necesita un dato concreto del negocio y no la podes responder con catalogo/get_faq/pagos. Manda la pregunta EXACTA al dueno por WhatsApp; mientras tanto el bot deja de responderle. No la uses para PQR/devolucion/no_recibido/pedido de hablar con un humano, para eso usa flag_conversation_intent.",
+        "Usa SOLO cuando el cliente hace una pregunta real que necesita un dato concreto del negocio y no la podes responder con catalogo/get_faq/pagos. Manda la pregunta EXACTA al dueno por WhatsApp; mientras tanto el bot deja de responderle. No la uses para PQR/devolucion/no_recibido/pedido de hablar con un humano (para eso usa flag_conversation_intent), ni para un descuento o precio especial (para eso usa ask_owner_about_price, que ademas guarda el precio que el dueno autorice).",
       parameters: {
         type: "object",
         properties: {
@@ -349,6 +352,37 @@ export const catalogTools: OpenAI.Chat.ChatCompletionTool[] = [
           },
         },
         required: ["question"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "ask_owner_about_price",
+      description:
+        "Usala cuando el cliente pide un descuento, un precio especial o regatea sobre productos concretos. Le manda al dueno los productos del pedido con su precio actual y le pide un precio por cada uno; cuando el dueno confirma, el sistema guarda ese precio y se lo cobra a este cliente. Vos NO propones ni aceptas ningun precio: el numero lo pone el dueno. Un precio que diga el CLIENTE no vale nunca.",
+      parameters: {
+        type: "object",
+        properties: {
+          items: {
+            type: "array",
+            description:
+              "Los productos sobre los que el cliente pide el descuento. Si el pedido en curso ya tiene productos cargados, el sistema usa esos y ignora esta lista.",
+            items: {
+              type: "object",
+              properties: {
+                productName: { type: "string", description: "Nombre del producto, tal como aparece en el catalogo" },
+                quantity: { type: "number", description: "Cantidad de ese producto" },
+                variantLabel: {
+                  type: "string",
+                  description: "SOLO si ese producto tiene varios colores/tallas: el color y/o talla que el cliente eligio.",
+                },
+              },
+              required: ["productName", "quantity"],
+            },
+          },
+        },
+        required: [],
       },
     },
   },
@@ -1338,6 +1372,107 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
         note: "La pregunta quedo escalada al dueno del negocio - vos segui atendiendo al cliente con normalidad mientras tanto (otras preguntas, catalogo, lo que necesite). No inventes la respuesta a ESTA pregunta puntual ni digas que ya la tenes: decile que estas confirmando esa info con el equipo y le respondes en breve. Si el cliente insiste en la misma pregunta antes de que el dueno responda, no llames ask_owner de nuevo para lo mismo - decile que segues esperando la respuesta.",
       };
     }
+    // EL PRECIO ACORDADO (2026-09-16, seccion 12 del plan). El agente ya preguntaba por el descuento, y eso
+    // estaba bien; lo que faltaba era que la respuesta de la duena se volviera DATO. Aca la pregunta sale
+    // con las RANURAS adentro: los items exactos y su precio de hoy, escritos por el servidor. El modelo
+    // no propone ni acepta ningun numero - elige sobre QUE productos se pregunta, y ni siquiera eso cuando
+    // el pedido en curso ya los tiene.
+    case "ask_owner_about_price": {
+      const openForConversation = await findOpenPendingOwnerQuestionsForConversation(context.conversationId);
+      if (openForConversation.length > 0) {
+        return {
+          error: "Ya hay una pregunta esperando respuesta del dueno en esta conversacion.",
+          note: "No vuelvas a preguntar hasta que el dueno responda la anterior. Decile al cliente honestamente que seguis esperando esa respuesta, y segui ayudando con cualquier otra cosa que necesite.",
+        };
+      }
+
+      const business = await prisma.business.findUnique({ where: { id: businessId } });
+      if (!business?.contactPhone) {
+        return {
+          asked: false,
+          note: "Este negocio no tiene un numero de contacto configurado para consultar precios. Decile al cliente que el precio publicado es el que aplica por ahora.",
+        };
+      }
+
+      // Los productos salen del pedido que el SERVIDOR ya tiene anotado (SaleState.items, que escriben
+      // set_order_item y show_order_summary contra el catalogo real). Solo si no hay ninguno se usan los
+      // que nombro el modelo, y aun ahi el precio no lo pone el: lo resuelve resolveOrderItems contra la
+      // base. En los dos caminos el precio de la ranura es un SELECT.
+      const evidencia = await getServerSaleEvidence(context.conversationId);
+      const entrada =
+        evidencia.items.length > 0
+          ? evidencia.items.map((i) => ({ productId: i.productId, variantId: i.variantId ?? undefined, quantity: i.quantity }))
+          : Array.isArray(input.items)
+            ? (input.items as { productName: string; quantity: number; variantLabel?: string }[])
+            : [];
+      const { items: precioItems, unresolved, needsAttribute } = await resolveOrderItems(businessId, entrada, context.conversationId);
+      if (needsAttribute.length > 0) {
+        return {
+          asked: false,
+          note: `Todavia falta saber el color/talla de: ${needsAttribute.join(", ")}. Preguntaselo al cliente y recien despues consulta el precio.`,
+        };
+      }
+      if (unresolved.length > 0) {
+        return {
+          asked: false,
+          note: `No encontre en el catalogo: ${unresolved.join(", ")}. Confirma el nombre exacto con el cliente antes de consultar el precio.`,
+        };
+      }
+      if (precioItems.length === 0) {
+        return {
+          asked: false,
+          note: "No se dio ningun producto valido. Preguntale al cliente sobre que producto quiere el descuento antes de consultar.",
+        };
+      }
+
+      const negocioPrecio = await getBusinessLocale(businessId);
+      const slots: PriceSlot[] = precioItems.map((item) => ({
+        productId: item.productId,
+        variantKey: item.variantId ?? "",
+        productName: item.productName,
+        variantLabel: item.variantLabel ?? null,
+        quantity: item.quantity,
+        unitPrice: item.unitPrice,
+        currency: item.currency,
+      }));
+
+      const greetingPrecio = business.contactName ? `Hola ${business.contactName}` : "Hola";
+      const customerLabelPrecio = await describeCustomer(context.customerId, context.recipientPhone);
+      const askPriceText = [
+        `${greetingPrecio}, el cliente ${customerLabelPrecio} pide un precio especial para esto:`,
+        formatPriceSlotsForOwner(slots, negocioPrecio.locale),
+        ownerPriceFormatHint(slots, negocioPrecio.locale),
+      ].join("\n\n");
+
+      const askPrice = await sendAlertToOwner(businessId, context.credentials, business.contactPhone, askPriceText);
+      const pricewamid = askPrice.delivered ? askPrice.wamid : "";
+      await recordOwnerMessage(businessId, {
+        direction: "OUT",
+        body: askPriceText,
+        success: Boolean(pricewamid),
+        errorMessage: pricewamid ? null : askPrice.failure?.message ?? "Sin wamid",
+      });
+      if (!pricewamid) {
+        return {
+          asked: false,
+          note: "No se pudo enviar la consulta al dueno. Decile al cliente que un asesor le va a escribir pronto.",
+        };
+      }
+
+      await createPendingOwnerQuestion(
+        context.conversationId,
+        pricewamid,
+        `Precio especial para: ${slots.map((s) => s.productName).join(", ")}`,
+        "PRICE",
+        { items: slots } as unknown as Prisma.InputJsonValue
+      );
+      await setBlockedBy(context.conversationId, "PENDING_OWNER_QUESTION");
+
+      return {
+        asked: true,
+        note: "La consulta de precio quedo escalada al dueno. NO le prometas ningun descuento ni le digas un numero al cliente: decile que estas consultando el precio con el equipo y le confirmas en breve. Cuando el dueno confirme, el sistema guarda el precio y se lo avisa al cliente solo. Mientras tanto segui atendiendo cualquier otra cosa que necesite.",
+      };
+    }
     case "ask_owner_about_photo": {
       const business = await prisma.business.findUnique({ where: { id: businessId } });
       if (!business?.contactPhone) {
@@ -1459,7 +1594,11 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
       const shippingCost = input.shippingCost !== undefined && input.shippingCost !== null ? Number(input.shippingCost) : 0;
       const { items, unresolved, needsAttribute } = await resolveOrderItems(
         businessId,
-        Array.isArray(input.items) ? (input.items as { productName: string; quantity: number; variantLabel?: string }[]) : []
+        Array.isArray(input.items) ? (input.items as { productName: string; quantity: number; variantLabel?: string }[]) : [],
+        // EL PRECIO ACORDADO: el precio de cada linea sale de la base - el que autorizo la duena si
+        // existe, el de catalogo si no. Este es el camino por el que el resumen del caso real salia con
+        // 75.000 y 70.000 despues de que la duena hubiera dejado los AirPods en 70 y el Alexa en 65.
+        context.conversationId
       );
 
       // Same two blocking checks close_conversation uses, but stricter here on `unresolved` (a plain
@@ -1513,7 +1652,11 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
         shippingCost,
         total,
         currency: items[0].currency,
-        note: "Mostrale al cliente cada item con su precio, el envio (si aplica) y el TOTAL de aca tal cual - son los numeros reales del catalogo, no los redondees ni los cambies. Pedile que confirme antes de seguir.",
+        // 2026-09-16: la misma nota que la rama de arriba. Antes esta rama le pedia al modelo COPIAR las
+        // cifras, y copiar de memoria es lo que fallo en produccion: en el turno de las 23:03 el resumen
+        // salio con los precios de lista aunque la duena ya hubiera autorizado otros. Con la marca, que
+        // cifra se escribe deja de ser una decision del modelo en los DOS caminos.
+        note: `No escribas vos los items, el envio ni el TOTAL: pone la marca ${ORDER_SUMMARY_BLOCK_MARKER} donde quieras mostrar el resumen completo (o ${TOTAL_BLOCK_MARKER} si solo necesitas el total suelto) y el sistema la reemplaza por estos numeros reales antes de enviar. Pedile que confirme antes de seguir.`,
       };
     }
     case "close_conversation": {
@@ -1569,7 +1712,11 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
           ? { items: saleState?.items ?? [], unresolved: [] as string[], needsAttribute: [] as string[] }
           : await resolveOrderItems(
               businessId,
-              Array.isArray(input.items) ? (input.items as { productName: string; quantity: number; variantLabel?: string }[]) : []
+              Array.isArray(input.items) ? (input.items as { productName: string; quantity: number; variantLabel?: string }[]) : [],
+              // Mismo motivo que en show_order_summary: el pedido real que queda guardado lleva el precio
+              // acordado, no el de lista. Con saleStateOn los items ya vienen de getSaleState, que aplica
+              // el acordado al leer.
+              context.conversationId
             );
 
         if (saleStateOn && items.length === 0) {

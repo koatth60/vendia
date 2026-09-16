@@ -1826,6 +1826,9 @@ function renderThreadMessages(thread, messages) {
 
 function updateCloseSaleButtonVisibility(status) {
   document.getElementById('close-sale-btn').style.display = status === 'SOLD' ? 'none' : 'inline-flex';
+  // Un pedido ya cerrado tiene su precio guardado en OrderItem: cambiar el acordado no lo movería, así
+  // que ofrecerlo sería mentir sobre lo que hace el botón.
+  document.getElementById('agreed-price-btn').style.display = status === 'SOLD' ? 'none' : 'inline-flex';
 }
 
 async function pollConversation() {
@@ -2209,7 +2212,104 @@ function addCloseSaleItemRowFromExtraction(item) {
   closeSaleRowWarning(row, product && product.variants.length > 0 ? 'Elegí color/talla antes de confirmar.' : '');
 }
 
+// EL PRECIO ACORDADO (ONIX-PLAN-CATALOGO-Y-MEDIOS.md, seccion 12) - el camino sin modelo.
+//
+// La dueña fija el precio de la venta abierta sin pasar por el chat. Los productos NO se eligen aca: los
+// devuelve el servidor desde la venta que ya tiene anotada, y el numero que se manda se valida en el
+// servidor con la misma funcion que valida la respuesta por WhatsApp. El panel no puede escribir un
+// precio sobre un producto que no este en esa venta.
+let agreedPriceRowsCache = [];
+
+function agreedPriceRowHtml(item, index) {
+  const variante = item.variantLabel ? ` (${escapeHtml(item.variantLabel)})` : '';
+  const actual = item.agreedPrice === null ? '' : String(item.agreedPrice);
+  return `
+    <div class="agreed-price-row" data-index="${index}" style="display:flex; gap:8px; align-items:center; margin-bottom:8px; flex-wrap:wrap;">
+      <div style="flex:1; min-width:160px;">
+        <div style="font-size:13px;">${item.quantity}x ${escapeHtml(item.productName)}${variante}</div>
+        <div style="font-size:11.5px; color:var(--onix-muted);">Catálogo: <span class="onix-num">${formatMoney(item.listPrice, item.currency)}</span></div>
+      </div>
+      <input type="number" class="agreed-price-input onix-num" min="1" step="1" style="width:130px;"
+             placeholder="Precio de catálogo" value="${escapeHtml(actual)}" />
+    </div>`;
+}
+
+async function openAgreedPriceForm() {
+  // Los dos paneles viven encima del hilo; con los dos abiertos el chat queda sin espacio.
+  document.getElementById('close-sale-form').style.display = 'none';
+  document.getElementById('agreed-price-form').style.display = 'block';
+  await loadAgreedPrices();
+}
+
+function closeAgreedPriceForm() {
+  document.getElementById('agreed-price-form').style.display = 'none';
+  document.getElementById('agreed-price-rows').innerHTML = '';
+  document.getElementById('agreed-price-status').textContent = '';
+  agreedPriceRowsCache = [];
+}
+
+async function loadAgreedPrices() {
+  if (!currentConversationId) return;
+  const status = document.getElementById('agreed-price-status');
+  const rows = document.getElementById('agreed-price-rows');
+  status.textContent = 'Leyendo la venta abierta...';
+  status.style.color = 'var(--onix-muted)';
+  rows.innerHTML = '';
+  try {
+    const res = await apiFetch(`/admin/api/conversations/${currentConversationId}/agreed-prices`);
+    const data = await res.json();
+    agreedPriceRowsCache = data.items || [];
+    if (agreedPriceRowsCache.length === 0) {
+      status.textContent = 'Esta conversación todavía no tiene productos en la venta. Onix los anota cuando el cliente elige qué quiere, o podés cerrarla a mano con "Cerrar venta".';
+      return;
+    }
+    status.textContent = (data.needsAttribute || []).length > 0
+      ? `Falta elegir color/talla de: ${(data.needsAttribute || []).join(', ')} - esas líneas no aparecen acá.`
+      : '';
+    rows.innerHTML = agreedPriceRowsCache.map(agreedPriceRowHtml).join('');
+  } catch {
+    status.textContent = 'No se pudo leer la venta abierta.';
+    status.style.color = 'var(--onix-danger)';
+  }
+}
+
+async function saveAgreedPrices() {
+  if (!currentConversationId) return;
+  const status = document.getElementById('agreed-price-status');
+  const btn = document.getElementById('agreed-price-save-btn');
+  const prices = Array.from(document.querySelectorAll('#agreed-price-rows .agreed-price-row')).map((row) => {
+    const item = agreedPriceRowsCache[Number(row.dataset.index)];
+    const raw = row.querySelector('.agreed-price-input').value.trim();
+    return { productId: item.productId, variantKey: item.variantKey, unitPrice: raw === '' ? null : Number(raw) };
+  });
+  btn.disabled = true;
+  status.style.color = 'var(--onix-muted)';
+  status.textContent = 'Guardando...';
+  try {
+    const res = await apiFetch(`/admin/api/conversations/${currentConversationId}/agreed-prices`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prices }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      status.style.color = 'var(--onix-danger)';
+      status.textContent = data.error || 'No se pudo guardar.';
+      return;
+    }
+    status.style.color = 'var(--onix-accent)';
+    status.textContent = 'Listo. Onix le cobra estos precios a este cliente.';
+    await loadAgreedPrices();
+  } catch {
+    status.style.color = 'var(--onix-danger)';
+    status.textContent = 'No se pudo guardar.';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 async function openCloseSaleForm() {
+  closeAgreedPriceForm();
   document.getElementById('close-sale-form').style.display = 'block';
   await prefillCloseSaleForm();
 }
@@ -5193,7 +5293,7 @@ function renderWhatsappConnection(conn) {
     }
 
     stateEl.innerHTML = `
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--onix-success)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="m8.5 12 2.5 2.5 4.5-5"/></svg>
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--onix-accent)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="m8.5 12 2.5 2.5 4.5-5"/></svg>
       <span>Conectado — <strong>${label}</strong></span>`;
     return;
   }

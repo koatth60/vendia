@@ -4,6 +4,7 @@ import { getProductById } from "../catalog/products";
 import { resolveShippingRateForCity } from "../catalog/shippingRates";
 import { computeCheckoutState, type CheckoutFacts, type CheckoutState } from "./checkoutState";
 import { getBusinessLocale } from "../config/businessConfig";
+import { getAgreedPrices, applyAgreedPrices } from "./agreedPrices";
 
 // Fase 2 del plan maestro (2026-09-15), causa raiz C1. Unico dueno de lectura/escritura de SaleState -
 // ver ONIX-PLAN-MAESTRO.md seccion 1.3 y 4 (Fase 2) para el diseno completo. Nada fuera de este archivo
@@ -99,7 +100,12 @@ export async function getSaleState(conversationId: string): Promise<SaleStateSna
   const idNumber = state?.idNumber ?? conversation.customer.idNumber;
   const deliveryPhone = state?.deliveryPhone ?? conversation.customer.deliveryPhone;
   const address = state?.address ?? conversation.customer.address;
-  const items = parseItems(state?.items);
+  // EL PRECIO ACORDADO (2026-09-16). Se aplica al LEER y no al escribir, por el mismo principio que ya
+  // rige este archivo ("se deriva, no se duplica"): la duena puede autorizar un descuento despues de que
+  // el item ya estaba en el pedido - que es exactamente lo que paso en el caso real - y un precio escrito
+  // en el momento del set_order_item se habria quedado con el del catalogo para siempre. Asi el subtotal
+  // y el total de abajo salen solos del precio correcto.
+  const items = applyAgreedPrices(parseItems(state?.items), await getAgreedPrices(conversationId));
 
   const { city, label: shippingLabel, cost: shippingCost } = await resolveCityAndShipping(businessId, address);
 

@@ -31,6 +31,14 @@ import {
   type OrderItemInput,
 } from "../../orders/service";
 import { uploadMedia } from "../../media/s3";
+import { getServerSaleEvidence } from "../../orders/saleState";
+import {
+  getAgreedPrices,
+  setAgreedPrices,
+  clearAgreedPrice,
+  agreedUnitPriceOf,
+  validateProposedPrices,
+} from "../../orders/agreedPrices";
 import { upload, businessIdOf, isUnsupportedImageType } from "./shared";
 
 export const conversationsRouter = Router();
@@ -270,6 +278,128 @@ conversationsRouter.post("/api/conversations/:id/send-template", async (req, res
 // Prefills the close-sale form by reading the conversation with AI - read-only, no side effects. The
 // owner still reviews/edits every field and clicks "Confirmar venta" herself before anything is created,
 // so a bad extraction just means editing a field, not a wrong order silently going through.
+// EL PRECIO ACORDADO (ONIX-PLAN-CATALOGO-Y-MEDIOS.md, seccion 12) - EL CAMINO SIN MODELO.
+//
+// La regla de admision de efectos requeridos exige un fallback que el servidor pueda hacer SOLO, con
+// datos de la base. Este es: la duena fija el precio acordado desde el panel, sobre la venta abierta, sin
+// pasar por el chat y sin que intervenga el agente ni la interpretacion de ninguna respuesta. Si el
+// camino de WhatsApp falla (no cita, escribe raro, no confirma), este existe y no puede fallar por las
+// mismas razones, porque no tiene un modelo ni una prosa adentro.
+//
+// Los productos NO los elige el panel: salen de la venta abierta que el servidor ya tiene anotada
+// (SaleState.items, escrito por set_order_item/show_order_summary contra el catalogo real) y se
+// revalidan contra el catalogo en cada lectura.
+async function openSaleItemsForPanel(businessId: string, conversationId: string) {
+  const evidencia = await getServerSaleEvidence(conversationId);
+  const { items, needsAttribute } = await resolveOrderItems(
+    businessId,
+    evidencia.items.map((i) => ({ productId: i.productId, variantId: i.variantId ?? undefined, quantity: i.quantity })),
+    conversationId
+  );
+  // needsAttribute: una linea sin color/talla resuelto no tiene precio propio que fijar. Se devuelve
+  // aparte para que el panel lo diga en vez de perderla en silencio (ver resolveOrderItems.arch.test.ts).
+  return { items, needsAttribute };
+}
+
+conversationsRouter.get("/api/conversations/:id/agreed-prices", async (req, res) => {
+  const businessId = businessIdOf(req);
+  const conversation = await getConversationForBusiness(businessId, String(req.params.id));
+  if (!conversation) {
+    res.status(404).json({ error: "Conversación no encontrada" });
+    return;
+  }
+  const { items, needsAttribute } = await openSaleItemsForPanel(businessId, conversation.id);
+  const acordados = await getAgreedPrices(conversation.id);
+  const catalogo = await prisma.product.findMany({
+    where: { businessId, id: { in: items.map((i) => i.productId) } },
+    select: { id: true, price: true, currency: true },
+  });
+  const precioDeLista = new Map(catalogo.map((p) => [p.id, Number(p.price)]));
+  res.json({
+    needsAttribute,
+    items: items.map((item) => ({
+      productId: item.productId,
+      variantKey: item.variantId ?? "",
+      productName: item.productName,
+      variantLabel: item.variantLabel ?? null,
+      quantity: item.quantity,
+      // El de catalogo va aparte del vigente a proposito: el vigente ya trae el acordado aplicado, y sin
+      // el de lista la duena no ve cuanto esta descontando.
+      listPrice: precioDeLista.get(item.productId) ?? item.unitPrice,
+      agreedPrice: agreedUnitPriceOf(item, acordados),
+      currency: item.currency,
+    })),
+  });
+});
+
+conversationsRouter.put("/api/conversations/:id/agreed-prices", async (req, res) => {
+  const businessId = businessIdOf(req);
+  const conversation = await getConversationForBusiness(businessId, String(req.params.id));
+  if (!conversation) {
+    res.status(404).json({ error: "Conversación no encontrada" });
+    return;
+  }
+  const { items } = await openSaleItemsForPanel(businessId, conversation.id);
+  const catalogo = await prisma.product.findMany({
+    where: { businessId, id: { in: items.map((i) => i.productId) } },
+    select: { id: true, price: true },
+  });
+  const precioDeLista = new Map(catalogo.map((p) => [p.id, Number(p.price)]));
+
+  const enviados: unknown[] = Array.isArray(req.body?.prices) ? req.body.prices : [];
+  const aEscribir: { productId: string; variantKey: string; unitPrice: number; currency: string }[] = [];
+  const aBorrar: { productId: string; variantKey: string }[] = [];
+
+  for (const raw of enviados) {
+    if (!raw || typeof raw !== "object") continue;
+    const fila = raw as Record<string, unknown>;
+    const productId = String(fila.productId ?? "");
+    const variantKey = String(fila.variantKey ?? "");
+    const item = items.find((i) => i.productId === productId && (i.variantId ?? "") === variantKey);
+    // Un producto que no esta en la venta abierta no se acepta: el panel no abre una puerta que el chat
+    // no tiene. Los productos los pone el servidor, tambien por este camino.
+    if (!item) {
+      res.status(400).json({ error: "Ese producto no está en la venta abierta de esta conversación" });
+      return;
+    }
+    if (fila.unitPrice === null || fila.unitPrice === "" || fila.unitPrice === undefined) {
+      aBorrar.push({ productId, variantKey });
+      continue;
+    }
+    const unitPrice = Number(fila.unitPrice);
+    // LAS MISMAS validaciones que el camino de WhatsApp, y literalmente la misma funcion: mayor que cero
+    // y menor o igual al precio de catalogo. Un solo lugar donde esta escrito que es un precio valido.
+    const validacion = validateProposedPrices(
+      [
+        {
+          productId,
+          variantKey,
+          productName: item.productName,
+          variantLabel: item.variantLabel ?? null,
+          quantity: item.quantity,
+          unitPrice: precioDeLista.get(productId) ?? item.unitPrice,
+          currency: item.currency,
+        },
+      ],
+      [unitPrice]
+    );
+    if (!validacion.ok) {
+      res.status(400).json({
+        error:
+          validacion.reason === "no_positivo"
+            ? `El precio de "${item.productName}" tiene que ser mayor que cero`
+            : `El precio de "${item.productName}" no puede ser mayor al del catálogo`,
+      });
+      return;
+    }
+    aEscribir.push({ productId, variantKey, unitPrice, currency: item.currency });
+  }
+
+  if (aEscribir.length > 0) await setAgreedPrices(conversation.id, aEscribir, "ADMIN_PANEL");
+  for (const fila of aBorrar) await clearAgreedPrice(conversation.id, fila.productId, fila.variantKey);
+  res.json({ ok: true, guardados: aEscribir.length, borrados: aBorrar.length });
+});
+
 conversationsRouter.get("/api/conversations/:id/extract-sale-details", async (req, res) => {
   const businessId = businessIdOf(req);
   const conversation = await getConversationForBusiness(businessId, String(req.params.id));
@@ -341,7 +471,9 @@ conversationsRouter.post("/api/conversations/:id/close-sale", async (req, res) =
     accessToken: business.whatsappAccessToken,
   };
 
-  const { items, unresolved, needsAttribute } = await resolveOrderItems(businessId, parsedItems);
+  // EL PRECIO ACORDADO (2026-09-16): el pedido que cierra el panel lleva el precio que la duena autorizo
+  // para esta conversacion, no el de lista. Es la misma lectura que usa el resumen del bot.
+  const { items, unresolved, needsAttribute } = await resolveOrderItems(businessId, parsedItems, conversation.id);
   // Chequeo separado de `unresolved` a proposito (bug de produccion, 2026-09-15): un producto con
   // variantes sin color/talla elegido caia aca antes, ni entraba a `items` ni a `unresolved`, y la ruta
   // solo miraba esas dos listas - la linea desaparecia del pedido sin ningun error visible.

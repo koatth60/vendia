@@ -309,6 +309,44 @@ model SaleState {
   updatedAt      DateTime     @updatedAt
 }
 
+// EL PRECIO ACORDADO (2026-09-16). Un precio que la duena autorizo para ESTE cliente y estos productos,
+// distinto del de catalogo. Antes de esta tabla un descuento vivia unicamente como texto en el chat: el
+// agente no lo tenia como dato y cobraba lo unico que tenia, el catalogo (caso real, conversacion
+// cmu4gykpm003le82keve7ngck del 2026-09-16 - la duena dejo los AirPods en 70 y el Alexa en 65, y el
+// resumen salio con 75.000 y 70.000, dos veces).
+//
+// Cuando existe una fila aca, ESE es el precio del item: el catalogo pasa a ser el valor por defecto, no
+// la verdad. Solo dos cosas escriben esta tabla, y ninguna de las dos es el modelo ni el cliente: la
+// confirmacion explicita de la duena a una PendingOwnerQuestion de kind PRICE (src/routes/whatsapp.ts) y
+// el panel (src/routes/admin/conversations.ts). Un precio dicho por el cliente no llega aca por ningun
+// camino, y hay una prueba que lo fija.
+model AgreedPrice {
+  id             String            @id @default(cuid())
+  conversation   Conversation      @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  conversationId String
+  productId      String
+  // El variantId, o "" cuando la linea no tiene variante. Cadena vacia y no NULL porque en Postgres dos
+  // NULL no chocan entre si, asi que un @@unique con una columna nullable no impediria dos filas para el
+  // mismo producto sin variante.
+  variantKey     String            @default("")
+  unitPrice      Decimal           @db.Decimal(12, 2)
+  currency       String
+  source         AgreedPriceSource
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  @@unique([conversationId, productId, variantKey])
+  @@index([conversationId])
+}
+
+// De donde salio la autorizacion. Las dos son la duena: por WhatsApp respondiendo y confirmando la
+// pregunta del agente, o a mano desde el panel sobre la venta abierta. No hay un tercer valor, y
+// especialmente no hay uno para "lo dijo el cliente".
+enum AgreedPriceSource {
+  OWNER_REPLY
+  ADMIN_PANEL
+}
+
 model OrderItem {
   id           String  @id @default(cuid())
   order        Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
@@ -323,6 +361,12 @@ model OrderItem {
   variantLabel String?
   quantity     Int
   unitPrice    Decimal @db.Decimal(12, 2)
+  // El precio que se le cobro de verdad a este cliente por esta linea, cuando NO es el del catalogo -
+  // ver el modelo AgreedPrice. NULL = se cobro el precio de catalogo, que es lo que significaba toda
+  // fila anterior a esta columna. unitPrice arriba siempre trae el precio efectivamente cobrado (el
+  // acordado si existe), asi que ningun total cambia de forma; esta columna existe para poder DECIR que
+  // esa linea salio de un descuento autorizado y no de un precio de catalogo viejo.
+  agreedUnitPrice Decimal? @db.Decimal(12, 2)
   currency     String
 }
 
@@ -724,6 +768,7 @@ model Conversation {
   unreadCount                  Int                    @default(0)
   order                        Order?
   saleState                    SaleState?
+  agreedPrices                 AgreedPrice[]
   messages                     Message[]
   queuedOutbound               QueuedOutboundMessage[]
   createdAt                    DateTime               @default(now())
@@ -753,6 +798,13 @@ model PendingOwnerQuestion {
   wamid          String                   @unique
   question       String
   kind           PendingOwnerQuestionKind @default(TEXT)
+  // Las RANURAS que el servidor espera llenar con la respuesta del dueno, escritas por el servidor
+  // cuando manda la pregunta. Solo para kind PRICE hoy: { items: [{productId, variantKey, productName,
+  // variantLabel, quantity, unitPrice, currency}], propuesta?: number[] }. La respuesta del dueno se
+  // interpreta SOLO contra estas ranuras (N items, un numero cada uno) y `propuesta` es lo que el
+  // servidor entendio, todavia sin efecto: un precio acordado no existe hasta que la duena confirma esa
+  // propuesta. NULL para TEXT y PHOTO_PRODUCT, que es lo que era toda fila anterior a esta columna.
+  payload        Json?
   createdAt      DateTime                 @default(now())
   remindedAt     DateTime?
 
@@ -763,9 +815,14 @@ model PendingOwnerQuestion {
 // in src/ai/tools.ts), not a plain text question - handleOwnerReply answers it differently (tries to
 // resolve the owner's reply to a real catalog product and send its photo back, instead of forwarding the
 // owner's raw text as-is).
+// PRICE: el agente le pregunto al dueno por el precio de un pedido concreto (ask_owner_about_price en
+// src/ai/tools.ts). La pregunta lleva los items exactos y sus precios actuales en `payload`, y la
+// respuesta se resuelve contra esas ranuras en vez de reenviarse tal cual al cliente - ver la rama PRICE
+// de handleOwnerReply en src/routes/whatsapp.ts.
 enum PendingOwnerQuestionKind {
   TEXT
   PHOTO_PRODUCT
+  PRICE
 }
 
 enum ConversationStatus {

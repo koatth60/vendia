@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { Prisma } from "@prisma/client";
 import { env } from "../config/env";
-import { toBusinessLocale } from "../config/businessConfig";
+import { toBusinessLocale, getBusinessLocale } from "../config/businessConfig";
 import { getPaymentExamples } from "../catalog/paymentMethods";
 import { prisma } from "../db/client";
 import {
@@ -27,6 +27,7 @@ import {
   clearPendingConfirmation,
   findConversationByPendingOwnerQuestion,
   clearPendingOwnerQuestion,
+  updatePendingOwnerQuestion,
   findOpenPendingOwnerQuestionsForBusiness,
   findOpenPendingConfirmationsForBusiness,
   setHumanControl,
@@ -43,6 +44,17 @@ import { analyzeCustomerImage } from "../ai/vision";
 import { transcribeAudio } from "../ai/transcription";
 import { checkPlanCap } from "../ai/usage";
 import { createOrder, askForCsat, recordCsatReply, type ResolvedOrderItem } from "../orders/service";
+import {
+  setAgreedPrices,
+  parsePriceSlots,
+  parseProposedPrices,
+  parseOwnerPriceReply,
+  validateProposedPrices,
+  formatPriceSlotsForOwner,
+  ownerPriceFormatHint,
+  formatProposalForOwner,
+  formatAgreedPricesForCustomer,
+} from "../orders/agreedPrices";
 import { recordAskOwnerResolution } from "../catalog/learnedFaq";
 import { getCatalogHintText, findConfidentProductMatch } from "../catalog/products";
 import { recordDeliveryFailure } from "../delivery/failures";
@@ -131,7 +143,10 @@ async function replyToOwner(
   credentials: WhatsappCredentials,
   ownerPhone: string,
   text: string
-): Promise<void> {
+  // Devuelve el wamid del mensaje que salio, o "" si no salio. Lo necesita la pregunta de PRECIO: cuando
+  // el servidor le devuelve a la duena la propuesta para que la confirme, ESE mensaje pasa a ser el que
+  // tiene que citar, asi que su wamid reemplaza al de la pregunta original en la fila abierta.
+): Promise<string> {
   const result = await sendToOwner(businessId, credentials, ownerPhone, { kind: "text", text });
   await recordOwnerMessage(businessId, {
     direction: "OUT",
@@ -140,6 +155,7 @@ async function replyToOwner(
     errorMessage: result.failure?.message ?? null,
   });
   if (!result.delivered) console.error("No se pudo contestarle a la duena:", result.failure?.message);
+  return result.delivered ? result.wamid : "";
 }
 
 // Aviso con plantilla aprobada a la duena (llega tambien fuera de su ventana de 24h).
@@ -253,6 +269,120 @@ export async function handleOwnerReply(
     if (!answerText) {
       const askTextText = "Respondeme con un mensaje de texto, citando esa misma pregunta, por favor.";
       await replyToOwner(businessId, credentials, ownerPhone, askTextText);
+      return;
+    }
+
+    // EL PRECIO ACORDADO (ONIX-PLAN-CATALOGO-Y-MEDIOS.md, seccion 12). La duena esta llenando las RANURAS
+    // que el servidor le mando: N items del pedido, un numero cada uno. Dos etapas, y en ninguna de las
+    // dos se escribe un precio por interpretar prosa:
+    //
+    //   1. RECOLECCION. Se cuentan los numeros de su respuesta. Si no son exactamente tantos como items,
+    //      o alguno no pasa las validaciones en codigo (mayor que cero, menor o igual al precio de hoy),
+    //      NO SE ESCRIBE NADA y se vuelve a preguntar con formato explicito. Nunca se elige cual numero
+    //      era cual.
+    //   2. CONFIRMACION. Con los numeros resueltos, el servidor le devuelve la PROPUESTA ya formateada y
+    //      recien con su "si" se escribe en AgreedPrice. Sin confirmacion no hay precio acordado.
+    //
+    // Un precio dicho por el CLIENTE no llega aca por ningun camino: este bloque corre unicamente sobre
+    // un mensaje del telefono del dueno del negocio, atado a una pregunta de precio que abrio el servidor.
+    if (pendingQuestion.kind === "PRICE") {
+      const slots = parsePriceSlots(pendingQuestion.payload);
+      const negocioPrecio = await getBusinessLocale(businessId);
+      if (slots.length === 0) {
+        // Fila sin ranuras (solo posible si alguien la escribio a mano): no hay formulario que llenar, y
+        // adivinar a que se referia seria justo lo que esta fase vino a borrar. Se cierra y se avisa.
+        await clearPendingOwnerQuestion(pendingQuestion.questionId);
+        await replyToOwner(businessId, credentials, ownerPhone, "Esa consulta de precio ya no tiene los productos asociados - volvé a abrirla desde el panel.");
+        return;
+      }
+
+      const answerNorm = answerText.toLowerCase();
+      const proposal = parseProposedPrices(pendingQuestion.payload);
+
+      if (proposal) {
+        if (CONFIRM_WORDS.includes(answerNorm)) {
+          await setAgreedPrices(
+            pendingQuestion.conversationId,
+            slots.map((slot, i) => ({
+              productId: slot.productId,
+              variantKey: slot.variantKey,
+              unitPrice: proposal[i],
+              currency: slot.currency,
+            })),
+            "OWNER_REPLY"
+          );
+          await clearPendingOwnerQuestion(pendingQuestion.questionId);
+          // El aviso al cliente lo compone el SERVIDOR con las cifras que acaba de escribir en la base.
+          // Es el fallback sin modelo adentro: el precio existe y el cliente se entera aunque el turno
+          // siguiente del agente falle.
+          const priceCustomerText = formatForWhatsapp(formatAgreedPricesForCustomer(slots, proposal, negocioPrecio.locale));
+          const priceOutcome = await deliverOwnerAnswerToCustomer(businessId, pendingQuestion.conversationId, credentials, pendingQuestion.customer.phoneNumber, priceCustomerText);
+          await recordMessage(businessId, pendingQuestion.conversationId, "ASSISTANT", priceCustomerText);
+          await replyToOwner(businessId, credentials, ownerPhone, ownerConfirmationText(priceOutcome, "Listo, el precio quedó guardado y se lo confirmé al cliente ✅"));
+          return;
+        }
+        if (DENY_WORDS.includes(answerNorm)) {
+          // Nada escrito: se borra la propuesta y se vuelve al formulario en blanco.
+          const reaskText = [formatPriceSlotsForOwner(slots, negocioPrecio.locale), ownerPriceFormatHint(slots, negocioPrecio.locale)].join("\n\n");
+          const reaskWamid = await replyToOwner(businessId, credentials, ownerPhone, `Listo, no guardé nada.\n\n${reaskText}`);
+          await updatePendingOwnerQuestion(pendingQuestion.questionId, {
+            payload: { items: slots } as unknown as Prisma.InputJsonValue,
+            ...(reaskWamid ? { wamid: reaskWamid } : {}),
+          });
+          return;
+        }
+        await replyToOwner(businessId, credentials, ownerPhone, 'Respondeme "si" o "no" citando ese mismo mensaje, por favor.');
+        return;
+      }
+
+      if (DENY_WORDS.includes(answerNorm)) {
+        await clearPendingOwnerQuestion(pendingQuestion.questionId);
+        const noDiscountText = formatForWhatsapp("Consulté con el equipo y por ahora el precio publicado es el que aplica.");
+        const noDiscountOutcome = await deliverOwnerAnswerToCustomer(businessId, pendingQuestion.conversationId, credentials, pendingQuestion.customer.phoneNumber, noDiscountText);
+        await recordMessage(businessId, pendingQuestion.conversationId, "ASSISTANT", noDiscountText);
+        await replyToOwner(businessId, credentials, ownerPhone, ownerConfirmationText(noDiscountOutcome, "Listo, le avisé al cliente que no hay precio especial ✅"));
+        return;
+      }
+
+      const parsed = parseOwnerPriceReply(answerText, slots.length);
+      if (!parsed.ok) {
+        const motivo =
+          parsed.reason === "sin_numeros"
+            ? "No encontré ningún precio en tu respuesta."
+            : `Encontré ${parsed.found} números y necesito exactamente ${slots.length}, uno por producto.`;
+        const reaskText = [
+          `${motivo} No guardé nada.`,
+          formatPriceSlotsForOwner(slots, negocioPrecio.locale),
+          ownerPriceFormatHint(slots, negocioPrecio.locale),
+        ].join("\n\n");
+        const reaskWamid = await replyToOwner(businessId, credentials, ownerPhone, reaskText);
+        if (reaskWamid) await updatePendingOwnerQuestion(pendingQuestion.questionId, { wamid: reaskWamid });
+        return;
+      }
+
+      const validation = validateProposedPrices(slots, parsed.prices);
+      if (!validation.ok) {
+        const motivo =
+          validation.reason === "no_positivo"
+            ? `El precio de "${validation.slot.productName}" tiene que ser mayor que cero.`
+            : `El precio de "${validation.slot.productName}" no puede ser mayor al que ya tiene.`;
+        const reaskText = [
+          `${motivo} No guardé nada.`,
+          formatPriceSlotsForOwner(slots, negocioPrecio.locale),
+          ownerPriceFormatHint(slots, negocioPrecio.locale),
+        ].join("\n\n");
+        const reaskWamid = await replyToOwner(businessId, credentials, ownerPhone, reaskText);
+        if (reaskWamid) await updatePendingOwnerQuestion(pendingQuestion.questionId, { wamid: reaskWamid });
+        return;
+      }
+
+      // Hasta aca no se escribio ningun precio, y no se va a escribir hasta el "si" de la duena.
+      const proposalText = formatProposalForOwner(slots, parsed.prices, negocioPrecio.locale);
+      const proposalWamid = await replyToOwner(businessId, credentials, ownerPhone, proposalText);
+      await updatePendingOwnerQuestion(pendingQuestion.questionId, {
+        payload: { items: slots, propuesta: parsed.prices } as unknown as Prisma.InputJsonValue,
+        ...(proposalWamid ? { wamid: proposalWamid } : {}),
+      });
       return;
     }
 

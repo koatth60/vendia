@@ -536,10 +536,32 @@ export async function createPendingOwnerQuestion(
   conversationId: string,
   wamid: string,
   question: string,
-  kind: "TEXT" | "PHOTO_PRODUCT" = "TEXT"
+  kind: "TEXT" | "PHOTO_PRODUCT" | "PRICE" = "TEXT",
+  // Las ranuras que el servidor espera llenar con la respuesta (ver PendingOwnerQuestion.payload en
+  // schema.prisma). Solo las preguntas de precio la usan hoy; TEXT y PHOTO_PRODUCT la dejan en NULL.
+  payload?: Prisma.InputJsonValue
 ) {
   await prisma.pendingOwnerQuestion.create({
-    data: { conversationId, wamid, question, kind },
+    data: { conversationId, wamid, question, kind, ...(payload === undefined ? {} : { payload }) },
+  });
+}
+
+/**
+ * Reescribe una pregunta abierta sin resolverla. Lo necesita la pregunta de PRECIO, que tiene dos pasos:
+ * el dueno responde con los numeros y el servidor le devuelve la propuesta ya formateada para que la
+ * confirme. Ese segundo mensaje tiene su propio wamid, asi que citarlo tiene que seguir resolviendo a la
+ * misma fila. Nada se escribe en AgreedPrice hasta la confirmacion.
+ */
+export async function updatePendingOwnerQuestion(
+  questionId: string,
+  data: { wamid?: string; payload?: Prisma.InputJsonValue }
+) {
+  await prisma.pendingOwnerQuestion.update({
+    where: { id: questionId },
+    data: {
+      ...(data.wamid === undefined ? {} : { wamid: data.wamid }),
+      ...(data.payload === undefined ? {} : { payload: data.payload }),
+    },
   });
 }
 
@@ -553,6 +575,7 @@ export async function findConversationByPendingOwnerQuestion(wamid: string) {
     questionId: pending.id,
     question: pending.question,
     kind: pending.kind,
+    payload: pending.payload,
     conversationId: pending.conversationId,
     customer: pending.conversation.customer,
   };
@@ -606,6 +629,7 @@ export async function findOpenPendingOwnerQuestionsForBusiness(businessId: strin
     questionId: p.id,
     question: p.question,
     kind: p.kind,
+    payload: p.payload,
     conversationId: p.conversationId,
     customer: p.conversation.customer,
   }));
