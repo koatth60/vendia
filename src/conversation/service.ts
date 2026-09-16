@@ -1064,8 +1064,10 @@ export async function getConversationForBusiness(businessId: string, conversatio
 // Groups a customer's Conversation rows into one row for the admin panel's Conversaciones list (see
 // [[onix-conversations-group-by-customer]]) - the data model is unchanged (still one Conversation per
 // sales cycle, Order.conversationId stays @unique), this only changes what the LIST shows. `conversations`
-// must already be sorted updatedAt desc and belong to a single customer - conversations[0] is then always
-// that customer's most recent activity regardless of status.
+// must already be sorted updatedAt desc and belong to a single customer - conversations[0] (`mostRecent`)
+// still decides the fallback `active` cycle when todos son SOLD/LOST, pero el mensaje/hora que se
+// muestran en la fila se calculan aparte, por el createdAt real de los mensajes (ver más abajo) - no
+// por conversations[0], que puede no ser la conversación con la actividad más reciente de verdad.
 function formatCustomerRow(
   conversations: {
     id: string;
@@ -1086,13 +1088,27 @@ function formatCustomerRow(
   // exactly counting this customer's completed orders, with no extra join.
   const orderCount = conversations.filter((c) => c.status === "SOLD").length;
 
+  // El mensaje (y la hora) de la fila son el mensaje más reciente DE VERDAD entre todas las
+  // conversaciones del cliente, no el de `mostRecent` (conversations[0], por conversation.updatedAt):
+  // cancelar una venta vieja, editar un pedido o agregar una nota le pisa el updatedAt a ESA
+  // conversación aunque el cliente lleve horas hablando en otra más nueva. Caso real, Laura
+  // Manjarrez (2026-09-16): cancelar su venta SOLD vieja le puso "Tu pedido fue cancelado" en la
+  // fila, tapando lo que en verdad estaba pasando en su conversación NEW activa - y al abrir el
+  // chat ese mensaje no estaba, porque vivía en la otra conversación. El createdAt de un mensaje no
+  // se mueve nunca después de escrito, así que ordenar por ahí no se corrompe con acciones que no
+  // son mensajes.
+  const latestMessage = conversations
+    .map((c) => c.messages?.[0])
+    .filter((m): m is NonNullable<typeof m> => Boolean(m))
+    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0];
+
   return {
     customerId: active.customerId,
     activeConversationId: active.id,
     status: active.status,
     intent: active.intent,
     humanControl: active.humanControl,
-    updatedAt: mostRecent.updatedAt,
+    updatedAt: latestMessage?.createdAt ?? mostRecent.updatedAt,
     unreadCount,
     orderCount,
     customer: {
@@ -1102,7 +1118,7 @@ function formatCustomerRow(
       displayName: customerDisplayName(active.customer),
       tags: active.customer.tags,
     },
-    lastMessage: formatLastMessagePreview(mostRecent.messages?.[0]),
+    lastMessage: formatLastMessagePreview(latestMessage),
     cycles: conversations.map((c) => ({ id: c.id, status: c.status, updatedAt: c.updatedAt })),
   };
 }
@@ -1142,20 +1158,36 @@ export async function getCustomerThreadForBusiness(businessId: string, customerI
   const customer = await prisma.customer.findFirst({ where: { id: customerId, businessId } });
   if (!customer) return null;
 
-  // createdAt, no updatedAt: este orden es la caminata cronológica de ciclos que hasMore/targetIndex
-  // usan más abajo para decidir si queda historia más vieja por cargar. updatedAt se mueve por
-  // motivos que no tienen nada que ver con "cuándo pasó esta conversación" - una venta SOLD puede
-  // tocarse (nota, edición de pedido, etc.) horas después de que el ciclo siguiente ya arrancó, y
-  // ahí quedaba con updatedAt más nuevo que el ciclo activo. Cuando eso corría, el ciclo activo
-  // dejaba de ser el índice 0 del arreglo, "hasMore" salía false y el botón "Ver conversación
-  // anterior" desaparecía aunque sí hubiera historia vieja (caso real: Milena Hernández Parra,
-  // 2026-09-16). createdAt no se mueve nunca después de creado, así que el orden no se corrompe.
-  const conversations = await prisma.conversation.findMany({
+  // Ordenados por el mensaje más reciente DE VERDAD de cada ciclo (el createdAt de su propio último
+  // Message), no por conversation.updatedAt ni conversation.createdAt:
+  //
+  //  - updatedAt se mueve por motivos que no tienen nada que ver con "cuándo pasó esta conversación"
+  //    (una nota, una edición de pedido) - eso fue el bug de Milena Hernández Parra (2026-09-16): su
+  //    SOLD quedaba con updatedAt más nuevo que su ciclo activo y "hasMore" salía false con historia
+  //    real esperando.
+  //  - createdAt tampoco alcanza: un ciclo SOLD puede recibir un mensaje genuino (aviso de envío,
+  //    aviso de cancelación) horas después de que el siguiente ciclo ya arrancó - eso fue el caso de
+  //    Laura Manjarrez (2026-09-16), y también, se confirmó, el MISMO Milena ("¡Tu pedido fue
+  //    enviado!" a las 14:28, en su ciclo SOLD, mucho después de que su ciclo NEW ya existía).
+  //
+  // El createdAt de un Message no se mueve nunca después de escrito - por eso este orden no se
+  // corrompe con NINGUNA acción que no sea "se escribió un mensaje nuevo", y decisión del dueño
+  // (2026-09-16): el ciclo que se abre por defecto es el de índice 0 acá, el del mensaje más
+  // reciente, sea SOLD/LOST/NEW - no siempre "el ciclo sin cerrar".
+  const conversationsRaw = await prisma.conversation.findMany({
     where: { customerId },
-    include: { order: true },
-    orderBy: { createdAt: "desc" },
+    include: {
+      order: true,
+      messages: { orderBy: { createdAt: "desc" }, take: 1, select: { createdAt: true } },
+    },
   });
-  if (conversations.length === 0) return null;
+  if (conversationsRaw.length === 0) return null;
+
+  const conversations = conversationsRaw.sort((a, b) => {
+    const at = a.messages[0]?.createdAt.getTime() ?? a.createdAt.getTime();
+    const bt = b.messages[0]?.createdAt.getTime() ?? b.createdAt.getTime();
+    return bt - at;
+  });
 
   const cycles = conversations.map((c) => ({
     id: c.id,
@@ -1163,6 +1195,9 @@ export async function getCustomerThreadForBusiness(businessId: string, customerI
     updatedAt: c.updatedAt,
     order: c.order ? { summary: c.order.summary, totalAmount: Number(c.order.totalAmount), currency: c.order.currency } : null,
   }));
+  // El ciclo donde el composer/handoff/cerrar-venta actúan - siempre el que sigue abierto, sin
+  // importar cuál se esté MOSTRANDO por defecto (eso lo decide targetIndex más abajo). Dos preguntas
+  // distintas: "¿a cuál le hablo si escribo ahora?" vs "¿cuál ciclo entro a ver primero?".
   const activeConversationId =
     conversations.find((c) => c.status !== "SOLD" && c.status !== "LOST")?.id ?? conversations[0].id;
   const customerBasic = {
@@ -1175,12 +1210,14 @@ export async function getCustomerThreadForBusiness(businessId: string, customerI
 
   let targetIndex: number;
   if (before) {
-    // "Load the cycle before this one" - conversations is sorted updatedAt desc, so the next OLDER
-    // cycle sits right after `before`'s own position in the array.
+    // "Load the cycle before this one" - conversations is sorted by mensaje-más-reciente desc, so the
+    // next-less-reciente cycle sits right after `before`'s own position in the array.
     const beforeIndex = conversations.findIndex((c) => c.id === before);
     targetIndex = beforeIndex === -1 ? conversations.length : beforeIndex + 1;
   } else {
-    targetIndex = conversations.findIndex((c) => c.id === activeConversationId);
+    // Índice 0 siempre - conversations ya está ordenado por mensaje más reciente, así que esto es
+    // exactamente "el ciclo con la actividad más nueva de verdad", sea SOLD/LOST/NEW.
+    targetIndex = 0;
 
     // Opening the grouped thread reads every conversation of this customer at once - unlike the old
     // single-cycle view, there's no per-cycle "currently open elsewhere" concept left to protect, so

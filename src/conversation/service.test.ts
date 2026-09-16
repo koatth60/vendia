@@ -198,6 +198,48 @@ test("listCustomerThreadsForBusiness collapses a customer's closed + open conver
   }
 });
 
+// Caso real, Laura Manjarrez (2026-09-16): su venta SOLD vieja se cancela y esa acción le pisa el
+// updatedAt (14:28-como-hora, mucho más nuevo que su conversación NEW activa, donde en realidad
+// sigue hablando ahora mismo). Antes del fix, la fila mostraba "Tu pedido fue cancelado" - un mensaje
+// que vivía en la OTRA conversación - y al abrir el chat (que carga la conversación activa) ese
+// mensaje no estaba en ningún lado.
+test("listCustomerThreadsForBusiness muestra el mensaje mas reciente de VERDAD, no el de la conversacion que alguien tocó por última vez", async () => {
+  const customer = await prisma.customer.create({ data: { businessId, phoneNumber: `573025${Date.now()}` } });
+  const now = Date.now();
+  try {
+    const sold = await prisma.conversation.create({
+      data: { customerId: customer.id, status: "SOLD", createdAt: new Date(now - 3600000), updatedAt: new Date(now - 3600000) },
+    });
+    await prisma.message.create({
+      data: { conversationId: sold.id, role: "ASSISTANT", content: "¡Listo! Tu pedido va en camino.", createdAt: new Date(now - 3600000) },
+    });
+
+    const active = await prisma.conversation.create({
+      data: { customerId: customer.id, status: "NEW", createdAt: new Date(now - 1800000), updatedAt: new Date(now - 1800000) },
+    });
+    await prisma.message.create({
+      data: { conversationId: active.id, role: "CUSTOMER", content: "Quiero pedir otra cosa", createdAt: new Date(now - 1800000) },
+    });
+
+    // Cancela la venta vieja DESPUÉS de que la conversación activa ya tiene su propio mensaje más
+    // reciente - esto es lo que le pasó a Laura: la cancelación le pisa el updatedAt a `sold`.
+    await prisma.conversation.update({ where: { id: sold.id }, data: { updatedAt: new Date(now) } });
+    await prisma.message.create({
+      data: { conversationId: sold.id, role: "ASSISTANT", content: "Tu pedido fue cancelado. Cualquier duda me escribes.", createdAt: new Date(now) },
+    });
+
+    const rows = await listCustomerThreadsForBusiness(businessId);
+    const row = rows.find((r) => r.customerId === customer.id);
+    assert.ok(row);
+    assert.equal(row.activeConversationId, active.id, "la conversación NEW sigue siendo la activa");
+    assert.equal(row.lastMessage?.content, "Tu pedido fue cancelado. Cualquier duda me escribes.", "el mensaje mas nuevo de verdad, sea de la conversacion que sea");
+  } finally {
+    await prisma.message.deleteMany({ where: { conversation: { customerId: customer.id } } });
+    await prisma.conversation.deleteMany({ where: { customerId: customer.id } });
+    await prisma.customer.deleteMany({ where: { id: customer.id } });
+  }
+});
+
 test("listCustomerThreadsForBusiness picks the most recently updated conversation as active when all are closed", async () => {
   const customer = await prisma.customer.create({ data: { businessId, phoneNumber: `573021${Date.now()}` } });
   const now = Date.now();
@@ -264,6 +306,55 @@ test("getCustomerThreadForBusiness returns only the active cycle's messages, and
     assert.equal(exhausted.conversationId, null);
     assert.deepEqual(exhausted.messages, []);
     assert.equal(exhausted.hasMore, false);
+  } finally {
+    await prisma.message.deleteMany({ where: { conversation: { customerId: customer.id } } });
+    await prisma.conversation.deleteMany({ where: { customerId: customer.id } });
+    await prisma.customer.deleteMany({ where: { id: customer.id } });
+  }
+});
+
+// Caso real, Laura Manjarrez (2026-09-16): se cancela una venta SOLD vieja MIENTRAS la clienta ya
+// tiene una conversación NEW activa hablando de otra cosa - el aviso de cancelación es un mensaje
+// genuino, nuevo, que cae en el ciclo SOLD. Decisión del dueño: al abrir la ficha se muestra el
+// ciclo con el mensaje más reciente de VERDAD (acá, el SOLD con la cancelación), no siempre "el
+// ciclo sin cerrar" - eso quedaba tapando el aviso que el cliente sí recibió. El composer sigue
+// apuntando al ciclo activo (NEW) sea cual sea el que se esté mostrando.
+test("getCustomerThreadForBusiness muestra por defecto el ciclo con el mensaje mas reciente, aunque ese ciclo este SOLD/LOST", async () => {
+  const customer = await prisma.customer.create({ data: { businessId, phoneNumber: `573026${Date.now()}` } });
+  const now = Date.now();
+  try {
+    const sold = await prisma.conversation.create({
+      data: { customerId: customer.id, status: "SOLD", createdAt: new Date(now - 3600000) },
+    });
+    await prisma.message.create({
+      data: { conversationId: sold.id, role: "ASSISTANT", content: "¡Listo! Tu pedido va en camino.", createdAt: new Date(now - 3600000) },
+    });
+
+    const active = await prisma.conversation.create({
+      data: { customerId: customer.id, status: "NEW", createdAt: new Date(now - 1800000) },
+    });
+    await prisma.message.create({
+      data: { conversationId: active.id, role: "CUSTOMER", content: "Quiero pedir otra cosa", createdAt: new Date(now - 1800000) },
+    });
+
+    // El aviso de cancelación llega DESPUÉS, al ciclo SOLD - el mensaje más nuevo de los dos, aunque
+    // su conversación sea la más vieja de las dos por creación.
+    await prisma.message.create({
+      data: { conversationId: sold.id, role: "ASSISTANT", content: "Tu pedido fue cancelado. Cualquier duda me escribes.", createdAt: new Date(now) },
+    });
+
+    const result = await getCustomerThreadForBusiness(businessId, customer.id);
+    assert.ok(result);
+    assert.equal(result.conversationId, sold.id, "se muestra el ciclo con el mensaje mas reciente");
+    assert.deepEqual(result.messages.map((m) => m.content), ["¡Listo! Tu pedido va en camino.", "Tu pedido fue cancelado. Cualquier duda me escribes."]);
+    assert.equal(result.activeConversationId, active.id, "el composer sigue apuntando al ciclo NEW, no al SOLD que se esta mostrando");
+    assert.equal(result.hasMore, true, "el ciclo NEW con historia real sigue alcanzable con 'Ver conversación anterior'");
+
+    const older = await getCustomerThreadForBusiness(businessId, customer.id, sold.id);
+    assert.ok(older);
+    assert.equal(older.conversationId, active.id);
+    assert.deepEqual(older.messages.map((m) => m.content), ["Quiero pedir otra cosa"]);
+    assert.equal(older.hasMore, false);
   } finally {
     await prisma.message.deleteMany({ where: { conversation: { customerId: customer.id } } });
     await prisma.conversation.deleteMany({ where: { customerId: customer.id } });
