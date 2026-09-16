@@ -19,6 +19,12 @@ export interface AgentTurnRecord {
   scope: string;
   /** Texto exacto de cada bloque enviado, en orden. */
   blocks: string[];
+  /**
+   * true = el modelo puso la marca {{BLOQUE_CATALOGO}} y el bloque viajo adentro de su mensaje; false =
+   * salio como mensaje aparte, o no hubo bloque. Sin esto la tasa de omision de la marca no se puede
+   * consultar, y es el numero con el que se sabe si el cambio del 2026-09-16 sirvio.
+   */
+  catalogInlined: boolean;
   /** Ids de producto cuyos medios salieron con esos bloques. */
   mediaProductIds: string[];
   /**

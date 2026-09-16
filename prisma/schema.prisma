@@ -870,6 +870,10 @@ model AgentTurn {
   scope          String   @default("none")
   // Texto exacto de cada bloque que se envio, en orden. Es la respuesta real del bot, no la del modelo.
   blocks         String[] @default([])
+  // true = el modelo puso la marca {{BLOQUE_CATALOGO}} y el bloque de arriba viajo adentro de su mensaje;
+  // false = salio como mensaje aparte, o no hubo bloque. Es el denominador de la tasa de omision de la
+  // marca, que es el numero con el que se sabe si el cambio del 2026-09-16 sirvio.
+  catalogInlined Boolean  @default(false)
   // Ids de producto cuyos medios salieron con los bloques de este turno.
   mediaProductIds String[] @default([])
   // Pieza 5 del plan de catalogo y medios, EN MODO SOMBRA: lo que la validacion contra el catalogo real

@@ -279,6 +279,29 @@ test("el modelo NO pone la marca: el bloque sale aparte, con los datos reales, i
   assert.equal(blocks[0].media[0].items.length, 1);
 });
 
+// La fila de AgentTurn tiene que decir DONDE salio el bloque, no solo cual fue. Sin esta columna la
+// tasa de omision de {{BLOQUE_CATALOGO}} no se puede consultar, que es el numero que decide si el
+// cambio del 2026-09-16 sirvio.
+
+test("AgentTurn registra catalogInlined=true cuando el bloque viajo adentro del mensaje", async () => {
+  mockModel([{ content: "¡Claro! Te muestro:\n\n{{BLOQUE_CATALOGO}}\n\n¿Te lo aparto?" }]);
+  await generateReply(conversationId, context, null, "quiero el Serie 11 Mini");
+
+  const fila = await prisma.agentTurn.findFirstOrThrow({ where: { conversationId }, orderBy: { createdAt: "desc" } });
+  assert.equal(fila.catalogInlined, true);
+  // El bloque se guarda igual en los dos casos: la columna dice donde salio, no si salio.
+  assert.ok(fila.blocks[0]?.includes("Reloj Inteligente Serie 11 Mini"));
+});
+
+test("AgentTurn registra catalogInlined=false cuando el bloque salio como mensaje aparte", async () => {
+  mockModel([{ content: "¡Claro! Te muestro el reloj:" }]);
+  await generateReply(conversationId, context, null, "quiero el Serie 11 Mini");
+
+  const fila = await prisma.agentTurn.findFirstOrThrow({ where: { conversationId }, orderBy: { createdAt: "desc" } });
+  assert.equal(fila.catalogInlined, false);
+  assert.ok(fila.blocks[0]?.includes("Reloj Inteligente Serie 11 Mini"));
+});
+
 test("el modelo escribe un precio inventado y NO pone la marca: el respaldo lo cubre igual que hoy", async () => {
   mockModel([
     {

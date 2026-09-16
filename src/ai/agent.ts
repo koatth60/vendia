@@ -1717,6 +1717,9 @@ export async function generateReply(
     // Lo que compuso el servidor, aunque el modelo haya elegido ponerlo adentro de su mensaje: la
     // auditoria tiene que poder ver el bloque real sin depender de donde termino saliendo.
     blocks: catalogBlocks.map((b) => b.text),
+    // Y donde termino saliendo: sin esta columna el bloque de arriba no dice si fue un mensaje aparte o
+    // si viajo adentro del mensaje del modelo, que es justo la tasa que hay que mirar.
+    catalogInlined,
     mediaProductIds: catalogMediaProductIds(),
     shadowFindings: shadowFindings.map(serializeFinding),
   });
