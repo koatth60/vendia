@@ -694,13 +694,53 @@
   .conv-row.active { background: var(--bg); }
   .chat-back-btn { display: none; padding: 4px 8px; font-size: 18px; line-height: 1; }
 
-  @media (max-width: 760px) {
+  @media (max-width: 767.98px) {
     .chat-split { height: 72vh; }
     .chat-split-col { width: 100%; border-right: none; }
     .chat-split-thread { display: none; }
     .chat-back-btn { display: flex; }
     .chat-split.chat-split--open .chat-split-col { display: none; }
     .chat-split.chat-split--open .chat-split-thread { display: flex; }
+
+    /* Bandeja a pantalla completa en el celular: el chrome (barra lateral,
+       barra superior, subpestañas) se esconde entero y la Bandeja pasa a
+       reservar el alto exacto de la ventana, como cuando el shell de escritorio
+       usa altura fija. body.no-scroll ya marca "estamos en Bandeja" (lo pone
+       switchTab) - no hace falta una clase nueva para esta parte. */
+    body.no-scroll .sidebar,
+    body.no-scroll .topbar,
+    body.no-scroll .subnav {
+      display: none;
+    }
+    body.no-scroll .app {
+      height: 100vh; height: 100dvh; overflow: hidden;
+    }
+    body.no-scroll .app-main { overflow: hidden; }
+    body.no-scroll main { overflow: hidden; padding: 0; }
+    body.no-scroll .tab-panel.active[data-tab-panel="conversations"] {
+      display: flex; flex-direction: column; height: 100%;
+    }
+    /* Barra minima: solo el titulo. Sin subtitulo ni indicador en vivo. */
+    body.no-scroll .tab-panel[data-tab-panel="conversations"] .panel-header {
+      flex-shrink: 0; margin: 0; padding: 14px 18px;
+      border-bottom: 1px solid var(--onix-border-soft);
+    }
+    body.no-scroll .tab-panel[data-tab-panel="conversations"] .panel-subtitle,
+    body.no-scroll .tab-panel[data-tab-panel="conversations"] .realtime-indicator {
+      display: none;
+    }
+    body.no-scroll .tab-panel[data-tab-panel="conversations"] .card {
+      flex: 1; min-height: 0; border: none; border-radius: 0; box-shadow: none;
+    }
+    .chat-split { height: 100%; }
+
+    /* Chat abierto: el hilo ocupa la pantalla entera, como WhatsApp. Su propia
+       cabecera (‹ volver + nombre + estado) hace de barra superior, así que la
+       barra "Conversaciones" de arriba ya no hace falta - solo mientras el
+       hilo esta abierto, prendido/apagado por openCustomer()/closeConversation(). */
+    body.chat-fullscreen .tab-panel[data-tab-panel="conversations"] .panel-header {
+      display: none;
+    }
   }
 
   .modal-overlay {

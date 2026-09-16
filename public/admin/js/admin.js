@@ -127,6 +127,8 @@ function switchTab(name) {
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.dataset.tabPanel === name));
   document.querySelector('main').classList.toggle('wide', name === 'conversations');
   document.body.classList.toggle('no-scroll', name === 'conversations');
+  // Salir de Bandeja con un chat abierto no deja el chrome escondido detras.
+  if (name !== 'conversations') document.body.classList.remove('chat-fullscreen');
   if (name === 'conversations') {
     requestAnimationFrame(fitChatSplit);
     markConversationReadIfViewing();
@@ -2013,6 +2015,9 @@ async function openCustomer(customerId) {
   document.getElementById('chat-panel-empty').style.display = 'none';
   document.getElementById('chat-panel-active').style.display = 'flex';
   document.getElementById('chat-split').classList.add('chat-split--open');
+  // Solo pinta algo a ancho de telefono (media query en admin.css) - abre el
+  // hilo a pantalla completa, como WhatsApp, sin el chrome de arriba.
+  document.body.classList.add('chat-fullscreen');
   document.querySelectorAll('.conv-row').forEach((row) => row.classList.toggle('active', row.dataset.customerId === customerId));
   thread.innerHTML = '<div style="text-align:center; color:var(--muted); font-size:13px; padding:20px;">Cargando…</div>';
   // Opening it counts as reading it - clear the badge immediately (the server also resets its own
@@ -2072,6 +2077,7 @@ function closeConversation() {
   document.getElementById('chat-panel-active').style.display = 'none';
   document.getElementById('chat-panel-empty').style.display = 'flex';
   document.getElementById('chat-split').classList.remove('chat-split--open');
+  document.body.classList.remove('chat-fullscreen');
   document.querySelectorAll('.conv-row').forEach((row) => row.classList.remove('active'));
   currentConversationId = null;
   currentCustomerId = null;
