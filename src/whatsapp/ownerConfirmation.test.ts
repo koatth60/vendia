@@ -6,7 +6,12 @@ import {
   askOwnerToConfirmSale,
   drainOwnerConfirmationQueue,
   buildSaleConfirmationText,
+  canSpendTemplate,
   describeCustomerForOwner,
+  nextConfirmationDelayMinutes,
+  CONFIRMATION_REMINDER_STEPS,
+  CONFIRMATION_TEMPLATE_SPACING_MINUTES,
+  MAX_CONFIRMATION_TEMPLATES,
 } from "./ownerConfirmation";
 import { findOpenPendingConfirmationsForBusiness, recordMessageDeliveryStatus } from "../conversation/service";
 import { runEscalationReminderJob } from "../jobs/escalationReminder";
@@ -119,8 +124,11 @@ beforeEach(async () => {
   // Una conversacion nueva por prueba: el estado de la confirmacion vive en la conversacion, y compartir
   // una haria que el orden de las pruebas cambiara el resultado.
   await prisma.message.deleteMany({ where: { conversation: { customerId } } });
+  // Las pruebas que llegan hasta el "si llego" del dueno dejan un Order, que referencia la conversacion.
+  await prisma.order.deleteMany({ where: { customerId } });
   await prisma.conversation.deleteMany({ where: { customerId } });
   await prisma.ownerMessageLog.deleteMany({ where: { businessId } });
+  await prisma.agentIncident.deleteMany({ where: { businessId } });
   const conversation = await prisma.conversation.create({ data: { customerId } });
   conversationId = conversation.id;
   // La ventana de 24h del CLIENTE se mide contra su ultimo mensaje; sin uno, todo envio al cliente da
@@ -133,6 +141,43 @@ const DRAFT = { items: [], shippingAddress: "Calle 1", paymentMethodLabel: "Nequ
 
 async function ask(summary = "1x Reloj Serie 11 Mini - $154.000") {
   return askOwnerToConfirmSale({ businessId, conversationId, customerId, credentials, summary, draft: DRAFT });
+}
+
+/**
+ * Adelanta el reloj de ESTA confirmacion corriendo sus fechas hacia atras. El job usa `Date.now()` real,
+ * asi que mover las fechas es la unica forma de simular horas sin esperarlas - y es fiel: el vencimiento
+ * mide contra `pendingConfirmationAskedAt`, que se corre igual que todo lo demas.
+ */
+async function shiftBack(minutes: number): Promise<void> {
+  const ms = minutes * 60 * 1000;
+  const c = await prisma.conversation.findUniqueOrThrow({ where: { id: conversationId } });
+  const back = (date: Date | null) => (date ? new Date(date.getTime() - ms) : null);
+  await prisma.conversation.update({
+    where: { id: conversationId },
+    data: {
+      pendingConfirmationAskedAt: back(c.pendingConfirmationAskedAt),
+      pendingConfirmationRemindedAt: back(c.pendingConfirmationRemindedAt),
+      pendingConfirmationNextAttemptAt: back(c.pendingConfirmationNextAttemptAt),
+      pendingConfirmationLastTemplateAt: back(c.pendingConfirmationLastTemplateAt),
+    },
+  });
+}
+
+/** Corre el perseguidor hasta que la confirmacion vence, saltando de un intento al siguiente. */
+async function simularHastaElVencimiento(): Promise<{ minutosSimulados: number; pasadas: number }> {
+  let minutosSimulados = 0;
+  let pasadas = 0;
+  for (;;) {
+    const c = await prisma.conversation.findUniqueOrThrow({ where: { id: conversationId } });
+    if (!c.pendingConfirmationAskedAt) break; // vencida y limpiada
+    const faltanMin = Math.max(Math.ceil((c.pendingConfirmationNextAttemptAt!.getTime() - Date.now()) / 60000), 0);
+    await shiftBack(faltanMin);
+    minutosSimulados += faltanMin;
+    await runEscalationReminderJob();
+    pasadas++;
+    assert.ok(pasadas < 400, "el perseguidor tiene que terminar: o el dueno contesta o vence");
+  }
+  return { minutosSimulados, pasadas };
 }
 
 test("describeCustomerForOwner no muestra un numero que WhatsApp oculto", () => {
@@ -273,16 +318,21 @@ test("el perseguidor vuelve a preguntar pasados ownerReminderMinutes, y no antes
   try {
     await ask();
 
+    // El primer aviso sale exactamente a los ownerReminderMinutes configurados por el dueno: la escalera
+    // de espaciado arranca en 1x y crece recien despues.
+    const recien = await prisma.conversation.findUniqueOrThrow({ where: { id: conversationId } });
+    const primerIntervaloMin = Math.round(
+      (recien.pendingConfirmationNextAttemptAt!.getTime() - recien.pendingConfirmationAskedAt!.getTime()) / 60000
+    );
+    assert.equal(primerIntervaloMin, 5, "el primer intervalo es Business.ownerReminderMinutes, tal cual");
+
     // Recien preguntado: todavia no toca insistir.
     sent = [];
     await runEscalationReminderJob();
     assert.equal(toOwner().length, 0, "insistir de inmediato seria spam, no persistencia");
 
-    // 10 minutos despues, con el umbral en 5.
-    await prisma.conversation.update({
-      where: { id: conversationId },
-      data: { pendingConfirmationAskedAt: new Date(Date.now() - 10 * 60 * 1000) },
-    });
+    // Pasados los 5 minutos.
+    await shiftBack(10);
     sent = [];
     await runEscalationReminderJob();
     const reminders = toOwner();
@@ -295,7 +345,13 @@ test("el perseguidor vuelve a preguntar pasados ownerReminderMinutes, y no antes
     assert.ok(conversation.pendingConfirmationRemindedAt);
     assert.ok(conversation.pendingConfirmationAskedAt, "la confirmacion sigue viva hasta que el dueno conteste");
 
-    // Y no insiste dos veces en la misma ventana de 5 minutos.
+    // Y el siguiente intervalo ya es mayor: 2x la base, no 1x.
+    const segundoIntervaloMin = Math.round(
+      (conversation.pendingConfirmationNextAttemptAt!.getTime() - conversation.pendingConfirmationRemindedAt!.getTime()) / 60000
+    );
+    assert.equal(segundoIntervaloMin, 10);
+
+    // Y no insiste dos veces dentro del mismo intervalo.
     sent = [];
     await runEscalationReminderJob();
     assert.equal(toOwner().length, 0);
@@ -313,6 +369,7 @@ test("vencido ownerQuestionTimeoutHours: la conversacion pasa a manos de una per
       data: {
         pendingConfirmationAskedAt: new Date(Date.now() - 25 * 60 * 60 * 1000),
         pendingConfirmationRemindedAt: new Date(Date.now() - 25 * 60 * 60 * 1000),
+        pendingConfirmationNextAttemptAt: new Date(Date.now() - 60 * 1000),
       },
     });
 
@@ -405,6 +462,121 @@ test("el dueno aprieta '✅ Si llego': el flujo existente crea el pedido y la co
     sent = [];
     await runEscalationReminderJob();
     assert.equal(toOwner().length, 0);
+  } finally {
+    restoreFetch();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Politica de insistencia: espaciado creciente y tope de plantillas
+// ---------------------------------------------------------------------------
+
+test("el espaciado crece: el primer intervalo es el configurado y el ultimo paso se repite", () => {
+  // Base 5 minutos, o sea la config real de MAGByLizN.
+  assert.equal(nextConfirmationDelayMinutes(5, 1), 5, "el primer aviso respeta ownerReminderMinutes");
+  assert.equal(nextConfirmationDelayMinutes(5, 2), 10);
+  assert.equal(nextConfirmationDelayMinutes(5, 3), 15);
+  const ultimo = CONFIRMATION_REMINDER_STEPS[CONFIRMATION_REMINDER_STEPS.length - 1] * 5;
+  assert.equal(nextConfirmationDelayMinutes(5, CONFIRMATION_REMINDER_STEPS.length), ultimo);
+  assert.equal(nextConfirmationDelayMinutes(5, 200), ultimo, "el ultimo paso se repite, no crece para siempre");
+});
+
+test("el presupuesto de plantillas tiene tope y separacion minima", () => {
+  const ahora = new Date("2026-09-16T12:00:00Z");
+  assert.equal(canSpendTemplate({ templatesSent: 0, lastTemplateAt: null }, ahora), true);
+  assert.equal(
+    canSpendTemplate({ templatesSent: 1, lastTemplateAt: new Date(ahora.getTime() - 60 * 60 * 1000) }, ahora),
+    false,
+    "una hora despues de la anterior todavia no: la segunda no despierta a nadie y se factura igual"
+  );
+  assert.equal(
+    canSpendTemplate(
+      { templatesSent: 1, lastTemplateAt: new Date(ahora.getTime() - CONFIRMATION_TEMPLATE_SPACING_MINUTES * 60 * 1000) },
+      ahora
+    ),
+    true
+  );
+  assert.equal(
+    canSpendTemplate({ templatesSent: MAX_CONFIRMATION_TEMPLATES, lastTemplateAt: new Date(0) }, ahora),
+    false,
+    "gastado el presupuesto no se manda ninguna mas, por vieja que sea la ultima"
+  );
+});
+
+test("24 horas sin respuesta con la ventana abierta: 27 mensajes al dueno, no 288", async () => {
+  stubWhatsappFetch();
+  try {
+    await ask();
+    const { minutosSimulados } = await simularHastaElVencimiento();
+
+    const recordatorios = toOwner("interactive").length - 1; // el primero es el pedido inicial
+    assert.equal(toOwner("interactive").length, 27, "1 pedido inicial + 26 recordatorios en 24 horas");
+    assert.equal(recordatorios, 26);
+    assert.ok(minutosSimulados >= 24 * 60, `la simulacion tiene que cubrir las 24 horas (cubrio ${minutosSimulados} min)`);
+
+    // Con cadencia fija de 5 minutos hasta el vencimiento habrian sido 288.
+    assert.ok(toOwner("interactive").length < 40, "decenas, no cientos");
+
+    // Y vencio igual que antes: sin pedido, a control manual.
+    const conversation = await prisma.conversation.findUniqueOrThrow({ where: { id: conversationId } });
+    assert.equal(conversation.humanControl, true);
+    assert.equal(conversation.pendingConfirmationAskedAt, null);
+    assert.equal(await prisma.order.count({ where: { conversationId } }), 0);
+  } finally {
+    restoreFetch();
+  }
+});
+
+test("24 horas con la ventana cerrada: nunca mas de tres plantillas onix_owner_alert", async () => {
+  stubWhatsappFetch();
+  fetchMode = "only-template";
+  try {
+    await ask();
+    await simularHastaElVencimiento();
+
+    // El aviso de vencimiento tambien sale por plantilla, pero es otro mecanismo (uno por conversacion,
+    // no por reintento): se cuenta aparte para que el tope se mida sobre lo que el tope gobierna.
+    const plantillasDeLaConfirmacion = toOwner("template").filter((m) => !m.body.includes("Se vencio el tiempo de espera"));
+    assert.equal(plantillasDeLaConfirmacion.length, MAX_CONFIRMATION_TEMPLATES);
+
+    // Los reintentos siguieron igual (fallan gratis por botones/texto) y el vencimiento funciono.
+    const intentos = await prisma.ownerMessageLog.count({ where: { conversationId, direction: "OUT" } });
+    assert.equal(intentos, 28, "27 intentos de confirmacion + el aviso de vencimiento");
+    const conversation = await prisma.conversation.findUniqueOrThrow({ where: { id: conversationId } });
+    assert.equal(conversation.humanControl, true);
+    assert.equal(await prisma.order.count({ where: { conversationId } }), 0);
+  } finally {
+    restoreFetch();
+  }
+});
+
+test("el dueno contesta al tercer intento: se corta la insistencia y queda un solo pedido", async () => {
+  stubWhatsappFetch();
+  try {
+    await ask();
+
+    // Dos recordatorios (intentos 2 y 3).
+    await shiftBack(nextConfirmationDelayMinutes(5, 1));
+    await runEscalationReminderJob();
+    await shiftBack(nextConfirmationDelayMinutes(5, 2));
+    await runEscalationReminderJob();
+
+    const antes = await prisma.conversation.findUniqueOrThrow({ where: { id: conversationId } });
+    assert.equal(antes.pendingConfirmationAttempts, 3);
+
+    await handleOwnerReply(businessId, credentials, ownerPhone, {
+      type: "interactive",
+      interactive: { type: "button_reply", button_reply: { id: "confirm_yes", title: "✅ Si llego" } },
+      context: { id: antes.pendingConfirmationMessageId! },
+    });
+
+    assert.equal(await prisma.order.count({ where: { conversationId } }), 1);
+
+    // Y a partir de ahi el perseguidor no manda nada mas, por mucho que pase el tiempo.
+    sent = [];
+    for (let i = 0; i < 5; i++) await runEscalationReminderJob();
+    assert.equal(toOwner().length, 0);
+    assert.equal(await prisma.order.count({ where: { conversationId } }), 1, "un solo pedido");
   } finally {
     restoreFetch();
   }

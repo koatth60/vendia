@@ -4384,6 +4384,23 @@ function confirmationDeliveryNote(confirmation) {
   return 'Entregado a tu WhatsApp.';
 }
 
+// Los avisos se van espaciando: el segundo no llega al mismo rato que el primero. Sin decir cuándo sale
+// el próximo, "esperando" no le dice al dueño si tiene que hacer algo ahora o si el sistema sigue encima.
+function timeUntil(iso) {
+  if (!iso) return '';
+  const minutes = Math.round((new Date(iso).getTime() - Date.now()) / 60000);
+  if (minutes <= 0) return 'en un momento';
+  if (minutes < 60) return `en ${minutes} min`;
+  const hours = Math.round(minutes / 60);
+  return `en ${hours} h`;
+}
+
+function confirmationScheduleNote(confirmation) {
+  const intento = `Intento <span class="onix-num">${confirmation.attempts}</span>`;
+  const proximo = confirmation.nextAttemptAt ? ` · próximo aviso ${escapeHtml(timeUntil(confirmation.nextAttemptAt))}` : '';
+  return `${intento}${proximo}`;
+}
+
 let lastHealthSnapshot = null;
 
 async function loadHealth() {
@@ -4421,6 +4438,7 @@ async function loadHealth() {
             <div style="min-width:0;">
               <div class="title">${escapeHtml(c.customerName)} · esperando ${escapeHtml(timeAgo(c.askedAt))}</div>
               <div class="sample">${escapeHtml(c.summary || 'Sin resumen del pedido')}</div>
+              <div class="sample">${confirmationScheduleNote(c)}</div>
               <div class="sample">${escapeHtml(confirmationDeliveryNote(c))}</div>
             </div>
             <button type="button" class="btn-danger-solid action-cta" onclick="goToCustomerChat('${c.customerId}')">Ver chat</button>
@@ -4493,9 +4511,10 @@ async function loadHealth() {
       <div class="card" style="margin-bottom:16px;">
         <div style="font-size:12.5px; color:var(--muted); margin-bottom:10px;">
           El cliente ya pagó y el pedido <strong>no se crea</strong> hasta que respondas si el pago te
-          llegó. Te lo volvemos a preguntar por WhatsApp cada tanto hasta que contestes; el número de la
-          izquierda es cuántas veces te lo mandamos. Contestá por WhatsApp citando ese mensaje: no se
-          puede cerrar desde acá, sos la única que puede ver si la plata entró.
+          llegó. Te lo volvemos a preguntar por WhatsApp, cada vez más espaciado (no queremos llenarte el
+          teléfono), hasta que contestes; el número de la izquierda es cuántas veces te lo mandamos.
+          Contestá por WhatsApp citando ese mensaje: no se puede cerrar desde acá, sos la única que puede
+          ver si la plata entró.
         </div>
         ${confirmationRows}
       </div>

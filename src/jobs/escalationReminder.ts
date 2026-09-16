@@ -255,8 +255,11 @@ export async function runEscalationReminderJob(): Promise<void> {
       }
     }
 
+    // El vencimiento del proximo intento lo lleva la propia confirmacion, no un umbral fijo del job:
+    // el intervalo crece con el numero de intento (CONFIRMATION_REMINDER_STEPS). Con cadencia fija, la
+    // config real de MAGByLizN (5 minutos / 24 horas) daba ~288 mensajes al dueno por UNA venta.
     const dueConfirmations = await findOpenPendingConfirmationsForBusiness(business.id, {
-      remindDueBefore: stage1Before,
+      dueBefore: new Date(),
     });
     for (const conversation of dueConfirmations) {
       if (timedOutConfirmationIds.has(conversation.id)) continue;
@@ -269,6 +272,11 @@ export async function runEscalationReminderJob(): Promise<void> {
         customer: conversation.customer,
         summary: conversation.pendingOrderSummary,
         attempt: conversation.pendingConfirmationAttempts + 1,
+        reminderMinutes: business.ownerReminderMinutes,
+        budget: {
+          templatesSent: conversation.pendingConfirmationTemplatesSent,
+          lastTemplateAt: conversation.pendingConfirmationLastTemplateAt,
+        },
       });
       if (outcome.channel === "NONE") {
         console.error(`No se pudo reintentar la confirmacion de venta (conversation=${conversation.id}):`, outcome.error);

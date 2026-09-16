@@ -700,6 +700,17 @@ model Conversation {
   // mensaje real con botones sigue debiendo salir: se manda apenas el dueno escriba cualquier cosa, que
   // es lo que reabre su ventana.
   pendingConfirmationButtonsQueued Boolean            @default(false)
+  // Cuando toca el proximo reintento. Se guarda en vez de calcularse en la consulta porque el intervalo
+  // crece con el numero de intento (ver CONFIRMATION_REMINDER_STEPS): con cadencia fija alcanzaba un
+  // `lte` sobre la fecha del ultimo aviso, con espaciado creciente no. Ademas es lo que el panel muestra
+  // como "proximo aviso".
+  pendingConfirmationNextAttemptAt DateTime?
+  // Cuantas veces se gasto la plantilla onix_owner_alert en esta confirmacion. Es UTILITY: se factura
+  // por mensaje, y si no contesto la primera, la numero cuarenta no la va a despertar.
+  pendingConfirmationTemplatesSent Int                @default(0)
+  // Cuando salio la ultima. Sin esto, el tope se gastaba entero en los primeros 15 minutos y despues no
+  // quedaba forma de alcanzarla en las 23 horas que faltan.
+  pendingConfirmationLastTemplateAt DateTime?
   pendingOwnerQuestions        PendingOwnerQuestion[]
   contextSummary               String?
   contextSummarizedUpTo        Int?

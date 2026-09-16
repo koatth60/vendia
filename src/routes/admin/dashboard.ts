@@ -73,6 +73,10 @@ dashboardRouter.get("/api/pending-confirmations", async (req, res) => {
       askedAt: conversation.pendingConfirmationAskedAt,
       remindedAt: conversation.pendingConfirmationRemindedAt,
       attempts: conversation.pendingConfirmationAttempts,
+      // Cuando sale el proximo aviso. El intervalo crece con el numero de intento, asi que "cada cuanto"
+      // no es un dato fijo que el panel pueda deducir solo.
+      nextAttemptAt: conversation.pendingConfirmationNextAttemptAt,
+      templatesSent: conversation.pendingConfirmationTemplatesSent,
       // Por donde salio el ultimo intento. NONE significa que no salio por ninguna via y que el
       // perseguidor lo va a volver a intentar; el dueno tiene que poder distinguir "no contesto" de
       // "nunca le llego".

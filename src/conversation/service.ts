@@ -634,23 +634,21 @@ export async function findOpenPendingOwnerQuestionsForConversation(conversationI
  *
  * Una sola consulta para los tres usos (handleOwnerReply cuando el dueno responde sin citar, el
  * perseguidor de jobs/escalationReminder.ts, y el panel), acotada con `filter`:
- *   - `remindDueBefore`: el ultimo intento (o el pedido inicial) es mas viejo que eso -> toca insistir.
+ *   - `dueBefore`: ya le toca el proximo reintento (ver pendingConfirmationNextAttemptAt, que lo escribe
+ *     ownerConfirmation.ts con espaciado creciente; con cadencia fija alcanzaba comparar contra la fecha
+ *     del ultimo aviso, con espaciado creciente el intervalo depende del numero de intento).
  *   - `askedBefore`: la pregunta original es mas vieja que eso -> vencio.
  */
 export async function findOpenPendingConfirmationsForBusiness(
   businessId: string,
-  filter?: { remindDueBefore?: Date; askedBefore?: Date }
+  filter?: { dueBefore?: Date; askedBefore?: Date }
 ) {
   const where: Prisma.ConversationWhereInput = {
     customer: { businessId },
     pendingConfirmationAskedAt: filter?.askedBefore ? { lte: filter.askedBefore } : { not: null },
   };
-  if (filter?.remindDueBefore) {
-    // El reloj de la insistencia es el ultimo intento, y si nunca hubo reintento, el pedido original.
-    where.OR = [
-      { pendingConfirmationRemindedAt: { lte: filter.remindDueBefore } },
-      { pendingConfirmationRemindedAt: null, pendingConfirmationAskedAt: { lte: filter.remindDueBefore } },
-    ];
+  if (filter?.dueBefore) {
+    where.pendingConfirmationNextAttemptAt = { lte: filter.dueBefore };
   }
   return prisma.conversation.findMany({
     where,
