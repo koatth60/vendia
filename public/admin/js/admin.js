@@ -2606,13 +2606,13 @@ async function loadPaymentMethods() {
     }
 
     container.innerHTML = paymentMethodsCache.map((m) => `
-      <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px 12px; border:1px solid var(--border); border-radius:var(--radius-md); ${m.active ? '' : 'opacity:.5;'}">
-        <div>
+      <div style="display:flex; flex-wrap:wrap; align-items:flex-start; justify-content:space-between; gap:10px; padding:10px 12px; border:1px solid var(--border); border-radius:var(--radius-md); ${m.active ? '' : 'opacity:.5;'}">
+        <div style="flex:1 1 220px; min-width:0;">
           <span class="category-tag" style="margin-right:8px;">${pmTypeLabel(m.type)}</span>
           <strong style="font-size:13.5px;">${escapeHtml(m.label)}</strong>
-          <div style="font-size:12px; color:var(--muted); margin-top:2px; max-width:420px; overflow-wrap:anywhere;">${escapeHtml(m.details)}</div>
+          <div style="font-size:12px; color:var(--muted); margin-top:2px; overflow-wrap:anywhere;">${escapeHtml(m.details)}</div>
         </div>
-        <div style="display:flex; gap:6px; flex-shrink:0;">
+        <div style="display:flex; flex-wrap:wrap; gap:6px; flex-shrink:0;">
           <button class="btn-secondary" onclick="editPaymentMethod('${m.id}')">Editar</button>
           <button class="btn-secondary" onclick="togglePaymentMethod('${m.id}', ${!m.active})">${m.active ? 'Desactivar' : 'Activar'}</button>
           <button class="btn-danger" onclick="deletePaymentMethod('${m.id}')">Eliminar</button>
@@ -2719,12 +2719,12 @@ async function loadFaqEntries() {
     }
 
     container.innerHTML = faqEntriesCache.map((f) => `
-      <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:10px; padding:10px 12px; border:1px solid var(--border); border-radius:var(--radius-md); ${f.active ? '' : 'opacity:.5;'}">
-        <div>
+      <div style="display:flex; flex-wrap:wrap; align-items:flex-start; justify-content:space-between; gap:10px; padding:10px 12px; border:1px solid var(--border); border-radius:var(--radius-md); ${f.active ? '' : 'opacity:.5;'}">
+        <div style="flex:1 1 220px; min-width:0;">
           <strong style="font-size:13.5px;">${escapeHtml(f.question)}</strong>
-          <div style="font-size:12px; color:var(--muted); margin-top:2px; max-width:480px; overflow-wrap:anywhere;">${escapeHtml(f.answer)}</div>
+          <div style="font-size:12px; color:var(--muted); margin-top:2px; overflow-wrap:anywhere;">${escapeHtml(f.answer)}</div>
         </div>
-        <div style="display:flex; gap:6px; flex-shrink:0;">
+        <div style="display:flex; flex-wrap:wrap; gap:6px; flex-shrink:0;">
           <button class="btn-secondary" onclick="editFaqEntry('${f.id}')">Editar</button>
           <button class="btn-secondary" onclick="toggleFaqEntry('${f.id}', ${!f.active})">${f.active ? 'Desactivar' : 'Activar'}</button>
           <button class="btn-danger" onclick="deleteFaqEntry('${f.id}')">Eliminar</button>
@@ -2825,9 +2825,9 @@ async function loadCategoryAliases() {
     }
 
     container.innerHTML = list.map((a) => `
-      <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px 12px; border:1px solid var(--border); border-radius:var(--radius-md);">
-        <div style="font-size:13.5px;"><strong>${escapeHtml(a.synonym)}</strong> significa lo mismo que <strong>${escapeHtml(a.canonical)}</strong></div>
-        <button class="btn-danger" onclick="deleteCategoryAlias('${a.id}')">Eliminar</button>
+      <div style="display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:10px; padding:10px 12px; border:1px solid var(--border); border-radius:var(--radius-md);">
+        <div style="font-size:13.5px; flex:1 1 220px; min-width:0;"><strong>${escapeHtml(a.synonym)}</strong> significa lo mismo que <strong>${escapeHtml(a.canonical)}</strong></div>
+        <button class="btn-danger" style="flex-shrink:0;" onclick="deleteCategoryAlias('${a.id}')">Eliminar</button>
       </div>
     `).join('');
   } catch (err) {
@@ -3290,7 +3290,7 @@ async function loadAnalytics() {
               <span class="col-value onix-num">${d.customer}</span>
               <span class="col-fill" style="height:${fmt(d.customer)}; background:var(--onix-series-clients);"></span>
             </span>
-            <span class="col" title="Bot el ${escapeHtml(d.date)}: ${d.assistant}">
+            <span class="col" title="Agente el ${escapeHtml(d.date)}: ${d.assistant}">
               <span class="col-value onix-num">${d.assistant}</span>
               <span class="col-fill" style="height:${fmt(d.assistant)}; background:var(--onix-series-bot);"></span>
             </span>
@@ -3344,7 +3344,7 @@ async function loadAnalytics() {
             <h3 class="chart-title">Mensajes por día</h3>
             <div class="chart-legend">
               <span class="legend-item"><span class="legend-dot" style="background:var(--onix-series-clients);"></span>Clientes</span>
-              <span class="legend-item"><span class="legend-dot" style="background:var(--onix-series-bot);"></span>Bot</span>
+              <span class="legend-item"><span class="legend-dot" style="background:var(--onix-series-bot);"></span>Agente</span>
             </div>
           </div>
           ${days.length === 0
@@ -3372,12 +3372,12 @@ function configHealthChecklistHtml(health) {
   const items = [
     { ok: health.hasContactPhone, label: 'Teléfono de contacto configurado', missing: 'Sin esto, ninguna escalación al dueño (ask_owner, PQR, etc) llega a ningún lado - configuralo en Negocio > Identidad.' },
     { ok: health.hasCategoriesConfigured, label: 'Al menos un producto con categoría cargada', missing: 'Sin categorías, el bot depende de una vocabulario derivado de los nombres de producto para reconocer consultas como "¿qué relojes tienen?" - cargar la categoría real en Catálogo es más confiable.' },
-    { ok: health.hasPaymentMethods, label: 'Al menos un método de pago activo', missing: 'Sin un método de pago configurado, el bot no puede confirmarle al cliente cómo pagar - agregalo en Bot > Pagos.' },
+    { ok: health.hasPaymentMethods, label: 'Al menos un método de pago activo', missing: 'Sin un método de pago configurado, el bot no puede confirmarle al cliente cómo pagar - agregalo en Agente > Pagos.' },
     {
       ok: health.hasApprovedOwnerAlertTemplate === null ? null : health.hasApprovedOwnerAlertTemplate,
       label: 'Plantilla "onix_owner_alert" aprobada por WhatsApp',
-      missing: 'Sin esta plantilla aprobada, una escalación nocturna (fuera de la ventana de 24h del dueño) puede no llegarle nunca - revisá Bot > Canales > Plantillas.',
-      unknown: 'No se pudo verificar todavía (conectá WhatsApp Business primero en Bot > Canales).',
+      missing: 'Sin esta plantilla aprobada, una escalación nocturna (fuera de la ventana de 24h del dueño) puede no llegarle nunca - revisá Agente > Canales > Plantillas.',
+      unknown: 'No se pudo verificar todavía (conectá WhatsApp Business primero en Agente > Canales).',
     },
   ];
   const ICON = {
@@ -3500,12 +3500,12 @@ async function loadTeamMembers() {
     }
 
     container.innerHTML = members.map((m) => `
-      <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px 12px; border:1px solid var(--border); border-radius:var(--radius-md); ${m.active ? '' : 'opacity:.5;'}">
-        <div>
+      <div style="display:flex; flex-wrap:wrap; align-items:flex-start; justify-content:space-between; gap:10px; padding:10px 12px; border:1px solid var(--border); border-radius:var(--radius-md); ${m.active ? '' : 'opacity:.5;'}">
+        <div style="flex:1 1 220px; min-width:0;">
           <strong style="font-size:13.5px;">${escapeHtml(m.name)}</strong>
           <div style="font-size:12px; color:var(--muted); margin-top:2px;">${escapeHtml(m.email)}</div>
         </div>
-        <div style="display:flex; gap:6px; flex-shrink:0;">
+        <div style="display:flex; flex-wrap:wrap; gap:6px; flex-shrink:0;">
           <button class="btn-secondary" onclick="toggleTeamMember('${m.id}', ${!m.active})">${m.active ? 'Desactivar' : 'Activar'}</button>
           <button class="btn-danger" onclick="deleteTeamMember('${m.id}')">Eliminar</button>
         </div>
@@ -3837,8 +3837,8 @@ function initRealtime() {
   socket.on('delivery:failed', (failure) => {
     setStatus(
       failure && failure.critical
-        ? 'Un mensaje al dueño no se pudo entregar - revisá Bot > Salud'
-        : 'Un mensaje a un cliente no se pudo entregar - revisá Bot > Salud',
+        ? 'Un mensaje al dueño no se pudo entregar - revisá Agente > Salud'
+        : 'Un mensaje a un cliente no se pudo entregar - revisá Agente > Salud',
       true
     );
     if (document.querySelector('.tab-btn[data-tab="health"]')?.classList.contains('active')) loadHealth();
@@ -4070,14 +4070,14 @@ function renderCustomerProfile(p) {
   const orderRows = p.orders.length === 0
     ? '<div class="empty-state" style="padding:18px;">Todavía no tiene pedidos.</div>'
     : p.orders.map((o) => `
-        <div style="display:flex; justify-content:space-between; gap:10px; padding:10px 0; border-bottom:1px solid var(--border-soft);">
-          <div style="min-width:0;">
+        <div style="display:flex; flex-wrap:wrap; justify-content:space-between; gap:10px; padding:10px 0; border-bottom:1px solid var(--border-soft);">
+          <div style="flex:1 1 220px; min-width:0;">
             <div style="font-size:13px; font-weight:600;">${escapeHtml(o.summary)}</div>
             <div style="font-size:11.5px; color:var(--muted); margin-top:2px;">
               ${new Date(o.createdAt).toLocaleDateString('es-CO')} · ${escapeHtml(o.fulfillmentStatus)}
             </div>
           </div>
-          <div style="font-weight:700; white-space:nowrap;">${escapeHtml(formatMoney(o.totalAmount, o.currency))}</div>
+          <div style="font-weight:700; white-space:nowrap; flex-shrink:0;">${escapeHtml(formatMoney(o.totalAmount, o.currency))}</div>
         </div>
       `).join('');
 
@@ -4381,12 +4381,12 @@ async function loadHealth() {
     const pendingRows = pending.length === 0
       ? '<div class="empty-state" style="padding:18px;">Nada esperando respuesta. Al día.</div>'
       : pending.map((p) => `
-          <div style="display:flex; justify-content:space-between; gap:10px; align-items:flex-start; padding:11px 0; border-bottom:1px solid var(--border-soft);">
-            <div style="min-width:0;">
+          <div style="display:flex; flex-wrap:wrap; justify-content:space-between; gap:10px; align-items:flex-start; padding:11px 0; border-bottom:1px solid var(--border-soft);">
+            <div style="flex:1 1 220px; min-width:0;">
               <div style="font-size:13px; font-weight:600;">${escapeHtml(p.customer.name || p.customer.phoneNumber)}</div>
               <div style="font-size:12.5px; color:var(--muted); margin-top:3px; white-space:pre-wrap;">${escapeHtml(p.kind === 'PHOTO_PRODUCT' ? '📷 Pidió identificar una foto' : p.question)}</div>
             </div>
-            <div style="display:flex; gap:6px; flex-shrink:0;">
+            <div style="display:flex; flex-wrap:wrap; gap:6px; flex-shrink:0;">
               <button class="btn-secondary" onclick="goToCustomerChat('${p.customer.id}')">Ver chat</button>
               <button class="btn-secondary" onclick="resolvePendingQuestion('${p.questionId}')">Marcar resuelta</button>
             </div>
@@ -4396,8 +4396,8 @@ async function loadHealth() {
     const failureRows = failures.length === 0
       ? '<div class="empty-state" style="padding:18px;">Ningún mensaje falló. Todo llegó.</div>'
       : failures.map((f) => `
-          <div style="display:flex; justify-content:space-between; gap:10px; align-items:flex-start; padding:11px 0; border-bottom:1px solid var(--border-soft);">
-            <div style="min-width:0;">
+          <div style="display:flex; flex-wrap:wrap; justify-content:space-between; gap:10px; align-items:flex-start; padding:11px 0; border-bottom:1px solid var(--border-soft);">
+            <div style="flex:1 1 220px; min-width:0;">
               <div style="font-size:13px; font-weight:600;">
                 ${escapeHtml(f.recipientPhone)}
                 ${f.critical ? '<span class="stage-pill" style="background:var(--danger-light); color:var(--danger); margin-left:6px;">Crítico</span>' : ''}
@@ -4558,12 +4558,12 @@ async function loadShippingRates() {
     container.innerHTML = shippingRatesCache.length === 0
       ? '<div style="font-size:13px; color:var(--muted);">Todavía no agregaste ninguna tarifa.</div>'
       : shippingRatesCache.map((r) => `
-          <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px 12px; border:1px solid var(--border); border-radius:var(--radius-md);">
-            <div>
+          <div style="display:flex; flex-wrap:wrap; align-items:flex-start; justify-content:space-between; gap:10px; padding:10px 12px; border:1px solid var(--border); border-radius:var(--radius-md);">
+            <div style="flex:1 1 220px; min-width:0;">
               <strong style="font-size:13.5px;">${escapeHtml(r.label)}</strong>
               <div style="font-size:12px; color:var(--muted); margin-top:2px;">${escapeHtml(formatMoney(r.cost, 'COP'))}</div>
             </div>
-            <div style="display:flex; gap:6px; flex-shrink:0;">
+            <div style="display:flex; flex-wrap:wrap; gap:6px; flex-shrink:0;">
               <button class="btn-secondary" onclick="editShippingRate('${r.id}')">Editar</button>
               <button class="btn-danger" onclick="deleteShippingRate('${r.id}')">Eliminar</button>
             </div>
@@ -4668,9 +4668,9 @@ async function loadShippingCityRules() {
     container.innerHTML = items.length === 0
       ? '<div style="font-size:13px; color:var(--muted);">Todavía no agregaste ninguna regla de ciudad.</div>'
       : items.map((r) => `
-          <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px 12px; border:1px solid var(--border); border-radius:var(--radius-md);">
-            <div style="font-size:13.5px;"><strong>${escapeHtml(r.city)}</strong> → ${escapeHtml(r.label)}</div>
-            <button class="btn-danger" onclick="deleteShippingCityRule('${r.id}')">Eliminar</button>
+          <div style="display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:10px; padding:10px 12px; border:1px solid var(--border); border-radius:var(--radius-md);">
+            <div style="font-size:13.5px; flex:1 1 220px; min-width:0;"><strong>${escapeHtml(r.city)}</strong> → ${escapeHtml(r.label)}</div>
+            <button class="btn-danger" style="flex-shrink:0;" onclick="deleteShippingCityRule('${r.id}')">Eliminar</button>
           </div>
         `).join('');
 
@@ -4814,21 +4814,43 @@ async function runGlobalSearch(q) {
 // de una cadena JS embebida en HTML.
 let lastSearchProductNames = {};
 
+// Los mismos trazos 1.6px / grilla 18px del resto del panel (nunca emoji) - "producto" es
+// exactamente el icono del tab Catálogo, para que el resultado ya diga de qué tipo es antes de
+// leer el texto.
+const GLOBAL_SEARCH_ICON_PATHS = {
+  product: '<path d="M3.5 7.5 12 3.5l8.5 4v9L12 20.5l-8.5-4z"></path><path d="M3.5 7.5 12 11.5l8.5-4"></path><path d="M12 11.5v9"></path>',
+  order: '<rect x="5" y="4" width="14" height="16" rx="2"></rect><path d="M8.5 9h7M8.5 13h7M8.5 17h4"></path>',
+  faq: '<circle cx="12" cy="12" r="8.5"></circle><path d="M9.5 9.3a2.5 2.5 0 1 1 3.7 2.2c-.7.4-1.2.9-1.2 1.8"></path><path d="M12 16.3h.01"></path>',
+};
+function globalSearchIconHtml(type) {
+  return `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${GLOBAL_SEARCH_ICON_PATHS[type]}</svg>`;
+}
+
 function renderGlobalSearchResults(data) {
   const box = document.getElementById('global-search-results');
   lastSearchProductNames = Object.fromEntries(data.products.map((p) => [p.id, p.name]));
   const groups = [
     { label: 'Clientes', items: data.customers, render: (c) => ({
-        title: c.name || c.phoneNumber, meta: c.phoneNumber, action: `goToCustomerProfile('${c.id}')`,
+        title: c.name || c.phoneNumber, meta: c.name ? c.phoneNumber : 'Sin nombre guardado',
+        icon: `<span class="gsi-avatar" style="background:${avatarColor(c.phoneNumber)}">${(c.name || c.phoneNumber).trim().charAt(0).toUpperCase()}</span>`,
+        action: `goToCustomerProfile('${c.id}')`,
       }) },
     { label: 'Productos', items: data.products, render: (p) => ({
-        title: p.name, meta: formatMoney(p.price, p.currency), action: `goToProductInCatalog('${p.id}')`,
+        title: p.name, meta: p.category || 'Sin categoría',
+        icon: `<span class="gsi-icon">${globalSearchIconHtml('product')}</span>`,
+        right: `<span class="gsi-chip">${escapeHtml(formatMoney(p.price, p.currency))}</span>`,
+        action: `goToProductInCatalog('${p.id}')`,
       }) },
     { label: 'Pedidos', items: data.orders, render: (o) => ({
-        title: o.summary, meta: `${o.customer.name || o.customer.phoneNumber} · ${formatMoney(o.totalAmount, o.currency)}`, action: `goToOrderInList('${o.id}', '${o.fulfillmentStatus}')`,
+        title: o.summary, meta: o.customer.name || o.customer.phoneNumber,
+        icon: `<span class="gsi-icon">${globalSearchIconHtml('order')}</span>`,
+        right: `<span class="gsi-chip">${escapeHtml(formatMoney(o.totalAmount, o.currency))}</span>`,
+        action: `goToOrderInList('${o.id}', '${o.fulfillmentStatus}')`,
       }) },
     { label: 'FAQ', items: data.faq, render: (f) => ({
-        title: f.question, meta: '', action: `switchTab('faq'); hideGlobalSearchResults();`,
+        title: f.question, meta: 'Ver en Agente › FAQ',
+        icon: `<span class="gsi-icon">${globalSearchIconHtml('faq')}</span>`,
+        action: `switchTab('faq'); hideGlobalSearchResults();`,
       }) },
   ];
 
@@ -4841,8 +4863,12 @@ function renderGlobalSearchResults(data) {
       ${g.items.map((item) => {
         const r = g.render(item);
         return `<button type="button" class="global-search-item" onclick="${r.action}">
-          <div>${escapeHtml(r.title)}</div>
-          ${r.meta ? `<div class="meta">${escapeHtml(r.meta)}</div>` : ''}
+          ${r.icon}
+          <span class="gsi-body">
+            <span class="gsi-title">${escapeHtml(r.title)}</span>
+            ${r.meta ? `<span class="gsi-meta">${escapeHtml(r.meta)}</span>` : ''}
+          </span>
+          ${r.right || ''}
         </button>`;
       }).join('')}
     `).join('');

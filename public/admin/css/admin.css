@@ -319,7 +319,10 @@
   .quick-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
   .chip {
     border: 1px solid var(--border); background: var(--card); color: var(--ink-soft);
-    font-size: 12px; font-weight: 600; padding: 6px 12px; border-radius: 999px; cursor: pointer;
+    /* 13px, igual que label - antes 12px quedaba a medio camino entre el
+       label de arriba (12.5px) y el hint de abajo (11.5px), tres tamaños casi
+       iguales sin ninguna razón para ser distintos. */
+    font-size: 13px; font-weight: 600; padding: 6px 12px; border-radius: 999px; cursor: pointer;
     font-family: inherit; transition: border-color .15s, color .15s, background .15s;
   }
   .chip:hover { border-color: var(--brand); color: var(--brand-dark); background: var(--brand-light); }
@@ -330,15 +333,12 @@
   .btn-improve:disabled { opacity: .6; cursor: default; }
   .actions-row-end { margin-top: 20px; display: flex; justify-content: flex-end; }
 
-  label { display: block; font-size: 12.5px; font-weight: 600; margin-top: 13px; margin-bottom: 6px; color: var(--ink-soft); }
-  input, textarea, select {
-    width: 100%; padding: 10px 12px; border: 1.5px solid var(--border); border-radius: var(--radius-md);
-    font-size: 14px; font-family: inherit; background: var(--onix-surface-field); color: var(--ink); transition: border-color .15s, background .15s;
-  }
-  input:focus, textarea:focus, select:focus { outline: none; border-color: var(--brand); background: var(--onix-surface); box-shadow: 0 0 0 3px var(--onix-accent-ring); }
+  /* label / input,textarea,select / :focus / .hint de acá se redefinen mas
+     abajo (FASE 5, con los tokens del rediseño) - esas ganan siempre por venir
+     después con la misma especificidad, así que estas eran texto muerto.
+     :disabled no tiene una redefinición posterior - es la única que queda. */
   input:disabled, textarea:disabled, select:disabled { background: var(--border-soft); color: var(--muted); cursor: not-allowed; }
   textarea { min-height: 72px; resize: vertical; }
-  .hint { font-size: 11.5px; color: var(--muted-soft); margin-top: 6px; line-height: 1.4; }
 
   button {
     cursor: pointer; border: none; border-radius: var(--radius-md); padding: 10px 18px;
@@ -810,17 +810,19 @@
        nombre + numero/estado) tambien baja de tamaño - los iconos quedan al
        frente y la cabecera deja de comerse pantalla. */
     body.chat-fullscreen .chat-panel-header {
-      padding: 7px 10px; gap: 6px 8px;
+      padding: 5px 10px; gap: 4px 8px;
     }
     body.chat-fullscreen .chat-panel-header .conv-avatar {
-      width: 26px; height: 26px; font-size: 11px;
+      width: 22px; height: 22px; font-size: 10px;
     }
-    body.chat-fullscreen .modal-header-name { font-size: 13px; }
-    body.chat-fullscreen .modal-title-input { font-size: 13px; }
-    body.chat-fullscreen .modal-header-meta { font-size: 10.5px; margin-top: 1px; }
+    body.chat-fullscreen .modal-header-name { font-size: 12.5px; line-height: 1.2; }
+    body.chat-fullscreen .modal-title-input { font-size: 12.5px; }
+    body.chat-fullscreen .modal-header-meta { font-size: 10px; margin-top: 0; line-height: 1.2; }
+    body.chat-fullscreen .chat-back-btn { padding: 2px 4px; }
     body.chat-fullscreen .chat-panel-actions .mobile-icon-btn {
-      width: 30px; height: 30px; min-height: 30px;
+      width: 26px; height: 26px; min-height: 26px;
     }
+    body.chat-fullscreen .chat-panel-actions .mobile-icon-btn .btn-icon:not([hidden]) { width: 14px; height: 14px; }
     /* Etiquetas + "Onix responde automáticamente": el aviso de si el humano
        tiene el control ya lo dice el icono de la cabecera (brilla cuando esta
        activo, ver regla mas abajo) - esta franja completa se quita en el
@@ -1187,6 +1189,59 @@
     .global-search input { padding-right: 12px; }
   }
 
+  /* Resultados del buscador: existían en el JS/HTML pero sin una sola regla
+     de CSS - salía como botones sueltos sin estilo, texto centrado (default
+     de <button>) y sin separación entre grupos. Cada fila es su propia
+     tarjetita (icono + texto + chip), no una lista plana. */
+  .global-search-results {
+    position: absolute; top: calc(100% + 8px); left: 0; right: 0; z-index: 30;
+    max-height: min(440px, 70vh); overflow-y: auto;
+    padding: 8px; border: 1px solid var(--onix-border);
+    border-radius: var(--onix-radius-panel); background: var(--onix-surface);
+    box-shadow: var(--onix-shadow-lg);
+    animation: fadeIn .12s ease;
+  }
+  .global-search-group-label {
+    padding: 10px 6px 6px; font: var(--onix-text-caps);
+    letter-spacing: var(--onix-tracking-caps); text-transform: uppercase;
+    color: var(--onix-dim);
+  }
+  .global-search-group-label:first-child { padding-top: 3px; }
+  .global-search-item {
+    display: flex; align-items: center; gap: 10px; width: 100%;
+    padding: 7px 9px; margin-bottom: 3px;
+    border: 1px solid var(--onix-border-soft); border-radius: var(--onix-radius-control);
+    background: var(--onix-surface-2); color: var(--onix-ink); font-family: inherit;
+    text-align: left; cursor: pointer; transition: border-color .12s, background-color .12s;
+  }
+  .global-search-item:last-child { margin-bottom: 0; }
+  .global-search-item:hover, .global-search-item:focus-visible {
+    background: var(--onix-surface); border-color: var(--onix-accent-line);
+    box-shadow: var(--onix-shadow-sm);
+  }
+  .global-search-item:focus-visible { outline: 2px solid var(--onix-accent); outline-offset: 1px; }
+  /* Avatar de cliente (iniciales, mismo color por teléfono que en la Bandeja)
+     e icono de tipo (producto/pedido/FAQ) - miden lo mismo para que la
+     columna de texto siempre arranque en el mismo lugar. */
+  .gsi-avatar, .gsi-icon {
+    display: flex; align-items: center; justify-content: center;
+    width: 30px; height: 30px; flex-shrink: 0; border-radius: 999px;
+  }
+  .gsi-avatar { color: var(--onix-accent-ink); font-size: 12.5px; font-weight: 650; }
+  .gsi-icon { background: var(--onix-surface-3); color: var(--onix-muted); }
+  .gsi-body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+  .gsi-title {
+    font-size: 13px; font-weight: 550;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .gsi-meta { font-size: 11.5px; color: var(--onix-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .gsi-chip {
+    flex-shrink: 0; padding: 3px 9px; border-radius: var(--onix-radius-chip);
+    background: var(--onix-accent-soft); color: var(--onix-accent);
+    font-size: 12px; font-weight: 650; white-space: nowrap;
+  }
+  .global-search-empty { padding: 20px 10px; text-align: center; font-size: 13px; color: var(--onix-muted); }
+
   /* ==========================================================================
      FASES 3-5 · Componentes compartidos del CRM, el Catálogo y el Bot
      Todo lo de acá abajo usa exclusivamente tokens. Si algo necesita un color
@@ -1210,7 +1265,9 @@
     color: var(--onix-muted); font-size: 13px;
   }
 
-  .hint { font-size: 11.5px; color: var(--onix-dim); line-height: 1.5; margin-top: 5px; }
+  /* 12px, el tamaño de --onix-text-meta - antes 11.5px no coincidía con
+     ningún token, quedaba a medio camino entre el label (12.5px) y nada. */
+  .hint { font-size: 12px; color: var(--onix-dim); line-height: 1.5; margin-top: 5px; }
 
   /* --- Botones ------------------------------------------------------------ */
   .btn-primary, .btn-secondary, .btn-danger, .btn-ghost {
@@ -1611,8 +1668,11 @@
   @media (max-width: 760px) { .greet-bubble { margin-left: 0; } }
 
   /* --- FASE 5 · Formularios del Bot ---------------------------------------- */
+  /* 13px, igual que --onix-text-body - antes 12px quedaba entre el chip
+     (12px) y el campo que etiqueta (13.5px/16px), un salto que se sentía
+     random en vez de una jerarquía a propósito. */
   label {
-    display: block; font-size: 12px; font-weight: 550;
+    display: block; font-size: 13px; font-weight: 550;
     margin-top: 14px; margin-bottom: 6px; color: var(--onix-ink-3);
   }
   input, textarea, select {
