@@ -1431,3 +1431,103 @@ test("close_conversation with outcome LOST is never gated by the sale-capability
     await prisma.business.deleteMany({ where: { id: businessUnconfigured.id } });
   }
 });
+
+// Defecto real de produccion (2026-09-15): send_product_media no distinguia foto de video, asi que un
+// cliente que pedia el video de un producto que solo tiene fotos recibia las fotos y el modelo las
+// anunciaba como el video. En la base de MAGByLizN son 5 productos con video contra 15 con solo fotos:
+// el 75% del catalogo podia producirlo. Un caso por rama, todos contra la base real y con el fetch de
+// WhatsApp mockeado (stubWhatsappFetch) - ningun servicio externo.
+async function productWithMedia(name: string, media: { type: "IMAGE" | "VIDEO"; file: string }[]) {
+  return prisma.product.create({
+    data: {
+      businessId,
+      name,
+      description: "Producto de prueba para el filtro de tipo de medio",
+      price: 100000,
+      currency: "COP",
+      stock: 3,
+      media: { create: media.map((m) => ({ type: m.type, url: `https://example.com/${m.file}`, s3Key: m.file })) },
+    },
+  });
+}
+
+test("send_product_media con mediaType video manda SOLO el video cuando el producto tiene los dos", async () => {
+  stubWhatsappFetch();
+  try {
+    const product = await productWithMedia(`Video y foto ${randomUUID()}`, [
+      { type: "IMAGE", file: "mixto.jpg" },
+      { type: "VIDEO", file: "mixto.mp4" },
+    ]);
+    const context = await freshContext();
+    const result = (await runCatalogTool(context, "send_product_media", {
+      productId: product.id,
+      mediaType: "video",
+    })) as { sent: boolean; count: number };
+
+    assert.equal(result.sent, true);
+    assert.equal(result.count, 1, "solo el video, no la foto");
+    assert.equal(sentMedia.length, 1);
+    assert.equal(sentMedia[0].type, "video");
+  } finally {
+    restoreFetch();
+  }
+});
+
+test("send_product_media con mediaType video NO manda nada si el producto solo tiene fotos", async () => {
+  stubWhatsappFetch();
+  try {
+    const product = await productWithMedia(`Solo fotos ${randomUUID()}`, [{ type: "IMAGE", file: "solofoto.jpg" }]);
+    const context = await freshContext();
+    const result = (await runCatalogTool(context, "send_product_media", {
+      productId: product.id,
+      mediaType: "video",
+    })) as { sent: boolean; reason: string };
+
+    assert.equal(result.sent, false);
+    // El motivo tiene que ser distinto del "no tiene fotos ni videos": el modelo necesita poder decirle
+    // al cliente que fotos SI hay.
+    assert.equal(result.reason, "Este producto tiene fotos pero no video");
+    assert.equal(sentMedia.length, 0, "no se mando ni una foto en lugar del video");
+  } finally {
+    restoreFetch();
+  }
+});
+
+test("send_product_media con mediaType imagen NO manda nada si el producto solo tiene video", async () => {
+  stubWhatsappFetch();
+  try {
+    const product = await productWithMedia(`Solo video ${randomUUID()}`, [{ type: "VIDEO", file: "solovideo.mp4" }]);
+    const context = await freshContext();
+    const result = (await runCatalogTool(context, "send_product_media", {
+      productId: product.id,
+      mediaType: "imagen",
+    })) as { sent: boolean; reason: string };
+
+    assert.equal(result.sent, false);
+    assert.equal(result.reason, "Este producto tiene video pero no fotos");
+    assert.equal(sentMedia.length, 0);
+  } finally {
+    restoreFetch();
+  }
+});
+
+test("send_product_media sin mediaType manda todo, como siempre", async () => {
+  stubWhatsappFetch();
+  try {
+    const product = await productWithMedia(`Sin tipo pedido ${randomUUID()}`, [
+      { type: "IMAGE", file: "sintipo.jpg" },
+      { type: "VIDEO", file: "sintipo.mp4" },
+    ]);
+    const context = await freshContext();
+    const result = (await runCatalogTool(context, "send_product_media", { productId: product.id })) as {
+      sent: boolean;
+      count: number;
+    };
+
+    assert.equal(result.sent, true);
+    assert.equal(result.count, 2);
+    assert.equal(sentMedia.length, 2);
+  } finally {
+    restoreFetch();
+  }
+});

@@ -215,7 +215,7 @@ export const catalogTools: OpenAI.Chat.ChatCompletionTool[] = [
     function: {
       name: "send_product_media",
       description:
-        "Envia por WhatsApp las fotos/videos reales de un producto. Usar SIEMPRE que el cliente pida verlas. Preferi productId (mas confiable) si lo obtuviste este turno con search_products o get_product_details; si no, usa productName.",
+        "Envia por WhatsApp las fotos/videos reales de un producto. Usar SIEMPRE que el cliente pida verlas. Preferi productId (mas confiable) si lo obtuviste este turno con search_products o get_product_details; si no, usa productName. Si el cliente pidio puntualmente video o foto, pasa mediaType: la herramienta te avisa si ese tipo no existe en vez de mandar el otro.",
       parameters: {
         type: "object",
         properties: {
@@ -233,6 +233,12 @@ export const catalogTools: OpenAI.Chat.ChatCompletionTool[] = [
             type: "string",
             description:
               "SOLO si ese producto tiene variantes (varios colores/tallas) y find_products_by_attributes ya te dio el 'variantId' del color/talla exacto que el cliente quiere - manda solo las fotos de ESE color, no las de todos. No inventes un variantId, solo usa el que te devolvio la herramienta.",
+          },
+          mediaType: {
+            type: "string",
+            enum: ["imagen", "video"],
+            description:
+              "Solo si el cliente pidio un tipo puntual ('mandame el video', 'una foto'). Sin esto se manda todo lo que el producto tenga.",
           },
         },
         // Exactly one of productId/productName identifies the product - the runtime already treats them
@@ -725,6 +731,27 @@ function totalStock(product: { stock: number; variants: { stock: number; active:
 // 6.0b.
 const LIST_DESCRIPTION_MAX_CHARS = 150;
 
+// Defecto real de produccion (2026-09-15): send_product_media no distinguia foto de video. Un cliente
+// que pedia el video de un producto que solo tiene fotos recibia las fotos igual, y el modelo las
+// anunciaba como "aqui te va el video". Medido contra la base de MAGByLizN: 5 productos tienen video y
+// 15 solo fotos, o sea el 75% del catalogo podia producirlo.
+//
+// El tipo pedido se valida contra la base, no con una regex sobre el mensaje ni con una instruccion de
+// prompt: el modelo declara que pidio el cliente y la herramienta responde con lo que el producto
+// REALMENTE tiene. Las variantes de escritura se resuelven con una tabla cerrada sobre el texto ya
+// normalizado (normalizeForMatch saca acentos y mayusculas: "Vídeo" y "video" son la misma clave). Un
+// valor que no este en la tabla se trata como "sin tipo pedido", que es el comportamiento de siempre.
+const REQUESTED_MEDIA_TYPES = new Map<string, "IMAGE" | "VIDEO">([
+  ["imagen", "IMAGE"],
+  ["imagenes", "IMAGE"],
+  ["foto", "IMAGE"],
+  ["fotos", "IMAGE"],
+  ["image", "IMAGE"],
+  ["photo", "IMAGE"],
+  ["video", "VIDEO"],
+  ["videos", "VIDEO"],
+]);
+
 // Bloqueador de produccion (2026-09-15): el modelo escribia la lista de productos de memoria - le
 // invento 11 de 18 nombres a un cliente real, inflo dos precios reales y omitio cinco productos con
 // stock. Mismo patron que los otros bloques fijos: la lista la renderiza agent.ts desde estos mismos
@@ -816,6 +843,7 @@ const TOOL_INPUT_SCHEMAS: Record<string, z.ZodTypeAny> = {
     productId: SCALAR_INPUT.optional(),
     productName: SCALAR_INPUT.optional(),
     variantId: SCALAR_INPUT.optional(),
+    mediaType: SCALAR_INPUT.optional(),
   }),
   get_shipping_rate_for_city: z.object({ city: SCALAR_INPUT.optional() }),
   save_customer_name: z.object({ name: SCALAR_INPUT.optional() }),
@@ -1065,6 +1093,31 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
 
       if (media.length === 0) {
         return { sent: false, product: product.name, reason: "Este producto no tiene fotos ni videos cargados" };
+      }
+
+      // Ver REQUESTED_MEDIA_TYPES. El motivo que se devuelve cuando el tipo pedido no existe es
+      // DISTINTO del "no tiene fotos ni videos" de arriba a proposito: el modelo tiene que poder decirle
+      // al cliente, con sus palabras, que del producto hay fotos pero no video (o al reves), que no es lo
+      // mismo que no haber nada. No se toca el dedup ni se marca nada como enviado: no se mando nada.
+      const requestedMediaType = input.mediaType
+        ? REQUESTED_MEDIA_TYPES.get(normalizeForMatch(String(input.mediaType).trim())) ?? null
+        : null;
+      if (requestedMediaType) {
+        const ofRequestedType = media.filter((m) => m.type === requestedMediaType);
+        if (ofRequestedType.length === 0) {
+          const hasImage = media.some((m) => m.type === "IMAGE");
+          const hasVideo = media.some((m) => m.type === "VIDEO");
+          const reason =
+            requestedMediaType === "VIDEO"
+              ? hasImage
+                ? "Este producto tiene fotos pero no video"
+                : "Este producto no tiene video cargado"
+              : hasVideo
+                ? "Este producto tiene video pero no fotos"
+                : "Este producto no tiene fotos cargadas";
+          return { sent: false, product: product.name, variant: variantLabel, reason };
+        }
+        media = ofRequestedType;
       }
 
       // Dedup key: the compound "productId#variantId" for a scoped color/size so a DIFFERENT variant is
