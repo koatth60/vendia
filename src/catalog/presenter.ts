@@ -42,6 +42,19 @@ export interface RenderCatalogOptions {
   categoryOrder?: string[];
   /** Encabezado para los productos sin categoria cargada. */
   uncategorizedLabel?: string;
+  /**
+   * Los productos que el servidor YA presento entero en esta conversacion (ficha + medios). Sale de
+   * `Conversation.mediaSentProductIds`, el mismo registro que ya consultaba el auto-envio de
+   * get_product_details; aca no se crea ninguno nuevo.
+   *
+   * Incidente real 2026-09-16 (conversacion cmu4gniqe000se82kdrhvrw6d): el cliente pregunto por un
+   * producto, despues por otro, y volvio al primero. Recibio 4 fotos y 2 videos del mismo producto y 2
+   * fotos del otro, porque este presentador adjuntaba los medios SIEMPRE, sin mirar el registro. Con
+   * esta lista, los medios de un producto salen una sola vez por conversacion y la segunda ficha sale
+   * corta. Un reenvio que el cliente pida explicitamente sigue siendo de send_product_media, que no pasa
+   * por aca.
+   */
+  alreadyPresentedProductIds?: string[];
 }
 
 /**
@@ -135,8 +148,24 @@ function descriptionLines(product: ScopeProduct): string[] {
     .filter((line) => line.length > 0);
 }
 
-/** La ficha de un producto puntual: sin numerar, porque no hay nada entre que elegir. */
-function renderSingle(product: ScopeProduct, variant: ScopeVariant | null, opts: RenderCatalogOptions): CatalogBlock {
+/**
+ * La ficha de un producto puntual: sin numerar, porque no hay nada entre que elegir.
+ *
+ * `alreadyPresented` es la segunda vez: el cliente ya leyo la descripcion y ya recibio las fotos, asi que
+ * la ficha se reduce a lo que puede haber cambiado o que el cliente vuelve a necesitar - nombre, precio y
+ * stock (con el stock por color cuando hay variantes). Sin descripcion, sin ofrecer el resto y sin medios.
+ * El modelo escribe encima lo suyo ("listo, el Ultra 3 entonces, ¿seguimos?").
+ *
+ * `modelText` sigue trayendo la descripcion ENTERA tambien en la version corta: el cliente no la ve de
+ * nuevo, pero una pregunta puntual sobre una caracteristica se contesta con el dato real aunque la ficha
+ * original ya se haya salido de la ventana de historial.
+ */
+function renderSingle(
+  product: ScopeProduct,
+  variant: ScopeVariant | null,
+  opts: RenderCatalogOptions,
+  alreadyPresented: boolean
+): CatalogBlock {
   const label = variant ? variantLabel(variant) : null;
   const title = label ? `*${product.name}* (${label})` : `*${product.name}*`;
   const stock = variant ? variant.stock : totalStock(product);
@@ -148,6 +177,15 @@ function renderSingle(product: ScopeProduct, variant: ScopeVariant | null, opts:
   if (variants) head.push(variants);
 
   const description = descriptionLines(product);
+  if (alreadyPresented) {
+    return {
+      text: head.join("\n"),
+      modelText: [...head, ...description].join("\n"),
+      media: [],
+      productIds: [product.id],
+    };
+  }
+
   const shown = description.slice(0, MAX_DESCRIPTION_LINES);
   const customerLines = [...head, ...shown];
   if (description.length > shown.length) customerLines.push(MORE_DESCRIPTION_LINE);
@@ -218,14 +256,18 @@ function renderNumberedGroup(
 export function renderCatalog(scope: ProductScope, opts: RenderCatalogOptions): CatalogBlock[] {
   if (scope.kind === "none") return [];
 
+  // Lo ya presentado en esta conversacion: decide, producto por producto, si va la ficha entera con sus
+  // medios o la version corta sin medios. Una lista numerada nunca manda medios, asi que no la toca.
+  const alreadyPresented = new Set(opts.alreadyPresentedProductIds ?? []);
+
   if (scope.kind === "one") {
-    return [renderSingle(scope.product, scope.variant ?? null, opts)];
+    return [renderSingle(scope.product, scope.variant ?? null, opts, alreadyPresented.has(scope.product.id))];
   }
 
   if (scope.kind === "few") {
     // Hasta FEW_PRODUCTS_MAX productos: una ficha por producto, cada una con sus fotos. No se numeran
     // ni se ofrece elegir - ya los tiene todos delante.
-    return scope.products.map((product) => renderSingle(product, null, opts));
+    return scope.products.map((product) => renderSingle(product, null, opts, alreadyPresented.has(product.id)));
   }
 
   const groups =

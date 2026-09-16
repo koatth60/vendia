@@ -263,3 +263,66 @@ test("alcance 'group' y 'all': el recorte de descripcion no los toca", () => {
     assert.equal(block.modelText, block.text);
   }
 });
+
+// Incidente real 2026-09-16 (conversacion cmu4gniqe000se82kdrhvrw6d): el cliente pregunto por un
+// producto, despues por otro, y volvio al primero. Recibio 4 fotos y 2 videos del primero y 2 fotos del
+// segundo, porque el presentador adjuntaba los medios SIEMPRE, sin mirar el registro de lo ya enviado
+// (Conversation.mediaSentProductIds), que el camino viejo de get_product_details si consultaba.
+test("producto A, producto B, producto A otra vez: los medios de A salen UNA sola vez", () => {
+  const yaEnviados: string[] = [];
+  const conteoPorProducto = new Map<string, number>();
+
+  // Cada turno se renderiza con el registro tal como quedo despues de los turnos anteriores, que es
+  // exactamente lo que hace agent.ts.
+  for (const texto of ["el Serie 12 Ultra 3", "el Serie 11 Mini", "volvamos al Serie 12 Ultra 3"]) {
+    const scope = resolveProductScopeFrom(magimp, NO_ALIASES, texto, []);
+    const blocks = renderCatalog(scope, { ...OPTS, alreadyPresentedProductIds: yaEnviados });
+    for (const block of blocks) {
+      for (const media of block.media) {
+        conteoPorProducto.set(media.productId, (conteoPorProducto.get(media.productId) ?? 0) + media.items.length);
+        if (!yaEnviados.includes(media.productId)) yaEnviados.push(media.productId);
+      }
+    }
+  }
+
+  const ultra = productNamed(magimp, "Serie 12 Ultra 3");
+  const mini = productNamed(magimp, "Serie 11 Mini");
+  assert.equal(
+    conteoPorProducto.get(ultra.id),
+    ultra.media.length + ultra.variants.flatMap((v) => v.media).length,
+    "los medios del Ultra 3 salen una sola vez en toda la conversacion"
+  );
+  assert.ok((conteoPorProducto.get(mini.id) ?? 0) > 0, "el segundo producto si manda los suyos la primera vez");
+});
+
+test("la segunda presentacion de un producto es corta: nombre, precio y stock, sin descripcion ni medios", () => {
+  const ultra = productNamed(magimp, "Serie 12 Ultra 3");
+  const scope = resolveProductScopeFrom(magimp, NO_ALIASES, "el Serie 12 Ultra 3", []);
+
+  const primera = renderCatalog(scope, OPTS)[0];
+  assert.ok(primera.media.length > 0, "la primera vez no cambia nada: van los medios");
+  assert.ok(primera.text.includes("¿Te cuento el resto"), "la primera vez ofrece el resto de la descripcion");
+
+  const segunda = renderCatalog(scope, { ...OPTS, alreadyPresentedProductIds: [ultra.id] })[0];
+  assert.deepEqual(segunda.media, [], "la segunda vez no se reenvia ni una foto");
+  assert.ok(!segunda.text.includes("¿Te cuento el resto"), `sin la linea de ofrecer el resto: "${segunda.text}"`);
+  assert.ok(segunda.text.includes("$"), "el precio sigue saliendo");
+  assert.ok(segunda.text.includes("Serie 12 Ultra 3"), "el nombre sigue saliendo");
+  assert.ok(segunda.text.includes("disponibles"), "el stock sigue saliendo");
+
+  const descripcion = ultra.description.split("\n").map((l) => l.trim()).filter(Boolean);
+  for (const linea of descripcion) {
+    assert.ok(!segunda.text.includes(linea), `el cliente ya leyo la descripcion: "${linea}"`);
+  }
+  // El modelo si la sigue viendo entera: una pregunta puntual se contesta con el dato real aunque la
+  // ficha original ya se haya ido de la ventana de historial.
+  assert.ok(segunda.modelText.includes(descripcion[0]), "el modelo conserva la descripcion completa");
+});
+
+test("un registro de otro producto no acorta la ficha del que se esta presentando", () => {
+  const mini = productNamed(magimp, "Serie 11 Mini");
+  const scope = resolveProductScopeFrom(magimp, NO_ALIASES, "el Serie 12 Ultra 3", []);
+  const blocks = renderCatalog(scope, { ...OPTS, alreadyPresentedProductIds: [mini.id] });
+  assert.ok(blocks[0].media.length > 0, "los medios del Ultra 3 no los toca el registro del Mini");
+  assert.ok(blocks[0].text.includes("¿Te cuento el resto"), "y la ficha sale entera");
+});

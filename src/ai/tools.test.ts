@@ -1531,3 +1531,44 @@ test("send_product_media sin mediaType manda todo, como siempre", async () => {
     restoreFetch();
   }
 });
+
+// Incidente real 2026-09-16 (conversacion cmu4gniqe000se82kdrhvrw6d): 4 fotos y 2 videos del mismo
+// producto. Una parte salia dentro del MISMO turno: el presentador del servidor ya tenia los medios
+// armados para salir, pero el registro de la base se escribe recien cuando esos bloques se envian
+// (despues del turno), asi que una llamada del modelo en ese mismo turno no veia nada y mandaba de nuevo.
+test("send_product_media no reenvia lo que el presentador ya tiene armado para este turno", async () => {
+  stubWhatsappFetch();
+  try {
+    const watch = await prisma.product.create({
+      data: {
+        businessId,
+        name: "Smartwatch Queued Test",
+        description: "Reloj deportivo",
+        price: 140000,
+        currency: "COP",
+        stock: 5,
+        media: { create: [{ type: "IMAGE", url: "https://example.com/queued.jpg", s3Key: "queued.jpg" }] },
+      },
+    });
+    const base = await freshContext();
+    const context: ToolContext = { ...base, mediaQueuedProductIds: [watch.id] };
+
+    const result = (await runCatalogTool(context, "send_product_media", { productId: watch.id })) as {
+      sent: boolean;
+      alreadyGoingOutThisTurn?: boolean;
+    };
+    assert.equal(result.sent, true, "el cliente igual recibe las fotos: salen en los bloques de este turno");
+    assert.equal(result.alreadyGoingOutThisTurn, true);
+    assert.equal(sentMedia.length, 0, "pero no se manda una segunda copia por esta via");
+
+    // Turno posterior: el presentador ya no las adjunta (dedup por conversacion), asi que un reenvio
+    // explicito del cliente tiene que llegar.
+    const despues = (await runCatalogTool({ ...base, mediaQueuedProductIds: [] }, "send_product_media", {
+      productId: watch.id,
+    })) as { sent: boolean };
+    assert.equal(despues.sent, true);
+    assert.equal(sentMedia.length, 1, "el reenvio explicito de un turno posterior si sale");
+  } finally {
+    restoreFetch();
+  }
+});

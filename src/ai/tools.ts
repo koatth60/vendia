@@ -710,6 +710,16 @@ export interface ToolContext {
   customerId: string;
   credentials: WhatsappCredentials;
   recipientPhone: string;
+  /**
+   * Los productos cuyos medios el servidor YA tiene armados para salir en ESTE turno (los bloques de
+   * renderCatalog, ver agent.ts). El registro de la base (`Conversation.mediaSentProductIds`) todavia no
+   * los tiene: los bloques se envian despues de que termina el turno, asi que sin este dato una llamada a
+   * get_product_details o a send_product_media en el mismo turno mandaba las mismas fotos una segunda vez.
+   *
+   * No bloquea un reenvio explicito: si el cliente pide la foto de nuevo en un turno posterior, el
+   * presentador ya no la adjunta (dedup por conversacion) y send_product_media la manda como siempre.
+   */
+  mediaQueuedProductIds?: string[];
 }
 
 // Track C item 3 (ONIX-RELIABILITY-PLAN.md): a validation gate ahead of the switch below, catching a
@@ -910,7 +920,11 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
           prisma.business.findUnique({ where: { id: businessId }, select: { autoSendPhotoOnQuote: true } }),
           prisma.conversation.findUnique({ where: { id: context.conversationId }, select: { mediaSentProductIds: true } }),
         ]);
-        const alreadySent = conversation?.mediaSentProductIds.includes(product.id) ?? false;
+        // Lo ya enviado en turnos anteriores (la base) MAS lo que el presentador de este turno ya tiene
+        // armado para salir: los bloques se envian despues del turno, asi que la base todavia no los ve.
+        const alreadySent =
+          (conversation?.mediaSentProductIds.includes(product.id) ?? false) ||
+          (context.mediaQueuedProductIds?.includes(product.id) ?? false);
         if (business?.autoSendPhotoOnQuote && !alreadySent) {
           await sendMediaWithSpacing(
             businessId,
@@ -1032,6 +1046,14 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
           context.conversationId
         );
         return { sent: false, skipped: true, product: product.name, variant: variantLabel, reason: "Ya se le mandaron estas fotos antes en esta conversacion" };
+      }
+
+      // Los medios de este producto ya van a salir en este mismo turno, en los bloques que compuso el
+      // servidor: mandarlos aca seria la misma foto dos veces seguidas. No es el freno de un reenvio
+      // explicito - el cliente los recibe igual, en este turno - y en un turno posterior, donde el
+      // presentador ya no los adjunta, esta llamada los manda como siempre.
+      if (context.mediaQueuedProductIds?.includes(product.id)) {
+        return { sent: true, product: product.name, variant: variantLabel, count: media.length, alreadyGoingOutThisTurn: true };
       }
 
       await sendMediaWithSpacing(

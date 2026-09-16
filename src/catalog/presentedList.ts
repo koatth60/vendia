@@ -32,3 +32,27 @@ export async function setLastPresentedProductIds(conversationId: string, product
     console.error("No se pudo guardar la ultima lista presentada (no bloqueante):", error);
   }
 }
+
+/**
+ * Los productos cuyos medios YA salieron de verdad en esta conversacion. Es el mismo registro que ya
+ * consultaban el auto-envio de get_product_details y send_product_media (`Conversation.mediaSentProductIds`),
+ * leido aca para que el presentador tambien lo consulte ANTES de adjuntar fotos y videos: hasta el
+ * 2026-09-16 los adjuntaba siempre, y un cliente que volvia a un producto recibia las mismas fotos otra vez.
+ *
+ * Tambien es lo que marca una ficha como "ya vista": el camino que escribe esta lista es el mismo que
+ * manda la ficha entera, asi que un id de aca es un producto que el cliente ya leyo completo.
+ */
+export async function getMediaSentProductIds(conversationId: string): Promise<string[]> {
+  try {
+    const row = await prisma.conversation.findUnique({
+      where: { id: conversationId },
+      select: { mediaSentProductIds: true },
+    });
+    return row?.mediaSentProductIds ?? [];
+  } catch (error) {
+    // No bloqueante, igual que la lista presentada: sin el registro se cae al comportamiento anterior
+    // (se manda la ficha entera con sus medios), nunca se pierde el turno.
+    console.error("No se pudo leer el registro de medios ya enviados (no bloqueante):", error);
+    return [];
+  }
+}

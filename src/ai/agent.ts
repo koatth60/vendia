@@ -24,7 +24,7 @@ import {
   stripLinesAlreadyInBlocks,
   type CatalogBlock,
 } from "../catalog/presenter";
-import { getLastPresentedProductIds, setLastPresentedProductIds } from "../catalog/presentedList";
+import { getLastPresentedProductIds, setLastPresentedProductIds, getMediaSentProductIds } from "../catalog/presentedList";
 import { recordAgentTurn } from "./agentTurns";
 import { findShadowCatalogFindings, serializeFinding } from "../catalog/outputValidation";
 import { listActivePaymentMethods } from "../catalog/paymentMethods";
@@ -33,7 +33,6 @@ import {
   getSaleState,
   formatSaleStateForPrompt,
   getBlockedBy,
-  getMediaSent,
   getPhotoIdStreak,
   bumpPhotoIdStreak,
   resetPhotoIdStreak,
@@ -832,11 +831,6 @@ export async function generateReply(
   const { history: mediaFreeHistory } = extractMediaHistory(history);
   const modelFacingHistory = mediaFreeHistory.slice(-20);
 
-  // Fase 5 del plan maestro (2026-09-15), causa raiz C2: la lista de "ya enviado" viene de SaleState
-  // (escrita por tools.ts en el momento real del envio), no de reconstruirla leyendo el historial con
-  // MEDIA_CAPTION_PATTERN. Independiente de saleStateEnabled, igual que blockedBy.
-  const mediaSent = await getMediaSent(conversationId);
-
   // FASE B, PIEZAS 1-3 (ONIX-PLAN-CATALOGO-Y-MEDIOS.md). El alcance del turno lo decide el servidor,
   // ANTES de la primera llamada al modelo y solo con datos reales del negocio: que producto, que
   // categoria o que catalogo completo pidio el cliente. Con kind "none" no es un turno de presentacion y
@@ -845,16 +839,24 @@ export async function generateReply(
   // la frase que los introduce, asi que ya no puede listar un producto que no existe ni prometer una
   // foto que no sale.
   const lastPresentedList = await getLastPresentedProductIds(conversationId);
+  // Lo que YA salio en esta conversacion, leido del registro que ya existia (Conversation.mediaSentProductIds).
+  // Hasta el 2026-09-16 solo lo consultaba el auto-envio de get_product_details; el presentador de la Fase B
+  // adjuntaba los medios siempre, y un cliente que volvia a un producto recibia las mismas fotos de nuevo.
+  const alreadyPresentedProductIds = await getMediaSentProductIds(conversationId);
   const resolvedScope: ProductScope = await withSignedMedia(
     context.businessId,
     await resolveProductScope(context.businessId, customerText ?? "", lastPresentedList)
   );
-  const renderOptions = { currency: negocio.currency, locale: negocio.locale };
+  const renderOptions = { currency: negocio.currency, locale: negocio.locale, alreadyPresentedProductIds };
   // Mutable porque hay un segundo momento en el que el servidor puede resolver el alcance: ver
   // promoteScopeFromIdentifiedPhoto mas abajo.
   let catalogBlocks = renderCatalog(resolvedScope, renderOptions);
   let scopeForRecord = resolvedScope;
   const catalogMediaProductIds = () => catalogBlocks.flatMap((b) => b.media.map((m) => m.productId));
+  // Lo que ya va a salir por los bloques, visible para las herramientas: el registro de la base se escribe
+  // recien cuando los bloques se envian (despues del turno), asi que sin esto una llamada del modelo a
+  // get_product_details o send_product_media en el mismo turno mandaba las mismas fotos una segunda vez.
+  context = { ...context, mediaQueuedProductIds: catalogMediaProductIds() };
 
   const lastHistoryEntry = history[history.length - 1];
   const customerSentMediaThisTurn =
@@ -873,7 +875,7 @@ export async function generateReply(
 
   // Fase 2 del plan maestro (2026-09-15), causa raiz C1: el estado real del pedido en curso, calculado
   // de la base (nunca de lo que diga el modelo), inyectado como mensaje system - mismo canal que ya usa
-  // FOTOS/VIDEOS YA ENVIADOS abajo. Solo para negocios con la bandera activa; el resto sigue exactamente
+  // el bloque del catalogo de abajo. Solo para negocios con la bandera activa; el resto sigue exactamente
   // igual que hoy.
   const saleState = personality?.saleStateEnabled ? await getSaleState(conversationId) : null;
   const saleStateText = saleState ? formatSaleStateForPrompt(saleState) : "";
@@ -887,7 +889,7 @@ export async function generateReply(
 
   // Fase 4 del plan maestro (2026-09-15), correccion causa raiz C2: si esta conversacion ya tiene una
   // pregunta sin responder del dueno AL EMPEZAR este turno, se lo decimos al modelo como dato de estado
-  // (mismo canal que FOTOS/VIDEOS YA ENVIADOS abajo) en vez de reemplazarle la respuesta entera despues -
+  // (mismo canal que el resto del estado que se inyecta abajo) en vez de reemplazarle la respuesta entera despues -
   // eso descartaba cualquier respuesta real a otra cosa que el cliente preguntara. Independiente de
   // saleStateEnabled (ver getBlockedBy): la escalacion real es Core, no una funcion de seguimiento de
   // pedido. La pregunta pendiente en si (no solo el marcador) viene de PendingOwnerQuestion - ask_owner
@@ -920,14 +922,6 @@ export async function generateReply(
       : []),
     ...(saleStateText
       ? [{ role: "system" as const, content: saleStateText }]
-      : []),
-    ...(mediaSent.length > 0
-      ? [
-          {
-            role: "system" as const,
-            content: `FOTOS/VIDEOS YA ENVIADOS en esta conversacion (no los vuelvas a ofrecer ni a decir que los mandaste de nuevo, salvo que el cliente los pida explicitamente): ${mediaSent.join(", ")}`,
-          },
-        ]
       : []),
     ...(catalogBlocks.length > 0
       ? [

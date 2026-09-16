@@ -31,9 +31,9 @@ export interface SendCatalogBlocksArgs {
  * (ver renderCatalog): el modelo no eligio ninguno, no llamo send_product_media y no pudo prometer una
  * foto que no sale.
  *
- * Deja registrado lo enviado en Conversation.mediaSentProductIds y en SaleState.mediaSent, que es de
- * donde salen el dedup de reenvios y el bloque "FOTOS/VIDEOS YA ENVIADOS" del prompt - sin esto, el
- * turno siguiente volveria a ofrecer las mismas fotos.
+ * Deja registrado lo enviado en Conversation.mediaSentProductIds y en SaleState.mediaSent. De ahi sale el
+ * dedup: 2026-09-16, renderCatalog lee Conversation.mediaSentProductIds antes de adjuntar nada, asi que sin
+ * este registro el turno siguiente volveria a mandar las mismas fotos.
  */
 export async function sendCatalogBlocks(args: SendCatalogBlocksArgs): Promise<void> {
   const { businessId, conversationId, credentials, to, blocks } = args;
