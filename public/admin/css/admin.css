@@ -37,6 +37,13 @@
   option { font-family: inherit; }
   html, body { max-width: 100%; overflow-x: hidden; }
   body.no-scroll { overflow-y: hidden; }
+  /* 100dvh no siempre se recalcula a tiempo cuando la barra del navegador del
+     celular se esconde/aparece - deja un hueco abajo que ni el fondo de la
+     tarjeta ni el de la pagina cubren igual, y se ve "cortado". La cadena de
+     alturas en % (html -> body -> .app) no tiene ese retraso: se recalcula en
+     el mismo layout que el viewport real. */
+  html { height: 100%; }
+  body.no-scroll { height: 100%; }
   body {
     font-family: var(--onix-font-sans);
     background: var(--bg);
@@ -681,6 +688,16 @@
      para saber si el editor está abierto: el display inline es un contrato, no
      un estilo suelto. No lo cambies por [hidden] ni por una clase. */
 
+  /* Humano tomó el control: el botón brilla en vez de quedar igual que
+     "Tomar control" - sin esto no había forma de notar el estado a simple
+     vista (antes solo lo decía el texto, "Tomar control" vs "Devolver a la
+     IA"). Mismos tokens que el pill de "Bot activo" de la topbar. */
+  #modal-handoff-btn[data-active="true"] {
+    background: var(--onix-accent-soft); color: var(--onix-accent);
+    border-color: var(--onix-accent-line);
+  }
+  #modal-handoff-btn[data-active="true"]:hover { background: var(--onix-accent-soft); }
+
   /* Los botones viajan juntos: o entran los dos en la fila, o bajan los dos. */
   .chat-panel-actions {
     display: flex; align-items: center; gap: 8px;
@@ -719,7 +736,7 @@
       display: none;
     }
     body.no-scroll .app {
-      height: 100vh; height: 100dvh; overflow: hidden;
+      height: 100%; overflow: hidden;
     }
     body.no-scroll .app-main { overflow: hidden; }
     body.no-scroll main { overflow: hidden; padding: 0; }
@@ -786,7 +803,11 @@
     body.chat-fullscreen .chat-panel-actions .mobile-icon-btn {
       width: 30px; height: 30px; min-height: 30px;
     }
-    body.chat-fullscreen .thread-subbar { padding: 4px 10px; }
+    /* Etiquetas + "Onix responde automáticamente": el aviso de si el humano
+       tiene el control ya lo dice el icono de la cabecera (brilla cuando esta
+       activo, ver regla mas abajo) - esta franja completa se quita en el
+       celular para dejarle mas alto al hilo. */
+    body.chat-fullscreen .thread-subbar { display: none; }
   }
 
   .modal-overlay {
