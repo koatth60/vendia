@@ -71,3 +71,49 @@ fase están en `design/ONIX-REDESIGN-PLAN.md`.
   `grep -nEi '#[0-9a-f]{3,8}\b|rgba?\(' public/admin/css/admin.css` debe salir vacío.
 - Un cambio de CSS nunca justifica correr `npm run regression` ni `npm run test:paid`
   (llaman a DeepSeek de verdad y cuestan plata). `src/ai/*` no se toca en ninguna fase.
+
+# Regla permanente: estructura, nunca parche
+
+Decisión del dueño del proyecto, 2026-09-15, después de una semana de "arreglamos un parche y
+rompimos otro". Aplica a todo cambio en Onix (`src/ai/*`, `src/catalog/*`, `src/orders/*`,
+`src/whatsapp/*`) y está por encima de cualquier prisa.
+
+**Antes de proponer o implementar un arreglo, respondé esta pregunta:**
+
+> ¿Después de este cambio, el modelo tiene MENOS decisiones que puede equivocar, o más reglas
+> que puede desobedecer?
+
+Menos decisiones = estructura. Más reglas = parche. **Un parche no se implementa.** Se dice
+que no alcanza y se propone el cambio estructural, aunque sea más grande y tarde más.
+
+Son parche, sin excepción:
+
+- Agregar texto al `BASE_SYSTEM_PROMPT` pidiéndole al modelo que se acuerde de algo.
+- Una expresión regular nueva sobre la prosa ya generada para deducir qué quiso hacer el modelo.
+- Confiar en que el modelo llame una herramienta, sin verificar que la haya llamado.
+- Forzar `tool_choice` como única defensa. Medido en producción el 2026-09-15: DeepSeek
+  devolvió texto sin `tool_calls` con `tool_choice` forzado, dos veces, y el bot inventó
+  productos que no existen en el catálogo.
+
+**Sacar los datos de las manos del modelo pero dejarle la decisión no es media garantía: es
+cero garantía con mejor apariencia.** Es el error exacto de las Fases 3 y 5 del plan maestro.
+Los bloques fijos funcionaban perfecto en los turnos donde el modelo colaboraba, y no existían
+en los turnos donde no llamaba ninguna herramienta.
+
+**Cada fase termina quitándole al modelo al menos una decisión concreta.** Una fase que no
+puede nombrar cuál quitó es un parche disfrazado y hay que devolverla.
+
+## Efectos requeridos: regla de admisión
+
+El mecanismo de efectos requeridos (declarar el efecto esperado, verificarlo contra la base
+antes de responder, reintentar, caer a código, escalar) está descrito en
+`ONIX-PLAN-CATALOGO-Y-MEDIOS.md`. Un efecto entra a la tabla solo si cumple las tres:
+
+1. **Disparador determinista** — se calcula desde estado de la base o metadatos estructurados
+   del mensaje (`mediaType`, quién habla). Nunca desde interpretar prosa, ni del cliente ni del
+   modelo. Un disparador leído de la prosa es el guard de clase D que la Fase 5 vino a borrar.
+2. **Verificable con una consulta** — se responde con un `SELECT`, no con una opinión.
+3. **Con fallback sin modelo** — el servidor tiene que poder hacerlo solo, con datos de la base.
+
+El reintento es mitigación, no garantía. La garantía la da el fallback, porque no tiene al
+modelo adentro.

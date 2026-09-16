@@ -25,10 +25,16 @@ function getS3Client(): S3Client {
 // Fase 8, punto 7 del plan maestro (2026-09-15). Tope por tipo, no uno solo para todo: 50 MB para un
 // video es razonable, para una foto de catalogo no - y el tope mas alto es el que termina definiendo
 // cuanto puede ocupar cualquier subida si no se separan.
+// Los topes son los de WhatsApp, no unos nuestros mas generosos. Incidente real 2026-09-16: el panel
+// aceptaba una foto de 6 MB, la guardaba, le mostraba a la duena que se habia enviado, y Meta la
+// rechazaba despues con el error 131053 ("Image file has size 6303812 bytes but must be atmost 5242880
+// bytes"). La duena no tenia forma de enterarse: dos fotos a un cliente real nunca llegaron. Un tope
+// propio mas alto que el de la plataforma convierte un rechazo visible al subir en una falla silenciosa
+// al enviar.
 export const MAX_BYTES_BY_KIND: Record<FileKind, number> = {
-  image: 12 * 1024 * 1024,
-  video: 50 * 1024 * 1024,
-  audio: 20 * 1024 * 1024,
+  image: 5 * 1024 * 1024,
+  video: 16 * 1024 * 1024,
+  audio: 16 * 1024 * 1024,
 };
 
 // Que puede caer en cada carpeta. "receipts" recibe fotos de comprobantes y tambien el cuadro que se
