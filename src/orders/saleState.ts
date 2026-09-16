@@ -313,9 +313,16 @@ export async function setPaymentMethod(
   return { ok: true, state: state! };
 }
 
-// Llamado por save_customer_contact_info/save_customer_name en tools.ts cuando el negocio tiene la
-// bandera activa - dual-write ademas de lo que esas herramientas ya guardan en Customer (ver comentario
-// del modelo SaleState en schema.prisma sobre por que no alcanza con leer solo Customer).
+// Llamado por save_customer_contact_info/save_customer_name en tools.ts - dual-write ademas de lo que
+// esas herramientas ya guardan en Customer (ver comentario del modelo SaleState en schema.prisma sobre
+// por que no alcanza con leer solo Customer).
+//
+// 2026-09-15: dejo de estar detras de Business.saleStateEnabled. La bandera mezclaba dos cosas distintas
+// y ahora estan separadas: REGISTRAR el estado corre siempre (es una proyeccion del servidor de lo que
+// ya paso), EXPONER y APLICAR ese estado - las saleStateTools en el esquema, getSaleState inyectado al
+// prompt, blockedBy, el directive del prompt - sigue solo con la bandera. Con la bandera apagada el
+// cliente ve exactamente lo mismo que antes y el prompt pesa exactamente lo mismo; lo unico que cambia
+// es que queda rastro en la base, que es de donde sale el disparador de los efectos requeridos.
 export async function saveDeliveryDataToSaleState(
   conversationId: string,
   data: { customerName?: string; idNumber?: string; deliveryPhone?: string; address?: string }
@@ -359,6 +366,42 @@ export async function clearBlockedByIfNoPendingQuestions(conversationId: string)
 export async function getMediaSent(conversationId: string): Promise<string[]> {
   const state = await prisma.saleState.findUnique({ where: { conversationId }, select: { mediaSent: true } });
   return state?.mediaSent ?? [];
+}
+
+// Proyeccion del servidor: los items que el cliente REALMENTE vio en un resumen de pedido. Los escribe
+// show_order_summary con lo que ya resolvio contra el catalogo (resolveOrderItems valida nombre, variante
+// y precio linea por linea), nunca con lo que el modelo escribio en prosa. Con saleStateEnabled activo el
+// resumen ya sale de SaleState, asi que ahi no se llama: no hay nada que espejar.
+export async function recordOrderItemsShown(conversationId: string, items: SaleStateItem[]): Promise<void> {
+  if (items.length === 0) return;
+  await upsertSaleState(conversationId, { items });
+}
+
+// Proyeccion del servidor: la ciudad para la que get_shipping_rate_for_city encontro una tarifa real.
+// Solo se escribe cuando hubo match contra ShippingCityRule, o sea cuando la ciudad existe en la
+// configuracion del negocio - no cuando el cliente la nombro.
+export async function recordShippingCity(conversationId: string, city: string): Promise<void> {
+  await upsertSaleState(conversationId, { shippingCity: city });
+}
+
+/**
+ * Lo que el SERVIDOR escribio sobre esta conversacion, leido crudo de la fila y sin ninguna derivacion.
+ * Es la unica entrada del disparador de efectos requeridos: nada de esto lo escribe el modelo ni el
+ * cliente. Deliberadamente separado de getSaleState - ese calcula ciudad, envio, faltantes y checkout, y
+ * alimenta el prompt de los negocios con la bandera activa; tocarlo cambiaria esos prompts.
+ */
+export async function getServerSaleEvidence(
+  conversationId: string
+): Promise<{ items: SaleStateItem[]; mediaSent: string[]; shippingCity: string | null }> {
+  const state = await prisma.saleState.findUnique({
+    where: { conversationId },
+    select: { items: true, mediaSent: true, shippingCity: true },
+  });
+  return {
+    items: parseItems(state?.items),
+    mediaSent: state?.mediaSent ?? [],
+    shippingCity: state?.shippingCity ?? null,
+  };
 }
 
 export async function recordMediaSent(conversationId: string, label: string): Promise<void> {

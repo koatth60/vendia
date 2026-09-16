@@ -59,6 +59,8 @@ import {
   setShippingModality as setSaleStateShippingModality,
   setPaymentMethod as setSaleStatePaymentMethod,
   saveDeliveryDataToSaleState,
+  recordOrderItemsShown,
+  recordShippingCity,
   isSaleStateEnabled,
   setBlockedBy,
   recordMediaSent,
@@ -1204,6 +1206,9 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
       if (!city) return { matched: false, note: "Falta la ciudad." };
 
       const resolved = await resolveShippingRateForCity(businessId, city);
+      // Matcheo contra ShippingCityRule: la ciudad existe de verdad en la configuracion del negocio, asi
+      // que queda registrada como evidencia del servidor (no como dato de entrega - ver schema.prisma).
+      if (resolved) await recordShippingCity(context.conversationId, city);
       if (!resolved) {
         return {
           matched: false,
@@ -1257,9 +1262,9 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
       }
 
       await saveCustomerName(context.businessId, context.customerId, name);
-      if (await isSaleStateEnabled(businessId)) {
-        await saveDeliveryDataToSaleState(context.conversationId, { customerName: name });
-      }
+      // Sin la bandera: registrar el estado corre siempre (ver saveDeliveryDataToSaleState). Lo que la
+      // bandera sigue gobernando es exponerlo al modelo y aplicarlo, no anotarlo.
+      await saveDeliveryDataToSaleState(context.conversationId, { customerName: name });
       return { saved: true, name };
     }
     case "save_customer_contact_info": {
@@ -1288,9 +1293,7 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
       }
 
       await saveCustomerContactInfo(context.businessId, context.customerId, { idNumber: validIdNumber, deliveryPhone: validDeliveryPhone, address });
-      if (await isSaleStateEnabled(businessId)) {
-        await saveDeliveryDataToSaleState(context.conversationId, { idNumber: validIdNumber, deliveryPhone: validDeliveryPhone, address });
-      }
+      await saveDeliveryDataToSaleState(context.conversationId, { idNumber: validIdNumber, deliveryPhone: validDeliveryPhone, address });
       return {
         saved: true,
         idNumber: validIdNumber,
@@ -1559,6 +1562,21 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
 
       const subtotal = items.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
       const total = subtotal + shippingCost;
+      // Espejo hacia SaleState de lo que el servidor ya resolvio contra el catalogo. No cambia nada de lo
+      // que ve el cliente ni de lo que ve el modelo (sin la bandera, nadie lee SaleState.items en el
+      // turno): deja el rastro del que se alimenta el disparador de efectos requeridos.
+      await recordOrderItemsShown(
+        context.conversationId,
+        items.map((item) => ({
+          productId: item.productId,
+          productName: item.productName,
+          variantId: item.variantId ?? null,
+          variantLabel: item.variantLabel ?? null,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+          currency: item.currency,
+        }))
+      );
       return {
         ready: true,
         items: items.map((item) => ({

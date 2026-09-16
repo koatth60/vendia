@@ -25,7 +25,7 @@ import {
   verifyRequiredEffects,
   runRequiredEffectFallback,
   recordRequiredEffectsTurn,
-  FALLBACK_SALE_REGISTERED_TEXT,
+  escalationOwnerAlertText,
   ESCALATION_TEXT,
   markEscalatedTurn,
   type RequiredEffect,
@@ -1471,7 +1471,10 @@ export async function generateReply(
       );
       if (outcome.ok) {
         missing = await verifyRequiredEffects(conversationId, requiredEffects);
-        text = FALLBACK_SALE_REGISTERED_TEXT;
+        // El texto al cliente lo elige el fallback segun el efecto que realmente produjo: "ya registre
+        // tu pedido" solo cuando hay pedido. El aviso a la duena sin pedido tiene su propio texto, que
+        // no afirma que exista uno.
+        if (outcome.customerText) text = outcome.customerText;
       }
     }
 
@@ -1483,10 +1486,7 @@ export async function generateReply(
       text = ESCALATION_TEXT;
       await setHumanControl(context.businessId, conversationId, true);
       markEscalatedTurn(conversationId);
-      await alertOwner(
-        context,
-        `Atencion: un cliente mando un comprobante con un pedido ya armado y el bot no logro registrarlo (ni el modelo ni el cierre automatico). Esa conversacion quedo esperandote en el panel - revisa el pago a mano.`
-      );
+      await alertOwner(context, escalationOwnerAlertText(missing[0].kind));
       await recordAgentIncident(
         context.businessId,
         "BACKSTOP_INTERVENTION",

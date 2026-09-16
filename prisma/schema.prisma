@@ -295,6 +295,11 @@ model SaleState {
   // Independiente de Business.saleStateEnabled, igual que blockedBy: no mandar fotos repetidas no es una
   // funcion del motor de venta.
   mediaSent      String[]     @default([])
+  // Ciudad para la que get_shipping_rate_for_city encontro una tarifa real en esta conversacion,
+  // escrita por el servidor en el momento del match. Deliberadamente NO entra en el calculo de
+  // getSaleState (ciudad/costo se siguen derivando de `address`): es evidencia de lo que el servidor
+  // sabe, no un dato de entrega. Independiente de Business.saleStateEnabled, igual que mediaSent.
+  shippingCity   String?
   // Cuantas veces seguidas el cliente mando una foto/video para identificar un producto sin que el turno
   // lo resolviera (ni un envio real ni una escalacion al dueno) - ver shouldForcePhotoEscalation en
   // agent.ts. Se resetea a 0 apenas se resuelve; nunca se lee de texto.
@@ -442,9 +447,15 @@ model OwnerMessageLog {
   body         String
   success      Boolean               @default(true)
   errorMessage String?
+  // Conversacion que origino el aviso, cuando la hay. String suelto y no @relation a proposito: esto es
+  // un registro de auditoria y tiene que sobrevivir al borrado de la conversacion. Lo escriben por ahora
+  // solo los avisos del mecanismo de efectos requeridos (src/ai/requiredEffects.ts), que necesita poder
+  // probar con un SELECT por conversacion que el aviso al dueno salio de verdad.
+  conversationId String?
   createdAt    DateTime              @default(now())
 
   @@index([businessId, createdAt])
+  @@index([conversationId, createdAt])
 }
 
 enum OwnerMessageDirection {

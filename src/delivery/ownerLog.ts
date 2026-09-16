@@ -6,7 +6,7 @@ import { prisma } from "../db/client";
 // there's no need (and no endpoint) to expose this to the business's own /admin panel.
 export async function recordOwnerMessage(
   businessId: string,
-  data: { direction: "OUT" | "IN"; body: string; success?: boolean; errorMessage?: string | null }
+  data: { direction: "OUT" | "IN"; body: string; success?: boolean; errorMessage?: string | null; conversationId?: string | null }
 ) {
   return prisma.ownerMessageLog.create({
     data: {
@@ -15,6 +15,9 @@ export async function recordOwnerMessage(
       body: data.body,
       success: data.success ?? true,
       errorMessage: data.errorMessage ?? null,
+      // Opcional a proposito: solo lo pasa quien despues necesita PROBAR por conversacion que el aviso
+      // salio (src/ai/requiredEffects.ts). El resto de los avisos siguen igual que siempre.
+      conversationId: data.conversationId ?? null,
     },
   });
 }

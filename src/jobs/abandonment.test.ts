@@ -22,6 +22,10 @@ before(async () => {
       whatsappPhoneNumberId: "test-phone-id",
       whatsappAccessToken: "test-token",
       cartRecoveryTemplateName: "recuperar_carrito",
+      // La recuperacion de carrito sigue detras de saleStateEnabled: desde 2026-09-15 SaleState.items se
+      // escribe tambien sin la bandera (proyeccion del servidor, ver orders/saleState.ts), y sin este
+      // filtro negocios que hoy nunca mandan la plantilla empezarian a mandarsela a sus clientes.
+      saleStateEnabled: true,
       cartRecoveryTemplateLanguage: "es",
     },
   });
@@ -159,6 +163,28 @@ test("runAbandonmentJob does not send a cart-recovery template for an abandoned 
     assert.equal(updated.status, "ABANDONED");
     assert.equal(updated.cartRecoverySentAt, null);
   } finally {
+    restore();
+    await cleanup(conversation.id, customer.id);
+  }
+});
+
+test("runAbandonmentJob does not send a cart-recovery template for a business without saleStateEnabled", async () => {
+  // Desde 2026-09-15 SaleState.items tambien se escribe para negocios con la bandera apagada (es una
+  // proyeccion del servidor, ver orders/saleState.ts). Este test es el candado de que ese cambio interno
+  // no le empieza a mandar plantillas a los clientes de negocios que hoy nunca las reciben.
+  const { restore, sentMessages } = stubWhatsappFetch();
+  const product = await createProduct(businessId, { name: "Cable HDMI", description: "d", price: 15000, stock: 5 });
+  const { customer, conversation } = await seedConversation({ lastCustomerMessageHoursAgo: 80 });
+  try {
+    await prisma.business.update({ where: { id: businessId }, data: { saleStateEnabled: false } });
+    await setOrderItem(businessId, conversation.id, { productId: product.id, quantity: 1 });
+
+    await runAbandonmentJob();
+
+    assert.equal(sentMessages.length, 0, "sin la bandera, el carrito registrado no dispara ninguna plantilla");
+    assert.equal((await prisma.conversation.findUniqueOrThrow({ where: { id: conversation.id } })).cartRecoverySentAt, null);
+  } finally {
+    await prisma.business.update({ where: { id: businessId }, data: { saleStateEnabled: true } });
     restore();
     await cleanup(conversation.id, customer.id);
   }

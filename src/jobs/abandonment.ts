@@ -30,6 +30,13 @@ export async function runAbandonmentJob(): Promise<void> {
     // --- Paso 2: recuperacion de carrito para abandonadas con SaleState -------------------------
     // Independiente del paso anterior (misma pasada u otra): reintenta hasta que la plantilla se
     // entregue de verdad, igual que jobs/followUp.ts.
+    //
+    // saleStateEnabled tiene que seguir aca: desde 2026-09-15 SaleState.items tambien se escribe para
+    // negocios con la bandera apagada (proyeccion del servidor, ver orders/saleState.ts). Sin este
+    // filtro, negocios que hoy nunca reciben la plantilla de recuperacion empezarian a mandarsela a sus
+    // clientes solo por ese cambio interno, que es exactamente el cambio de comportamiento visible que
+    // no puede pasar. Aplicar el estado sigue detras de la bandera; registrarlo, no.
+    if (!business.saleStateEnabled) continue;
     if (!business.cartRecoveryTemplateName || !business.whatsappPhoneNumberId || !business.whatsappAccessToken) continue;
     const credentials: WhatsappCredentials = {
       phoneNumberId: business.whatsappPhoneNumberId,
