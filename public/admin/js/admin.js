@@ -34,6 +34,14 @@ async function apiFetch(url, options) {
 function fitChatSplit() {
   const split = document.getElementById('chat-split');
   if (!split) return;
+  // A ancho de telefono la Bandeja es pantalla completa (CSS, body.no-scroll):
+  // un alto en px puesto acá gana siempre por ser inline, y el margen de
+  // 16px de abajo (pensado para el escritorio) es justo el hueco muerto que
+  // se veía debajo del composer. Se lo deja vacío y manda el 100% del CSS.
+  if (window.matchMedia('(max-width: 767.98px)').matches) {
+    split.style.height = '';
+    return;
+  }
   const top = split.getBoundingClientRect().top;
   const bottomMargin = 16;
   const available = window.innerHeight - top - bottomMargin;

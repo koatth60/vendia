@@ -291,7 +291,10 @@
   .panel-header { display: flex; align-items: baseline; justify-content: space-between; margin: 4px 0 16px; gap: 12px; }
   /* Solo existe para volver de Bandeja a Inicio a ancho de telefono (ver media
      query mas abajo) - en escritorio el sidebar ya hace ese trabajo. */
-  .inbox-back-btn { display: none; }
+  /* .panel-header + clase (no solo la clase) para pesar mas que .btn-ghost -
+     esa regla vive mas abajo en el archivo y con la misma especificidad
+     hubiera ganado por venir después, mostrando la flecha en escritorio. */
+  .panel-header .inbox-back-btn { display: none; }
   .panel-title { font-size: 20px; font-weight: 800; letter-spacing: -0.01em; }
   .panel-subtitle { font-size: 13px; color: var(--muted); margin-top: 3px; }
   .section-title {
@@ -755,7 +758,11 @@
     body.no-scroll .tab-panel[data-tab-panel="conversations"] .card {
       flex: 1; min-height: 0; border: none; border-radius: 0; box-shadow: none;
     }
-    .chat-split { height: 100%; }
+    /* body.no-scroll (no solo el ancho) para pesar mas que los otros
+       ".chat-split { height: clamp(...) }" de mas abajo en este archivo
+       (900px, 1240px) - misma especificidad, y esos ganaban por venir
+       después: el hilo se quedaba a 611px con 240px de hueco muerto abajo. */
+    body.no-scroll .chat-split { height: 100%; }
 
     /* Chat abierto: el hilo ocupa la pantalla entera, como WhatsApp. Su propia
        cabecera (‹ volver + nombre + estado) hace de barra superior, así que la
@@ -766,9 +773,17 @@
     }
 
     /* Volver de Bandeja a Inicio: con el sidebar escondido a este ancho, es la
-       única salida de esta pantalla. */
-    .inbox-back-btn {
-      display: inline-flex; width: var(--onix-h-btn); height: var(--onix-h-btn);
+       única salida de esta pantalla. Mismo selector con .panel-header que la
+       regla que lo esconde en escritorio, para pesar mas que .btn-ghost. */
+    .panel-header .inbox-back-btn {
+      display: inline-flex;
+      /* !important: a este ancho ".panel-header button{min-height:44px}" y
+         ".panel-header>div:first-child button{width:auto}" (mas abajo, para
+         cualquier botón junto al título) pesan mas que esta regla por los
+         :first-child/button que suman - sin esto el botón salía chico y
+         angosto (20x44) en vez del cuadrado que es. */
+      width: var(--onix-h-btn) !important; height: var(--onix-h-btn) !important;
+      min-height: var(--onix-h-btn) !important;
       padding: 0; flex-shrink: 0;
     }
 
@@ -783,7 +798,10 @@
       flex: 0 0 auto; width: var(--onix-h-btn); height: var(--onix-h-btn);
       min-height: var(--onix-h-btn); padding: 0; gap: 0;
     }
-    .mobile-icon-btn .btn-icon { display: inline-flex; }
+    /* :not([hidden]) - el icono-boton tenia mas especificidad que [hidden] y
+       le ganaba, así que en "Tomar control"/"Devolver a la IA" se veían los
+       2 iconos pisados uno sobre el otro en vez de solo el que corresponde. */
+    .mobile-icon-btn .btn-icon:not([hidden]) { display: inline-flex; }
     .mobile-icon-btn .btn-label {
       position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
       overflow: hidden; white-space: nowrap; border: 0;
