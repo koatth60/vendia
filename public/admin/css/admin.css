@@ -771,6 +771,22 @@
       position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
       overflow: hidden; white-space: nowrap; border: 0;
     }
+    /* Con los botones ya reducidos a iconos, la cabecera del hilo (foto +
+       nombre + numero/estado) tambien baja de tamaño - los iconos quedan al
+       frente y la cabecera deja de comerse pantalla. */
+    body.chat-fullscreen .chat-panel-header {
+      padding: 7px 10px; gap: 6px 8px;
+    }
+    body.chat-fullscreen .chat-panel-header .conv-avatar {
+      width: 26px; height: 26px; font-size: 11px;
+    }
+    body.chat-fullscreen .modal-header-name { font-size: 13px; }
+    body.chat-fullscreen .modal-title-input { font-size: 13px; }
+    body.chat-fullscreen .modal-header-meta { font-size: 10.5px; margin-top: 1px; }
+    body.chat-fullscreen .chat-panel-actions .mobile-icon-btn {
+      width: 30px; height: 30px; min-height: 30px;
+    }
+    body.chat-fullscreen .thread-subbar { padding: 4px 10px; }
   }
 
   .modal-overlay {
