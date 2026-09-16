@@ -271,6 +271,39 @@ test("getCustomerThreadForBusiness returns only the active cycle's messages, and
   }
 });
 
+// Caso real, Milena Hernández Parra (2026-09-16): un ciclo SOLD queda con updatedAt más nuevo que el
+// ciclo NEW activo (una nota, una edición del pedido, cualquier toque administrativo después de que
+// el cliente ya escribió el siguiente ciclo) - si el orden que usa hasMore fuera por updatedAt, el
+// ciclo activo dejaba de estar en el índice 0 y "Ver conversación anterior" desaparecía con historia
+// vieja real esperando. createdAt no se mueve después de creado, así que el orden no se corrompe.
+test("getCustomerThreadForBusiness sigue mostrando hasMore=true aunque el ciclo SOLD se toque despues de que el ciclo activo arranco", async () => {
+  const customer = await prisma.customer.create({ data: { businessId, phoneNumber: `573024${Date.now()}` } });
+  const now = Date.now();
+  try {
+    const sold = await prisma.conversation.create({
+      data: { customerId: customer.id, status: "SOLD", createdAt: new Date(now - 86400000) },
+    });
+    await prisma.message.create({ data: { conversationId: sold.id, role: "CUSTOMER", content: "mensaje viejo" } });
+
+    const active = await prisma.conversation.create({
+      data: { customerId: customer.id, status: "NEW", createdAt: new Date(now) },
+    });
+    await prisma.message.create({ data: { conversationId: active.id, role: "CUSTOMER", content: "mensaje actual" } });
+
+    // Toca el ciclo SOLD DESPUÉS de que el ciclo activo ya existe - esto es lo que le pasó a Milena.
+    await prisma.conversation.update({ where: { id: sold.id }, data: { updatedAt: new Date(now + 60000) } });
+
+    const result = await getCustomerThreadForBusiness(businessId, customer.id);
+    assert.ok(result);
+    assert.equal(result.activeConversationId, active.id);
+    assert.equal(result.hasMore, true);
+  } finally {
+    await prisma.message.deleteMany({ where: { conversation: { customerId: customer.id } } });
+    await prisma.conversation.deleteMany({ where: { customerId: customer.id } });
+    await prisma.customer.deleteMany({ where: { id: customer.id } });
+  }
+});
+
 test("getCustomerThreadForBusiness marks every one of the customer's conversations as read, not just the active one", async () => {
   const customer = await prisma.customer.create({ data: { businessId, phoneNumber: `573023${Date.now()}` } });
   try {

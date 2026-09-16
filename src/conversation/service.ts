@@ -1074,10 +1074,18 @@ export async function getCustomerThreadForBusiness(businessId: string, customerI
   const customer = await prisma.customer.findFirst({ where: { id: customerId, businessId } });
   if (!customer) return null;
 
+  // createdAt, no updatedAt: este orden es la caminata cronológica de ciclos que hasMore/targetIndex
+  // usan más abajo para decidir si queda historia más vieja por cargar. updatedAt se mueve por
+  // motivos que no tienen nada que ver con "cuándo pasó esta conversación" - una venta SOLD puede
+  // tocarse (nota, edición de pedido, etc.) horas después de que el ciclo siguiente ya arrancó, y
+  // ahí quedaba con updatedAt más nuevo que el ciclo activo. Cuando eso corría, el ciclo activo
+  // dejaba de ser el índice 0 del arreglo, "hasMore" salía false y el botón "Ver conversación
+  // anterior" desaparecía aunque sí hubiera historia vieja (caso real: Milena Hernández Parra,
+  // 2026-09-16). createdAt no se mueve nunca después de creado, así que el orden no se corrompe.
   const conversations = await prisma.conversation.findMany({
     where: { customerId },
     include: { order: true },
-    orderBy: { updatedAt: "desc" },
+    orderBy: { createdAt: "desc" },
   });
   if (conversations.length === 0) return null;
 
