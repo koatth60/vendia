@@ -1,3 +1,4 @@
+import type OpenAI from "openai";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { prisma } from "../src/db/client";
@@ -86,13 +87,24 @@ async function main() {
       // @ts-expect-error narrower stub than the real SDK type, same pattern as replay.ts/loopExhaustion test
       deepseek.chat.completions.create = async (params: Parameters<typeof originalCreate>[0]) => {
         const response = await originalCreate(params);
-        const message = response.choices[0]?.message;
+        // El SDK tipa create() como ChatCompletion | Stream<ChatCompletionChunk> porque el mismo metodo
+        // sirve para streaming. Onix nunca pide stream, asi que en ejecucion siempre es ChatCompletion:
+        // este chequeo lo estrecha para el compilador sin un any suelto, y si algun dia llegara un
+        // stream falla ruidoso en vez de grabar un fixture vacio.
+        if (!("choices" in response)) {
+          throw new Error("record-replay: DeepSeek devolvio un stream; este script solo graba respuestas completas.");
+        }
+        const message: OpenAI.Chat.Completions.ChatCompletionMessage | undefined = response.choices[0]?.message;
         recorded.push({
           content: message?.content ?? undefined,
-          toolCalls: (message?.tool_calls ?? []).map((tc) => ({
-            name: tc.function.name,
-            arguments: JSON.parse(tc.function.arguments || "{}"),
-          })),
+          // Mismo estrechamiento que agent.ts:1320: el SDK admite tool calls "custom" que no traen
+          // .function, y Onix solo usa las de tipo "function".
+          toolCalls: (message?.tool_calls ?? [])
+            .filter((tc) => tc.type === "function")
+            .map((tc) => ({
+              name: tc.function.name,
+              arguments: JSON.parse(tc.function.arguments || "{}"),
+            })),
         });
         return response;
       };

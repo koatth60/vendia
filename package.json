@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "test": "node --import tsx --test \"src/**/*.test.ts\"",
+    "typecheck:all": "tsc --noEmit -p tsconfig.scripts.json",
     "test:paid": "node --import tsx --test src/ai/agent.escalationPaid.ts src/ai/agent.categoryColorScopePaid.ts src/ai/agent.ambiguousRequestsPaid.ts src/ai/contextSummaryPaid.ts src/routes/whatsapp.webhookPaid.ts",
     "regression": "tsx scripts/run-regression-suite.ts",
     "record-replay": "tsx scripts/record-replay.ts",
