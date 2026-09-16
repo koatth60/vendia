@@ -20,6 +20,7 @@ import { listShippingRates, resolveShippingRateForCity } from "../catalog/shippi
 import { recordAgentIncident } from "./incidents";
 import { getSaleGate } from "./configHealth";
 import { normalizeForMatch } from "../search/text";
+import { totalStock } from "../catalog/stock";
 import { formatPrice } from "../config/money";
 import { getBusinessLocale } from "../config/businessConfig";
 
@@ -608,10 +609,8 @@ async function requestSaleConfirmation(context: ToolContext, summary: string, dr
 // never touched and stays stale forever once variants exist. Report the real total (sum of active
 // variants) here instead, so a generic "cuantos tienen en total" question isn't answered with a frozen
 // number that never reflects what's actually sold.
-function totalStock(product: { stock: number; variants: { stock: number; active: boolean }[] }): number {
-  if (product.variants.length === 0) return product.stock;
-  return product.variants.filter((v) => v.active).reduce((sum, v) => sum + v.stock, 0);
-}
+// Movida a src/catalog/stock.ts para que el presenter de la Fase B use la MISMA definicion: estaba
+// duplicada en la capa de la IA y el camino nuevo no la encontro (incidente 2026-09-16, ver ese archivo).
 
 // LIST_DESCRIPTION_MAX_CHARS: solo para vistas de LISTA (varios productos en un mismo tool result) - el
 // modelo ahi solo necesita reconocer de cual producto se trata para decidir relevancia o pedir el detalle

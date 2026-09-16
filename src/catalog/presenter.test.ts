@@ -108,3 +108,26 @@ test("stripNumberedLines no toca un precio ni una fecha que no sean una linea nu
   assert.equal(stripNumberedLines("Cuesta $145.000 con envio"), "Cuesta $145.000 con envio");
   assert.equal(stripNumberedLines("Llega el 3. de octubre"), "Llega el 3. de octubre");
 });
+
+// Incidente real 2026-09-16, conversacion cmu4dqbcx0001zi2kxxrf1ge3: el bot le dijo a una clienta que el
+// Smartwatch Serie 12 Ultra 3 no tenia unidades. Tenia 15 (negro 7 + gris 8). El presenter leia
+// `product.stock`, que es el campo BASE y queda en 0 para todo producto cuyo inventario se lleva por
+// color: 12 de los 37 productos activos de ese negocio, 117 unidades, se mostraban "(sin stock)".
+// El fixture no lo detectaba porque sus dos productos con variantes repetian el total en el campo base,
+// una forma que no existe en produccion. Ahora tienen base 0, como los reales.
+test("un producto con el inventario en variantes no se muestra sin stock", () => {
+  const ultra = productNamed(magimp, "Serie 12 Ultra 3");
+  assert.equal(ultra.stock, 0, "el fixture tiene que reproducir la forma real: base 0");
+  const enVariantes = ultra.variants.filter((v) => v.active).reduce((s, v) => s + v.stock, 0);
+  assert.equal(enVariantes, 15, "y el inventario real en las variantes");
+
+  const enLista = allText(render("que relojes tienen")).split("\n");
+  const linea = enLista.find((l) => l.includes("Serie 12 Ultra 3"));
+  assert.ok(linea, `el producto tiene que aparecer en la lista; salio: "${enLista.join(" / ")}"`);
+  assert.ok(!linea.includes("sin stock"), `no puede decir sin stock teniendo 15: "${linea}"`);
+  assert.ok(linea.includes("15 disponibles"), `tiene que decir 15 disponibles: "${linea}"`);
+
+  const ficha = allText(render("el Serie 12 Ultra 3"));
+  assert.ok(!ficha.includes("sin stock"), `la ficha tampoco puede decir sin stock: "${ficha}"`);
+  assert.ok(ficha.includes("15 disponibles"), `la ficha tiene que decir 15 disponibles: "${ficha}"`);
+});

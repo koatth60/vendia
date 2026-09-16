@@ -1,5 +1,6 @@
 import { formatPrice } from "../config/money";
 import type { ProductScope, ScopeMedia, ScopeProduct, ScopeVariant } from "./scope";
+import { totalStock } from "./stock";
 
 // Fase B del plan de catalogo y medios (ONIX-PLAN-CATALOGO-Y-MEDIOS.md, pieza 2).
 //
@@ -93,7 +94,7 @@ function mediaBlockFor(product: ScopeProduct, variant: ScopeVariant | null): Cat
 function renderSingle(product: ScopeProduct, variant: ScopeVariant | null, opts: RenderCatalogOptions): CatalogBlock {
   const label = variant ? variantLabel(variant) : null;
   const title = label ? `*${product.name}* (${label})` : `*${product.name}*`;
-  const stock = variant ? variant.stock : product.stock;
+  const stock = variant ? variant.stock : totalStock(product);
   const lines = [`${title} — ${priceLine(product, opts)}${stockSuffix(stock)}`];
   if (product.description.trim()) lines.push(product.description.trim());
   return { text: lines.join("\n"), media: mediaBlockFor(product, variant), productIds: [product.id] };
@@ -139,7 +140,7 @@ function renderNumberedGroup(
   for (let offset = 0; offset < products.length; offset += MAX_LINES_PER_BLOCK) {
     const chunk = products.slice(offset, offset + MAX_LINES_PER_BLOCK);
     const lines = chunk.map(
-      (product, i) => `${startNumber + offset + i}. *${product.name}* — ${priceLine(product, opts)}${stockSuffix(product.stock)}`
+      (product, i) => `${startNumber + offset + i}. *${product.name}* — ${priceLine(product, opts)}${stockSuffix(totalStock(product))}`
     );
     const text = heading && offset === 0 ? `*${heading}*\n${lines.join("\n")}` : lines.join("\n");
     blocks.push({ text, media: [], productIds: chunk.map((p) => p.id) });
