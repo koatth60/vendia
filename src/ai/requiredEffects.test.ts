@@ -345,7 +345,19 @@ test("condiciones del disparador: tipo de medio, control humano y candado de ide
   await prisma.conversation.update({ where: { id: conversationId }, data: { humanControl: false } });
 
   // Con el aviso de confirmacion ya mandado el efecto ya ocurrio: no se exige de nuevo.
-  await prisma.conversation.update({ where: { id: conversationId }, data: { pendingConfirmationMessageId: `wamid.${randomUUID()}` } });
+  await prisma.conversation.update({
+    where: { id: conversationId },
+    data: { pendingConfirmationAskedAt: new Date(), pendingConfirmationMessageId: `wamid.${randomUUID()}` },
+  });
+  assert.deepEqual(await computeRequiredEffects(conversationId, { mediaType: "IMAGE" }), []);
+
+  // Y el candado es `pendingConfirmationAskedAt`, no el wamid (2026-09-16): cuando los tres escalones de
+  // envio al dueno fallan no hay wamid y la confirmacion existe igual - sin esto, cada imagen nueva
+  // volveria a disparar el efecto sobre una venta que ya esta esperando respuesta.
+  await prisma.conversation.update({
+    where: { id: conversationId },
+    data: { pendingConfirmationMessageId: null },
+  });
   assert.deepEqual(await computeRequiredEffects(conversationId, { mediaType: "IMAGE" }), []);
 });
 

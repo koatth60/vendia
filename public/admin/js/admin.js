@@ -4371,6 +4371,19 @@ function runDashboardAction(kind) {
 // lo que además arrancaba con un "Cargando…" que hacía parpadear toda la sección. Ahora "Cargando…"
 // solo se muestra la primera vez (lastHealthSnapshot todavía null); un refresh de fondo que sí trae
 // datos nuevos re-renderiza, pero el scroll ya lo restaura startAutoRefresh() por fuera.
+// Icono de urgencia del panel (triangulo de advertencia). SVG inline, trazo 1.6, grilla de 18px, nunca
+// emoji - regla de estilo del rediseno (ver CLAUDE.md).
+const URGENT_ICON = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="var(--onix-danger)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px; margin-right:6px;"><path d="M12 4.5 21 19.5H3z"/><path d="M12 10v4M12 16.8v.2"/></svg>';
+
+// El dueno tiene que poder distinguir "no contesto" de "nunca le llego": son dos problemas distintos y
+// se arreglan de forma distinta. `channel` dice por donde salio el ultimo intento.
+function confirmationDeliveryNote(confirmation) {
+  if (confirmation.channel === 'NONE') return 'No se pudo entregar todavía: lo seguimos reintentando.';
+  if (confirmation.buttonsQueued) return 'Te llegó como plantilla (tu chat llevaba más de 24 h sin actividad). Los botones salen apenas escribas cualquier cosa.';
+  if (confirmation.remindedAt) return 'Último recordatorio ' + timeAgo(confirmation.remindedAt) + '.';
+  return 'Entregado a tu WhatsApp.';
+}
+
 let lastHealthSnapshot = null;
 
 async function loadHealth() {
@@ -4379,13 +4392,14 @@ async function loadHealth() {
   const isFirstLoad = lastHealthSnapshot === null;
   if (isFirstLoad) container.innerHTML = '<div class="card empty-state">Cargando…</div>';
   try {
-    const [pendingRes, failuresRes, logRes, incidentsRes, findingsRes, baselineRes] = await Promise.all([
+    const [pendingRes, failuresRes, logRes, incidentsRes, findingsRes, baselineRes, confirmationsRes] = await Promise.all([
       apiFetch('/admin/api/pending-questions'),
       apiFetch('/admin/api/delivery-failures'),
       apiFetch('/admin/api/owner-log'),
       apiFetch('/admin/api/agent-incidents'),
       apiFetch('/admin/api/health-findings'),
       apiFetch('/admin/api/baseline'),
+      apiFetch('/admin/api/pending-confirmations'),
     ]);
     const pending = await pendingRes.json();
     const failures = await failuresRes.json();
@@ -4393,10 +4407,25 @@ async function loadHealth() {
     const incidents = await incidentsRes.json();
     const { findings } = await findingsRes.json();
     const baseline = await baselineRes.json();
+    const confirmations = await confirmationsRes.json();
 
-    const snapshot = JSON.stringify({ pending, failures, log, incidents, findings, baseline });
+    const snapshot = JSON.stringify({ pending, failures, log, incidents, findings, baseline, confirmations });
     if (snapshot === lastHealthSnapshot) return;
     lastHealthSnapshot = snapshot;
+
+    const confirmationRows = confirmations.length === 0
+      ? '<div class="empty-state" style="padding:18px;">Ninguna venta esperando que confirmes el pago.</div>'
+      : confirmations.map((c) => `
+          <div class="action-card is-urgent">
+            <div class="count onix-num">${c.attempts}</div>
+            <div style="min-width:0;">
+              <div class="title">${escapeHtml(c.customerName)} · esperando ${escapeHtml(timeAgo(c.askedAt))}</div>
+              <div class="sample">${escapeHtml(c.summary || 'Sin resumen del pedido')}</div>
+              <div class="sample">${escapeHtml(confirmationDeliveryNote(c))}</div>
+            </div>
+            <button type="button" class="btn-danger-solid action-cta" onclick="goToCustomerChat('${c.customerId}')">Ver chat</button>
+          </div>
+        `).join('');
 
     const pendingRows = pending.length === 0
       ? '<div class="empty-state" style="padding:18px;">Nada esperando respuesta. Al día.</div>'
@@ -4459,6 +4488,17 @@ async function loadHealth() {
 
     container.innerHTML = `
       ${botHealthCardsHtml(incidents, 'margin-bottom:16px;')}
+
+      <div class="section-title">${URGENT_ICON} Ventas esperando que confirmes el pago</div>
+      <div class="card" style="margin-bottom:16px;">
+        <div style="font-size:12.5px; color:var(--muted); margin-bottom:10px;">
+          El cliente ya pagó y el pedido <strong>no se crea</strong> hasta que respondas si el pago te
+          llegó. Te lo volvemos a preguntar por WhatsApp cada tanto hasta que contestes; el número de la
+          izquierda es cuántas veces te lo mandamos. Contestá por WhatsApp citando ese mensaje: no se
+          puede cerrar desde acá, sos la única que puede ver si la plata entró.
+        </div>
+        ${confirmationRows}
+      </div>
 
       <div class="section-title">Línea base (${baseline.days} días)</div>
       <div class="card" style="margin-bottom:16px;">

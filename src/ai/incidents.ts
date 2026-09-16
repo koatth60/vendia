@@ -9,7 +9,8 @@ export type AgentIncidentKind =
   | "STALE_REPLY_DISCARDED"
   | "OWNER_QUESTION_TIMEOUT"
   | "CONVERSATION_ABANDONED"
-  | "INTENT_ESCALATION_TIMEOUT";
+  | "INTENT_ESCALATION_TIMEOUT"
+  | "SALE_CONFIRMATION_TIMEOUT";
 
 // Fase F, 2026-09-13 audit (F9): none of agent.ts's backend safety nets left any queryable trace before
 // this - only a console.error/warn nobody reads unless tailing production logs. Best-effort on purpose:

@@ -292,6 +292,23 @@ export async function recordMessage(
 // Meta no garantiza el orden de entrega de los webhooks de estado.
 const DELIVERY_STATUS_RANK: Record<"SENT" | "DELIVERED" | "READ", number> = { SENT: 1, DELIVERED: 2, READ: 3 };
 
+// Los estados de Meta llegan fuera de orden con frecuencia (un `sent` tardio despues de un `delivered`).
+// El rango evita que un acuse viejo pise uno mejor que ya esta escrito.
+function isBetterStatus(current: "SENT" | "DELIVERED" | "READ" | null, next: "SENT" | "DELIVERED" | "READ"): boolean {
+  return !current || DELIVERY_STATUS_RANK[current] < DELIVERY_STATUS_RANK[next];
+}
+
+/**
+ * Un solo camino para el acuse de entrega de Meta, sobre las DOS tablas que guardan un wamid propio:
+ *
+ *  - `Message`: lo que sale hacia el cliente.
+ *  - `OwnerMessageLog`: lo que sale hacia el dueno (avisos, escalaciones, confirmaciones de venta).
+ *
+ * El segundo faltaba, y era el agujero del caso de Milena (2026-09-16): el acuse de la pregunta
+ * "¿Te llego el pago?" llegaba por el webhook, no matcheaba contra ningun `Message` y se descartaba, asi
+ * que `delivered: true` (o sea "Meta acepto el envio") era todo lo que se sabia nunca. Un wamid solo
+ * puede estar en una de las dos tablas, asi que no hay ambiguedad: se intentan las dos y matchea una.
+ */
 export async function recordMessageDeliveryStatus(whatsappMessageId: string, status: string): Promise<void> {
   const mapped = status.toUpperCase();
   if (mapped !== "SENT" && mapped !== "DELIVERED" && mapped !== "READ") return;
@@ -300,11 +317,23 @@ export async function recordMessageDeliveryStatus(whatsappMessageId: string, sta
     where: { whatsappMessageId },
     select: { id: true, deliveryStatus: true },
   });
-  if (!existing) return;
-  if (existing.deliveryStatus && DELIVERY_STATUS_RANK[existing.deliveryStatus] >= DELIVERY_STATUS_RANK[mapped]) return;
+  if (existing) {
+    if (!isBetterStatus(existing.deliveryStatus, mapped)) return;
+    await prisma.message.update({
+      where: { id: existing.id },
+      data: { deliveryStatus: mapped, deliveryStatusAt: new Date() },
+    });
+    return;
+  }
 
-  await prisma.message.update({
-    where: { id: existing.id },
+  const ownerMessage = await prisma.ownerMessageLog.findUnique({
+    where: { wamid: whatsappMessageId },
+    select: { id: true, deliveryStatus: true },
+  });
+  if (!ownerMessage) return;
+  if (!isBetterStatus(ownerMessage.deliveryStatus, mapped)) return;
+  await prisma.ownerMessageLog.update({
+    where: { id: ownerMessage.id },
     data: { deliveryStatus: mapped, deliveryStatusAt: new Date() },
   });
 }
@@ -485,10 +514,21 @@ export async function findConversationByPendingConfirmation(pendingConfirmationM
   });
 }
 
+// Limpia TODO el estado de la confirmacion, no solo el wamid: si quedara `pendingConfirmationAskedAt`,
+// el perseguidor seguiria insistiendo por una venta que el dueno ya contesto.
 export async function clearPendingConfirmation(conversationId: string) {
   await prisma.conversation.update({
     where: { id: conversationId },
-    data: { pendingConfirmationMessageId: null, pendingOrderSummary: null, pendingOrderItems: Prisma.JsonNull },
+    data: {
+      pendingConfirmationMessageId: null,
+      pendingOrderSummary: null,
+      pendingOrderItems: Prisma.JsonNull,
+      pendingConfirmationAskedAt: null,
+      pendingConfirmationRemindedAt: null,
+      pendingConfirmationAttempts: 0,
+      pendingConfirmationChannel: null,
+      pendingConfirmationButtonsQueued: false,
+    },
   });
 }
 
@@ -583,11 +623,39 @@ export async function findOpenPendingOwnerQuestionsForConversation(conversationI
   });
 }
 
-export async function findOpenPendingConfirmationsForBusiness(businessId: string) {
+/**
+ * Las confirmaciones de venta vivas de un negocio: las que ya se le preguntaron al dueno y siguen sin
+ * respuesta.
+ *
+ * Lo vivo lo marca `pendingConfirmationAskedAt`, NO el wamid. Esa distincion es el punto: cuando los
+ * tres escalones de envio fallan no hay wamid y la confirmacion existe igual - antes esas desaparecian
+ * de esta consulta y nadie las volvia a mirar nunca. El wamid sigue siendo la clave para matchear la
+ * respuesta citada del dueno, que es otra cosa.
+ *
+ * Una sola consulta para los tres usos (handleOwnerReply cuando el dueno responde sin citar, el
+ * perseguidor de jobs/escalationReminder.ts, y el panel), acotada con `filter`:
+ *   - `remindDueBefore`: el ultimo intento (o el pedido inicial) es mas viejo que eso -> toca insistir.
+ *   - `askedBefore`: la pregunta original es mas vieja que eso -> vencio.
+ */
+export async function findOpenPendingConfirmationsForBusiness(
+  businessId: string,
+  filter?: { remindDueBefore?: Date; askedBefore?: Date }
+) {
+  const where: Prisma.ConversationWhereInput = {
+    customer: { businessId },
+    pendingConfirmationAskedAt: filter?.askedBefore ? { lte: filter.askedBefore } : { not: null },
+  };
+  if (filter?.remindDueBefore) {
+    // El reloj de la insistencia es el ultimo intento, y si nunca hubo reintento, el pedido original.
+    where.OR = [
+      { pendingConfirmationRemindedAt: { lte: filter.remindDueBefore } },
+      { pendingConfirmationRemindedAt: null, pendingConfirmationAskedAt: { lte: filter.remindDueBefore } },
+    ];
+  }
   return prisma.conversation.findMany({
-    where: { customer: { businessId }, pendingConfirmationMessageId: { not: null } },
+    where,
     include: { customer: true },
-    orderBy: { updatedAt: "desc" },
+    orderBy: { pendingConfirmationAskedAt: "asc" },
   });
 }
 

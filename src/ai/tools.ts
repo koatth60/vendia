@@ -75,6 +75,7 @@ import {
 import { prisma } from "../db/client";
 import { getPresignedMediaUrl } from "../media/s3";
 import { recordOwnerMessage } from "../delivery/ownerLog";
+import { askOwnerToConfirmSale, describeCustomerForOwner } from "../whatsapp/ownerConfirmation";
 
 // WhatsApp sometimes fails to deliver/render an image if it's sent immediately after another one -
 // a short gap between consecutive media sends avoids that collision.
@@ -124,12 +125,7 @@ async function sendMediaWithSpacing(
 
 async function describeCustomer(customerId: string, recipientPhone: string): Promise<string> {
   const customer = await prisma.customer.findUnique({ where: { id: customerId } });
-  if (!isBsuid(recipientPhone)) {
-    return customer?.name ? `${customer.name} (${recipientPhone})` : recipientPhone;
-  }
-  return customer?.name
-    ? `${customer.name} (sin numero visible, privacidad de WhatsApp activada)`
-    : "un cliente (sin numero visible, privacidad de WhatsApp activada)";
+  return describeCustomerForOwner({ name: customer?.name ?? null, phoneNumber: recipientPhone });
 }
 
 export const catalogTools: OpenAI.Chat.ChatCompletionTool[] = [
@@ -632,86 +628,24 @@ interface PendingOrderDraft {
 
 // Returns true whenever this business requires owner confirmation before closing a sale (i.e. has a
 // contactPhone configured) - the caller must NOT auto-close the order in that case, regardless of
-// whether the alert actually reached the owner. Previously, sendInteractiveButtonsMessage throwing (a
-// real WhatsApp API error, not just an empty response) was uncaught here, which bubbled all the way up
-// through generateReply and was swallowed by the webhook's outer try/catch - the customer got NO reply
-// at all for that turn. And even when it didn't throw, `!wamid` was read as "no confirmation needed",
-// so a failed send silently auto-approved an unconfirmed sale instead of blocking it. Now: buttons are
-// tried first, falling back to plain text (compatible with the same "si"/"no" parsing in
-// handleOwnerReply) if that fails, and the sale is only ever treated as NOT requiring confirmation when
-// no contactPhone is configured at all - a total failure to reach the owner still blocks auto-closing,
-// it just can't be resolved by quote-reply later (logged loudly for manual follow-up instead).
+// whether the alert actually reached the owner. Una falla total en alcanzar al dueno sigue bloqueando el
+// cierre automatico; lo que cambio (2026-09-16) es que ya no termina ahi: la confirmacion queda viva en
+// la conversacion y el perseguidor de jobs/escalationReminder.ts la reintenta hasta que el dueno
+// responda o venza Business.ownerQuestionTimeoutHours.
+//
+// Toda la garantia de entrega (escalera botones -> texto -> plantilla, idempotencia, registro del wamid
+// para el acuse de Meta) vive en src/whatsapp/ownerConfirmation.ts, que es el mismo modulo que usa el
+// perseguidor - asi el primer pedido y cada reintento dejan exactamente el mismo estado.
 async function requestSaleConfirmation(context: ToolContext, summary: string, draft: PendingOrderDraft): Promise<boolean> {
-  const business = await prisma.business.findUnique({ where: { id: context.businessId } });
-  if (!business?.contactPhone) {
-    // No hay a quien mandarle WhatsApp - la venta se autoconfirma igual (comportamiento existente),
-    // pero sin este log quedaba sin ningun rastro de que el dueno nunca se entero en tiempo real.
-    await recordOwnerMessage(context.businessId, {
-      direction: "OUT",
-      body: `Venta autoconfirmada sin aviso al dueno (falta configurar Telefono de contacto en el negocio): ${summary || "sin resumen"}`,
-      success: false,
-      errorMessage: "Sin contactPhone configurado",
-    });
-    return false;
-  }
-
-  const greeting = business.contactName ? `Hola ${business.contactName}` : "Hola";
-  const customerLabel = await describeCustomer(context.customerId, context.recipientPhone);
-  const text = [
-    `${greeting}, el cliente ${customerLabel} pago/confirmo este pedido:`,
-    summary || "El cliente confirmo la compra, sin mas detalles registrados.",
-    "¿Te llego el pago?",
-  ].join("\n\n");
-
-  let wamid = "";
-  let lastError: unknown = null;
-  const buttons = await sendToOwner(context.businessId, context.credentials, business.contactPhone, {
-    kind: "buttons",
-    text,
-    buttons: [
-      { id: "confirm_yes", title: "✅ Si llego" },
-      { id: "confirm_no", title: "❌ No llego" },
-    ],
+  const result = await askOwnerToConfirmSale({
+    businessId: context.businessId,
+    conversationId: context.conversationId,
+    customerId: context.customerId,
+    credentials: context.credentials,
+    summary,
+    draft,
   });
-  if (buttons.delivered) {
-    wamid = buttons.wamid;
-  } else {
-    lastError = new Error(buttons.failure?.message ?? "Sin wamid");
-    console.error("No se pudo enviar los botones de confirmacion de venta al dueno, probando texto libre:", lastError);
-    const plain = await sendToOwner(context.businessId, context.credentials, business.contactPhone, {
-      kind: "text",
-      text: `${text}\n\nRespondeme "si" o "no" citando este mismo mensaje, por favor.`,
-    });
-    if (plain.delivered) {
-      wamid = plain.wamid;
-      lastError = null;
-    } else {
-      lastError = new Error(plain.failure?.message ?? "Sin wamid");
-      console.error("No se pudo enviar la confirmacion de venta al dueno de ninguna forma (revisar manualmente):", lastError, {
-        businessId: context.businessId,
-        conversationId: context.conversationId,
-      });
-    }
-  }
-
-  await recordOwnerMessage(context.businessId, {
-    direction: "OUT",
-    body: text,
-    success: Boolean(wamid),
-    errorMessage: wamid ? null : lastError instanceof Error ? lastError.message : lastError ? String(lastError) : "Sin wamid",
-  });
-
-  if (wamid) {
-    await prisma.conversation.update({
-      where: { id: context.conversationId },
-      data: {
-        pendingConfirmationMessageId: wamid,
-        pendingOrderSummary: summary || null,
-        pendingOrderItems: draft as unknown as object,
-      },
-    });
-  }
-  return true;
+  return result.pending;
 }
 
 // For a product sold in several colors/sizes (see ProductVariant in schema.prisma), each sale

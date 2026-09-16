@@ -6,7 +6,14 @@ import { prisma } from "../db/client";
 // there's no need (and no endpoint) to expose this to the business's own /admin panel.
 export async function recordOwnerMessage(
   businessId: string,
-  data: { direction: "OUT" | "IN"; body: string; success?: boolean; errorMessage?: string | null; conversationId?: string | null }
+  data: {
+    direction: "OUT" | "IN";
+    body: string;
+    success?: boolean;
+    errorMessage?: string | null;
+    conversationId?: string | null;
+    wamid?: string | null;
+  }
 ) {
   return prisma.ownerMessageLog.create({
     data: {
@@ -15,6 +22,11 @@ export async function recordOwnerMessage(
       body: data.body,
       success: data.success ?? true,
       errorMessage: data.errorMessage ?? null,
+      // `success` solo dice que Meta acepto el envio. Guardar el wamid es lo que le da al acuse de
+      // entrega real (webhook de estados de Meta) una fila donde aterrizar: sin el, el acuse llegaba,
+      // no matcheaba contra ningun `Message` (los avisos al dueno no son mensajes de una conversacion)
+      // y se descartaba. Ver recordMessageDeliveryStatus en conversation/service.ts.
+      wamid: data.wamid || null,
       // Opcional a proposito: solo lo pasa quien despues necesita PROBAR por conversacion que el aviso
       // salio (src/ai/requiredEffects.ts). El resto de los avisos siguen igual que siempre.
       conversationId: data.conversationId ?? null,

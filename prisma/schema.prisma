@@ -447,6 +447,13 @@ model OwnerMessageLog {
   body         String
   success      Boolean               @default(true)
   errorMessage String?
+  // `success` solo dice que Meta ACEPTO el envio, no que el dueno lo haya recibido. El acuse real llega
+  // despues por el webhook de estados, que matchea por wamid - sin esta columna ese acuse llegaba y se
+  // descartaba, porque los mensajes al dueno no viven en `Message`. Nullable: los avisos que fallaron no
+  // tienen wamid, y ninguna fila historica lo tiene.
+  wamid            String?               @unique
+  deliveryStatus   MessageDeliveryStatus?
+  deliveryStatusAt DateTime?
   // Conversacion que origino el aviso, cuando la hay. String suelto y no @relation a proposito: esto es
   // un registro de auditoria y tiene que sobrevivir al borrado de la conversacion. Lo escriben por ahora
   // solo los avisos del mecanismo de efectos requeridos (src/ai/requiredEffects.ts), que necesita poder
@@ -671,9 +678,28 @@ model Conversation {
   // Se limpia si la conversacion se reactiva (getOrCreateOpenConversation), para que un abandono
   // posterior pueda volver a mandarla.
   cartRecoverySentAt           DateTime?
+  // wamid del mensaje que el dueno tiene que responder. Sirve para matchear su respuesta citada; NO es
+  // lo que define que haya una confirmacion viva - cuando los tres escalones de envio fallan no hay
+  // wamid y la confirmacion existe igual. Eso lo marca pendingConfirmationAskedAt.
   pendingConfirmationMessageId String?                @unique
   pendingOrderSummary          String?
   pendingOrderItems            Json?
+  // Momento en que se le pidio la confirmacion al dueno por primera vez. Es la marca de "hay una
+  // confirmacion viva" y el reloj contra el que miden el perseguidor (Business.ownerReminderMinutes) y
+  // el vencimiento (Business.ownerQuestionTimeoutHours), igual que PendingOwnerQuestion.createdAt.
+  pendingConfirmationAskedAt   DateTime?
+  // Ultimo reintento del perseguidor. A diferencia de PendingOwnerQuestion.remindedAt, este no es un
+  // "una sola vez": se insiste cada ownerReminderMinutes hasta que el dueno responda o venza el plazo.
+  pendingConfirmationRemindedAt DateTime?
+  // Cuantas veces se intento hacerle llegar la pregunta (el pedido inicial cuenta como 1).
+  pendingConfirmationAttempts  Int                    @default(0)
+  // Por cual escalon de la escalera salio el ultimo intento. NONE = no salio por ninguno; el
+  // perseguidor lo vuelve a intentar.
+  pendingConfirmationChannel   OwnerConfirmationChannel?
+  // El aviso salio por plantilla (unico contenido que cruza la ventana de 24h cerrada), asi que el
+  // mensaje real con botones sigue debiendo salir: se manda apenas el dueno escriba cualquier cosa, que
+  // es lo que reabre su ventana.
+  pendingConfirmationButtonsQueued Boolean            @default(false)
   pendingOwnerQuestions        PendingOwnerQuestion[]
   contextSummary               String?
   contextSummarizedUpTo        Int?
@@ -685,6 +711,17 @@ model Conversation {
   queuedOutbound               QueuedOutboundMessage[]
   createdAt                    DateTime               @default(now())
   updatedAt                    DateTime               @updatedAt
+
+  @@index([pendingConfirmationAskedAt])
+}
+
+// Por cual escalon de la escalera de envio salio la pregunta de confirmacion al dueno:
+// botones -> texto libre -> plantilla onix_owner_alert. NONE es "no salio por ninguno".
+enum OwnerConfirmationChannel {
+  BUTTONS
+  TEXT
+  TEMPLATE
+  NONE
 }
 
 // One row per question escalated to the owner, instead of a single field on Conversation - a customer
@@ -837,6 +874,10 @@ enum AgentIncidentKind {
   // Business.intentEscalationTimeoutHours sin que el dueno respondiera - se le devolvio el control al
   // bot solo, ver conversationIntent en jobs/escalationReminder.ts.
   INTENT_ESCALATION_TIMEOUT
+  // Se vencio Business.ownerQuestionTimeoutHours con una confirmacion de venta sin responder: el cliente
+  // pago y el dueno nunca contesto "¿Te llego el pago?". La conversacion pasa a control manual. Es el
+  // caso mas caro de todos, porque hay plata de por medio.
+  SALE_CONFIRMATION_TIMEOUT
 }
 
 // Fase 8, punto 5 del plan maestro (2026-09-15): las sesiones del panel vivian en la memoria del

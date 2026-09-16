@@ -2,7 +2,12 @@ import { Router } from "express";
 import { getDashboardSummary } from "../../crm/dashboard";
 import { listUnresolvedDeliveryFailures, resolveDeliveryFailure } from "../../delivery/failures";
 import { listOwnerMessages } from "../../delivery/ownerLog";
-import { findOpenPendingOwnerQuestionsForBusiness, resolvePendingOwnerQuestion } from "../../conversation/service";
+import {
+  customerDisplayName,
+  findOpenPendingConfirmationsForBusiness,
+  findOpenPendingOwnerQuestionsForBusiness,
+  resolvePendingOwnerQuestion,
+} from "../../conversation/service";
 import { businessIdOf } from "./shared";
 
 // Fase 3 (ver ONIX-CRM-REORG-PLAN.md): lo que el backend ya registraba pero el dueño no podia ver
@@ -50,4 +55,30 @@ dashboardRouter.post("/api/pending-questions/:id/resolve", async (req, res) => {
     return;
   }
   res.json({ ok: true });
+});
+
+// Confirmaciones de venta sin responder (2026-09-16). Es lo mas urgente que puede haber en el panel: el
+// cliente ya pago y el pedido NO se crea hasta que el dueno confirme, asi que cada minuto que pasa es un
+// cliente esperando por plata que ya entrego. Solo lectura y sin accion de "resolver": la unica forma
+// valida de cerrarla es que el dueno conteste si el pago llego o no - resolverla desde el panel
+// equivaldria a saltearse la confirmacion, que es justo lo que no se negocia.
+dashboardRouter.get("/api/pending-confirmations", async (req, res) => {
+  const pending = await findOpenPendingConfirmationsForBusiness(businessIdOf(req));
+  res.json(
+    pending.map((conversation) => ({
+      conversationId: conversation.id,
+      customerId: conversation.customer.id,
+      customerName: customerDisplayName(conversation.customer),
+      summary: conversation.pendingOrderSummary,
+      askedAt: conversation.pendingConfirmationAskedAt,
+      remindedAt: conversation.pendingConfirmationRemindedAt,
+      attempts: conversation.pendingConfirmationAttempts,
+      // Por donde salio el ultimo intento. NONE significa que no salio por ninguna via y que el
+      // perseguidor lo va a volver a intentar; el dueno tiene que poder distinguir "no contesto" de
+      // "nunca le llego".
+      channel: conversation.pendingConfirmationChannel,
+      // Salio por plantilla y el mensaje con botones todavia le debe llegar.
+      buttonsQueued: conversation.pendingConfirmationButtonsQueued,
+    }))
+  );
 });

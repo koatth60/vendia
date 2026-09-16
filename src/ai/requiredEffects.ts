@@ -82,6 +82,10 @@ interface ConversationFacts {
   pendingOrderSummary: string | null;
   pendingOrderItems: unknown;
   pendingConfirmationMessageId: string | null;
+  // Marca de "ya se le pidio la confirmacion al dueno por esta conversacion", exista o no wamid. El
+  // wamid falta justamente cuando el envio fallo por las tres vias, y en ese caso el efecto ya se
+  // intento: volver a dispararlo duplicaria la pregunta sin arreglar nada.
+  pendingConfirmationAskedAt: Date | null;
   hasOrder: boolean;
 }
 
@@ -93,6 +97,7 @@ async function readConversationFacts(conversationId: string): Promise<Conversati
       pendingOrderSummary: true,
       pendingOrderItems: true,
       pendingConfirmationMessageId: true,
+      pendingConfirmationAskedAt: true,
       order: { select: { id: true } },
       customer: { select: { businessId: true, business: { select: { saleStateEnabled: true } } } },
     },
@@ -105,6 +110,7 @@ async function readConversationFacts(conversationId: string): Promise<Conversati
     pendingOrderSummary: row.pendingOrderSummary,
     pendingOrderItems: row.pendingOrderItems,
     pendingConfirmationMessageId: row.pendingConfirmationMessageId,
+    pendingConfirmationAskedAt: row.pendingConfirmationAskedAt,
     hasOrder: Boolean(row.order),
   };
 }
@@ -174,7 +180,7 @@ export async function computeRequiredEffects(
   // antes - requestSaleConfirmation deja pendingConfirmationMessageId puesto y el Order recien se crea
   // cuando la duena contesta "si llego", asi que entre esos dos momentos el efecto YA ocurrio aunque no
   // haya Order.
-  if (conversation.hasOrder || conversation.pendingConfirmationMessageId) return [];
+  if (conversation.hasOrder || conversation.pendingConfirmationAskedAt) return [];
 
   // (b) hay evidencia de venta en curso ESCRITA POR EL SERVIDOR
   const evidence = await getServerSaleEvidence(conversationId);
@@ -223,7 +229,11 @@ export async function verifyRequiredEffects(conversationId: string, effects: Req
   //  - hay Order (negocio sin contactPhone: close_conversation autocierra y crea el pedido), o
   //  - hay pendingConfirmationMessageId (close_conversation le mando "¿Te llego el pago?" al dueno y
   //    quedo esperando su respuesta; ese campo solo se escribe cuando el envio devolvio wamid, o sea
-  //    cuando el dueno REALMENTE recibio el aviso - ver requestSaleConfirmation en tools.ts).
+  //    cuando el dueno REALMENTE recibio el aviso - ver ownerConfirmation.ts).
+  //
+  // A proposito el wamid y no pendingConfirmationAskedAt, que es la marca de "hay confirmacion viva":
+  // una confirmacion reservada cuyos tres envios fallaron NO prueba que el dueno se entero, asi que el
+  // efecto sigue faltando y la escalacion de este modulo tiene que correr igual.
   const saleClosed = conversation.hasOrder || Boolean(conversation.pendingConfirmationMessageId);
 
   const missing: RequiredEffect[] = [];

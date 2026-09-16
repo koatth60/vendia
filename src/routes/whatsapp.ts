@@ -46,6 +46,7 @@ import { recordAskOwnerResolution } from "../catalog/learnedFaq";
 import { getCatalogHintText, findConfidentProductMatch } from "../catalog/products";
 import { recordDeliveryFailure } from "../delivery/failures";
 import { recordAgentIncident } from "../ai/incidents";
+import { drainOwnerConfirmationQueue } from "../whatsapp/ownerConfirmation";
 
 // The owner's answer is free-form text - unlike sendOwnerAlert (always the SAME fixed wrapper phrase to
 // the owner, so one approved template covers every call), an arbitrary customer-facing answer can't be
@@ -678,6 +679,12 @@ whatsappRouter.post("/webhook", async (req, res) => {
             : `[${message.type}]`;
       await recordOwnerMessage(business.id, { direction: "IN", body: ownerIncomingBody });
       await handleOwnerReply(business.id, credentials, from, message);
+      // El dueno acaba de escribir, asi que su ventana de 24h esta abierta de nuevo: sale cualquier
+      // confirmacion de venta que haya tenido que irse por plantilla (una plantilla no lleva botones de
+      // respuesta rapida). Va DESPUES de handleOwnerReply a proposito: si lo que escribio era justamente
+      // la respuesta, la confirmacion ya quedo cerrada y no hay nada que mandar - al reves le
+      // estariamos preguntando algo que acaba de contestar.
+      await drainOwnerConfirmationQueue(business.id, credentials, from);
       return;
     }
 
