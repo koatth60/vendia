@@ -4162,13 +4162,33 @@ async function loadCustomerTimeline(customerId) {
     const KIND_LABEL = { MESSAGE: 'Mensaje', ORDER: 'Pedido', NOTE: 'Nota' };
     container.innerHTML = events.length === 0
       ? '<div class="empty-state" style="padding:18px;">Sin actividad todavía.</div>'
-      : events.map((e) => `
-          <div class="timeline-item">
-            <div class="timeline-kind">${escapeHtml(KIND_LABEL[e.kind] || e.kind)}</div>
-            <div class="timeline-body">${escapeHtml(String(e.detail || '').slice(0, 220))}</div>
-            <div class="timeline-time">${escapeHtml(timeAgo(e.createdAt))}</div>
-          </div>
-        `).join('');
+      : events.map((e) => {
+          let kindLabel = KIND_LABEL[e.kind] || e.kind;
+          let rowClass = '';
+          if (e.kind === 'MESSAGE') {
+            const role = e.meta && e.meta.role;
+            if (role === 'CUSTOMER') {
+              kindLabel = (currentCrmProfile && currentCrmProfile.name) || 'Cliente';
+              rowClass = ' timeline-item--customer';
+            } else if (role === 'ASSISTANT') {
+              // "Negocio", nunca "Onix"/"Bot": el rol ASSISTANT en Message cubre DOS cosas
+              // idénticas en la base - lo que escribió el bot Y lo que escribió la dueña cuando
+              // tomó el control de la conversación. No hay campo en Message que las separe.
+              // Ponerle "Bot" a un mensaje que escribió la dueña a mano sería mentirle a quien
+              // lee el panel. Separarlas de verdad necesita un campo nuevo en Message (backend,
+              // fuera de este cambio) - no "arregles" esta etiqueta sin ese campo primero.
+              kindLabel = 'Negocio';
+              rowClass = ' timeline-item--business';
+            }
+          }
+          return `
+            <div class="timeline-item${rowClass}">
+              <div class="timeline-kind">${escapeHtml(kindLabel)}</div>
+              <div class="timeline-body">${escapeHtml(String(e.detail || '').slice(0, 220))}</div>
+              <div class="timeline-time">${escapeHtml(timeAgo(e.createdAt))}</div>
+            </div>
+          `;
+        }).join('');
   } catch (err) {
     container.innerHTML = `<div class="empty-state" style="color:var(--danger); padding:18px;">No se pudo cargar: ${escapeHtml(err.message)}</div>`;
   }
