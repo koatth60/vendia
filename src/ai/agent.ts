@@ -20,6 +20,17 @@ import {
   bumpPhotoIdStreak,
   resetPhotoIdStreak,
 } from "../orders/saleState";
+import {
+  computeRequiredEffects,
+  verifyRequiredEffects,
+  runRequiredEffectFallback,
+  recordRequiredEffectsTurn,
+  FALLBACK_SALE_REGISTERED_TEXT,
+  ESCALATION_TEXT,
+  markEscalatedTurn,
+  type RequiredEffect,
+} from "./requiredEffects";
+import { setHumanControl } from "../conversation/service";
 import { canonicalColors } from "../catalog/attributeTaxonomy";
 import { tokenize, normalizeForMatch } from "../search/text";
 import { buildSystemPrompt, type BotPersonality } from "./prompts/systemPrompt";
@@ -815,6 +826,14 @@ export async function generateReply(
   // shouldForcePhotoEscalation abajo) en vez de escanear el historial buscando una frase del modelo.
   const photoIdStreakAtTurnStart = customerSentMediaThisTurn ? await getPhotoIdStreak(conversationId) : 0;
 
+  // EFECTOS REQUERIDOS (2026-09-15): que tiene que HABER PASADO de verdad al terminar este turno, leido
+  // solo de la base (ver src/ai/requiredEffects.ts). Se calcula antes de la primera llamada al modelo
+  // para que el estado que se mira sea el de ANTES del turno. Bandera apagada = lista vacia = cero
+  // cambio de comportamiento.
+  const requiredEffects: RequiredEffect[] = personality?.requiredEffectsEnabled
+    ? await computeRequiredEffects(conversationId, { mediaType: lastHistoryEntry?.mediaType ?? null })
+    : [];
+
   // Fase 2 del plan maestro (2026-09-15), causa raiz C1: el estado real del pedido en curso, calculado
   // de la base (nunca de lo que diga el modelo), inyectado como mensaje system - mismo canal que ya usa
   // FOTOS/VIDEOS YA ENVIADOS abajo. Solo para negocios con la bandera activa; el resto sigue exactamente
@@ -1132,14 +1151,19 @@ export async function generateReply(
             ? "save_customer_contact_info"
             : null;
 
+  // El lazo de tool-calling, extraido a una funcion para poder VOLVER A CORRERLO en el mismo turno
+  // cuando la verificacion de efectos requeridos dice que el turno no hizo lo que su texto dice que hizo
+  // (ver la escalera mas abajo). Mismo `messages`, mismos contadores *ThisTurn: es una continuacion del
+  // turno, no un turno nuevo. Devuelve el texto final; finalizeTurn se aplica una sola vez, al final.
+  async function runModelLoop(forcedFirstTool: string | null): Promise<string> {
   try {
     for (let iteration = 0; iteration < 5; iteration++) {
       const response = await createChatCompletion({
         max_tokens: 1024,
         messages,
         tools,
-        ...(iteration === 0 && forcedToolChoice
-          ? { tool_choice: { type: "function" as const, function: { name: forcedToolChoice } } }
+        ...(iteration === 0 && forcedFirstTool
+          ? { tool_choice: { type: "function" as const, function: { name: forcedFirstTool } } }
           : {}),
         // @ts-expect-error DeepSeek-specific param, not in the OpenAI SDK types. Disabled: reasoning
         // tokens add latency/cost we don't need for a WhatsApp sales reply.
@@ -1163,7 +1187,7 @@ export async function generateReply(
 
       const toolCalls = message.tool_calls ?? [];
       if (toolCalls.length === 0) {
-        return finalizeTurn(lastText || FALLBACK_TEXT);
+        return lastText || FALLBACK_TEXT;
       }
 
       messages.push(message);
@@ -1358,7 +1382,7 @@ export async function generateReply(
     // backstops) against whatever the customer said this turn.
     console.error("Fallo la llamada a DeepSeek en generateReply:", error);
     if (!lastText) await alertOwnerOfDegradedReply(context, "Fallo la llamada a DeepSeek y no habia texto previo que mostrar");
-    return finalizeTurn(lastText || FALLBACK_TEXT);
+    return lastText || FALLBACK_TEXT;
   }
 
   // Reached only when the model kept requesting tools through all 5 iterations without ever returning
@@ -1385,5 +1409,105 @@ export async function generateReply(
     console.error("Fallo la llamada final (sin herramientas) tras agotar el loop de tool-calling:", error);
   }
   if (!finalText) await alertOwnerOfDegradedReply(context, "Se agoto el loop de herramientas y no se logro generar ninguna respuesta final");
-  return finalizeTurn(finalText || FALLBACK_TEXT);
+  return finalText || FALLBACK_TEXT;
+  }
+
+  // LA ESCALERA. Corre el turno y, si se exigio algun efecto, verifica contra la base ANTES de mandar
+  // nada: (a) reintento con tool_choice forzado, (b) fallback por codigo, (c) escalacion. Nunca falla en
+  // silencio, y nunca sale un texto que afirme algo que no paso.
+  async function runTurnWithRequiredEffects(): Promise<string> {
+    let text = await runModelLoop(forcedToolChoice);
+    if (requiredEffects.length === 0) return text;
+
+    const missingAfterFirstAttempt = await verifyRequiredEffects(conversationId, requiredEffects);
+    if (missingAfterFirstAttempt.length === 0) {
+      recordRequiredEffectsTurn({
+        conversationId,
+        required: requiredEffects.map((e) => e.kind),
+        missingAfterFirstAttempt: [],
+        retries: 0,
+        retryResolved: false,
+        fallbackUsed: false,
+        fallbackResolved: false,
+        escalated: false,
+      });
+      return text;
+    }
+
+    // (a) REINTENTO. Maximo 2. Se le dice al modelo, como mensaje de sistema, que su intento anterior no
+    // llamo la herramienta - y se fuerza tool_choice a la que falta. Sabemos que forzar no garantiza
+    // nada (medicion del 2026-09-15), por eso hay dos escalones mas abajo.
+    let missing = missingAfterFirstAttempt;
+    let retries = 0;
+    for (; retries < 2 && missing.length > 0; ) {
+      const effect = missing[0];
+      retries++;
+      messages.push({
+        role: "system",
+        content:
+          `INTENTO ANTERIOR INCOMPLETO: no llamaste ${effect.tool} en este turno, asi que ${effect.reason}. ` +
+          `Nada de lo que escribiste sobre eso ocurrio de verdad todavia. Llama ${effect.tool} ahora, con los datos reales del pedido en curso, antes de contestarle al cliente.`,
+      });
+      text = await runModelLoop(effect.tool);
+      missing = await verifyRequiredEffects(conversationId, requiredEffects);
+    }
+    const retryResolved = missing.length === 0;
+
+    // (b) FALLBACK POR CODIGO. Los argumentos salen de la base (el pedido ya armado, la forma de pago, el
+    // cliente), nunca de la prosa del modelo, y la respuesta al cliente es texto FIJO escrito por
+    // nosotros: si el modelo no supo cerrar el pedido, tampoco vale su redaccion sobre el.
+    let fallbackUsed = false;
+    let fallbackResolved = false;
+    if (missing.length > 0) {
+      fallbackUsed = true;
+      const outcome = await runRequiredEffectFallback(context, missing[0]);
+      fallbackResolved = outcome.ok;
+      await recordAgentIncident(
+        context.businessId,
+        "BACKSTOP_INTERVENTION",
+        `El modelo no llamo ${missing[0].tool} en ${retries + 1} intento(s); el efecto ${missing[0].kind} se ejecuto desde el codigo. Resultado: ${outcome.detail}`,
+        conversationId,
+        outcome.ok ? "efecto_requerido_fallback" : "efecto_requerido_fallback_fallido"
+      );
+      if (outcome.ok) {
+        missing = await verifyRequiredEffects(conversationId, requiredEffects);
+        text = FALLBACK_SALE_REGISTERED_TEXT;
+      }
+    }
+
+    // (c) ESCALACION. Ni el reintento ni el fallback lo lograron: no sale ninguna respuesta que afirme
+    // que algo paso, se le avisa al dueno y la conversacion queda en manos de una persona.
+    let escalated = false;
+    if (missing.length > 0) {
+      escalated = true;
+      text = ESCALATION_TEXT;
+      await setHumanControl(context.businessId, conversationId, true);
+      markEscalatedTurn(conversationId);
+      await alertOwner(
+        context,
+        `Atencion: un cliente mando un comprobante con un pedido ya armado y el bot no logro registrarlo (ni el modelo ni el cierre automatico). Esa conversacion quedo esperandote en el panel - revisa el pago a mano.`
+      );
+      await recordAgentIncident(
+        context.businessId,
+        "BACKSTOP_INTERVENTION",
+        `Efecto requerido ${missing.map((e) => e.kind).join(", ")} sin cumplir tras ${retries} reintento(s) y el fallback por codigo. Conversacion pasada a control humano.`,
+        conversationId,
+        "efecto_requerido_sin_cumplir"
+      );
+    }
+
+    recordRequiredEffectsTurn({
+      conversationId,
+      required: requiredEffects.map((e) => e.kind),
+      missingAfterFirstAttempt: missingAfterFirstAttempt.map((e) => e.kind),
+      retries,
+      retryResolved,
+      fallbackUsed,
+      fallbackResolved,
+      escalated,
+    });
+    return text;
+  }
+
+  return finalizeTurn(await runTurnWithRequiredEffects());
 }

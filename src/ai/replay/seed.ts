@@ -60,7 +60,10 @@ export interface SeededBusiness {
 // Crea un negocio NUEVO en cada llamada (email con timestamp+random), a proposito: cada test de
 // replay.test.ts debe poder correr en paralelo o repetirse sin pisar el negocio `[REGRESSION]` que deja
 // scripts/run-regression-suite.ts, ni el de una corrida anterior de esta misma suite.
-export async function seedReplayBusiness(catalogName: string, opts?: { saleStateEnabled?: boolean }): Promise<SeededBusiness> {
+export async function seedReplayBusiness(
+  catalogName: string,
+  opts?: { saleStateEnabled?: boolean; requiredEffectsEnabled?: boolean }
+): Promise<SeededBusiness> {
   const fixture = catalogs.find((c) => c.name === catalogName);
   if (!fixture) {
     throw new Error(`No hay catalogo "${catalogName}" en src/ai/regression/fixtures/catalog.json`);
@@ -76,6 +79,7 @@ export async function seedReplayBusiness(catalogName: string, opts?: { saleState
       contactPhone: "573000000000",
       contactName: "Dueno de prueba",
       saleStateEnabled: opts?.saleStateEnabled ?? false,
+      requiredEffectsEnabled: opts?.requiredEffectsEnabled ?? false,
       countryCode: fixture.countryCode ?? "CO",
       currency: fixture.currency ?? "COP",
       timezone: fixture.timezone ?? "America/Bogota",
@@ -128,6 +132,7 @@ export async function seedReplayBusiness(catalogName: string, opts?: { saleState
     category: business.businessCategory,
     shippingRatesConfigured,
     saleStateEnabled: business.saleStateEnabled,
+    requiredEffectsEnabled: business.requiredEffectsEnabled,
     // Fase 11: mismo dato que arma routes/whatsapp.ts para una conversacion real.
     paymentExamples: formatPaymentExamples(fixture.paymentMethods.filter((m) => m.active).map((m) => m.label)),
   };

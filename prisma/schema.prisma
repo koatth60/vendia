@@ -103,6 +103,11 @@ model Business {
   // leyendo/escribiendo el estado por su cuenta. Off por defecto - bandera de reversion explicita del
   // plan: un negocio se prueba primero con esto en true, el resto sigue exactamente igual que hoy.
   saleStateEnabled         Boolean                   @default(false)
+  // Efectos requeridos (2026-09-15): antes de enviar la respuesta, el motor verifica contra la base que
+  // el turno haya producido el efecto que su propio texto dice haber producido, y si falta lo reintenta,
+  // lo ejecuta desde el codigo o escala. Off por defecto - encendido en un negocio a la vez. Ver
+  // src/ai/requiredEffects.ts.
+  requiredEffectsEnabled    Boolean                   @default(false)
   // Fase 11 del plan maestro (2026-09-15), causa raiz C5: el pais del negocio deja de estar cableado en
   // el codigo. Elige la entrada de src/config/countries.ts que decide el formato de precio, que forma
   // tiene un telefono y un documento, como se reconoce una direccion despachable y como se le pide cada

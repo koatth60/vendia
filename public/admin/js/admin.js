@@ -181,6 +181,7 @@ async function loadBusiness() {
       : (business.autoSendPhotoOnQuote !== false ? 'auto' : 'reactive');
     document.getElementById('bot-require-proof').checked = business.requirePaymentProof !== false;
     document.getElementById('bot-category').value = business.businessCategory || '';
+    document.getElementById('bot-required-effects').checked = Boolean(business.requiredEffectsEnabled);
     document.getElementById('bot-gendered-address').checked = Boolean(business.genderedAddressEnabled);
     document.getElementById('bot-female-term').value = business.femaleAddressTerm || '';
     document.getElementById('bot-male-term').value = business.maleAddressTerm || '';
@@ -534,6 +535,7 @@ async function saveBusiness() {
   const abandonedAfterHours = Number(document.getElementById('business-abandoned-after-hours').value) || 72;
   const cartRecoveryTemplateName = document.getElementById('business-cart-recovery-template').value.trim();
   const cartRecoveryTemplateLanguage = document.getElementById('business-cart-recovery-language').value.trim() || 'es';
+  const requiredEffectsEnabled = document.getElementById('bot-required-effects').checked;
   const genderedAddressEnabled = document.getElementById('bot-gendered-address').checked;
   const femaleAddressTerm = document.getElementById('bot-female-term').value.trim();
   const maleAddressTerm = document.getElementById('bot-male-term').value.trim();
@@ -558,7 +560,7 @@ async function saveBusiness() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         name, description, customInstructions, assistantName, botTone, botDialect, botGreeting, botNeverSay,
-        autoSendPhotoOnQuote, offerPhotosBeforeSending, requirePaymentProof, businessCategory, contactName, contactPhone,
+        autoSendPhotoOnQuote, offerPhotosBeforeSending, requirePaymentProof, requiredEffectsEnabled, businessCategory, contactName, contactPhone,
         ownerReminderMinutes, ownerQuestionTimeoutHours, intentEscalationTimeoutHours,
         followUpTemplateName, followUpTemplateLanguage, followUpDelayHours,
         abandonedAfterHours, cartRecoveryTemplateName, cartRecoveryTemplateLanguage,
@@ -3573,7 +3575,7 @@ let isOwner = true;
 
 const OWNER_ONLY_INPUT_IDS = [
   'business-name', 'business-description', 'business-instructions',
-  'bot-category', 'bot-assistant-name', 'bot-tone', 'bot-dialect', 'bot-greeting', 'bot-never-say', 'bot-photo-mode', 'bot-require-proof',
+  'bot-category', 'bot-assistant-name', 'bot-tone', 'bot-dialect', 'bot-greeting', 'bot-never-say', 'bot-photo-mode', 'bot-require-proof', 'bot-required-effects',
   'business-contact-name',
   'business-contact-phone', 'business-owner-reminder-minutes', 'business-owner-question-timeout-hours',
   'business-intent-escalation-timeout-hours',

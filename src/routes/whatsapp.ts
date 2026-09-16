@@ -36,6 +36,7 @@ import {
   saveCustomerContactInfo,
   recordMessageDeliveryStatus,
 } from "../conversation/service";
+import { consumeEscalatedTurn } from "../ai/requiredEffects";
 import { generateReply, generateClosingMessage, extractDeliveryDataFromAnswer, extractAddressFromAnswer } from "../ai/agent";
 import { analyzeCustomerImage } from "../ai/vision";
 import { transcribeAudio } from "../ai/transcription";
@@ -479,6 +480,7 @@ async function runGenerateAndSend(conversationId: string, items: ReplyBurstItem[
       shippingPaymentModalities: business.shippingPaymentModalities,
       shippingRatesConfigured,
       saleStateEnabled: business.saleStateEnabled,
+      requiredEffectsEnabled: business.requiredEffectsEnabled,
       paymentExamples,
     },
     combinedRawText
@@ -491,7 +493,12 @@ async function runGenerateAndSend(conversationId: string, items: ReplyBurstItem[
     where: { id: conversationId },
     select: { humanControl: true },
   });
-  if (stillAutomatic?.humanControl) {
+  // Excepcion: cuando la que puso humanControl fue la propia escalacion de efectos requeridos (ver
+  // src/ai/requiredEffects.ts), el texto que devolvio generateReply es nuestro aviso neutro y tiene que
+  // salir igual - si se descartara, un cliente que acaba de mandar el comprobante se quedaria sin
+  // ninguna respuesta, que es el silencio que ese mecanismo existe para eliminar.
+  const escaladoPorElBot = consumeEscalatedTurn(conversationId);
+  if (stillAutomatic?.humanControl && !escaladoPorElBot) {
     console.log("El equipo tomo el control mientras se generaba la respuesta, se descarta:", conversationId);
     return;
   }

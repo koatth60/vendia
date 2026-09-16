@@ -1,6 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { findHealthIssues } from "./conversationHealth";
+import { randomUUID } from "node:crypto";
+import { prisma } from "../db/client";
+import { teardownReplayBusiness } from "../ai/replay/seed";
+import { findHealthIssues, runConversationHealthJob } from "./conversationHealth";
 
 // Fase 0 del plan: hasta ahora el unico detector de fallos era una persona leyendo conversaciones. Cada
 // caso de abajo es uno REAL de la auditoria del 14-15 de septiembre, escrito tal como quedo en la base.
@@ -135,4 +138,110 @@ test("ignora lo que pasó antes de la ventana de revision", () => {
     messages: [msg("ASSISTANT", "Aquí te van las fotos del reloj 📸", "02:00:00")],
   });
   assert.equal(found.length, 0);
+});
+
+// ---------------------------------------------------------------------------------------------------
+// A QUIEN SE LE AVISA. La noche del incidente de Milena (2026-09-16) este job le mando a la duena
+// "RESPUESTA_DUPLICADA x3" - un falso positivo que causa nuestro propio corte de mensajes de la Fase 10 -
+// y NO le mando VENTA_SIN_PEDIDO, que habia saltado a las 03:01:30 en la conversacion de Milena y era la
+// mitad de las ventas reales de esa noche. El unico aviso que recibio fue el que no significaba nada.
+// Estas dos pruebas corren el job entero contra la base, con el fetch a la Graph API mockeado (ningun
+// mensaje real sale de aca).
+
+async function seedHealthBusiness(): Promise<{ businessId: string; conversationId: string }> {
+  const business = await prisma.business.create({
+    data: {
+      name: `[HEALTH] ${randomUUID()}`,
+      email: `health+${randomUUID()}@onix.internal`,
+      passwordHash: "x",
+      active: true,
+      contactPhone: "573000000000",
+      whatsappPhoneNumberId: `fake-${randomUUID()}`,
+      whatsappAccessToken: "fake-token-no-es-real",
+    },
+  });
+  const customer = await prisma.customer.create({ data: { businessId: business.id, phoneNumber: `h-${randomUUID()}` } });
+  const conversation = await prisma.conversation.create({ data: { customerId: customer.id } });
+  return { businessId: business.id, conversationId: conversation.id };
+}
+
+async function runJobCapturingOwnerAlerts(): Promise<string[]> {
+  const original = globalThis.fetch;
+  const alerts: string[] = [];
+  globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
+    alerts.push(String(init?.body ?? ""));
+    return { ok: true, status: 200, json: async () => ({ messages: [{ id: `wamid.${randomUUID()}` }] }), text: async () => "{}" } as Response;
+  }) as typeof fetch;
+  try {
+    await runConversationHealthJob();
+  } finally {
+    globalThis.fetch = original;
+  }
+  return alerts;
+}
+
+test("RESPUESTA_DUPLICADA queda registrada pero ya no le avisa al dueno", async () => {
+  const { businessId, conversationId } = await seedHealthBusiness();
+  try {
+    // Dos respuestas del bot con segundos de diferencia: exactamente lo que produce splitLongMessage.
+    await prisma.message.create({ data: { conversationId, role: "ASSISTANT", content: "Primera parte del mensaje largo." } });
+    await prisma.message.create({ data: { conversationId, role: "ASSISTANT", content: "Segunda parte del mensaje largo." } });
+
+    const alerts = await runJobCapturingOwnerAlerts();
+
+    const registrado = await prisma.agentIncident.findFirst({
+      where: { businessId, detail: { contains: "RESPUESTA_DUPLICADA" } },
+    });
+    assert.ok(registrado, "el hallazgo se sigue registrando y sigue visible en Bot > Salud");
+    assert.equal(alerts.length, 0, "pero no interrumpe a nadie");
+  } finally {
+    await prisma.ownerMessageLog.deleteMany({ where: { businessId } });
+    await teardownReplayBusiness(businessId);
+  }
+});
+
+test("VENTA_SIN_PEDIDO si le avisa al dueno", async () => {
+  const { businessId, conversationId } = await seedHealthBusiness();
+  try {
+    await prisma.message.create({
+      data: { conversationId, role: "ASSISTANT", content: "Te dejo el resumen de tu pedido: 1x producto. Total a pagar $154.000" },
+    });
+
+    const alerts = await runJobCapturingOwnerAlerts();
+
+    assert.ok(alerts.length > 0, "una venta que no quedo registrada tiene que llegarle al dueno");
+    assert.ok(
+      alerts.some((a) => a.includes("VENTA_SIN_PEDIDO")),
+      "y el aviso tiene que decir de que se trata"
+    );
+  } finally {
+    await prisma.ownerMessageLog.deleteMany({ where: { businessId } });
+    await teardownReplayBusiness(businessId);
+  }
+});
+
+test("un incidente de escalacion prometida sin herramienta tambien avisa", async () => {
+  const { businessId, conversationId } = await seedHealthBusiness();
+  try {
+    await prisma.message.create({ data: { conversationId, role: "ASSISTANT", content: "Dejame consultarlo con el equipo." } });
+    await prisma.agentIncident.create({
+      data: {
+        businessId,
+        conversationId,
+        kind: "BACKSTOP_INTERVENTION",
+        guard: "escalacion_prometida_sin_herramienta",
+        detail: "El bot prometio consultar al dueno sin ninguna PendingOwnerQuestion real.",
+      },
+    });
+
+    const alerts = await runJobCapturingOwnerAlerts();
+
+    assert.ok(
+      alerts.some((a) => a.includes("ESCALACION_PROMETIDA_SIN_HERRAMIENTA")),
+      "el detector F1 dejaba una fila que nadie miraba; ahora avisa"
+    );
+  } finally {
+    await prisma.ownerMessageLog.deleteMany({ where: { businessId } });
+    await teardownReplayBusiness(businessId);
+  }
 });

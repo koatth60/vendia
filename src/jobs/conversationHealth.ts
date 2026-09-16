@@ -26,6 +26,27 @@ export const HEALTH_CHECK_INTERVAL_MS = 30 * 60 * 1000;
 // avisar de una en vez de esperar al resumen (item 32 del plan).
 const REPEAT_ALERT_THRESHOLD = 2;
 
+// Que hallazgos le VALEN un WhatsApp al dueno. Todos se siguen registrando como AgentIncident y todos se
+// siguen viendo en Bot > Salud; esto decide unicamente a cuales se le interrumpe el dia.
+//
+// Correccion 2026-09-15, medida en produccion: la noche del incidente de Milena el job le mando a la
+// duena "RESPUESTA_DUPLICADA x3" - un falso positivo conocido, causado por nuestro propio corte de
+// mensajes de la Fase 10 (splitLongMessage manda dos mensajes con segundos de diferencia, que es
+// exactamente la firma que ese detector busca) - y NO le mando VENTA_SIN_PEDIDO, que habia saltado a las
+// 03:01:30 en la conversacion de Milena y era la mitad de las ventas reales de esa noche. El unico aviso
+// que la duena recibio fue el que no significaba nada. Invertido.
+export const ALERTABLE_KINDS = new Set([
+  "VENTA_SIN_PEDIDO",
+  "FOTO_PROMETIDA_SIN_ENVIAR",
+  "ESCALACION_PROMETIDA_SIN_HERRAMIENTA",
+]);
+
+// Guard de agent.ts (detector F1 del diagnostico) que hasta ahora solo dejaba una fila en AgentIncident:
+// el bot prometio consultarle algo al dueno y no existe ninguna PendingOwnerQuestion que respalde la
+// promesa. Es el mismo tipo de fallo que VENTA_SIN_PEDIDO (el turno afirma un efecto que no ocurrio), asi
+// que ahora tambien avisa. Se levanta de la base porque lo registra el turno en vivo, no este chequeo.
+const ESCALATION_PROMISE_GUARD = "escalacion_prometida_sin_herramienta";
+
 const SAVED_CLAIM = /\bya tengo (el|tu|la|los|tus)\s+(nombre|c[eé]dula|celular|datos|identificaci[oó]n)/i;
 const PHOTO_CLAIM = /\b(te (mand|envi|pas)|ya (te |se la |la |lo )?(mand|envi|pas)\w*|aqu[ií] (te van|te va|van|va)|ah[ií] (te van|te va|van|va))/i;
 const PHOTO_WORD = /\b(foto|fotos|imagen|im[aá]genes|video|videos)\b/i;
@@ -159,6 +180,24 @@ export async function runConversationHealthJob(): Promise<void> {
         })
       );
     }
+
+    // Los incidentes que los backstops del turno ya registraron en vivo y que tambien ameritan aviso.
+    // Entran por el mismo embudo que el resto (dedupe + AgentIncident + alerta) en vez de tener su propio
+    // camino: el id del incidente original va en el detail, asi que la deduplicacion de las ventanas
+    // solapadas funciona igual que con los demas hallazgos.
+    const promesasSinHerramienta = await prisma.agentIncident.findMany({
+      where: { businessId: business.id, createdAt: { gte: since }, guard: ESCALATION_PROMISE_GUARD },
+      select: { id: true, conversationId: true },
+    });
+    for (const incidente of promesasSinHerramienta) {
+      if (!incidente.conversationId) continue;
+      findings.push({
+        kind: "ESCALACION_PROMETIDA_SIN_HERRAMIENTA",
+        conversationId: incidente.conversationId,
+        detail: `prometio consultar al dueno sin abrir ninguna pregunta real (incidente ${incidente.id})`,
+      });
+    }
+
     if (findings.length === 0) continue;
 
     // No repetir un hallazgo que la corrida anterior ya registro: las ventanas se solapan a proposito.
@@ -180,7 +219,10 @@ export async function runConversationHealthJob(): Promise<void> {
       nuevos.push(f);
       await recordAgentIncident(business.id, "BACKSTOP_INTERVENTION", detail, f.conversationId);
     }
-    if (nuevos.length === 0 || !business.contactPhone) continue;
+    // Todo hallazgo nuevo quedo registrado arriba; de aca en adelante solo se mira lo que amerita un
+    // WhatsApp. RESPUESTA_DUPLICADA cae aca: sigue visible en el panel, deja de despertar a nadie.
+    const avisables = nuevos.filter((f) => ALERTABLE_KINDS.has(f.kind));
+    if (avisables.length === 0 || !business.contactPhone) continue;
 
     const credentials: WhatsappCredentials = {
       phoneNumberId: business.whatsappPhoneNumberId!,
@@ -190,7 +232,7 @@ export async function runConversationHealthJob(): Promise<void> {
     // Un patron (mismo tipo repetido) se avisa aparte y con nombre propio: es lo que distingue "se cayo
     // una foto" de "las fotos no estan saliendo".
     const porTipo = new Map<string, number>();
-    for (const f of nuevos) porTipo.set(f.kind, (porTipo.get(f.kind) ?? 0) + 1);
+    for (const f of avisables) porTipo.set(f.kind, (porTipo.get(f.kind) ?? 0) + 1);
     const patrones = [...porTipo.entries()].filter(([, n]) => n >= REPEAT_ALERT_THRESHOLD);
 
     if (patrones.length > 0) {
@@ -202,12 +244,12 @@ export async function runConversationHealthJob(): Promise<void> {
         `Atencion: el bot repitio el mismo fallo en la ultima media hora (${texto}). Revisa Bot > Salud en el panel.`
       );
     } else {
-      const resumen = nuevos.map((f) => f.kind).join(", ");
+      const resumen = avisables.map((f) => f.kind).join(", ");
       await alertOwner(
         business.id,
         credentials,
         business.contactPhone,
-        `El chequeo automatico encontro ${nuevos.length} ${nuevos.length === 1 ? "cosa" : "cosas"} para revisar en las conversaciones de la ultima media hora: ${resumen}. Esta el detalle en Bot > Salud.`
+        `El chequeo automatico encontro ${avisables.length} ${avisables.length === 1 ? "cosa" : "cosas"} para revisar en las conversaciones de la ultima media hora: ${resumen}. Esta el detalle en Bot > Salud.`
       );
     }
   }

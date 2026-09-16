@@ -43,6 +43,7 @@ businessRouter.put("/api/business", requireOwner, async (req, res) => {
     autoSendPhotoOnQuote,
     offerPhotosBeforeSending,
     requirePaymentProof,
+    requiredEffectsEnabled,
     businessCategory,
     contactPhone,
     contactName,
@@ -87,6 +88,10 @@ businessRouter.put("/api/business", requireOwner, async (req, res) => {
       autoSendPhotoOnQuote: Boolean(autoSendPhotoOnQuote),
       offerPhotosBeforeSending: Boolean(offerPhotosBeforeSending),
       requirePaymentProof: Boolean(requirePaymentProof),
+      // Efectos requeridos (2026-09-15): `undefined` cuando el cliente no manda el campo, para que un
+      // PUT viejo (o un formulario parcial) no apague la bandera sin querer - mismo patron que
+      // genderedAddressEnabled abajo, no el Boolean() directo de los tres de arriba.
+      requiredEffectsEnabled: requiredEffectsEnabled !== undefined ? Boolean(requiredEffectsEnabled) : undefined,
       businessCategory: businessCategory || null,
       contactPhone,
       contactName,

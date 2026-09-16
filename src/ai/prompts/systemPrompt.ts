@@ -430,6 +430,11 @@ export interface BotPersonality {
   // Fase 2 del plan maestro (2026-09-15), causa raiz C1: bandera de reversion por negocio para el
   // motor de venta ejecutable (SaleState). Off por defecto - ver Business.saleStateEnabled.
   saleStateEnabled?: boolean;
+  // Efectos requeridos (2026-09-15): bandera de reversion por negocio del lazo de control que verifica
+  // contra la base que el turno haya producido el efecto que su texto afirma. No cambia una sola palabra
+  // del prompt (el modelo ni se entera); vive aca porque es el mismo canal por el que generateReply ya
+  // recibe las banderas del negocio. Off por defecto - ver Business.requiredEffectsEnabled.
+  requiredEffectsEnabled?: boolean;
   // Fase 11 del plan maestro (2026-09-15), causa raiz C5. Todo lo de abajo lo resuelve el caller
   // (src/config/businessConfig.ts + catalog/paymentMethods.ts) y se lo pasa ya hecho, igual que
   // shippingRatesConfigured: este archivo arma texto, no lee la base.
