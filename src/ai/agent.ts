@@ -30,6 +30,7 @@ import { recordAgentTurn } from "./agentTurns";
 import { findShadowCatalogFindings, verifyAgainstCatalog, serializeFinding } from "../catalog/outputValidation";
 import { listActivePaymentMethods } from "../catalog/paymentMethods";
 import { buildCheckoutState } from "../orders/checkoutStateFromDb";
+import { getCustomerCommerceState } from "../orders/customerCommerceState";
 import {
   getSaleState,
   formatSaleStateForPrompt,
@@ -922,6 +923,22 @@ export async function generateReply(
   // igual que hoy.
   const saleState = personality?.saleStateEnabled ? await getSaleState(conversationId) : null;
   const saleStateText = saleState ? formatSaleStateForPrompt(saleState) : "";
+
+  // PIEZA 6 del plan de catalogo y medios (2026-09-16): el estado comercial del CLIENTE, no el de esta
+  // conversacion. Se lee de la base ANTES de la primera llamada al modelo, siempre, para todos los
+  // negocios: el disparador es "este cliente tiene pedidos", que es un SELECT, nunca una lectura de lo
+  // que el cliente escribio. No hay deteccion de intencion de cancelar ni palabra clave que valga.
+  //
+  // Del estado completo, al turno entra solo `pedidos` (ver el mensaje system de abajo).
+  // `ultimaListaPresentada` y `ventaEnCurso` quedan en el estado porque son la misma lectura y el mismo
+  // concepto, pero esta fase no los inyecta: la lista de ESTA conversacion ya es la entrada de
+  // resolveProductScope (camino de catalogo, que esta fase no toca) y la venta en curso de ESTA
+  // conversacion ya es saleStateText, que depende de Business.saleStateEnabled - meterla por aca seria
+  // encender esa bandera de costado, y su regresion es el bloqueador conocido del proyecto.
+  const commerceState = await getCustomerCommerceState(context.businessId, context.customerId, conversationId, {
+    currency: negocio.currency,
+    locale: negocio.locale,
+  });
   // Herramientas nuevas solo visibles (y llamables) para un negocio con la bandera activa - el resto no
   // paga el costo de tokens de un tool que no puede usar. Fase 11: los ejemplos de canal de pago que
   // traen cuatro de sus descripciones son los metodos reales de ESTE negocio, no "Nequi" para todos.
@@ -965,6 +982,20 @@ export async function generateReply(
       : []),
     ...(saleStateText
       ? [{ role: "system" as const, content: saleStateText }]
+      : []),
+    // PIEZA 6: dato estructurado, misma forma que productFacts - no prosa, y ninguna instruccion sobre
+    // que hacer con el. El modelo puede desobedecer una directiva; no puede ignorar un dato que tiene
+    // delante. Sin pedidos no sale ningun mensaje, asi que un cliente nuevo no paga un solo token.
+    ...(commerceState.pedidos.length > 0
+      ? [
+          {
+            role: "system" as const,
+            content:
+              `PEDIDOS DE ESTE CLIENTE, leidos de la base. Estan TODOS los que tiene con este negocio, ` +
+              `incluidos los que abrio en otras conversaciones: son los unicos que existen para el.\n\n` +
+              JSON.stringify(commerceState.pedidos),
+          },
+        ]
       : []),
     // UN SOLO AUTOR: datos estructurados, no un mensaje ya escrito. No lleva ninguna instruccion sobre
     // el largo ni sobre que no repita: repetir era un problema cuando hablaban dos, y aca habla uno.

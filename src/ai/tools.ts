@@ -474,7 +474,7 @@ export const catalogTools: OpenAI.Chat.ChatCompletionTool[] = [
     function: {
       name: "cancel_order",
       description:
-        "Cancela el pedido mas reciente de este cliente. USA ESTA HERRAMIENTA SOLO despues de que el cliente ya confirmo explicitamente que si quiere cancelar (ver CONSULTAR O CANCELAR UN PEDIDO en tus instrucciones) - nunca en el mismo turno en que recien lo pide. Si el pedido ya fue enviado, esta herramienta lo va a rechazar.",
+        "Cancela el pedido mas reciente de este cliente, sea de esta conversacion o de otra. USA ESTA HERRAMIENTA SOLO despues de que el cliente ya confirmo explicitamente que si quiere cancelar (ver CANCELAR UN PEDIDO en tus instrucciones) - nunca en el mismo turno en que recien lo pide. Si el pedido ya fue enviado, esta herramienta lo va a rechazar.",
       parameters: {
         type: "object",
         properties: {},

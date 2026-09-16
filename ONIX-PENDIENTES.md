@@ -30,11 +30,32 @@ no llama `close_conversation`.
 
 Ver `ONIX-PLAN-CATALOGO-Y-MEDIOS.md`.
 
-- **Pieza 6 — estado por cliente.** `getLatestOrderForCustomer` se usa solo dentro de
-  `cancel_order` (`src/ai/tools.ts:1739`), así que el modelo se entera de que hay un pedido
-  abierto después de decidir cancelarlo. Caso real 2026-09-16: Laura Manjarrez pidió cancelar
-  desde una conversación distinta de la que tenía el pedido, y para el modelo no existía.
-  **Es la única pendiente que todavía puede costar una venta.**
+- **Pieza 6 — estado por cliente.** Cerrada el 2026-09-16: el estado comercial del cliente
+  (`src/orders/customerCommerceState.ts`) entra a cada turno como dato estructurado, con los
+  pedidos abiertos de **cualquier** conversación. Ver la sección 12 del plan.
+
+- **La pregunta de confirmación determinista antes de cancelar.** Queda abierta **a propósito**.
+  El plan la pedía como "cuando el mensaje del cliente es sobre cancelar y hay un pedido abierto,
+  la pregunta de confirmación se hace de forma determinista", y esa condición es una lectura de
+  prosa: viola la regla de admisión de efectos requeridos (sección 6 del plan). Hoy la
+  confirmación la sostiene una directiva del prompt (`CANCELAR UN PEDIDO`), o sea el modelo.
+
+  **El diseño que sí cumpliría la regla, para cuando el dueño lo decida:** invertir el disparador.
+  El servidor no necesita saber que el cliente pidió cancelar; le alcanza con garantizar que nunca
+  se cancela en el mismo turno en que se pide. Disparador: la llamada a `cancel_order` sobre un
+  pedido abierto (un evento estructurado, no prosa). La primera llamada no cancela: escribe
+  `Order.cancelRequestedAt` (columna nueva, aditiva y nullable) y devuelve el pedido para que el
+  agente pregunte. Una llamada posterior cancela **solo** si `cancelRequestedAt` es anterior al
+  arranque del turno actual, o sea si hubo un mensaje del cliente en el medio; la solicitud se
+  limpia al final de cualquier turno que no la use, así que no queda una autorización vieja
+  esperando. Verificable con un `SELECT`, y el fallback no tiene modelo adentro: si nada pasa, el
+  pedido sigue vivo, que es el estado seguro.
+
+  **Por qué no entró en la fase de la Pieza 6:** cambia el contrato de `cancel_order` —hoy la
+  primera llamada cancela— y con él lo que espera una prueba existente
+  (`src/ai/tools.test.ts`, "cancel_order cancels a pending order and notifies the owner", que
+  afirma `{ canceled: true }` en la primera llamada). Cambiar esa prueba para acomodar el cambio
+  es exactamente lo que este repositorio no admite sin que el dueño lo decida primero.
 
 ---
 

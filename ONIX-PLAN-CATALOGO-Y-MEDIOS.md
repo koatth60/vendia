@@ -169,7 +169,7 @@ ahora sabemos que no es confiable y no tenemos un número para ella.
 | **A** | `AgentTurn` + métrica de cumplimiento de `tool_choice` + detector de producto inventado **en modo sombra** | Sin cambio de comportamiento. Hace verificable todo lo que viene después, y le da visibilidad al dueño mañana mismo sin tocar una respuesta. |
 | **B** ✅ 2026-09-16 | Piezas 1, 2, 3 y 4 | El grueso. Cierra los problemas 1, 2 y 3. Verificable con la Fase A ya puesta. |
 | **C** 🔍 sombra desde 2026-09-16 | Pieza 5 **en sombra** (hecha); activarla es un cambio aparte | Necesita los números de A y el alcance de B para no dar falsos positivos. |
-| **D** | Pieza 6 | Cierra el problema 4. Independiente de las otras tres. |
+| **D** ✅ 2026-09-16 | Pieza 6 | Cierra el problema 4. Independiente de las otras tres. |
 
 Cada fase va en su propia sesión, con contexto limpio, como el resto del plan maestro.
 
@@ -197,7 +197,7 @@ Estado de cada efecto candidato:
 |---|---|---|
 | Imagen entrante → **dueño avisado** | `mediaType` IMAGE + evidencia de venta escrita por el servidor (`SaleState.items` o `mediaSent`) | **Hecho** (`3d36903`). Ver la nota de abajo. |
 | Producto en alcance → sus fotos enviadas | alcance resuelto por la Pieza 1 (`resolveProductScope`), o `mediaType` IMAGE/VIDEO más un `get_product_details` con un id real | **Hecho** (Fase B, 2026-09-16). Cumple las tres: el disparador sale del catálogo real y de metadatos estructurados, se verifica con un `SELECT` sobre los ids presentados, y el fallback no tiene modelo adentro — los bloques y sus medios los compone y los manda el servidor. |
-| Pidió cancelar → pedido cancelado o pregunta de confirmación hecha | hoy solo se puede leer de la prosa | **No todavía.** Necesita la Pieza 6: primero el modelo tiene que poder ver el pedido abierto. |
+| Pidió cancelar → pedido cancelado o pregunta de confirmación hecha | el disparador sigue siendo prosa | **No, y la Pieza 6 no lo cambia.** Ver la sección 12: lo que la Pieza 6 garantiza es que el pedido abierto *exista* para el turno, no que el cliente haya pedido cancelarlo. |
 | Prometió consultar al dueño → existe `PendingOwnerQuestion` | la promesa vive en la prosa | **No como efecto.** Se queda como **alerta** al dueño, nunca como creación automática de estado. Avisar de más es barato; inventar estado de negocio no. |
 
 Por eso el orden importa y no se puede atajar: **cada fase vuelve determinista un disparador,
@@ -418,3 +418,69 @@ características nombrar y cuáles es decisión de conversación, y ahí este pr
 entrega las variantes activas con stock como dato en el turno donde esa directiva aplicaba) y la última
 frase de `CATALOGO` sobre "el serie 11 mini" (el alcance resuelve el producto nombrado contra el catálogo
 real antes de la primera llamada al modelo).
+
+## 12. Estado de la Pieza 6 (2026-09-16) — el pedido es del cliente, no de la conversación
+
+`getLatestOrderForCustomer` ya buscaba bien (por cliente) desde el primer día, pero solo se la llamaba
+dentro de `cancel_order` y de `get_order_status`: el modelo se enteraba de que había un pedido abierto
+**después** de haber decidido cancelarlo. Todo lo demás del turno miraba `getOrderByConversationId`, que es
+por conversación, y `Order.conversationId` es 1:1 con la conversación en la que el pedido se cerró. Un
+cliente que vuelve a escribir abre una conversación nueva, así que su pedido quedaba del otro lado de la
+pared.
+
+### Qué se hizo
+
+`src/orders/customerCommerceState.ts`: `getCustomerCommerceState(businessId, customerId, conversationId)`.
+Una sola lectura a Prisma, por `customerId`, que trae los pedidos del cliente y sus conversaciones
+recientes. Toda la decisión de qué entra y qué no vive en `buildCustomerCommerceState`, que es pura y se
+prueba sin base (`src/orders/customerCommerceState.test.ts`).
+
+El estado entra al turno como **dato estructurado**, con la misma forma que `productFacts` de la sección
+11: un mensaje `system` con JSON leído de la base, sin ninguna directiva alrededor sobre qué hacer con él.
+El modelo puede desobedecer una instrucción; no puede ignorar un dato que tiene delante.
+
+**El disparador es determinista.** Se calcula antes de la primera llamada al modelo y la condición es "este
+cliente tiene pedidos", que es un `SELECT`. No hay detección de intención de cancelar, no hay palabra
+clave, no hay expresión regular nueva. Un cliente que saluda recibe el mismo dato que uno que pide
+cancelar, y eso está fijado con una prueba.
+
+**Qué ve el modelo:** todos los pedidos abiertos (`PENDING`), tengan la edad que tengan, más los dos más
+recientes ya cerrados, con su estado, su total, su fecha y si son de esta conversación o de otra. Recortar
+por recencia a secas volvería a esconder el caso real, porque ese pedido tenía días.
+
+**Qué decisión pierde el modelo: si un pedido abierto existe o no para este turno.** Hasta hoy eso dependía
+de en qué conversación estuviera el cliente y de si el modelo llamaba una herramienta. Desde acá lo decide
+el servidor leyendo la base, antes de que el modelo hable.
+
+**Lo que el prompt devuelve:** `src/ai/prompts/systemPrompt.ts`: 539 → 537 líneas.
+
+### Lo que NO se hizo, y por qué
+
+El plan pedía además: "cuando el mensaje del cliente es sobre cancelar y hay un pedido abierto, la pregunta
+de confirmación se hace de forma determinista". **Esa línea viola la regla de admisión de la sección 6.**
+"Cuando el mensaje del cliente es sobre cancelar" es exactamente una lectura de prosa, que es el guard de
+clase D que la Fase 5 del plan maestro vino a borrar. La Pieza 6 no lo arregla: garantiza que el pedido
+abierto *exista* para el turno, no que el cliente lo haya pedido.
+
+Existe una forma de darle una garantía real a ese efecto sin leer prosa —invertir el disparador: que el
+servidor no ejecute nunca una cancelación en el mismo turno en que se pide, usando como disparador la
+llamada a `cancel_order` sobre un pedido abierto, que es un evento estructurado—. Está anotada en
+`ONIX-PENDIENTES.md` con su diseño y con el motivo por el que no entra acá: cambia el contrato de
+`cancel_order` y por lo tanto lo que espera una prueba existente, y eso es una decisión del dueño, no algo
+que se mete de contrabando en una fase de lectura.
+
+### `getOrderByConversationId`: los dos usos que quedan
+
+Se revisó cada uno, porque un pedido que se busca por conversación es un lugar donde este defecto puede
+volver:
+
+1. `src/ai/tools.ts` (`close_conversation`) — **se justifica.** No pregunta "¿este cliente tiene un
+   pedido?", pregunta "¿esta conversación ya tiene uno?", que es la restricción `@unique` de
+   `Order.conversationId` chequeada antes de chocar contra ella. Por conversación es la pregunta correcta.
+   Que un cliente pueda abrir un segundo pedido teniendo uno sin entregar es otra discusión (defecto 1 de
+   la sección 5 de `ONIX-PENDIENTES.md`), y es una decisión de negocio, no un bug de esta pieza: hoy el
+   modelo al menos **ve** el pedido anterior mientras la conversa.
+2. `src/routes/admin/conversations.ts` — **se justifica.** Es la vista de una conversación en el panel,
+   donde la pregunta es literalmente "¿qué pedido salió de esta conversación?".
+
+Ningún otro lugar del turno mira pedidos por conversación.
