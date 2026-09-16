@@ -79,28 +79,50 @@ async function listen(app: express.Express): Promise<{ url: string; close: () =>
   };
 }
 
+// express-session le contesta al cliente y recien despues termina de confirmar la escritura en el store,
+// asi que "llego la respuesta 200" NO implica "la fila ya esta en Postgres". Medido el 2026-09-16
+// aislado, sin ninguna otra prueba corriendo: 2 de 40 vueltas leian rowCount 0 con status 200 y la cookie
+// ya emitida. Esperar la fila es lo que la prueba siempre quiso decir ("la sesion queda escrita"), no un
+// atajo: lo que no puede pasar es que NUNCA llegue.
+async function esperarSesion(sid: string): Promise<{ sess: { businessId?: string } }> {
+  const limite = Date.now() + 5000;
+  for (;;) {
+    const stored = await pool.query('SELECT sess FROM "session" WHERE sid = $1', [sid]);
+    if (stored.rowCount === 1) return stored.rows[0];
+    if (Date.now() > limite) throw new Error(`La sesion ${sid} nunca llego a la tabla "session" en 5s`);
+    await new Promise((r) => setTimeout(r, 25));
+  }
+}
+
 test("la sesion sobrevive a un reinicio: vive en Postgres, no en la memoria del proceso", async () => {
+  // Todo dentro de try/finally desde el primer servidor: si una asercion falla antes de cerrarlo, ese
+  // handle abierto deja el proceso de ESTE archivo vivo para siempre y `npm test` se cuelga entero (sin
+  // --test-timeout, sin una sola linea de salida). Paso de verdad el 2026-09-16: 40 minutos parados aca.
   const antes = await listen(appWithFreshStore());
-  const login = await fetch(`${antes.url}/entrar`);
-  assert.equal(login.status, 200);
-  const cookie = login.headers.getSetCookie()[0];
-  assert.ok(cookie, "la ruta tiene que dejar una cookie de sesion");
-
-  // La sesion quedo escrita en Postgres, no solo en la memoria del proceso.
-  const sid = decodeURIComponent(cookie.slice(cookie.indexOf("=") + 1, cookie.indexOf(";"))).slice(2).split(".")[0];
-  const stored = await pool.query('SELECT sess FROM "session" WHERE sid = $1', [sid]);
-  assert.equal(stored.rowCount, 1);
-  assert.equal(stored.rows[0].sess.businessId, "negocio-de-prueba");
-
-  // Se apaga el proceso y se levanta otro, con un store nuevo: la sesion sigue ahi.
-  await antes.close();
-  const despues = await listen(appWithFreshStore());
+  let sid = "";
   try {
-    const response = await fetch(`${despues.url}/quien-soy`, { headers: { cookie } });
-    const body = (await response.json()) as { businessId: string | null };
-    assert.equal(body.businessId, "negocio-de-prueba", "el reinicio no puede desloguear a nadie");
+    const login = await fetch(`${antes.url}/entrar`);
+    assert.equal(login.status, 200);
+    const cookie = login.headers.getSetCookie()[0];
+    assert.ok(cookie, "la ruta tiene que dejar una cookie de sesion");
+
+    // La sesion quedo escrita en Postgres, no solo en la memoria del proceso.
+    sid = decodeURIComponent(cookie.slice(cookie.indexOf("=") + 1, cookie.indexOf(";"))).slice(2).split(".")[0];
+    const stored = await esperarSesion(sid);
+    assert.equal(stored.sess.businessId, "negocio-de-prueba");
+
+    // Se apaga el proceso y se levanta otro, con un store nuevo: la sesion sigue ahi.
+    await antes.close();
+    const despues = await listen(appWithFreshStore());
+    try {
+      const response = await fetch(`${despues.url}/quien-soy`, { headers: { cookie } });
+      const body = (await response.json()) as { businessId: string | null };
+      assert.equal(body.businessId, "negocio-de-prueba", "el reinicio no puede desloguear a nadie");
+    } finally {
+      await despues.close();
+    }
   } finally {
-    await despues.close();
-    await pool.query('DELETE FROM "session" WHERE sid = $1', [sid]);
+    await antes.close();
+    if (sid) await pool.query('DELETE FROM "session" WHERE sid = $1', [sid]);
   }
 });
