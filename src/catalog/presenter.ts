@@ -1,4 +1,5 @@
 import { formatPrice } from "../config/money";
+import { normalizeForMatch } from "../search/text";
 import type { ProductScope, ScopeMedia, ScopeProduct, ScopeVariant } from "./scope";
 import { totalStock } from "./stock";
 
@@ -19,6 +20,13 @@ export interface CatalogBlockMedia {
 /** Un bloque = un mensaje de WhatsApp. Sale literal: nadie lo reescribe despues. */
 export interface CatalogBlock {
   text: string;
+  /**
+   * Lo mismo que `text` pero SIN recortar la descripcion: es la version que ve el MODELO en su contexto,
+   * nunca la que sale al cliente. Asi el cliente lee un extracto corto y el modelo igual contesta
+   * "¿tiene ritmo cardiaco?" con el dato real, sin que nadie tenga que guardar que quedo una
+   * continuacion pendiente. Fuera de la ficha de un producto puntual es identico a `text`.
+   */
+  modelText: string;
   media: CatalogBlockMedia[];
   /** Ids de producto que este bloque nombra, en el orden en que aparecen numerados. */
   productIds: string[];
@@ -50,7 +58,19 @@ export const FEW_PRODUCTS_MAX = 2;
  */
 const MAX_LINES_PER_BLOCK = 12;
 
+/**
+ * Tope de lineas de DESCRIPCION que ve el cliente en la ficha de un producto puntual. Vive aca, en un
+ * solo lugar. El corte es por lineas COMPLETAS, nunca a mitad de una: la descripcion es una lista de
+ * vinetas y cortar por caracteres parte la vineta al medio. El modelo sigue recibiendo la descripcion
+ * entera (ver CatalogBlock.modelText), asi que una pregunta puntual sobre lo que quedo afuera la
+ * contesta con el dato real.
+ */
+const MAX_DESCRIPTION_LINES = 5;
+
 const PHOTO_OFFER_LINE = "¿De cuál te gustaría ver fotos?";
+
+/** Cierre del bloque cuando la descripcion no entro entera: el resto se ofrece, no se manda. */
+const MORE_DESCRIPTION_LINE = "¿Te cuento el resto de las características?";
 
 const DEFAULT_UNCATEGORIZED_LABEL = "Otros productos";
 
@@ -90,14 +110,54 @@ function mediaBlockFor(product: ScopeProduct, variant: ScopeVariant | null): Cat
   return [{ productId: product.id, productName: label ? `${product.name} (${label})` : product.name, items }];
 }
 
+/**
+ * Las variantes activas del producto, nombradas con su stock real. Sin esta linea el bloque no dice de
+ * que colores hay, y ese hueco lo rellenaba el modelo inventando: caso real del 2026-09-16, dijo "Negro
+ * Matte y Titanio Plateado" (lo que decia la descripcion cargada a mano) cuando las variantes de la base
+ * son `negro` y `gris`. El dato correcto SALE; no hay que pedirle nada al modelo ni validarlo despues.
+ */
+function variantsLine(product: ScopeProduct): string | null {
+  const parts = product.variants
+    .filter((v) => v.active)
+    .map((v) => {
+      const label = variantLabel(v);
+      return label ? `${label}${stockSuffix(v.stock)}` : null;
+    })
+    .filter((part): part is string => part !== null);
+  return parts.length > 0 ? `Disponible en: ${parts.join(", ")}` : null;
+}
+
+/** Las lineas con contenido de la descripcion, sin las vacias: son las unidades del corte. */
+function descriptionLines(product: ScopeProduct): string[] {
+  return product.description
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+}
+
 /** La ficha de un producto puntual: sin numerar, porque no hay nada entre que elegir. */
 function renderSingle(product: ScopeProduct, variant: ScopeVariant | null, opts: RenderCatalogOptions): CatalogBlock {
   const label = variant ? variantLabel(variant) : null;
   const title = label ? `*${product.name}* (${label})` : `*${product.name}*`;
   const stock = variant ? variant.stock : totalStock(product);
-  const lines = [`${title} — ${priceLine(product, opts)}${stockSuffix(stock)}`];
-  if (product.description.trim()) lines.push(product.description.trim());
-  return { text: lines.join("\n"), media: mediaBlockFor(product, variant), productIds: [product.id] };
+  // Con una variante ya elegida el titulo ya dice cual es y con cuanto stock: listar las demas seria
+  // ofrecerle colores que no pidio.
+  const variants = variant ? null : variantsLine(product);
+
+  const head = [`${title} — ${priceLine(product, opts)}${stockSuffix(stock)}`];
+  if (variants) head.push(variants);
+
+  const description = descriptionLines(product);
+  const shown = description.slice(0, MAX_DESCRIPTION_LINES);
+  const customerLines = [...head, ...shown];
+  if (description.length > shown.length) customerLines.push(MORE_DESCRIPTION_LINE);
+
+  return {
+    text: customerLines.join("\n"),
+    modelText: [...head, ...description].join("\n"),
+    media: mediaBlockFor(product, variant),
+    productIds: [product.id],
+  };
 }
 
 function groupByCategory(products: ScopeProduct[], opts: RenderCatalogOptions): { category: string | null; products: ScopeProduct[] }[] {
@@ -143,7 +203,7 @@ function renderNumberedGroup(
       (product, i) => `${startNumber + offset + i}. *${product.name}* — ${priceLine(product, opts)}${stockSuffix(totalStock(product))}`
     );
     const text = heading && offset === 0 ? `*${heading}*\n${lines.join("\n")}` : lines.join("\n");
-    blocks.push({ text, media: [], productIds: chunk.map((p) => p.id) });
+    blocks.push({ text, modelText: text, media: [], productIds: chunk.map((p) => p.id) });
   }
   return blocks;
 }
@@ -187,7 +247,8 @@ export function renderCatalog(scope: ProductScope, opts: RenderCatalogOptions): 
   if (blocks.length > 0) {
     // El ofrecimiento va UNA vez, pegado al ultimo mensaje: es la pregunta con la que termina el turno.
     const last = blocks[blocks.length - 1];
-    blocks[blocks.length - 1] = { ...last, text: `${last.text}\n\n${PHOTO_OFFER_LINE}` };
+    const withOffer = `${last.text}\n\n${PHOTO_OFFER_LINE}`;
+    blocks[blocks.length - 1] = { ...last, text: withOffer, modelText: withOffer };
   }
 
   return blocks;
@@ -209,6 +270,58 @@ export function presentedProductIds(blocks: CatalogBlock[]): string[] {
 export function stripNumberedLines(text: string): string {
   const kept = text.split("\n").filter((line) => !startsAsNumberedItem(line.trim()));
   return kept.join("\n").trim();
+}
+
+/**
+ * Clave de comparacion de una linea: minusculas y sin acentos (normalizeForMatch), y de ahi solo letras
+ * y digitos separados por un espacio. Asi "*Serie 12* — $140.000" y "Serie 12 - $140.000" son la misma
+ * linea, que es lo que hace falta: el modelo reescribe asteriscos, guiones y espacios al copiar la ficha.
+ *
+ * Sin expresion regular (regla del repositorio): se recorre caracter por caracter.
+ */
+function lineKey(line: string): string {
+  const normalized = normalizeForMatch(line);
+  const parts: string[] = [];
+  let current = "";
+  for (const ch of normalized) {
+    const keep = (ch >= "a" && ch <= "z") || (ch >= "0" && ch <= "9");
+    if (keep) current += ch;
+    else if (current) {
+      parts.push(current);
+      current = "";
+    }
+  }
+  if (current) parts.push(current);
+  return parts.join(" ");
+}
+
+/**
+ * Le quita a la frase del modelo toda linea que el servidor ya va a mandar en sus propios bloques.
+ *
+ * Incidente real 2026-09-16 (conversacion cmu4e3q9l001ozi2ka2x1t1b1): el cliente escribio "3" y recibio
+ * SEIS mensajes - el modelo habia escrito la ficha entera con vinetas y el servidor mando la misma ficha
+ * debajo. El prompt ya le pide al modelo que escriba solo una frase de introduccion; esto es lo que lo
+ * garantiza sin depender de que obedezca.
+ *
+ * Si al sacarle las duplicadas no queda ni una letra ni un digito, devuelve "" - el que llama no manda
+ * un mensaje vacio y el turno arranca directo en los bloques.
+ */
+export function stripLinesAlreadyInBlocks(text: string, blocks: CatalogBlock[]): string {
+  const alreadySent = new Set<string>();
+  for (const block of blocks) {
+    for (const line of block.text.split("\n")) {
+      const key = lineKey(line);
+      if (key) alreadySent.add(key);
+    }
+  }
+  if (alreadySent.size === 0) return text;
+
+  const kept = text.split("\n").filter((line) => {
+    const key = lineKey(line);
+    return key === "" || !alreadySent.has(key);
+  });
+  const result = kept.join("\n").trim();
+  return lineKey(result) ? result : "";
 }
 
 export function startsAsNumberedItem(line: string): boolean {

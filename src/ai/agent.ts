@@ -17,7 +17,13 @@ import {
   type ProductScope,
   type ScopeProduct,
 } from "../catalog/scope";
-import { renderCatalog, presentedProductIds, stripNumberedLines, type CatalogBlock } from "../catalog/presenter";
+import {
+  renderCatalog,
+  presentedProductIds,
+  stripNumberedLines,
+  stripLinesAlreadyInBlocks,
+  type CatalogBlock,
+} from "../catalog/presenter";
 import { getLastPresentedProductIds, setLastPresentedProductIds } from "../catalog/presentedList";
 import { recordAgentTurn } from "./agentTurns";
 import { findShadowCatalogFindings, serializeFinding } from "../catalog/outputValidation";
@@ -929,7 +935,9 @@ export async function generateReply(
             role: "system" as const,
             content:
               `MENSAJES QUE YA VAN A SALIR (los manda el sistema con datos reales del catalogo, vos no los escribis ni los podes cambiar):\n\n` +
-              catalogBlocks.map((b) => b.text).join("\n---\n") +
+              // modelText, no text: el cliente ve la descripcion recortada, el modelo la ve entera, asi
+              // que una pregunta sobre una caracteristica que quedo afuera la contesta con el dato real.
+              catalogBlocks.map((b) => b.modelText).join("\n---\n") +
               (catalogMediaProductIds().length > 0 ? `\n\nLas fotos de ese producto tambien salen solas, en este mismo turno.` : "") +
               `\n\nEscribi UNA sola frase corta de introduccion y nada mas. No repitas la lista, ni nombres, ni precios, ni stock` +
               (catalogMediaProductIds().length > 0
@@ -1001,6 +1009,11 @@ export async function generateReply(
     // propios mensajes.
     if (catalogBlocks.length > 0) {
       text = stripNumberedLines(text.split(CATALOG_BLOCK_MARKER).join(""));
+      // Y lo mismo con la ficha: toda linea que el bloque ya va a mandar se le quita a la frase del
+      // modelo, comparando normalizado. Un alcance "one" no tiene lista numerada que quitar, asi que sin
+      // esto el cliente recibia la ficha entera dos veces (2026-09-16, conversacion
+      // cmu4e3q9l001ozi2ka2x1t1b1: seis mensajes para un "3").
+      text = stripLinesAlreadyInBlocks(text, catalogBlocks);
     }
 
     // Etapa 1 del estado de pedido: se calcula y se registra, NO se usa. Sirve para comparar durante unos

@@ -1,6 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { renderCatalog, presentedProductIds, stripNumberedLines, FEW_PRODUCTS_MAX } from "./presenter";
+import {
+  renderCatalog,
+  presentedProductIds,
+  stripNumberedLines,
+  stripLinesAlreadyInBlocks,
+  FEW_PRODUCTS_MAX,
+} from "./presenter";
 import { resolveProductScopeFrom } from "./scope";
 import { loadFixtureCatalog, productNamed } from "./fixtureCatalog";
 
@@ -130,4 +136,130 @@ test("un producto con el inventario en variantes no se muestra sin stock", () =>
   const ficha = allText(render("el Serie 12 Ultra 3"));
   assert.ok(!ficha.includes("sin stock"), `la ficha tampoco puede decir sin stock: "${ficha}"`);
   assert.ok(ficha.includes("15 disponibles"), `la ficha tiene que decir 15 disponibles: "${ficha}"`);
+});
+
+// ---------------------------------------------------------------------------------------------
+// Incidentes reales del 2026-09-16, mismo turno de la Fase B:
+//   - cmu4e3q9l001ozi2ka2x1t1b1: el cliente escribio "3" y recibio SEIS mensajes (el modelo escribio la
+//     ficha entera y el servidor mando la misma ficha abajo, mas 949 caracteres de descripcion).
+//   - cmu4dqbcx0001zi2kxxrf1ge3: "tienes disponible en Negro Matte y Titanio Plateado" cuando las
+//     variantes reales son `negro` y `gris`. El bloque no nombraba los colores y el modelo relleno.
+// ---------------------------------------------------------------------------------------------
+
+const aurora = loadFixtureCatalog("Aurora Joyas");
+
+function ocurrencias(texto: string, fragmento: string): number {
+  let total = 0;
+  let desde = 0;
+  for (;;) {
+    const i = texto.indexOf(fragmento, desde);
+    if (i === -1) return total;
+    total++;
+    desde = i + fragmento.length;
+  }
+}
+
+/** Lo que el cliente REALMENTE recibe en el turno: la frase del modelo ya filtrada, mas los bloques. */
+function loQueRecibeElCliente(fraseDelModelo: string, blocks: { text: string }[]): string[] {
+  const frase = stripLinesAlreadyInBlocks(fraseDelModelo, blocks as never);
+  return [...(frase.trim() ? [frase] : []), ...blocks.map((b) => b.text)];
+}
+
+test("alcance 'one': el nombre y el precio le llegan al cliente UNA sola vez en todo el turno", () => {
+  const blocks = render("el Serie 12 Ultra 3");
+  assert.equal(blocks.length, 1);
+  // El modelo copia la ficha entera, reescribiendo asteriscos y guiones - exactamente lo que hizo en
+  // produccion. Ademas escribe una frase de introduccion, que es lo unico que le corresponde.
+  const fraseDelModelo = [
+    "¡Claro que sí! Mira este:",
+    "Reloj Inteligente Smartwatch Serie 12 Ultra 3 (Edición Deportiva / Robusta) - $140.000 (15 disponibles)",
+    "- Pantalla Ultra de 49 mm con isla de notificaciones y fondos personalizables",
+  ].join("\n");
+
+  const enviado = loQueRecibeElCliente(fraseDelModelo, blocks).join("\n");
+  assert.equal(ocurrencias(enviado, "Serie 12 Ultra 3"), 1, `el nombre sale una vez; salio:\n${enviado}`);
+  assert.equal(ocurrencias(enviado, "$140.000"), 1, `el precio sale una vez; salio:\n${enviado}`);
+  assert.equal(ocurrencias(enviado, "Pantalla Ultra de 49 mm"), 1, `la vineta sale una vez; salio:\n${enviado}`);
+  assert.ok(enviado.includes("¡Claro que sí! Mira este:"), "la frase de introduccion se conserva entera");
+});
+
+test("una frase de introduccion sola sale tal cual: no se le quita nada", () => {
+  const blocks = render("el Serie 12 Ultra 3");
+  const frase = "¡Claro! Aquí lo tienes 😊";
+  assert.equal(stripLinesAlreadyInBlocks(frase, blocks), frase);
+});
+
+test("si al modelo no le queda nada propio, no se manda un mensaje vacio", () => {
+  const blocks = render("el Serie 12 Ultra 3");
+  const copiaLiteral = blocks[0].text;
+  assert.equal(stripLinesAlreadyInBlocks(copiaLiteral, blocks), "");
+  // Y tampoco si lo que sobra es puntuacion suelta.
+  assert.equal(stripLinesAlreadyInBlocks(`${copiaLiteral}\n...\n•`, blocks), "");
+});
+
+test("alcance 'one' con variantes: el bloque nombra los colores reales con su stock", () => {
+  const ultra = productNamed(magimp, "Serie 12 Ultra 3");
+  assert.deepEqual(
+    ultra.variants.map((v) => [v.color, v.stock]),
+    [["negro", 7], ["gris", 8]],
+    "el fixture tiene que traer las variantes reales de ese producto"
+  );
+
+  const ficha = render("el Serie 12 Ultra 3")[0].text;
+  assert.ok(ficha.includes("negro (7 disponibles)"), `tiene que nombrar el negro con su stock: "${ficha}"`);
+  assert.ok(ficha.includes("gris (8 disponibles)"), `tiene que nombrar el gris con su stock: "${ficha}"`);
+});
+
+test("con una variante ya elegida no se listan las demas", () => {
+  const scope = resolveProductScopeFrom(magimp, NO_ALIASES, "el Serie 11 Mini negro", []);
+  assert.equal(scope.kind, "one");
+  if (scope.kind !== "one") return;
+  const ficha = renderCatalog(scope, OPTS)[0].text;
+  assert.ok(!ficha.includes("Disponible en:"), `ya eligio color, no se le ofrecen los otros: "${ficha}"`);
+});
+
+test("una descripcion larga sale recortada y ofrece el resto; una corta sale entera y no ofrece nada", () => {
+  const larga = render("el Serie 12 Ultra 3")[0];
+  const lineasDeDescripcion = larga.text
+    .split("\n")
+    .filter((l) => !l.startsWith("*") && !l.startsWith("Disponible en:") && !l.startsWith("¿Te cuento"));
+  assert.equal(lineasDeDescripcion.length, 5, `el tope son 5 lineas; salieron: ${lineasDeDescripcion.length}`);
+  assert.ok(larga.text.endsWith("¿Te cuento el resto de las características?"), `tiene que ofrecer el resto: "${larga.text}"`);
+
+  const corta = renderCatalog({ kind: "one", product: aurora[0], variant: null }, OPTS)[0];
+  assert.ok(!corta.text.includes("¿Te cuento"), `una descripcion de una linea no ofrece resto: "${corta.text}"`);
+  assert.ok(corta.text.includes(aurora[0].description.trim()), "y sale entera");
+});
+
+test("el corte nunca parte una linea por la mitad", () => {
+  const ficha = render("el Serie 12 Ultra 3")[0].text;
+  const completas = new Set(
+    productNamed(magimp, "Serie 12 Ultra 3").description.split("\n").map((l) => l.trim()).filter(Boolean)
+  );
+  const deLaDescripcion = ficha
+    .split("\n")
+    .filter((l) => !l.startsWith("*") && !l.startsWith("Disponible en:") && !l.startsWith("¿Te cuento"));
+  for (const linea of deLaDescripcion) {
+    assert.ok(completas.has(linea), `"${linea}" no es una linea completa de la descripcion`);
+  }
+});
+
+test("el modelo recibe la descripcion completa aunque el cliente vea el extracto", () => {
+  const bloque = render("el Serie 12 Ultra 3")[0];
+  const ultima = "Garantía: 3 meses por defectos de fábrica";
+  assert.ok(!bloque.text.includes(ultima), "el cliente no ve la ultima linea");
+  assert.ok(bloque.modelText.includes(ultima), "el modelo si la ve, para poder contestar por ella");
+  assert.ok(bloque.modelText.includes("Disponible en: negro (7 disponibles)"), "y ve los colores reales");
+});
+
+test("alcance 'group' y 'all': el recorte de descripcion no los toca", () => {
+  for (const pedido of ["que relojes tienen", "muéstrame todo el catálogo completo con precios"]) {
+    const texto = allText(render(pedido));
+    assert.ok(!texto.includes("¿Te cuento"), `una lista no ofrece descripcion: "${pedido}"`);
+    assert.ok(!texto.includes("Disponible en:"), `una lista no detalla variantes: "${pedido}"`);
+  }
+  // Y el texto que ve el modelo es el mismo que sale: solo la ficha de un producto puntual difiere.
+  for (const block of render("muéstrame todo el catálogo completo con precios")) {
+    assert.equal(block.modelText, block.text);
+  }
 });
