@@ -92,7 +92,9 @@ function priceLine(product: ScopeProduct, opts: RenderCatalogOptions): string {
 }
 
 function stockSuffix(stock: number): string {
-  return stock > 0 ? ` (${stock} disponibles)` : " (sin stock)";
+  if (stock <= 0) return " (sin stock)";
+  // "1 disponibles" (2026-09-16): la concordancia tambien es parte de que no suene a maquina.
+  return ` (${stock} disponible${stock === 1 ? "" : "s"})`;
 }
 
 function variantLabel(variant: ScopeVariant): string | null {
@@ -131,7 +133,10 @@ function mediaBlockFor(product: ScopeProduct, variant: ScopeVariant | null): Cat
  */
 function variantsLine(product: ScopeProduct): string | null {
   const parts = product.variants
-    .filter((v) => v.active)
+    // Sin stock no se nombra: nombrarla es ofrecerle al cliente un color que no le podemos vender.
+    // Caso real 2026-09-16: el bloque escribio "verde camuflado (sin stock)" en el mismo turno en el que
+    // el modelo, por su cuenta, habia listado solo los dos colores que si habia.
+    .filter((v) => v.active && v.stock > 0)
     .map((v) => {
       const label = variantLabel(v);
       return label ? `${label}${stockSuffix(v.stock)}` : null;

@@ -304,3 +304,55 @@ los casos uno por uno. Un hallazgo sobre un bloque compuesto por el servidor (`s
 - Un nombre real con palabras agregadas (`*Combo Pareja + obsequio*`): el criterio es que todas las
   palabras escritas estén en el nombre real, así que abreviar está bien y agregar no.
 - Un precio escrito con decimales donde el catálogo los tiene en cero, o al revés.
+
+## 10. La forma del turno (2026-09-16) — el bloque adentro del mensaje
+
+La Fase B dejó los datos en manos del servidor, y eso no se toca. Lo que quedaba mal era la **forma**:
+el bloque salía como un mensaje aparte, después del mensaje del agente, repitiendo lo que el agente
+acababa de decir. Dos conversaciones reales, lado a lado:
+
+- `cmu4gykpm003le82keve7ngck`, 19:04:46 (camino viejo, marca `{{BLOQUE_CATALOGO}}`): **un** mensaje, la
+  lista adentro de la frase del vendedor.
+- `cmu4e3q9l001ozi2ka2x1t1b1`, 20:45:37 (Fase B): **dos** mensajes, y el segundo repite el precio y los
+  colores que el primero ya había dicho.
+
+Los dos traían datos reales. El primero suena a persona; el segundo, a sistema.
+
+**Qué se hizo.** Cuando el alcance no es `none` y el servidor compuso **un** bloque, el texto exacto de
+ese bloque va al contexto del modelo junto con la marca `{{BLOQUE_CATALOGO}}`, y se le dice que la ponga
+donde quiera que ese texto aparezca dentro de su propio mensaje. La sustitución la hace
+`renderFixedBlocks`, el mismo mecanismo que ya existía para pago, envío, total y resumen: se agregó el
+campo `catalogBlockText`, que gana sobre la lista `catalog` del camino viejo.
+
+**Por qué es seguro, y es lo único que lo hace seguro.** Si el modelo no pone la marca, el bloque sale
+aparte, exactamente como el día anterior. La debilidad histórica de la marca era que el modelo podía
+omitirla y escribir la lista de memoria — el incidente de los cargadores inventados del 2026-09-15. Acá
+esa rama ya no existe: el bloque se compone siempre, la marca solo decide **dónde sale**, nunca **si
+sale**. El peor caso es el comportamiento de hoy.
+
+**Qué decisión perdió el modelo: ninguna, y es el punto.** Esta fase no le saca una decisión sobre un
+hecho — se la devuelve sobre la *conversación*, que es la categoría donde el norte del proyecto dice
+que no se fuerza nada (ver `CLAUDE.md`, "El norte: un agente con catálogo"). Dónde poner el bloque
+dentro de su mensaje es redacción, no dato. No entra a la tabla de efectos requeridos porque no es un
+efecto: no hay nada que verificar contra la base que no estuviera ya verificado.
+
+**Los medios no cambian.** Una foto nunca va adentro de un texto: sigue saliendo como mensaje propio,
+en los dos caminos.
+
+**La marca se ofrece solo con UN bloque.** Con varios (el catálogo completo sale como un mensaje por
+categoría) meterlos todos en un mensaje lo devolvería a la guillotina de 700 caracteres que el corte por
+categoría vino a reemplazar. Y se decide **antes** de la primera llamada al modelo: si no se le ofreció,
+una marca escrita igual se borra en silencio. Sin eso, el alcance que se resuelve tarde (la foto
+identificada con `get_product_details`) metería una ficha adentro de una frase escrita para una lista.
+
+**Los tres recortes siguen existiendo, y siguen haciendo falta.** `stripNumberedLines`,
+`stripLinesAlreadyInBlocks` y la ficha corta de la segunda presentación protegen el camino de respaldo,
+que es el que corre cada vez que el modelo omite la marca. Los dos primeros corren ahora en los **dos**
+caminos y **antes** de sustituir la marca: una lista que el modelo escriba de más sobra igual cuando el
+bloque entra adentro de su mensaje, y correrlos antes evita recortar el bloque mismo.
+
+**Dos defectos del bloque, arreglados de paso.**
+
+- Una variante **sin stock** ya no se nombra. El bloque escribía "verde camuflado (sin stock)" y le
+  ofrecía al cliente un color que no hay; en ese mismo turno el modelo las había omitido solo.
+- "1 disponible", no "1 disponibles". La concordancia también es parte de que no suene a máquina.

@@ -631,6 +631,11 @@ export interface FixedBlockData {
   // cuando ninguna de las dos herramientas corrio, o corrio y devolvio un solo producto (ahi no hay
   // lista que renderizar).
   catalog: { name: string; price: string; stock: number }[] | null;
+  // 2026-09-16: el texto YA compuesto por renderCatalog, cuando el modelo eligio poner la marca dentro
+  // de su propio mensaje en vez de dejar que salga aparte. Gana sobre `catalog`: el bloque del servidor
+  // sale de resolveProductScope (el alcance real del turno), y la lista de `catalog` sale de la ultima
+  // herramienta que corrio, que es el camino viejo. Ausente = no hubo bloque que ofrecer.
+  catalogBlockText?: string | null;
   // Fase 6 del plan maestro (2026-09-15): lista de lo que falta configurar, solo si una de
   // show_order_summary/set_payment_method/close_conversation quedo bloqueada ESTE turno por la
   // compuerta de configHealth.getSaleGate. null cuando ninguna corrio bloqueada.
@@ -690,7 +695,11 @@ export function renderFixedBlocks(text: string, data: FixedBlockData): { text: s
   // ultimo mensaje del bot sea una lista numerada para resolver "el 2" a un producto real. Un bloque con
   // viñetas rompería ese flujo.
   if (text.includes(CATALOG_BLOCK_MARKER)) {
-    if (data.catalog?.length) {
+    if (data.catalogBlockText) {
+      // El camino de la marca (2026-09-16): el dato ya viene armado desde la base y entra donde el modelo
+      // lo puso, asi que el turno sale en UN solo mensaje en vez de dos.
+      text = text.split(CATALOG_BLOCK_MARKER).join(data.catalogBlockText);
+    } else if (data.catalog?.length) {
       const lines = data.catalog.map(
         (p, i) => `${i + 1}. *${p.name}* — $${p.price}${p.stock > 0 ? ` (${p.stock} disponibles)` : " (sin stock)"}`
       );
@@ -852,6 +861,18 @@ export async function generateReply(
   // promoteScopeFromIdentifiedPhoto mas abajo.
   let catalogBlocks = renderCatalog(resolvedScope, renderOptions);
   let scopeForRecord = resolvedScope;
+  // 2026-09-16. Que el dato salga de la base ya esta garantizado; lo que faltaba era la FORMA. Un bloque
+  // que sale como mensaje aparte se nota: el servidor habla despues del agente y repite lo que el agente
+  // acaba de decir. Con la marca, el mismo texto entra DENTRO del mensaje del modelo y sale uno solo.
+  //
+  // Se le ofrece solo cuando el servidor compuso UN bloque: con varios (el catalogo completo, un mensaje
+  // por categoria) meterlos todos en un mensaje lo devolveria a la guillotina de 700 caracteres que el
+  // corte por categoria vino a reemplazar.
+  //
+  // Se calcula ACA, antes de la primera llamada al modelo, y no se recalcula despues: si la marca no se
+  // le ofrecio, una marca escrita igual no se honra. Sin esto, el alcance que se resuelve tarde (la foto
+  // identificada, mas abajo) inlinearia una ficha adentro de una frase escrita para una lista.
+  const catalogMarkerOffered = catalogBlocks.length === 1;
   const catalogMediaProductIds = () => catalogBlocks.flatMap((b) => b.media.map((m) => m.productId));
   // Lo que ya va a salir por los bloques, visible para las herramientas: el registro de la base se escribe
   // recien cuando los bloques se envian (despues del turno), asi que sin esto una llamada del modelo a
@@ -928,12 +949,20 @@ export async function generateReply(
           {
             role: "system" as const,
             content:
-              `MENSAJES QUE YA VAN A SALIR (los manda el sistema con datos reales del catalogo, vos no los escribis ni los podes cambiar):\n\n` +
+              (catalogMarkerOffered
+                ? `TEXTO CON DATOS REALES DEL CATALOGO que pone el sistema (vos no lo escribis ni lo podes cambiar):\n\n`
+                : `MENSAJES QUE YA VAN A SALIR (los manda el sistema con datos reales del catalogo, vos no los escribis ni los podes cambiar):\n\n`) +
               // modelText, no text: el cliente ve la descripcion recortada, el modelo la ve entera, asi
               // que una pregunta sobre una caracteristica que quedo afuera la contesta con el dato real.
               catalogBlocks.map((b) => b.modelText).join("\n---\n") +
               (catalogMediaProductIds().length > 0 ? `\n\nLas fotos de ese producto tambien salen solas, en este mismo turno.` : "") +
-              `\n\nEscribi UNA sola frase corta de introduccion y nada mas. No repitas la lista, ni nombres, ni precios, ni stock` +
+              // La marca es una OFERTA, no un requisito: ponerla hace que el turno salga en un solo
+              // mensaje, y no ponerla deja exactamente el comportamiento anterior. Por eso se le puede
+              // decir, sin riesgo, que el texto sale igual - es cierto, y saberlo le quita la tentacion
+              // de escribir la lista de memoria por las dudas.
+              (catalogMarkerOffered
+                ? `\n\nPone ${CATALOG_BLOCK_MARKER} en su propia linea, adentro de tu mensaje, donde quieras que ese texto aparezca: asi al cliente le llega uno solo. Si no la pones, ese texto sale igual, en un mensaje aparte. No repitas la lista, ni nombres, ni precios, ni stock`
+                : `\n\nEscribi UNA sola frase corta de introduccion y nada mas. No repitas la lista, ni nombres, ni precios, ni stock`) +
               (catalogMediaProductIds().length > 0
                 ? `, y no ofrezcas ni prometas fotos: ya van.`
                 : `. Si el cliente quiere fotos, el mensaje del sistema ya se las ofrece.`),
@@ -992,22 +1021,29 @@ export async function generateReply(
   // quedaron bloqueadas por getSaleGate en algun llamado de este turno - fuente de
   // {{BLOQUE_VENTA_BLOQUEADA}}.
   let saleBlockedThisTurn: string[] | null = null;
+  // Puesto en finalizeTurn, leido despues: dice si el texto del bloque viaja DENTRO del mensaje del
+  // modelo (marca puesta) o si sale como mensaje aparte (camino de respaldo).
+  let catalogInlined = false;
 
   async function finalizeTurn(text: string): Promise<string> {
     text = stripInternalLeaks(text);
 
     // Fase B: con bloques compuestos por el servidor, la frase del modelo es SOLO la introduccion. Una
     // lista numerada dentro de ella es, en el mejor caso, la misma informacion dos veces y, en el peor,
-    // la version inventada de la lista real que sale justo abajo - se le quita. La marca
-    // {{BLOQUE_CATALOGO}} tambien sobra: el catalogo ya no se sustituye dentro de la prosa, va en sus
-    // propios mensajes.
+    // la version inventada de la lista real que sale justo abajo - se le quita. Los dos recortes corren
+    // en los DOS caminos: la lista que el modelo escriba de mas sobra igual cuando el bloque entra
+    // adentro de su mensaje, y corren ANTES de sustituir la marca para no recortar el bloque mismo.
     if (catalogBlocks.length > 0) {
-      text = stripNumberedLines(text.split(CATALOG_BLOCK_MARKER).join(""));
+      text = stripNumberedLines(text);
       // Y lo mismo con la ficha: toda linea que el bloque ya va a mandar se le quita a la frase del
       // modelo, comparando normalizado. Un alcance "one" no tiene lista numerada que quitar, asi que sin
       // esto el cliente recibia la ficha entera dos veces (2026-09-16, conversacion
       // cmu4e3q9l001ozi2ka2x1t1b1: seis mensajes para un "3").
       text = stripLinesAlreadyInBlocks(text, catalogBlocks);
+      catalogInlined = catalogMarkerOffered && text.includes(CATALOG_BLOCK_MARKER);
+      // Sin marca ofrecida, una marca escrita igual no tiene bloque que la respalde en esa posicion: se
+      // borra en silencio, como hasta ahora. No es un bloque fijo sin datos, asi que no es un incidente.
+      if (!catalogInlined) text = text.split(CATALOG_BLOCK_MARKER).join("").trim();
     }
 
     // Etapa 1 del estado de pedido: se calcula y se registra, NO se usa. Sirve para comparar durante unos
@@ -1038,6 +1074,9 @@ export async function generateReply(
       // estructurado). Caso real del 2026-09-15/16: foto de UN reloj, respuesta con 11 productos. La
       // marca se borra y queda registrado el incidente, igual que cualquier otro bloque sin respaldo.
       catalog: catalogBlocks.length > 0 || customerSentMediaThisTurn ? null : catalogListThisTurn,
+      // El camino de la marca (2026-09-16). catalogMarkerOffered garantiza que aca hay exactamente un
+      // bloque, y es el que el modelo tuvo delante cuando decidio donde ponerla.
+      catalogBlockText: catalogInlined ? catalogBlocks[0].text : null,
       saleBlocked: saleBlockedThisTurn,
     });
     text = renderedText;
@@ -1641,6 +1680,11 @@ export async function generateReply(
 
   const text = await finalizeTurn(rawText);
 
+  // Con la marca puesta, el texto del bloque ya viaja adentro de `text`: el bloque sigue saliendo, pero
+  // solo con sus medios (sendCatalogBlocks saltea el texto vacio). Una foto nunca va adentro de un
+  // mensaje de texto, asi que los medios siguen siendo mensajes propios en los dos caminos.
+  const outgoingBlocks = catalogInlined ? catalogBlocks.map((b) => ({ ...b, text: "" })) : catalogBlocks;
+
   // PIEZA 5, MODO SOMBRA (ONIX-PLAN-CATALOGO-Y-MEDIOS.md). Se mide TODO lo que va a salir - la frase del
   // modelo y los bloques del servidor - contra el catalogo real. Los bloques se incluyen a proposito
   // aunque los componga el servidor: si alguna vez uno de ellos se marcara, el defecto estaria en el
@@ -1650,7 +1694,9 @@ export async function generateReply(
   // una garantia de tipo, no una disciplina. La activacion es otro cambio, con 48h de numeros a la vista.
   const shadowFindings = await findShadowCatalogFindings(
     context.businessId,
-    [text, ...catalogBlocks.map((b) => b.text)],
+    // outgoingBlocks, no catalogBlocks: con la marca puesta el bloque ya esta adentro de `text` y
+    // contarlo de nuevo duplicaria cada hallazgo.
+    [text, ...outgoingBlocks.map((b) => b.text)],
     { locale: negocio.locale, currency: negocio.currency }
   );
 
@@ -1668,10 +1714,12 @@ export async function generateReply(
     toolsCalled: toolsCalledThisTurn,
     forcedTool: forcedToolChoice,
     scope: describeScope(scopeForRecord),
+    // Lo que compuso el servidor, aunque el modelo haya elegido ponerlo adentro de su mensaje: la
+    // auditoria tiene que poder ver el bloque real sin depender de donde termino saliendo.
     blocks: catalogBlocks.map((b) => b.text),
     mediaProductIds: catalogMediaProductIds(),
     shadowFindings: shadowFindings.map(serializeFinding),
   });
 
-  return { text, blocks: catalogBlocks };
+  return { text, blocks: outgoingBlocks };
 }

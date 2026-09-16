@@ -246,3 +246,50 @@ test("cada turno deja su fila de AgentTurn con el alcance resuelto y las herrami
   assert.equal(fila.iterations, 2);
   assert.ok(fila.blocks.length > 0);
 });
+
+// 2026-09-16: el dato ya salia de la base, pero salia en un mensaje aparte y por eso se notaba. Con la
+// marca, el mismo texto entra adentro del mensaje del modelo; sin la marca, todo queda como estaba.
+
+test("el modelo pone la marca: UN solo mensaje, con los datos del servidor adentro", async () => {
+  mockModel([{ content: "¡Claro! Te muestro:\n\n{{BLOQUE_CATALOGO}}\n\n¿Te lo aparto?" }]);
+
+  const { text, blocks } = await generateReply(conversationId, context, null, "quiero el Serie 11 Mini");
+
+  assert.ok(text.includes("Reloj Inteligente Serie 11 Mini"), `el nombre real va adentro del mensaje: "${text}"`);
+  assert.ok(text.includes("$145.000"), `y el precio real tambien: "${text}"`);
+  assert.ok(text.includes("¿Te lo aparto?"), "la frase del modelo queda alrededor del bloque");
+  assert.ok(!text.includes("{{BLOQUE_CATALOGO}}"), "la marca nunca llega al cliente");
+
+  // Lo que hace que sea UN mensaje: el bloque ya no trae texto propio que enviar.
+  assert.equal(blocks.length, 1);
+  assert.equal(blocks[0].text, "", "no sale un segundo mensaje de texto");
+  // La foto sigue siendo un mensaje propio: una foto no va adentro de un texto.
+  assert.equal(blocks[0].media[0].items.length, 1);
+});
+
+test("el modelo NO pone la marca: el bloque sale aparte, con los datos reales, igual que hoy", async () => {
+  mockModel([{ content: "¡Claro! Te muestro el reloj:" }]);
+
+  const { text, blocks } = await generateReply(conversationId, context, null, "quiero el Serie 11 Mini");
+
+  assert.equal(text, "¡Claro! Te muestro el reloj:", "la frase del modelo sale tal cual");
+  assert.equal(blocks.length, 1);
+  assert.ok(blocks[0].text.includes("Reloj Inteligente Serie 11 Mini"));
+  assert.ok(blocks[0].text.includes("$145.000"), `el bloque aparte sigue trayendo el precio real: "${blocks[0].text}"`);
+  assert.equal(blocks[0].media[0].items.length, 1);
+});
+
+test("el modelo escribe un precio inventado y NO pone la marca: el respaldo lo cubre igual que hoy", async () => {
+  mockModel([
+    {
+      content: "¡Claro! Mira:\n1. *Reloj Inteligente Serie 11 Mini* — $99.000\n2. *Cargador iPhone* — $60.000\n¿Cuál te gusta?",
+    },
+  ]);
+
+  const { text, blocks } = await generateReply(conversationId, context, null, "quiero el Serie 11 Mini");
+
+  const todo = `${text}\n${allBlockText(blocks)}`;
+  assert.ok(!todo.includes("$99.000"), `el precio inventado no llega al cliente: "${todo}"`);
+  assert.ok(!todo.includes("Cargador iPhone"), "ni el producto inventado");
+  assert.ok(blocks[0].text.includes("$145.000"), "y el precio real sale igual, en el mensaje del servidor");
+});

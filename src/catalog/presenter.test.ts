@@ -7,7 +7,7 @@ import {
   stripLinesAlreadyInBlocks,
   FEW_PRODUCTS_MAX,
 } from "./presenter";
-import { resolveProductScopeFrom } from "./scope";
+import { resolveProductScopeFrom, type ScopeProduct } from "./scope";
 import { loadFixtureCatalog, productNamed } from "./fixtureCatalog";
 
 // Fase B del plan de catalogo y medios (ONIX-PLAN-CATALOGO-Y-MEDIOS.md, pieza 2). Puras: sin base de
@@ -325,4 +325,50 @@ test("un registro de otro producto no acorta la ficha del que se esta presentand
   const blocks = renderCatalog(scope, { ...OPTS, alreadyPresentedProductIds: [mini.id] });
   assert.ok(blocks[0].media.length > 0, "los medios del Ultra 3 no los toca el registro del Mini");
   assert.ok(blocks[0].text.includes("¿Te cuento el resto"), "y la ficha sale entera");
+});
+
+// Un producto armado a mano: el catalogo anonimizado no tiene ninguna variante agotada ni ningun
+// producto con una sola unidad, que es justo lo que estos dos casos necesitan.
+function productoDePrueba(stock: number, variants: ScopeProduct["variants"]): ScopeProduct {
+  return {
+    id: "prod-prueba",
+    name: "Gorra Tactica",
+    description: "Gorra ajustable.",
+    category: "Accesorios",
+    color: null,
+    size: null,
+    price: 40000,
+    currency: "COP",
+    stock,
+    media: [],
+    variants,
+  };
+}
+
+function variante(color: string, stock: number, active = true): ScopeProduct["variants"][number] {
+  return { id: `var-${color}`, color, size: null, active, stock, media: [] };
+}
+
+test("una variante sin stock no se nombra: no se le ofrece al cliente un color que no hay", () => {
+  // Caso real 2026-09-16: el bloque escribio "verde camuflado (sin stock)" y el modelo, en ese mismo
+  // turno, habia nombrado solo los dos colores que si habia. El bloque empeoraba la respuesta.
+  const producto = productoDePrueba(0, [variante("negro", 1), variante("verde camuflado", 0), variante("gris", 4)]);
+  const blocks = renderCatalog({ kind: "one", product: producto, variant: null }, OPTS);
+
+  assert.ok(!blocks[0].text.includes("verde camuflado"), `salio: "${blocks[0].text}"`);
+  assert.ok(!blocks[0].text.toLowerCase().includes("sin stock"), "y tampoco la etiqueta");
+  assert.ok(blocks[0].text.includes("negro"));
+  assert.ok(blocks[0].text.includes("gris"));
+});
+
+test("con una sola unidad dice 'disponible', no 'disponibles'", () => {
+  const producto = productoDePrueba(1, []);
+  const blocks = renderCatalog({ kind: "one", product: producto, variant: null }, OPTS);
+  assert.ok(blocks[0].text.includes("(1 disponible)"), `salio: "${blocks[0].text}"`);
+  assert.ok(!blocks[0].text.includes("1 disponibles"));
+
+  const conVariantes = productoDePrueba(0, [variante("negro", 1), variante("gris", 2)]);
+  const variantes = renderCatalog({ kind: "one", product: conVariantes, variant: null }, OPTS)[0].text;
+  assert.ok(variantes.includes("negro (1 disponible)"), `salio: "${variantes}"`);
+  assert.ok(variantes.includes("gris (2 disponibles)"), "y el plural sigue en plural");
 });
