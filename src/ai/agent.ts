@@ -20,6 +20,7 @@ import {
 import { renderCatalog, presentedProductIds, stripNumberedLines, type CatalogBlock } from "../catalog/presenter";
 import { getLastPresentedProductIds, setLastPresentedProductIds } from "../catalog/presentedList";
 import { recordAgentTurn } from "./agentTurns";
+import { findShadowCatalogFindings, serializeFinding } from "../catalog/outputValidation";
 import { listActivePaymentMethods } from "../catalog/paymentMethods";
 import { buildCheckoutState } from "../orders/checkoutStateFromDb";
 import {
@@ -1628,6 +1629,19 @@ export async function generateReply(
 
   const text = await finalizeTurn(rawText);
 
+  // PIEZA 5, MODO SOMBRA (ONIX-PLAN-CATALOGO-Y-MEDIOS.md). Se mide TODO lo que va a salir - la frase del
+  // modelo y los bloques del servidor - contra el catalogo real. Los bloques se incluyen a proposito
+  // aunque los componga el servidor: si alguna vez uno de ellos se marcara, el defecto estaria en el
+  // validador y esta es la unica forma de enterarse sin esperar a que le pase a un cliente.
+  //
+  // Lo que devuelve son hallazgos y nada mas. No hay camino desde aca hasta `text`: el modo sombra es
+  // una garantia de tipo, no una disciplina. La activacion es otro cambio, con 48h de numeros a la vista.
+  const shadowFindings = await findShadowCatalogFindings(
+    context.businessId,
+    [text, ...catalogBlocks.map((b) => b.text)],
+    { locale: negocio.locale, currency: negocio.currency }
+  );
+
   // La lista que el cliente REALMENTE vio, en el orden en que salio numerada: es contra esto que el
   // proximo turno resuelve "el 3". Se guarda solo cuando hubo bloques - un turno sin presentacion no
   // borra la lista anterior, que sigue siendo la ultima que vio.
@@ -1644,6 +1658,7 @@ export async function generateReply(
     scope: describeScope(scopeForRecord),
     blocks: catalogBlocks.map((b) => b.text),
     mediaProductIds: catalogMediaProductIds(),
+    shadowFindings: shadowFindings.map(serializeFinding),
   });
 
   return { text, blocks: catalogBlocks };

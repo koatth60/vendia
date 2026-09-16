@@ -210,7 +210,7 @@ export function stripNumberedLines(text: string): string {
   return kept.join("\n").trim();
 }
 
-function startsAsNumberedItem(line: string): boolean {
+export function startsAsNumberedItem(line: string): boolean {
   let i = 0;
   while (i < line.length && line[i] >= "0" && line[i] <= "9") i++;
   if (i === 0) return false;

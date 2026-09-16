@@ -168,7 +168,7 @@ ahora sabemos que no es confiable y no tenemos un número para ella.
 |---|---|---|
 | **A** | `AgentTurn` + métrica de cumplimiento de `tool_choice` + detector de producto inventado **en modo sombra** | Sin cambio de comportamiento. Hace verificable todo lo que viene después, y le da visibilidad al dueño mañana mismo sin tocar una respuesta. |
 | **B** ✅ 2026-09-16 | Piezas 1, 2, 3 y 4 | El grueso. Cierra los problemas 1, 2 y 3. Verificable con la Fase A ya puesta. |
-| **C** | Pieza 5 activada, después de 48 h de sombra | Necesita los números de A y el alcance de B para no dar falsos positivos. |
+| **C** 🔍 sombra desde 2026-09-16 | Pieza 5 **en sombra** (hecha); activarla es un cambio aparte | Necesita los números de A y el alcance de B para no dar falsos positivos. |
 | **D** | Pieza 6 | Cierra el problema 4. Independiente de las otras tres. |
 
 Cada fase va en su propia sesión, con contexto limpio, como el resto del plan maestro.
@@ -260,3 +260,47 @@ respaldo de los turnos `none`, donde nada cambió), la última frase de `CATALOG
 un disparador leído de prosa y la regla de admisión no lo permite. Hoy eso cae en el escalón que ya
 existe (`ask_owner_about_photo`), y el turno no puede listar el catálogo.
 
+## 9. Estado de la Pieza 5 (2026-09-16) — modo sombra
+
+Implementado: `src/catalog/outputValidation.ts` y la columna aditiva `AgentTurn.shadowFindings`
+(migración `20260916210000_catalog_output_validation_shadow`). El contador y los casos se ven en el
+panel, Bot → Salud, bloque "Validación del catálogo (modo sombra)", servido por
+`/admin/api/catalog-shadow`.
+
+**Qué mide.** Antes de que salga cualquier texto del turno —la frase del modelo y también los bloques
+que compone el servidor— se extraen del texto los precios (una cifra precedida de `$`) y los nombres de
+producto, y se comparan contra un `SELECT` sobre el catálogo activo de ese negocio más sus tarifas de
+envío configuradas. Solo se mira una línea cuando cumple **las dos** condiciones: está en posición de
+lista (numerada o con viñeta) o trae un tramo en negrita, **y** trae un precio. Ese "y" es lo que deja
+afuera la prosa: un precio mencionado de pasada dentro de una frase no es el objetivo de esta pieza, y
+tampoco lo son las líneas del bloque de resumen de pedido, cuyos totales por definición no son precios
+del catálogo.
+
+Sin expresiones regulares nuevas (regla del repositorio): el barrido es carácter por carácter y reusa
+`startsAsNumberedItem` (la misma función con la que `presenter.ts` borra la lista del modelo),
+`tokenize` y `formatPrice`.
+
+**Qué NO hace, y es el punto de la fase.** No modifica el texto, no lo bloquea, no agrega
+retractaciones. `validateAgainstCatalog` devuelve hallazgos y nada más: no recibe ninguna forma de
+cambiar el texto, así que el modo sombra es una garantía de tipo y no de disciplina. La prueba
+`src/ai/agent.shadowValidation.test.ts` lo fija de punta a punta: con la validación corriendo y
+marcando los seis hallazgos del caso real, lo que devuelve `generateReply` es byte por byte lo que
+escribió el modelo.
+
+**Qué decisión le quita al modelo: ninguna todavía, y es a propósito.** Esta fase es observabilidad,
+como la Fase A. La decisión que la activación va a quitarle —"qué precio y qué nombre de producto
+puede escribir en una lista"— no se le quita sin los números de la ventana de sombra delante, porque un
+falso positivo acá le llega al cliente. Mismo criterio que `WEBHOOK_SIGNATURE_ENFORCE`.
+
+**Cómo se decide activarla.** Con 48 horas de tráfico real: `flaggedTurns` sobre `turns` en el panel, y
+los casos uno por uno. Un hallazgo sobre un bloque compuesto por el servidor (`scope` distinto de
+`none`) no es una detección: es un defecto del validador, y se arregla antes de seguir.
+
+**Falsos positivos conocidos, a vigilar en la ventana:**
+
+- Una etiqueta en negrita con cifra que no es del catálogo ni del envío (`*Abono:* $50.000`,
+  `*Descuento:* $5.000`). El nombre no se marca —un nombre reclamado de una sola palabra se ignora, por
+  eso `*Total:*` y `*Envío:*` no aparecen— pero la cifra sí.
+- Un nombre real con palabras agregadas (`*Combo Pareja + obsequio*`): el criterio es que todas las
+  palabras escritas estén en el nombre real, así que abreviar está bien y agregar no.
+- Un precio escrito con decimales donde el catálogo los tiene en cero, o al revés.

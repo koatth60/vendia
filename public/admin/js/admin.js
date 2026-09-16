@@ -4403,13 +4403,61 @@ function confirmationScheduleNote(confirmation) {
 
 let lastHealthSnapshot = null;
 
+// Pieza 5 del plan de catalogo y medios (2026-09-16). Iconos SVG inline, trazo 1.6, grilla de 18 - nunca
+// emoji. Los colores salen de tokens.css, ningun literal aca.
+const SHADOW_ICON = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="var(--onix-accent)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px; margin-right:6px;"><path d="M12 3.5 20 7v5.5c0 4.3-3.2 7.3-8 8.5-4.8-1.2-8-4.2-8-8.5V7z"/><path d="m9 11.8 2.2 2.2L15.4 9.8"/></svg>';
+
+const SHADOW_FINDING_LABELS = {
+  precio_inexistente: 'Precio que no es de ningún producto',
+  producto_inexistente: 'Producto que no está en el catálogo',
+};
+
+function catalogShadowCardsHtml(shadow) {
+  return `
+    <div class="metric-grid" style="margin-bottom:12px;">
+      <div class="metric-card">
+        <div class="label">Mensajes marcados</div>
+        <div class="value onix-num"${shadow.flaggedTurns > 0 ? ' style="color:var(--onix-warn);"' : ''}>${shadow.flaggedTurns}</div>
+        <div class="sub">Habrían quedado marcados si la validación estuviera activa</div>
+      </div>
+      <div class="metric-card">
+        <div class="label">Mensajes revisados</div>
+        <div class="value onix-num">${shadow.turns}</div>
+        <div class="sub">Todo lo que el bot respondió en la ventana</div>
+      </div>
+    </div>`;
+}
+
+function catalogShadowDetectionsHtml(shadow) {
+  if (!shadow.detections || shadow.detections.length === 0) {
+    return '<div class="empty-state" style="padding:18px;">Nada marcado: todos los precios y nombres que escribió el bot existen en tu catálogo.</div>';
+  }
+  return shadow.detections.map((d) => `
+    <div style="display:flex; flex-wrap:wrap; justify-content:space-between; gap:10px; align-items:flex-start; padding:11px 0; border-bottom:1px solid var(--onix-border-soft);">
+      <div style="flex:1 1 260px; min-width:0;">
+        <div style="font-size:13px; font-weight:600;">${escapeHtml(d.customerName || 'Cliente sin nombre')}</div>
+        ${d.findings.map((f) => `
+          <div style="font-size:12.5px; color:var(--onix-muted); margin-top:4px;">
+            ${escapeHtml(SHADOW_FINDING_LABELS[f.kind] || f.kind)}: <strong>${escapeHtml(f.value)}</strong>
+          </div>
+          <div style="font-size:12px; color:var(--onix-dim); margin-top:2px; white-space:pre-wrap;">${escapeHtml(f.line)}</div>
+        `).join('')}
+        <div style="font-size:11px; color:var(--onix-dim); margin-top:4px;">
+          ${escapeHtml(timeAgo(d.createdAt))} · alcance ${escapeHtml(d.scope)} · <span class="onix-num">${d.toolsCalled}</span> herramientas
+        </div>
+      </div>
+      ${d.customerId ? `<button class="btn-secondary" style="flex-shrink:0;" onclick="goToCustomerChat('${d.customerId}')">Ver chat</button>` : ''}
+    </div>
+  `).join('');
+}
+
 async function loadHealth() {
   const container = document.getElementById('health-container');
   if (!container) return;
   const isFirstLoad = lastHealthSnapshot === null;
   if (isFirstLoad) container.innerHTML = '<div class="card empty-state">Cargando…</div>';
   try {
-    const [pendingRes, failuresRes, logRes, incidentsRes, findingsRes, baselineRes, confirmationsRes] = await Promise.all([
+    const [pendingRes, failuresRes, logRes, incidentsRes, findingsRes, baselineRes, confirmationsRes, shadowRes] = await Promise.all([
       apiFetch('/admin/api/pending-questions'),
       apiFetch('/admin/api/delivery-failures'),
       apiFetch('/admin/api/owner-log'),
@@ -4417,6 +4465,7 @@ async function loadHealth() {
       apiFetch('/admin/api/health-findings'),
       apiFetch('/admin/api/baseline'),
       apiFetch('/admin/api/pending-confirmations'),
+      apiFetch('/admin/api/catalog-shadow'),
     ]);
     const pending = await pendingRes.json();
     const failures = await failuresRes.json();
@@ -4425,8 +4474,9 @@ async function loadHealth() {
     const { findings } = await findingsRes.json();
     const baseline = await baselineRes.json();
     const confirmations = await confirmationsRes.json();
+    const shadow = await shadowRes.json();
 
-    const snapshot = JSON.stringify({ pending, failures, log, incidents, findings, baseline, confirmations });
+    const snapshot = JSON.stringify({ pending, failures, log, incidents, findings, baseline, confirmations, shadow });
     if (snapshot === lastHealthSnapshot) return;
     lastHealthSnapshot = snapshot;
 
@@ -4526,6 +4576,18 @@ async function loadHealth() {
           todavía dicen "sin medir" necesitan un detector que aún no existe.
         </div>
         ${baselineCardsHtml(baseline)}
+      </div>
+
+      <div class="section-title">${SHADOW_ICON}Validación del catálogo (modo sombra, ${shadow.days} días)</div>
+      <div class="card" style="margin-bottom:16px;">
+        <div style="font-size:12.5px; color:var(--onix-muted); margin-bottom:10px;">
+          Antes de que salga cada mensaje, se comparan los precios y los nombres de producto que aparecen
+          en listas o en negrita contra tu catálogo real. <strong>Por ahora solo se anota</strong>: el
+          cliente recibe el mensaje igual, sin cambiar una coma. Es para ver cuánto acierta antes de
+          dejarlo corregir de verdad.
+        </div>
+        ${catalogShadowCardsHtml(shadow)}
+        ${catalogShadowDetectionsHtml(shadow)}
       </div>
 
       <div class="section-title">Lo que encontró el chequeo automático</div>

@@ -872,6 +872,11 @@ model AgentTurn {
   blocks         String[] @default([])
   // Ids de producto cuyos medios salieron con los bloques de este turno.
   mediaProductIds String[] @default([])
+  // Pieza 5 del plan de catalogo y medios, EN MODO SOMBRA: lo que la validacion contra el catalogo real
+  // HABRIA marcado en el texto de este turno, un JSON por hallazgo ({kind, value, line}). Nada de esto
+  // cambia lo que recibe el cliente - la activacion es un cambio aparte, despues de 48h de datos.
+  // Array vacio = el turno no marco nada, que es el caso normal.
+  shadowFindings String[] @default([])
   createdAt      DateTime @default(now())
 
   @@index([businessId, createdAt])

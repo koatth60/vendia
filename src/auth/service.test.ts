@@ -26,7 +26,7 @@ before(async () => {
       passwordHash: await hashPassword("old-password-123"),
       contactPhone: "573000000000",
       contactName: "Owner",
-      whatsappPhoneNumberId: "test-phone-id",
+      whatsappPhoneNumberId: `test-phone-${randomUUID()}`,
       whatsappAccessToken: "test-token",
     },
   });

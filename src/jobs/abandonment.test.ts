@@ -19,7 +19,7 @@ before(async () => {
       passwordHash: "x",
       active: true,
       abandonedAfterHours: 72,
-      whatsappPhoneNumberId: "test-phone-id",
+      whatsappPhoneNumberId: `test-phone-${randomUUID()}`,
       whatsappAccessToken: "test-token",
       cartRecoveryTemplateName: "recuperar_carrito",
       // La recuperacion de carrito sigue detras de saleStateEnabled: desde 2026-09-15 SaleState.items se

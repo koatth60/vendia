@@ -50,7 +50,7 @@ async function seedOrder() {
       name: `Test ${randomUUID()}`,
       email: `test-${randomUUID()}@example.com`,
       passwordHash: "x",
-      whatsappPhoneNumberId: "test-phone-id",
+      whatsappPhoneNumberId: `test-phone-${randomUUID()}`,
       whatsappAccessToken: "test-token",
     },
   });

@@ -2,6 +2,7 @@ import { Router } from "express";
 import { getAiUsageSummary, getPlanUsage } from "../../ai/usage";
 import { getAgentIncidentSummary, getHealthFindings } from "../../ai/incidents";
 import { getConfigHealth } from "../../ai/configHealth";
+import { getShadowValidationSummary } from "../../ai/agentTurns";
 import { getAnalyticsSummary, getBaselineMetrics } from "../../analytics/service";
 import { businessIdOf } from "./shared";
 
@@ -26,6 +27,14 @@ insightsRouter.get("/api/agent-incidents", async (req, res) => {
 insightsRouter.get("/api/health-findings", async (req, res) => {
   const findings = await getHealthFindings(businessIdOf(req));
   res.json({ findings });
+});
+
+// Pieza 5 del plan de catalogo y medios (2026-09-16), MODO SOMBRA: cuantos mensajes del bot HABRIAN
+// quedado marcados por la validacion contra el catalogo real, y cuales. No cambia ni una respuesta -
+// es el numero con el que se decide, dentro de 48 horas, si la validacion se activa o no.
+insightsRouter.get("/api/catalog-shadow", async (req, res) => {
+  const summary = await getShadowValidationSummary(businessIdOf(req));
+  res.json(summary);
 });
 
 // Fase G, 2026-09-13 audit: surfaces the config gaps that today fail silently in production - see
