@@ -126,6 +126,45 @@ test("los bloques que compone el servidor nunca se marcan", () => {
   assert.deepEqual(validateAgainstCatalog(blocks.map((b) => b.text), FACTS), []);
 });
 
+// Los dos unicos hallazgos reales que dejo el modo sombra en 24 horas (4 turnos de 56, 2026-09-16), tal
+// cual quedaron guardados en AgentTurn.shadowFindings. Los dos son FALSOS POSITIVOS: las dos lineas las
+// compuso renderCatalog leyendo la base, y el validador las marcaba porque comparaba el nombre con las
+// decoraciones que el mismo servidor le habia puesto - el prefijo de numeracion y el sufijo de variante.
+//
+// Mientras esto no este en cero, activar la Pieza 5 romperia los bloques del propio servidor.
+
+test("no marca los bloques que compuso el servidor: las dos lineas reales del 2026-09-16", () => {
+  const facts: CatalogFacts = {
+    priceDigits: new Set(["145000", "125000"]),
+    productNameTokens: [
+      new Set(tokenize("Reloj Inteligente Smartwatch Serie 11 Mini (Edición Compacta y Elegante)")),
+      new Set(tokenize("Smartwatch hello plum")),
+    ],
+  };
+
+  const lineas = [
+    "*5. Reloj Inteligente Smartwatch Serie 11 Mini* — $145.000",
+    "2. *Smartwatch hello plum (Negro)* — $125.000 (1 disponibles)",
+  ];
+
+  assert.deepEqual(validateAgainstCatalog(lineas, facts), []);
+});
+
+test("sacarle la decoracion a un nombre inventado no lo vuelve real", () => {
+  const facts: CatalogFacts = {
+    priceDigits: new Set(["145000"]),
+    productNameTokens: [new Set(tokenize("Reloj Inteligente Smartwatch Serie 11 Mini"))],
+  };
+
+  const findings = validateAgainstCatalog(["*5. Cargador iPhone Magnetico (Negro)* — $145.000"], facts);
+
+  assert.deepEqual(
+    findings.map((f) => f.value),
+    ["5. Cargador iPhone Magnetico (Negro)"],
+    "el hallazgo conserva el nombre tal cual estaba escrito, decoraciones incluidas"
+  );
+});
+
 test("extractPrices corta la cifra donde termina y no se come el stock", () => {
   assert.deepEqual(extractPrices("1. *X* — $145.000 (3 disponibles)"), [{ raw: "145.000", digits: "145000" }]);
   assert.deepEqual(extractPrices("sin cifras"), []);

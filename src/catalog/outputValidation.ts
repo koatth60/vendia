@@ -1,7 +1,7 @@
 import { prisma } from "../db/client";
 import { formatPrice } from "../config/money";
 import { tokenize } from "../search/text";
-import { startsAsNumberedItem } from "./presenter";
+import { startsAsNumberedItem, stripPresentationDecorations } from "./presenter";
 
 // Pieza 5 del plan de catalogo y medios (ONIX-PLAN-CATALOGO-Y-MEDIOS.md), EN MODO SOMBRA.
 //
@@ -187,7 +187,14 @@ export function collectCatalogClaims(text: string): CatalogClaim[] {
  * es inventar. Por eso se exige que los tokens del nombre escrito esten TODOS en el nombre real.
  */
 function nameExists(name: string, facts: CatalogFacts): boolean {
-  const tokens = tokenize(name);
+  // Antes de comparar se le sacan las decoraciones que el propio servidor le pone al nombre al
+  // escribirlo en un bloque (ver stripPresentationDecorations en presenter.ts). Sin esto el validador
+  // marcaba como inexistentes productos que SI existen, porque comparaba "5. Reloj Inteligente
+  // Smartwatch Serie 11 Mini" o "Smartwatch hello plum (Negro)" contra el nombre pelado de la base.
+  // Medido en produccion el 2026-09-16: 4 turnos de 56 en 24 horas, los cuatro sobre lineas que habia
+  // compuesto renderCatalog leyendo la base. Un nombre inventado sigue marcando igual: sacarle "5. " o
+  // "(Negro)" a algo que no existe deja algo que sigue sin existir.
+  const tokens = tokenize(stripPresentationDecorations(name));
   if (tokens.length < MIN_NAME_TOKENS) return true;
   return facts.productNameTokens.some((real) => tokens.every((token) => real.has(token)));
 }

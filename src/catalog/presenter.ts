@@ -371,6 +371,34 @@ export function stripLinesAlreadyInBlocks(text: string, blocks: CatalogBlock[]):
   return lineKey(result) ? result : "";
 }
 
+/**
+ * Le saca a un nombre las decoraciones que le pone ESTE archivo al escribirlo adentro de un bloque: el
+ * prefijo de numeracion que arma renderNumberedGroup ("5. ") y el sufijo de variante entre parentesis
+ * que arman renderSingle y mediaBlockFor con variantLabel ("(Negro)"). Lo que queda es el nombre como
+ * esta en la base, que es lo unico contra lo que tiene sentido comparar.
+ *
+ * Vive aca, al lado de las funciones que ponen esas decoraciones, por la misma razon que
+ * startsAsNumberedItem: una sola definicion de cada forma, compartida con quien despues la tiene que
+ * deshacer (src/catalog/outputValidation.ts).
+ *
+ * Sin expresion regular (regla del repositorio): se recorre caracter por caracter.
+ */
+export function stripPresentationDecorations(name: string): string {
+  let out = name.trim();
+  if (startsAsNumberedItem(out)) {
+    let i = 0;
+    while (i < out.length && out[i] >= "0" && out[i] <= "9") i++;
+    out = out.slice(i + 2).trim(); // el "." o ")" mas el espacio
+  }
+  // Solo el ULTIMO parentesis y solo si cierra el nombre: un producto cuyo nombre real lleva parentesis
+  // adentro ("Serie 11 Mini (Edición Compacta) negro") no se queda sin su parte util.
+  if (out.endsWith(")")) {
+    const open = out.lastIndexOf("(");
+    if (open > 0) out = out.slice(0, open).trim();
+  }
+  return out;
+}
+
 export function startsAsNumberedItem(line: string): boolean {
   let i = 0;
   while (i < line.length && line[i] >= "0" && line[i] <= "9") i++;
