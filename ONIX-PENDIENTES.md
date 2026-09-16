@@ -69,6 +69,24 @@ Ver `ONIX-PLAN-MAESTRO.md`, sección 4.
   rename viejo, y una copia compilada de un test de costo real en `dist/` ya facturó a
   DeepSeek una vez (ver `CLAUDE.md`). El build de producción no tiene por qué compilar
   pruebas.
+- **No hay forma de probar un cambio de prompt.** La suite de replay (`src/ai/replay/`) mockea
+  `deepseek.chat.completions.create` y devuelve respuestas grabadas (`toChatCompletion` en
+  `replay.ts`): el prompt se arma, se manda y se descarta. Por construccion, **ningun cambio en
+  `src/ai/prompts/systemPrompt.ts` puede mover un fixture**. Hoy el unico instrumento que valida
+  una edicion del prompt es `npm run regression`, que llama a DeepSeek de verdad y cuesta plata,
+  asi que cada cambio de prompt o se paga o se despliega a ciegas. Descubierto el 2026-09-16 al
+  borrar directivas: el prompt de esa fase nombraba la suite de replay como red de seguridad, y
+  no lo es. Vale la pena un modo de replay que compare el prompt renderizado contra una version
+  aprobada (snapshot), que es gratis y detecta cambios no intencionales, aunque no diga como
+  reacciona el modelo.
+
+- **`scripts/` no pasa por el chequeo de tipos.** `tsconfig.json` tiene `"include": ["src"]`, asi
+  que `npx tsc --noEmit` da limpio con scripts rotos. El 2026-09-16 se descubrio pagando una
+  corrida de regresion: `generateReply` paso a devolver `{ text, blocks }` y los dos llamadores de
+  `scripts/` quedaron sin actualizar (`run-regression-suite.ts`, `record-replay.ts`). Se arreglaron,
+  pero la causa sigue: cualquier cambio de firma vuelve a romperlos en silencio hasta que alguien
+  pague una corrida.
+
 - **Advertencia `MemoryStore` en el log de arranque.** El panel usa `PgSession`
   (`src/auth/sessionMiddleware.ts:23`), así que las sesiones sí persisten. La advertencia sale
   de otro lado y no está explicada.

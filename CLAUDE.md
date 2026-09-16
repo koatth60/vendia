@@ -117,3 +117,42 @@ antes de responder, reintentar, caer a código, escalar) está descrito en
 
 El reintento es mitigación, no garantía. La garantía la da el fallback, porque no tiene al
 modelo adentro.
+
+# El norte: un agente con catálogo, no un chatbot
+
+Decisión del dueño del proyecto, 2026-09-16. Va junto con la regla de arriba y la condiciona.
+
+**La imagen que hay que tener en la cabeza:** un vendedor con el catálogo del negocio en la
+mano. El cliente pregunta, el vendedor revisa el catálogo y contesta con lo que hay. No se
+inventa productos, no se inventa precios, no dice "no hay" sin mirar. Pero conversa como una
+persona: recomienda, pregunta, ofrece fotos, maneja una objeción, cierra.
+
+Onix tiene que ser eso, para **cualquier** negocio: se le cargan categorías, productos, fotos,
+descripciones y preguntas frecuentes, y con eso vende.
+
+## Qué se le fuerza y qué no
+
+- **Hechos** — precios, stock, qué productos existen, qué colores hay, qué dice la FAQ.
+  Se fuerzan SIEMPRE. El modelo nunca es la fuente; el servidor se los da.
+- **Efectos con plata** — crear el pedido, avisarle al dueño, cancelar. Se fuerza que ocurran
+  y se verifica contra la base que ocurrieron. El servidor es la herramienta con la que el
+  agente comprueba si algo salió o hay que reintentarlo.
+- **Conversación** — qué decir, cómo decirlo, cuándo preguntar, cuándo insistir, cómo manejar
+  una objeción. **Acá no se fuerza nada.** Cada regla que se mete en esta categoría convierte
+  al agente en un chatbot con un adorno de IA encima.
+
+## La regla que devuelve libertad
+
+> **Cada hecho que el servidor se lleva, es una directiva del prompt que se puede borrar.**
+
+El error histórico fue hacer solo la mitad: se agregaban garantías en código y se dejaban las
+directivas viejas que existían para suplirlas. Por eso el prompt llegó a 568 líneas de "cuando
+el cliente diga X, hacé Y". Toda fase que garantice un hecho tiene que terminar borrando la
+directiva que ese hecho vuelve innecesaria.
+
+## La medida
+
+**Las líneas de `src/ai/prompts/systemPrompt.ts` tienen que ir BAJANDO mientras los errores se
+mantienen en cero.** 568 el 2026-09-16. Si sube y no hay errores, nos estamos convirtiendo en
+chatbot sin que nadie lo decida. Antes de agregar texto al prompt, hay que poder decir qué
+línea se borra a cambio.

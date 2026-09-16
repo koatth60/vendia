@@ -170,7 +170,7 @@ async function replayConversation(businessId: string, fixture: FixtureConversati
     let reply = "";
     let threw: unknown = null;
     try {
-      reply = await generateReply(conversation.id, context, personality, m.content);
+      ({ text: reply } = await generateReply(conversation.id, context, personality, m.content));
       if (process.env.DEBUG_TOOLCALLS) console.log("[reply]", JSON.stringify(reply));
     } catch (error) {
       threw = error;

@@ -98,7 +98,7 @@ async function main() {
       };
 
       console.log(`  turno: "${m.content.slice(0, 60)}"`);
-      const reply = await generateReply(conversation.id, context, personality, m.content);
+      const { text: reply } = await generateReply(conversation.id, context, personality, m.content);
       await recordMessage(businessId, conversation.id, "ASSISTANT", reply);
       console.log(`    -> ${recorded.length} llamada(s) al modelo, respuesta final: "${reply.slice(0, 80)}"`);
 
