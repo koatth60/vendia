@@ -1815,7 +1815,7 @@ function renderThreadMessages(thread, messages) {
 }
 
 function updateCloseSaleButtonVisibility(status) {
-  document.getElementById('close-sale-btn').style.display = status === 'SOLD' ? 'none' : 'inline-block';
+  document.getElementById('close-sale-btn').style.display = status === 'SOLD' ? 'none' : 'inline-flex';
 }
 
 async function pollConversation() {
@@ -2327,7 +2327,14 @@ async function confirmCloseSale() {
 
 function renderHandoffState(humanControl) {
   const btn = document.getElementById('modal-handoff-btn');
-  btn.textContent = humanControl ? 'Devolver a la IA' : 'Tomar control';
+  const label = humanControl ? 'Devolver a la IA' : 'Tomar control';
+  btn.querySelector('.btn-label').textContent = label;
+  btn.title = label;
+  btn.setAttribute('aria-label', label);
+  // A ancho de telefono el texto se esconde y solo queda el icono - cambia
+  // según el estado para no dejar el mismo dibujo diciendo dos cosas distintas.
+  btn.querySelector('.icon-take-control').hidden = humanControl;
+  btn.querySelector('.icon-return-bot').hidden = !humanControl;
   btn.dataset.active = humanControl ? 'true' : 'false';
   const input = document.getElementById('modal-composer-input');
   if (input) {

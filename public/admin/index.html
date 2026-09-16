@@ -22,7 +22,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400..700&family=JetBrains+Mono:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&family=Work+Sans:wght@400;500;600;700&display=swap">
 <link rel="stylesheet" href="/admin/css/tokens.css?v=2" />
 <script src="/admin/js/theme.js?v=2" defer></script>
-<link rel="stylesheet" href="/admin/css/admin.css?v=2" />
+<link rel="stylesheet" href="/admin/css/admin.css?v=4" />
 </head>
 <body>
   <div class="app">
@@ -801,9 +801,17 @@
 
     <div class="tab-panel" data-tab-panel="conversations">
       <div class="panel-header">
-        <div>
-          <div class="panel-title">Conversaciones</div>
-          <div class="panel-subtitle">Lo que tus clientes le están hablando al bot, en vivo.</div>
+        <div style="display:flex; align-items:center; gap:8px;">
+          <!-- Solo se ve a ancho de telefono (media query en admin.css): con el
+               chrome principal escondido en esta pantalla, es la única forma de
+               volver a Inicio/Catálogo/Bot/Negocio. -->
+          <button type="button" class="btn-ghost inbox-back-btn" onclick="switchSection('inicio')" title="Volver" aria-label="Volver">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 5.5 7 12l7.5 6.5"></path></svg>
+          </button>
+          <div>
+            <div class="panel-title">Conversaciones</div>
+            <div class="panel-subtitle">Lo que tus clientes le están hablando al bot, en vivo.</div>
+          </div>
         </div>
         <div class="realtime-indicator" id="realtime-indicator-conversations"><span class="realtime-dot"></span><span class="realtime-indicator-text">Conectando…</span></div>
       </div>
@@ -835,8 +843,17 @@
                   <div class="modal-header-meta" id="modal-subtitle"></div>
                 </div>
                 <div class="chat-panel-actions">
-                  <button class="btn-primary" type="button" id="close-sale-btn" onclick="openCloseSaleForm()">Cerrar venta</button>
-                  <button class="btn-ghost" id="modal-handoff-btn" onclick="toggleHandoff()"></button>
+                  <!-- .btn-icon queda oculto por CSS salvo a ancho de telefono, donde
+                       reemplaza el texto (mismos botones, sin reescribir escritorio). -->
+                  <button class="btn-primary mobile-icon-btn" type="button" id="close-sale-btn" onclick="openCloseSaleForm()" title="Cerrar venta" aria-label="Cerrar venta">
+                    <svg class="btn-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5 9.5 18 20 6"></path></svg>
+                    <span class="btn-label">Cerrar venta</span>
+                  </button>
+                  <button class="btn-ghost mobile-icon-btn" id="modal-handoff-btn" onclick="toggleHandoff()">
+                    <svg class="btn-icon icon-take-control" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8.3" r="3.1"></circle><path d="M5.3 19.3c0-3.5 3-5.8 6.7-5.8s6.7 2.3 6.7 5.8"></path></svg>
+                    <svg class="btn-icon icon-return-bot" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" hidden><rect x="4" y="7.5" width="16" height="12" rx="3.5"></rect><path d="M12 7.5V4"></path><path d="M9 13h.01M15 13h.01"></path></svg>
+                    <span class="btn-label"></span>
+                  </button>
                 </div>
               </div>
               <div class="thread-subbar">
@@ -1067,6 +1084,6 @@
 
 <script async defer crossorigin="anonymous" src="https://connect.facebook.net/en_US/sdk.js"></script>
 <script src="/socket.io/socket.io.js"></script>
-<script src="/admin/js/admin.js?v=3"></script>
+<script src="/admin/js/admin.js?v=4"></script>
 </body>
 </html>
