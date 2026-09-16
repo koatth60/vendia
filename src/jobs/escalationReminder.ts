@@ -2,7 +2,6 @@ import { prisma } from "../db/client";
 import { sendAlertToOwner, sendToCustomer, type WhatsappCredentials } from "../whatsapp/outbound";
 import { recordOwnerMessage } from "../delivery/ownerLog";
 import { recordAgentIncident } from "../ai/incidents";
-import { retrySaleConfirmation } from "../whatsapp/ownerConfirmation";
 import {
   findPendingOwnerQuestionsDueForReminder,
   markPendingOwnerQuestionReminded,
@@ -13,8 +12,6 @@ import {
   markStalledReminderSent,
   findFlagIntentEscalationsPastTimeout,
   clearConversationIntent,
-  findOpenPendingConfirmationsForBusiness,
-  clearPendingConfirmation,
   recordMessage,
   CUSTOMER_FOLLOWUP_TEXT,
   getWindowState,
@@ -197,90 +194,6 @@ export async function runEscalationReminderJob(): Promise<void> {
       await setHumanControl(business.id, conversation.conversationId, false);
       await clearConversationIntent(business.id, conversation.conversationId);
       await recordAgentIncident(business.id, "INTENT_ESCALATION_TIMEOUT", text, conversation.conversationId, "intent_escalation_timeout");
-    }
-
-    // 2026-09-16: las confirmaciones de venta sin responder no las perseguia nadie. Este bloque mira
-    // `Conversation.pendingConfirmationAskedAt`, que es la marca de "se le pidio la confirmacion al dueno
-    // y sigue sin contestar" - existe tambien cuando los tres escalones de envio fallaron y no hay wamid,
-    // que es precisamente el caso que antes desaparecia sin rastro.
-    //
-    // Caso real que lo motivo (conversacion cmu3htnp0009y4k2kzxhy9dlz): la clienta pago $154.000 por
-    // Nequi y la duena se entero horas despues, a mano.
-    //
-    // Dos diferencias con PendingOwnerQuestion, las dos a proposito:
-    //   - Se insiste cada `ownerReminderMinutes` hasta que responda, no una sola vez: hay plata de un
-    //     cliente esperando, no una pregunta de catalogo.
-    //   - El vencimiento corre primero, para que una conversacion que ya vencio no reciba un
-    //     recordatorio mas en la misma pasada antes de pasar a control manual.
-    const confirmationTimeoutBefore = new Date(Date.now() - business.ownerQuestionTimeoutHours * 60 * 60 * 1000);
-    const timedOutConfirmations = await findOpenPendingConfirmationsForBusiness(business.id, {
-      askedBefore: confirmationTimeoutBefore,
-    });
-    const timedOutConfirmationIds = new Set(timedOutConfirmations.map((c) => c.id));
-    for (const conversation of timedOutConfirmations) {
-      const customerLabel = customerDisplayName(conversation.customer);
-      const text = `Se vencio el tiempo de espera (${business.ownerQuestionTimeoutHours}h) sin que confirmaras si te llego el pago de ${customerLabel}: "${conversation.pendingOrderSummary ?? "sin resumen"}". NO se creo ningun pedido. La conversacion paso a control manual - revisala en el panel.`;
-      const alert = await sendAlertToOwner(business.id, credentials, business.contactPhone, text);
-      await recordOwnerMessage(business.id, {
-        direction: "OUT",
-        conversationId: conversation.id,
-        body: text,
-        success: alert.delivered,
-        errorMessage: alert.failure?.message ?? null,
-        wamid: alert.delivered ? alert.wamid : null,
-      });
-      if (!alert.delivered) console.error(`No se pudo avisar del vencimiento de una confirmacion de venta (conversation=${conversation.id}):`, alert.failure?.message);
-
-      await clearPendingConfirmation(conversation.id);
-      await setHumanControl(business.id, conversation.id, true);
-      await recordAgentIncident(business.id, "SALE_CONFIRMATION_TIMEOUT", text, conversation.id, "sale_confirmation_timeout");
-
-      // El cliente pago y lleva horas oyendo "estoy confirmando tu pago". Una sola linea, la misma que ya
-      // usan las otras escalaciones (y que la consulta de estancadas sabe que no cuenta como respuesta),
-      // para que no quede mudo justo cuando la conversacion pasa a manos de una persona.
-      if (!customerNotifiedThisRun.has(conversation.id) && (await canReachCustomer(conversation.id))) {
-        customerNotifiedThisRun.add(conversation.id);
-        const nudge = await sendToCustomer({
-          businessId: business.id,
-          conversationId: conversation.id,
-          credentials,
-          to: conversation.customer.phoneNumber,
-          content: { kind: "text", text: CUSTOMER_FOLLOWUP_TEXT },
-          onWindowClosed: "fail",
-          recordAs: { text: CUSTOMER_FOLLOWUP_TEXT },
-        });
-        if (!nudge.delivered) {
-          console.error(`No se pudo avisar al cliente del pago en verificacion (conversation=${conversation.id}):`, nudge.failure?.message);
-        }
-      }
-    }
-
-    // El vencimiento del proximo intento lo lleva la propia confirmacion, no un umbral fijo del job:
-    // el intervalo crece con el numero de intento (CONFIRMATION_REMINDER_STEPS). Con cadencia fija, la
-    // config real de MAGByLizN (5 minutos / 24 horas) daba ~288 mensajes al dueno por UNA venta.
-    const dueConfirmations = await findOpenPendingConfirmationsForBusiness(business.id, {
-      dueBefore: new Date(),
-    });
-    for (const conversation of dueConfirmations) {
-      if (timedOutConfirmationIds.has(conversation.id)) continue;
-      const outcome = await retrySaleConfirmation({
-        businessId: business.id,
-        conversationId: conversation.id,
-        credentials,
-        ownerPhone: business.contactPhone,
-        contactName: business.contactName,
-        customer: conversation.customer,
-        summary: conversation.pendingOrderSummary,
-        attempt: conversation.pendingConfirmationAttempts + 1,
-        reminderMinutes: business.ownerReminderMinutes,
-        budget: {
-          templatesSent: conversation.pendingConfirmationTemplatesSent,
-          lastTemplateAt: conversation.pendingConfirmationLastTemplateAt,
-        },
-      });
-      if (outcome.channel === "NONE") {
-        console.error(`No se pudo reintentar la confirmacion de venta (conversation=${conversation.id}):`, outcome.error);
-      }
     }
 
     const stalled = await findStalledConversationsDueForReminder(business.id, stage1Before, stage2Before);

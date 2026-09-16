@@ -18,6 +18,8 @@ import { runConversationHealthJob, HEALTH_CHECK_INTERVAL_MS } from "./jobs/conve
 import { runOutboundQueueJob, OUTBOUND_QUEUE_INTERVAL_MS } from "./jobs/outboundQueue";
 import { runTokenExpiryJob, TOKEN_EXPIRY_CHECK_INTERVAL_MS } from "./jobs/tokenExpiry";
 import { runAbandonmentJob, ABANDONMENT_CHECK_INTERVAL_MS } from "./jobs/abandonment";
+import { runSaleConfirmationChaserJob, SALE_CONFIRMATION_CHASER_INTERVAL_MS } from "./jobs/saleConfirmationChaser";
+import { runStartupJobs } from "./jobs/startup";
 
 const app = express();
 app.set("trust proxy", 1);
@@ -83,6 +85,13 @@ server.listen(env.port, () => {
   console.log(`Server listening on port ${env.port}`);
 });
 
+// setInterval no dispara al arrancar, solo despues del primer intervalo completo, asi que cada reinicio
+// empujaba todo lo pendiente un intervalo entero mas adelante (medido el 2026-09-16: reinicio 16:32 UTC,
+// confirmacion vencida 16:34, primera pasada 17:02). Los siete jobs se apoyan en fechas guardadas en la
+// base para decidir a quien tocar, asi que una pasada de mas no manda nada que no estuviera vencido
+// igual - el razonamiento, job por job, esta en src/jobs/startup.ts.
+runStartupJobs().catch((error) => console.error("Error corriendo los jobs al arranque:", error));
+
 const FOLLOW_UP_INTERVAL_MS = 60 * 60 * 1000;
 setInterval(() => {
   runFollowUpJob().catch((error) => console.error("Error corriendo el job de seguimiento post-venta:", error));
@@ -92,6 +101,15 @@ const ESCALATION_REMINDER_INTERVAL_MS = 30 * 60 * 1000;
 setInterval(() => {
   runEscalationReminderJob().catch((error) => console.error("Error corriendo el job de recordatorio de escalaciones:", error));
 }, ESCALATION_REMINDER_INTERVAL_MS);
+
+// El perseguidor de confirmaciones de venta tiene reloj propio y mucho mas fino (ver
+// SALE_CONFIRMATION_CHASER_INTERVAL_MS). Con los 30 minutos del job de escalaciones,
+// Business.ownerReminderMinutes no se podia cumplir: el panel deja poner 5 y el piso real era 30.
+setInterval(() => {
+  runSaleConfirmationChaserJob().catch((error) =>
+    console.error("Error corriendo el perseguidor de confirmaciones de venta:", error)
+  );
+}, SALE_CONFIRMATION_CHASER_INTERVAL_MS);
 
 // Fase 0: el chequeo de conversaciones corre solo. Ver src/jobs/conversationHealth.ts.
 setInterval(() => {
