@@ -25,6 +25,13 @@ export interface AgentTurnRecord {
    * consultar, y es el numero con el que se sabe si el cambio del 2026-09-16 sirvio.
    */
   catalogInlined: boolean;
+  /**
+   * UN SOLO AUTOR (2026-09-16): "modelo" cuando el agente escribio el mensaje entero con los datos
+   * estructurados del servidor y la verificacion contra el catalogo lo aprobo, "servidor" cuando la
+   * verificacion fallo dos veces y salio el bloque compuesto desde la base. null cuando el turno no
+   * paso por ese camino. Es el denominador de la tasa de caida al fallback.
+   */
+  catalogAuthor: "modelo" | "servidor" | null;
   /** Ids de producto cuyos medios salieron con esos bloques. */
   mediaProductIds: string[];
   /**

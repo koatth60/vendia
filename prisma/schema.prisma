@@ -873,11 +873,21 @@ model AgentTurn {
   // los dos casos a proposito: la auditoria tiene que poder ver el bloque que compuso el servidor sin
   // depender de donde termino saliendo. catalogInlined dice cual de los dos casos fue - sin mirarlo, una
   // fila con blocks no vacio NO significa que el cliente haya recibido un mensaje aparte con ese texto.
+  // Desde el camino de UN SOLO AUTOR (2026-09-16) hay un tercer caso: con catalogAuthor = "modelo" el
+  // bloque de esta columna NO se envio nunca - se compuso solo como fallback y el agente escribio el
+  // mensaje el mismo.
   blocks         String[] @default([])
   // true = el modelo puso la marca {{BLOQUE_CATALOGO}} y el bloque de arriba viajo adentro de su mensaje;
   // false = salio como mensaje aparte, o no hubo bloque. Es el denominador de la tasa de omision de la
   // marca, que es el numero con el que se sabe si el cambio del 2026-09-16 sirvio.
   catalogInlined Boolean  @default(false)
+  // UN SOLO AUTOR (2026-09-16). Quien escribio el mensaje de catalogo que recibio el cliente:
+  // "modelo" = el agente lo escribio entero con los datos estructurados del servidor y la verificacion
+  // contra el catalogo lo aprobo; "servidor" = la verificacion fallo dos veces y salio el bloque
+  // compuesto, que es texto leido de la base. null = este turno no paso por ese camino (alcance
+  // distinto de "one", o sin alcance). Es el denominador de la tasa de caida al fallback: el incidente
+  // solo da el numerador.
+  catalogAuthor  String?
   // Ids de producto cuyos medios salieron con los bloques de este turno.
   mediaProductIds String[] @default([])
   // Pieza 5 del plan de catalogo y medios, EN MODO SOMBRA: lo que la validacion contra el catalogo real

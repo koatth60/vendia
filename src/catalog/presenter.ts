@@ -71,19 +71,19 @@ export const FEW_PRODUCTS_MAX = 2;
  */
 const MAX_LINES_PER_BLOCK = 12;
 
-/**
- * Tope de lineas de DESCRIPCION que ve el cliente en la ficha de un producto puntual. Vive aca, en un
- * solo lugar. El corte es por lineas COMPLETAS, nunca a mitad de una: la descripcion es una lista de
- * vinetas y cortar por caracteres parte la vineta al medio. El modelo sigue recibiendo la descripcion
- * entera (ver CatalogBlock.modelText), asi que una pregunta puntual sobre lo que quedo afuera la
- * contesta con el dato real.
- */
-const MAX_DESCRIPTION_LINES = 5;
+// MAX_DESCRIPTION_LINES (5) y MORE_DESCRIPTION_LINE se ELIMINARON el 2026-09-16, con el camino de un
+// solo autor. Cortaban CINCO LINEAS, no cinco caracteristicas, y no hay forma de calibrar ese numero:
+// medido en produccion ese mismo dia, la descripcion de "Smartwatch serie 12 mini" tiene 34 lineas y
+// arranca con dos de presentacion y una de titulo ("Características:"), asi que al cliente le llegaban
+// DOS caracteristicas de 31 y despues "¿Te cuento el resto?". Parecia una respuesta rota.
+//
+// Cualquier arreglo del corte (subir el numero, saltear encabezados, detectar eslogans) es calibrar una
+// guillotina que no deberia existir. La descripcion ahora va ENTERA: al agente como dato estructurado
+// (ver productFacts, que la separa en presentacion y caracteristicas), y a la ficha de respaldo tal
+// cual esta cargada. Cuantas caracteristicas nombrar y cuales es decision de conversacion, y esa es la
+// categoria donde este proyecto no fuerza nada.
 
 const PHOTO_OFFER_LINE = "¿De cuál te gustaría ver fotos?";
-
-/** Cierre del bloque cuando la descripcion no entro entera: el resto se ofrece, no se manda. */
-const MORE_DESCRIPTION_LINE = "¿Te cuento el resto de las características?";
 
 const DEFAULT_UNCATEGORIZED_LABEL = "Otros productos";
 
@@ -158,7 +158,7 @@ function descriptionLines(product: ScopeProduct): string[] {
  *
  * `alreadyPresented` es la segunda vez: el cliente ya leyo la descripcion y ya recibio las fotos, asi que
  * la ficha se reduce a lo que puede haber cambiado o que el cliente vuelve a necesitar - nombre, precio y
- * stock (con el stock por color cuando hay variantes). Sin descripcion, sin ofrecer el resto y sin medios.
+ * stock (con el stock por color cuando hay variantes). Sin descripcion y sin medios.
  * El modelo escribe encima lo suyo ("listo, el Ultra 3 entonces, ¿seguimos?").
  *
  * `modelText` sigue trayendo la descripcion ENTERA tambien en la version corta: el cliente no la ve de
@@ -191,12 +191,9 @@ function renderSingle(
     };
   }
 
-  const shown = description.slice(0, MAX_DESCRIPTION_LINES);
-  const customerLines = [...head, ...shown];
-  if (description.length > shown.length) customerLines.push(MORE_DESCRIPTION_LINE);
-
+  // Sin corte: la descripcion sale tal cual esta cargada. Ver la nota de MAX_DESCRIPTION_LINES arriba.
   return {
-    text: customerLines.join("\n"),
+    text: [...head, ...description].join("\n"),
     modelText: [...head, ...description].join("\n"),
     media: mediaBlockFor(product, variant),
     productIds: [product.id],
@@ -405,4 +402,77 @@ export function startsAsNumberedItem(line: string): boolean {
   if (i === 0) return false;
   if (line[i] !== "." && line[i] !== ")") return false;
   return line[i + 1] === " ";
+}
+
+/**
+ * UN SOLO AUTOR (2026-09-16). Los mismos datos que renderSingle escribe en prosa, pero SIN redactar:
+ * nombre, precio, stock, variantes con stock, descripcion y moneda, tal como salieron del `SELECT`.
+ *
+ * Existe porque la ficha compuesta por el servidor y la frase del modelo eran dos autores escribiendole
+ * al cliente en el mismo turno, y el codigo los coordinaba pidiendoselo por prompt. Con estos datos en
+ * el contexto el agente escribe el mensaje entero con su voz, y lo que escribe se verifica despues
+ * contra el catalogo (src/catalog/outputValidation.ts). El bloque de renderSingle sigue existiendo, pero
+ * como FALLBACK: es lo que sale si la verificacion falla dos veces.
+ *
+ * Vive al lado de renderSingle a proposito: son la misma lectura del producto: si una cambia y la otra
+ * no, el fallback dejaria de decir lo mismo que el agente.
+ */
+export interface ProductFacts {
+  nombre: string;
+  /** Ya formateado con la moneda y el locale del negocio ("$120.000"): es la forma exacta que valida. */
+  precio: string;
+  moneda: string;
+  /** El de la variante elegida cuando el cliente nombro un color; si no, el total del producto. */
+  stock: number;
+  /** El color/talle que el cliente nombro, si nombro alguno. */
+  varianteElegida: string | null;
+  /**
+   * Las variantes activas CON stock, con su stock real. Vacio cuando el cliente ya eligio una: nombrar
+   * las demas seria ofrecerle colores que no pidio (mismo criterio que renderSingle).
+   */
+  variantes: { nombre: string; stock: number }[];
+  /**
+   * La descripcion ENTERA, sin ningun corte, separada en sus dos partes. Cuantas caracteristicas
+   * nombrarle al cliente y cuales lo decide el agente segun lo que le preguntaron: no hay ningun numero
+   * fijo que calibrar, que es lo que hacia MAX_DESCRIPTION_LINES (ver la nota arriba).
+   */
+  descripcion: { presentacion: string[]; caracteristicas: string[] };
+}
+
+/**
+ * Un titulo dentro de la descripcion es una linea que TERMINA en ":" ("Características:"). Se lee la
+ * FORMA de la linea, no su significado - mismo criterio que startsAsNumberedItem: la puntuacion es
+ * estructura, no intencion, y no hace falta ninguna lista de palabras ni ningun vocabulario por rubro.
+ *
+ * Sin ningun titulo, todo va a `presentacion`: no sabemos donde empieza la lista, y decir que la
+ * descripcion entera son "caracteristicas" seria inventar una estructura que el negocio no cargo. El
+ * agente recibe las dos partes y las dos estan completas, asi que en ningun caso se pierde una linea.
+ */
+function splitDescription(lines: string[]): { presentacion: string[]; caracteristicas: string[] } {
+  const heading = lines.findIndex((line) => line.length > 1 && line.endsWith(":"));
+  if (heading === -1) return { presentacion: lines, caracteristicas: [] };
+  return { presentacion: lines.slice(0, heading), caracteristicas: lines.slice(heading + 1) };
+}
+
+export function productFacts(
+  product: ScopeProduct,
+  variant: ScopeVariant | null,
+  opts: RenderCatalogOptions
+): ProductFacts {
+  const variantes = variant
+    ? []
+    : product.variants
+        .filter((v) => v.active && v.stock > 0)
+        .map((v) => ({ nombre: variantLabel(v), stock: v.stock }))
+        .filter((v): v is { nombre: string; stock: number } => v.nombre !== null);
+
+  return {
+    nombre: product.name,
+    precio: priceLine(product, opts),
+    moneda: product.currency || opts.currency,
+    stock: variant ? variant.stock : totalStock(product),
+    varianteElegida: variant ? variantLabel(variant) : null,
+    variantes,
+    descripcion: splitDescription(descriptionLines(product)),
+  };
 }

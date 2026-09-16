@@ -356,3 +356,65 @@ bloque entra adentro de su mensaje, y correrlos antes evita recortar el bloque m
 - Una variante **sin stock** ya no se nombra. El bloque escribía "verde camuflado (sin stock)" y le
   ofrecía al cliente un color que no hay; en ese mismo turno el modelo las había omitido solo.
 - "1 disponible", no "1 disponibles". La concordancia también es parte de que no suene a máquina.
+
+## 11. Un solo autor (2026-09-16) — el agente escribe, el servidor verifica
+
+La sección 10 arregló la forma cuando el modelo colaboraba, y dejó intacta la causa. Medido en
+producción el 2026-09-16, turno 22:25:16 UTC, alcance `one:Smartwatch serie 12 mini`: la marca se le
+ofreció, el modelo no la puso, y el cliente recibió dos mensajes que decían lo mismo con otras palabras
+—el del modelo ("Está disponible en Rosado y Negro, y tiene un montón de funciones…") y el del servidor
+("Smartwatch serie 12 mini — $120.000 (4 disponibles) / Disponible en: Rosado (3 disponibles)…").
+Ninguno mentía. El defecto era de forma, y la causa es que en ese turno había **dos autores** y el
+código los coordinaba pidiéndoselo por prompt.
+
+### Qué se hizo
+
+Con alcance `one`, el servidor deja de componer un mensaje para enviar:
+
+1. Le entrega al agente los **datos** del alcance resuelto —nombre, precio, moneda, stock, variantes con
+   stock y descripción completa— como JSON en el contexto (`productFacts`, `src/catalog/presenter.ts`).
+2. El agente escribe **un** mensaje entero, con su voz. Se borró la directiva por turno que le pedía
+   "Escribí UNA sola frase corta de introducción y nada más": era la que lo convertía en un locutor de
+   fichas, y existía solo porque el servidor hablaba después.
+3. Antes de enviar, el servidor **verifica** ese texto contra el catálogo real (la Pieza 5, que hasta hoy
+   solo miraba). Activa **únicamente** en este camino.
+4. Si falla: un reintento; si vuelve a fallar, sale el bloque compuesto por el servidor, que es texto
+   leído de la base. El fallback no tiene modelo adentro, y por eso es garantía y no mitigación. Cada
+   caída deja un `AgentIncident` (`catalogo_autor_fallback`) y `AgentTurn.catalogAuthor` da el
+   denominador.
+5. Los medios no cambian: una foto sigue siendo un mensaje propio.
+
+Solo el alcance `one`. Una lista es estructura del servidor: su numeración tiene que coincidir con
+`lastPresentedProductIds` para que "el 3" del próximo turno resuelva. Ahí el dato **es** el orden, y eso
+no se delega. Las listas siguen usando la marca de la sección 10.
+
+### Qué decisión pierde el modelo
+
+**Qué nombres y qué precios llegan al cliente.** Hasta hoy salía lo que escribiera, sin verificar.
+Desde acá sale lo que existe en la base, o no sale.
+
+Para que eso valga en un mensaje escrito entero por el agente, la verificación amplía el barrido de
+**precios** a toda línea que traiga uno, no solo a las que están en posición de lista (`everyPrice`). El
+disparador de ese modo es el alcance resuelto en código, nunca una lectura de la prosa. Los **nombres**
+siguen reclamándose solo donde la forma los delimita —negrita o ítem de lista—: una cifra viene marcada
+con `$`, que es estructura; un nombre en prosa libre no lo está, y sacarlo de ahí sería adivinar.
+
+### `MAX_DESCRIPTION_LINES` se elimina
+
+Cortaba **cinco líneas, no cinco características**. La descripción de "Smartwatch serie 12 mini" tiene 34
+líneas y arranca con dos de presentación y un título ("Características:"), así que al cliente le llegaban
+**dos características de 31** y después "¿Te cuento el resto de las características?". Parecía una
+respuesta rota.
+
+No hay número que calibrar, y saltear encabezados o detectar eslóganes sería leer prosa. La descripción
+ahora va entera: al agente separada en `presentacion` y `caracteristicas` (el corte es una línea que
+termina en `:` —puntuación, que es forma, no intención— y sin título todo queda en `presentacion`, porque
+inventar una lista que el negocio no cargó sería peor), y a la ficha de respaldo tal cual está. Cuántas
+características nombrar y cuáles es decisión de conversación, y ahí este proyecto no fuerza nada.
+
+### Lo que el prompt devuelve
+
+`src/ai/prompts/systemPrompt.ts`: 545 → 539 líneas. Se borró `VARIANTES DEL MISMO PRODUCTO` (el servidor
+entrega las variantes activas con stock como dato en el turno donde esa directiva aplicaba) y la última
+frase de `CATALOGO` sobre "el serie 11 mini" (el alcance resuelve el producto nombrado contra el catálogo
+real antes de la primera llamada al modelo).

@@ -6,6 +6,7 @@ import {
   stripNumberedLines,
   stripLinesAlreadyInBlocks,
   FEW_PRODUCTS_MAX,
+  productFacts,
 } from "./presenter";
 import { resolveProductScopeFrom, type ScopeProduct } from "./scope";
 import { loadFixtureCatalog, productNamed } from "./fixtureCatalog";
@@ -218,17 +219,23 @@ test("con una variante ya elegida no se listan las demas", () => {
   assert.ok(!ficha.includes("Disponible en:"), `ya eligio color, no se le ofrecen los otros: "${ficha}"`);
 });
 
-test("una descripcion larga sale recortada y ofrece el resto; una corta sale entera y no ofrece nada", () => {
+// 2026-09-16: MAX_DESCRIPTION_LINES se elimino. Cortaba CINCO LINEAS, no cinco caracteristicas, y
+// medido en produccion ese mismo dia una descripcion de 34 lineas le dejaba al cliente DOS
+// caracteristicas de 31 y un "¿Te cuento el resto?". No hay numero que calibrar: la descripcion va
+// entera y cuantas caracteristicas nombrar lo decide el agente.
+test("una descripcion larga sale ENTERA: no queda ningun corte fijo", () => {
   const larga = render("el Serie 12 Ultra 3")[0];
-  const lineasDeDescripcion = larga.text
-    .split("\n")
-    .filter((l) => !l.startsWith("*") && !l.startsWith("Disponible en:") && !l.startsWith("¿Te cuento"));
-  assert.equal(lineasDeDescripcion.length, 5, `el tope son 5 lineas; salieron: ${lineasDeDescripcion.length}`);
-  assert.ok(larga.text.endsWith("¿Te cuento el resto de las características?"), `tiene que ofrecer el resto: "${larga.text}"`);
+  const ultra = productNamed(magimp, "Serie 12 Ultra 3");
+  const descripcion = ultra.description.split("\n").map((l) => l.trim()).filter(Boolean);
+
+  assert.ok(descripcion.length > 5, "el fixture tiene que tener mas lineas que el viejo tope, si no la prueba no prueba nada");
+  for (const linea of descripcion) {
+    assert.ok(larga.text.includes(linea), `falta una linea de la descripcion: "${linea}"`);
+  }
+  assert.ok(!larga.text.includes("¿Te cuento"), `ya no existe el ofrecimiento del resto: "${larga.text}"`);
 
   const corta = renderCatalog({ kind: "one", product: aurora[0], variant: null }, OPTS)[0];
-  assert.ok(!corta.text.includes("¿Te cuento"), `una descripcion de una linea no ofrece resto: "${corta.text}"`);
-  assert.ok(corta.text.includes(aurora[0].description.trim()), "y sale entera");
+  assert.ok(corta.text.includes(aurora[0].description.trim()), "una descripcion corta tambien sale entera");
 });
 
 test("el corte nunca parte una linea por la mitad", () => {
@@ -244,11 +251,11 @@ test("el corte nunca parte una linea por la mitad", () => {
   }
 });
 
-test("el modelo recibe la descripcion completa aunque el cliente vea el extracto", () => {
+test("la ficha de respaldo trae la descripcion completa, la vea quien la vea", () => {
   const bloque = render("el Serie 12 Ultra 3")[0];
   const ultima = "Garantía: 3 meses por defectos de fábrica";
-  assert.ok(!bloque.text.includes(ultima), "el cliente no ve la ultima linea");
-  assert.ok(bloque.modelText.includes(ultima), "el modelo si la ve, para poder contestar por ella");
+  assert.ok(bloque.text.includes(ultima), "sin corte, la ultima linea tambien sale");
+  assert.ok(bloque.modelText.includes(ultima), "el modelo la ve igual, para poder contestar por ella");
   assert.ok(bloque.modelText.includes("Disponible en: negro (7 disponibles)"), "y ve los colores reales");
 });
 
@@ -301,11 +308,10 @@ test("la segunda presentacion de un producto es corta: nombre, precio y stock, s
 
   const primera = renderCatalog(scope, OPTS)[0];
   assert.ok(primera.media.length > 0, "la primera vez no cambia nada: van los medios");
-  assert.ok(primera.text.includes("¿Te cuento el resto"), "la primera vez ofrece el resto de la descripcion");
+  assert.ok(primera.text.includes("Garantía: 3 meses"), "la primera vez sale la descripcion entera");
 
   const segunda = renderCatalog(scope, { ...OPTS, alreadyPresentedProductIds: [ultra.id] })[0];
   assert.deepEqual(segunda.media, [], "la segunda vez no se reenvia ni una foto");
-  assert.ok(!segunda.text.includes("¿Te cuento el resto"), `sin la linea de ofrecer el resto: "${segunda.text}"`);
   assert.ok(segunda.text.includes("$"), "el precio sigue saliendo");
   assert.ok(segunda.text.includes("Serie 12 Ultra 3"), "el nombre sigue saliendo");
   assert.ok(segunda.text.includes("disponibles"), "el stock sigue saliendo");
@@ -324,7 +330,7 @@ test("un registro de otro producto no acorta la ficha del que se esta presentand
   const scope = resolveProductScopeFrom(magimp, NO_ALIASES, "el Serie 12 Ultra 3", []);
   const blocks = renderCatalog(scope, { ...OPTS, alreadyPresentedProductIds: [mini.id] });
   assert.ok(blocks[0].media.length > 0, "los medios del Ultra 3 no los toca el registro del Mini");
-  assert.ok(blocks[0].text.includes("¿Te cuento el resto"), "y la ficha sale entera");
+  assert.ok(blocks[0].text.includes("Garantía: 3 meses"), "y la ficha sale entera");
 });
 
 // Un producto armado a mano: el catalogo anonimizado no tiene ninguna variante agotada ni ningun
@@ -371,4 +377,110 @@ test("con una sola unidad dice 'disponible', no 'disponibles'", () => {
   const variantes = renderCatalog({ kind: "one", product: conVariantes, variant: null }, OPTS)[0].text;
   assert.ok(variantes.includes("negro (1 disponible)"), `salio: "${variantes}"`);
   assert.ok(variantes.includes("gris (2 disponibles)"), "y el plural sigue en plural");
+});
+
+// UN SOLO AUTOR (2026-09-16, seccion 11 del plan). Los mismos datos que la ficha, SIN redactar: es lo
+// que recibe el agente para escribir el mensaje entero con su voz.
+
+test("productFacts entrega los datos del producto sin redactarlos", () => {
+  const product = productNamed(magimp, "Serie 11 Mini");
+  const facts = productFacts(product, null, OPTS);
+
+  assert.equal(facts.nombre, product.name);
+  assert.equal(facts.precio, "$145.000");
+  assert.equal(facts.moneda, "COP");
+  assert.equal(facts.varianteElegida, null);
+  const lineasDeLaBase = product.description.split("\n").map((l) => l.trim()).filter(Boolean);
+  const lineasEntregadas = [...facts.descripcion.presentacion, ...facts.descripcion.caracteristicas];
+  assert.deepEqual(lineasEntregadas, lineasDeLaBase, "la descripcion va ENTERA, sin ningun corte");
+  // Una variante sin stock no se nombra: nombrarla es ofrecerle al cliente un color que no hay.
+  assert.ok(
+    facts.variantes.every((v) => v.stock > 0),
+    JSON.stringify(facts.variantes)
+  );
+});
+
+test("productFacts con una variante elegida no ofrece las demas", () => {
+  const scope = resolveProductScopeFrom(magimp, NO_ALIASES, "el Serie 11 Mini negro", []);
+  assert.equal(scope.kind, "one");
+  if (scope.kind !== "one") return;
+
+  const facts = productFacts(scope.product, scope.variant ?? null, OPTS);
+  assert.equal(facts.varianteElegida, "Negro");
+  assert.deepEqual(facts.variantes, [], "el cliente ya eligio: listar las demas seria ofrecerle otro color");
+  assert.equal(facts.stock, scope.variant?.stock);
+});
+
+test("productFacts dice lo mismo que la ficha del servidor: el fallback no puede contradecir al agente", () => {
+  const product = productNamed(magimp, "Serie 11 Mini");
+  const facts = productFacts(product, null, OPTS);
+  const bloque = renderCatalog({ kind: "one", product, variant: null }, OPTS)[0];
+
+  assert.ok(bloque.text.includes(facts.nombre));
+  assert.ok(bloque.text.includes(facts.precio));
+  for (const variante of facts.variantes) {
+    assert.ok(bloque.text.includes(variante.nombre), `la ficha tambien nombra "${variante.nombre}"`);
+  }
+});
+
+test("la descripcion se separa en presentacion y caracteristicas por el titulo, y no se pierde ni una linea", () => {
+  // La forma real del producto que motivo el cambio (produccion 2026-09-16, "Smartwatch serie 12 mini"):
+  // dos lineas de presentacion, un titulo "Características:" y la lista debajo. Con el tope de 5 lineas
+  // al cliente le llegaban DOS caracteristicas de las 31.
+  const producto: ScopeProduct = {
+    id: "p-hw12",
+    name: "Smartwatch serie 12 mini",
+    description: [
+      "¡Pequeño, pero poderoso! ⌚💚",
+      "Conoce el HW12 Mini Smartwatch: diseño moderno, compacto y perfecto para llevar tu estilo a otro nivel.",
+      "Características:",
+      "Memoria interna de 1 Gb",
+      "Siri",
+      "Monitor de ritmo cardiaco",
+      "Oxígeno en la sangre",
+      "Modo deporte",
+    ].join("\n"),
+    category: "Relojes",
+    color: null,
+    size: null,
+    price: 120000,
+    currency: "COP",
+    stock: 4,
+    media: [],
+    variants: [],
+  };
+
+  const facts = productFacts(producto, null, OPTS);
+  assert.deepEqual(facts.descripcion.presentacion, [
+    "¡Pequeño, pero poderoso! ⌚💚",
+    "Conoce el HW12 Mini Smartwatch: diseño moderno, compacto y perfecto para llevar tu estilo a otro nivel.",
+  ]);
+  assert.deepEqual(facts.descripcion.caracteristicas, [
+    "Memoria interna de 1 Gb",
+    "Siri",
+    "Monitor de ritmo cardiaco",
+    "Oxígeno en la sangre",
+    "Modo deporte",
+  ]);
+  assert.ok(facts.descripcion.caracteristicas.length > 2, "no hay ningun tope de 5 lineas que deje 2 caracteristicas");
+});
+
+test("sin ningun titulo, la descripcion entera va a presentacion y no se inventa una lista", () => {
+  const producto: ScopeProduct = {
+    id: "p-simple",
+    name: "Producto simple",
+    description: "Una sola linea de descripcion, sin titulos.",
+    category: null,
+    color: null,
+    size: null,
+    price: 1000,
+    currency: "COP",
+    stock: 1,
+    media: [],
+    variants: [],
+  };
+
+  const facts = productFacts(producto, null, OPTS);
+  assert.deepEqual(facts.descripcion.presentacion, ["Una sola linea de descripcion, sin titulos."]);
+  assert.deepEqual(facts.descripcion.caracteristicas, []);
 });

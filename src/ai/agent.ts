@@ -22,11 +22,12 @@ import {
   presentedProductIds,
   stripNumberedLines,
   stripLinesAlreadyInBlocks,
+  productFacts,
   type CatalogBlock,
 } from "../catalog/presenter";
 import { getLastPresentedProductIds, setLastPresentedProductIds, getMediaSentProductIds } from "../catalog/presentedList";
 import { recordAgentTurn } from "./agentTurns";
-import { findShadowCatalogFindings, serializeFinding } from "../catalog/outputValidation";
+import { findShadowCatalogFindings, verifyAgainstCatalog, serializeFinding } from "../catalog/outputValidation";
 import { listActivePaymentMethods } from "../catalog/paymentMethods";
 import { buildCheckoutState } from "../orders/checkoutStateFromDb";
 import {
@@ -872,7 +873,28 @@ export async function generateReply(
   // Se calcula ACA, antes de la primera llamada al modelo, y no se recalcula despues: si la marca no se
   // le ofrecio, una marca escrita igual no se honra. Sin esto, el alcance que se resuelve tarde (la foto
   // identificada, mas abajo) inlinearia una ficha adentro de una frase escrita para una lista.
-  const catalogMarkerOffered = catalogBlocks.length === 1;
+  // UN SOLO AUTOR (2026-09-16, seccion 11 del plan). La marca resolvia la forma pero no la causa: en el
+  // mismo turno seguia habiendo DOS autores escribiendole al cliente - el agente y el servidor - y el
+  // codigo los coordinaba pidiendoselo por prompt. Medido en produccion el 2026-09-16, turno 22:25:16
+  // UTC, alcance one:Smartwatch serie 12 mini: el modelo no puso la marca y el cliente recibio dos
+  // mensajes que decian lo mismo con otras palabras.
+  //
+  // Cuando el alcance es UN producto, el servidor deja de componer un mensaje para enviar: le entrega al
+  // agente los DATOS (nombre, precio, stock, variantes con stock, descripcion, moneda) y el agente
+  // escribe el mensaje entero con su voz. Lo que escribe se verifica contra el catalogo antes de salir
+  // (ver la escalera mas abajo), y el bloque compuesto queda como fallback sin modelo adentro.
+  //
+  // Solo el alcance "one", y no es timidez: una lista numerada es estructura del servidor - la
+  // numeracion tiene que coincidir con lastPresentedProductIds para que "el 3" del proximo turno
+  // resuelva. Ahi el dato ES el orden, y eso no se delega.
+  const modelAuthorsCatalog = resolvedScope.kind === "one" && catalogBlocks.length === 1;
+  const catalogMarkerOffered = !modelAuthorsCatalog && catalogBlocks.length === 1;
+  // Los datos del alcance resuelto, SIN redactar. Es lo que reemplaza al texto ya compuesto: el agente
+  // recibe el dato y escribe el mensaje, en vez de recibir un mensaje escrito y tener que ubicarlo.
+  const catalogFactsForModel =
+    modelAuthorsCatalog && resolvedScope.kind === "one"
+      ? productFacts(resolvedScope.product, resolvedScope.variant ?? null, renderOptions)
+      : null;
   const catalogMediaProductIds = () => catalogBlocks.flatMap((b) => b.media.map((m) => m.productId));
   // Lo que ya va a salir por los bloques, visible para las herramientas: el registro de la base se escribe
   // recien cuando los bloques se envian (despues del turno), asi que sin esto una llamada del modelo a
@@ -944,7 +966,27 @@ export async function generateReply(
     ...(saleStateText
       ? [{ role: "system" as const, content: saleStateText }]
       : []),
-    ...(catalogBlocks.length > 0
+    // UN SOLO AUTOR: datos estructurados, no un mensaje ya escrito. No lleva ninguna instruccion sobre
+    // el largo ni sobre que no repita: repetir era un problema cuando hablaban dos, y aca habla uno.
+    ...(catalogFactsForModel
+      ? [
+          {
+            role: "system" as const,
+            content:
+              `DATOS DEL PRODUCTO POR EL QUE PREGUNTA EL CLIENTE, leidos del catalogo real de este negocio. ` +
+              `Son los unicos nombres, precios y cantidades que existen para el:\n\n` +
+              JSON.stringify(catalogFactsForModel) +
+              `\n\nEscribi vos el mensaje entero para el cliente, con tu voz: no hay ningun otro mensaje del ` +
+              `sistema que lo complete ni que lo repita. La descripcion va completa, elegi vos que contarle ` +
+              `segun lo que pregunto. Los nombres y las cifras que escribas se comparan contra el catalogo ` +
+              `antes de enviarse, y lo que no exista ahi no sale.` +
+              (catalogMediaProductIds().length > 0
+                ? ` Las fotos de ese producto salen solas, en este mismo turno: no las ofrezcas ni las prometas.`
+                : ``),
+          },
+        ]
+      : []),
+    ...(catalogBlocks.length > 0 && !modelAuthorsCatalog
       ? [
           {
             role: "system" as const,
@@ -1033,7 +1075,12 @@ export async function generateReply(
     // la version inventada de la lista real que sale justo abajo - se le quita. Los dos recortes corren
     // en los DOS caminos: la lista que el modelo escriba de mas sobra igual cuando el bloque entra
     // adentro de su mensaje, y corren ANTES de sustituir la marca para no recortar el bloque mismo.
-    if (catalogBlocks.length > 0) {
+    if (modelAuthorsCatalog) {
+      // UN SOLO AUTOR: el agente escribio la ficha, asi que no hay un segundo mensaje que la repita y no
+      // hay nada duplicado que recortar - los dos recortes le borrarian su propio mensaje. La marca no
+      // se le ofrecio en este camino; si la escribio igual, se borra en silencio, como siempre.
+      text = text.split(CATALOG_BLOCK_MARKER).join("").trim();
+    } else if (catalogBlocks.length > 0) {
       text = stripNumberedLines(text);
       // Y lo mismo con la ficha: toda linea que el bloque ya va a mandar se le quita a la frase del
       // modelo, comparando normalizado. Un alcance "one" no tiene lista numerada que quitar, asi que sin
@@ -1647,7 +1694,61 @@ export async function generateReply(
     return text;
   }
 
-  const rawText = await runTurnWithRequiredEffects();
+  // LA ESCALERA DE UN SOLO AUTOR (2026-09-16). El agente escribio el mensaje entero con los datos que le
+  // dio el servidor; antes de que salga, todo precio que afirma y todo nombre que escribe en posicion de
+  // ficha se comparan contra el catalogo real, con un SELECT. Si no cierra: un reintento, y si vuelve a
+  // fallar, sale el bloque que compuso el servidor - texto leido de la base, sin modelo adentro. El
+  // reintento es mitigacion; la garantia la da el fallback, por eso existen los dos.
+  //
+  // DECISION QUE ESTA FASE LE QUITA AL MODELO: que nombres y que precios llegan al cliente. Hasta hoy
+  // salia lo que el modelo escribiera, sin verificar. Desde aca sale lo que existe en la base, o no sale.
+  async function enforceAuthoredCatalog(firstAttempt: string): Promise<{ text: string; author: "modelo" | "servidor" }> {
+    const opts = { locale: negocio.locale, currency: negocio.currency };
+    let text = firstAttempt;
+    let check = await verifyAgainstCatalog(context.businessId, [text], opts);
+    if (check.verificado && check.findings.length === 0) return { text, author: "modelo" };
+
+    // (a) REINTENTO, uno solo. Lo que se le dice sale de la comparacion contra la base ("este precio no
+    // existe"), nunca de una lectura de su prosa. Sin verificacion no hay reintento: si el catalogo no
+    // se pudo leer, no hay nada que decirle y se va directo al fallback.
+    if (check.verificado) {
+      messages.push({ role: "assistant", content: text });
+      messages.push({
+        role: "system",
+        content:
+          `ESE MENSAJE NO SE ENVIO: escribiste datos que no existen en el catalogo de este negocio ` +
+          `(${check.findings.map((f) => f.value).join(", ")}). Volve a escribirlo entero, con tu voz, ` +
+          `usando SOLO los datos del producto que te paso el sistema y las cifras tal cual figuran ahi.`,
+      });
+      text = await runModelLoop(null);
+      check = await verifyAgainstCatalog(context.businessId, [text], opts);
+      if (check.verificado && check.findings.length === 0) return { text, author: "modelo" };
+    }
+
+    // (b) FALLBACK SIN MODELO. Sale el bloque compuesto y el texto del agente se descarta entero: si lo
+    // que escribio sobre el producto no se pudo verificar, su redaccion sobre el producto tampoco vale.
+    await recordAgentIncident(
+      context.businessId,
+      "BACKSTOP_INTERVENTION",
+      check.verificado
+        ? `El agente escribio datos que no existen en el catalogo en dos intentos (${check.findings
+            .map((f) => `${f.kind}: ${f.value}`)
+            .join("; ")}). Salio el bloque compuesto por el servidor.`
+        : `No se pudo verificar contra el catalogo la respuesta que escribio el agente. Salio el bloque compuesto por el servidor.`,
+      conversationId,
+      "catalogo_autor_fallback"
+    );
+    return { text: "", author: "servidor" };
+  }
+
+  const primerIntento = await runTurnWithRequiredEffects();
+  let catalogAuthor: "modelo" | "servidor" | null = null;
+  let rawText = primerIntento;
+  if (modelAuthorsCatalog) {
+    const resultado = await enforceAuthoredCatalog(primerIntento);
+    rawText = resultado.text;
+    catalogAuthor = resultado.author;
+  }
 
   // FASE B, SEGUNDO MOMENTO DE ALCANCE. Un cliente que manda la FOTO de un producto no escribe su
   // nombre, asi que resolveProductScope no tiene con que resolver y el turno queda "none". Caso real de
@@ -1683,7 +1784,11 @@ export async function generateReply(
   // Con la marca puesta, el texto del bloque ya viaja adentro de `text`: el bloque sigue saliendo, pero
   // solo con sus medios (sendCatalogBlocks saltea el texto vacio). Una foto nunca va adentro de un
   // mensaje de texto, asi que los medios siguen siendo mensajes propios en los dos caminos.
-  const outgoingBlocks = catalogInlined ? catalogBlocks.map((b) => ({ ...b, text: "" })) : catalogBlocks;
+  // Dos formas de que el texto del bloque no salga como mensaje propio: la marca (el bloque viajo
+  // adentro del mensaje del modelo) y el camino de un solo autor aprobado (el agente escribio esa misma
+  // informacion el mismo, con sus palabras, y el bloque quedo solo como fallback que no hizo falta).
+  const blockTextAlreadyCovered = catalogInlined || catalogAuthor === "modelo";
+  const outgoingBlocks = blockTextAlreadyCovered ? catalogBlocks.map((b) => ({ ...b, text: "" })) : catalogBlocks;
 
   // PIEZA 5, MODO SOMBRA (ONIX-PLAN-CATALOGO-Y-MEDIOS.md). Se mide TODO lo que va a salir - la frase del
   // modelo y los bloques del servidor - contra el catalogo real. Los bloques se incluyen a proposito
@@ -1720,6 +1825,9 @@ export async function generateReply(
     // Y donde termino saliendo: sin esta columna el bloque de arriba no dice si fue un mensaje aparte o
     // si viajo adentro del mensaje del modelo, que es justo la tasa que hay que mirar.
     catalogInlined,
+    // Y quien lo escribio, cuando el turno paso por el camino de un solo autor. Sin esta columna la tasa
+    // de caida al fallback no tiene denominador: el incidente solo cuenta las caidas.
+    catalogAuthor,
     mediaProductIds: catalogMediaProductIds(),
     shadowFindings: shadowFindings.map(serializeFinding),
   });

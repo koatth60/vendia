@@ -183,3 +183,43 @@ test("el texto que se valida no se modifica", () => {
   assert.deepEqual(entrada, [original]);
   assert.equal(entrada[0], original);
 });
+
+// UN SOLO AUTOR (2026-09-16). En el turno donde el agente escribe el mensaje ENTERO con los datos del
+// servidor, toda cifra con "$" que escriba es una afirmacion sobre el catalogo, este o no en una lista:
+// sin eso, el mismo precio inventado pasaba por escribirlo en prosa. Los nombres siguen reclamandose
+// solo donde la forma los delimita.
+
+test("everyPrice: un precio inventado en prosa se marca, y sin la opcion no se marcaba", () => {
+  const prosa = "¡Claro! El Reloj Inteligente Smartwatch Serie 11 Mini te sale $99.000, es un precio especial.";
+
+  assert.deepEqual(validateAgainstCatalog([prosa], FACTS), [], "sin la opcion, la prosa queda afuera (modo sombra)");
+
+  const findings = validateAgainstCatalog([prosa], FACTS, { everyPrice: true });
+  assert.equal(findings.length, 1, JSON.stringify(findings));
+  assert.equal(findings[0].kind, "precio_inexistente");
+  assert.equal(findings[0].value, "$99.000");
+});
+
+test("everyPrice: el precio REAL escrito en prosa no marca nada", () => {
+  const prosa = "El Reloj Inteligente Smartwatch Serie 11 Mini cuesta $145.000 y el envío a Bogotá son $12.000.";
+  assert.deepEqual(validateAgainstCatalog([prosa], FACTS, { everyPrice: true }), []);
+});
+
+test("everyPrice: no inventa nombres de producto leyendo la prosa", () => {
+  // La cifra viene marcada con "$" y eso es estructura; un nombre en prosa libre no lo esta, y sacarlo
+  // de ahi seria adivinar que quiso decir el modelo. Con el precio real, esta linea no marca nada
+  // aunque nombre algo que no existe: el nombre se reclama en negrita o en item de lista, no en prosa.
+  const prosa = "Tenemos el Cargador iPhone por $145.000.";
+  assert.deepEqual(validateAgainstCatalog([prosa], FACTS, { everyPrice: true }), []);
+  // Escrito como ficha, con el nombre delimitado, si marca.
+  const ficha = "*Cargador iPhone* — $145.000";
+  const findings = validateAgainstCatalog([ficha], FACTS, { everyPrice: true });
+  assert.equal(findings.length, 1, JSON.stringify(findings));
+  assert.equal(findings[0].kind, "producto_inexistente");
+});
+
+test("collectCatalogClaims con everyPrice toma la linea de prosa que sin la opcion descartaba", () => {
+  const linea = "sale $99.000 con envío incluido";
+  assert.equal(collectCatalogClaims(linea).length, 0);
+  assert.equal(collectCatalogClaims(linea, { everyPrice: true }).length, 1);
+});

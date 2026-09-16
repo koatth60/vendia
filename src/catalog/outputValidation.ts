@@ -164,8 +164,22 @@ function claimedNames(line: string): string[] {
  * prosa - un precio mencionado de pasada dentro de una frase no es el objetivo de esta pieza - y
  * tambien el bloque de resumen de pedido, cuyas lineas ("2x AIRPODS PRO 2 — $110.000", "Total: $150.000")
  * no son ni items de lista ni negrita, y traen totales que por definicion no son precios del catalogo.
+ *
+ * `everyPrice` amplia el barrido de PRECIOS a toda linea que traiga uno, no solo a las que estan en
+ * posicion de lista o negrita. Lo pide el camino de UN SOLO AUTOR (2026-09-16): ahi el mensaje entero lo
+ * escribe el agente con los datos que le dio el servidor, asi que toda cifra con "$" que escriba es una
+ * afirmacion sobre el catalogo, este o no dentro de una lista. El disparador de ese modo es el ALCANCE
+ * que resolvio el codigo, nunca una lectura de la prosa.
+ *
+ * Los NOMBRES no se amplian, y es deliberado: un nombre se reclama solo donde la FORMA lo delimita
+ * (negrita o item de lista). Sacar nombres de prosa libre seria adivinar que quiso decir el modelo, que
+ * es la clase de guard que este proyecto no admite. Una cifra, en cambio, viene marcada con "$".
  */
-export function collectCatalogClaims(text: string): CatalogClaim[] {
+export interface ClaimOptions {
+  everyPrice?: boolean;
+}
+
+export function collectCatalogClaims(text: string, opts: ClaimOptions = {}): CatalogClaim[] {
   const claims: CatalogClaim[] = [];
   for (const raw of text.split("\n")) {
     const line = raw.trim();
@@ -174,7 +188,7 @@ export function collectCatalogClaims(text: string): CatalogClaim[] {
     if (prices.length === 0) continue;
     const names = claimedNames(line);
     const isListPositioned = listPrefixLength(line) > 0 || boldSegments(line).length > 0;
-    if (!isListPositioned) continue;
+    if (!isListPositioned && !opts.everyPrice) continue;
     claims.push({ line, prices, names });
   }
   return claims;
@@ -200,7 +214,11 @@ function nameExists(name: string, facts: CatalogFacts): boolean {
 }
 
 /** El nucleo PURO: mismos textos, mismo catalogo en memoria, mismos hallazgos. Sin base, sin red, sin modelo. */
-export function validateAgainstCatalog(texts: readonly string[], facts: CatalogFacts): CatalogFinding[] {
+export function validateAgainstCatalog(
+  texts: readonly string[],
+  facts: CatalogFacts,
+  opts: ClaimOptions = {}
+): CatalogFinding[] {
   const findings: CatalogFinding[] = [];
   const seen = new Set<string>();
   const add = (finding: CatalogFinding) => {
@@ -211,7 +229,7 @@ export function validateAgainstCatalog(texts: readonly string[], facts: CatalogF
   };
 
   for (const text of texts) {
-    for (const claim of collectCatalogClaims(text)) {
+    for (const claim of collectCatalogClaims(text, opts)) {
       for (const price of claim.prices) {
         if (!facts.priceDigits.has(price.digits)) {
           add({ kind: "precio_inexistente", value: `$${price.raw}`, line: claim.line });
@@ -288,6 +306,34 @@ export async function findShadowCatalogFindings(
     // un problema del cliente.
     console.error("No se pudo validar la salida contra el catalogo (no bloqueante):", error);
     return [];
+  }
+}
+
+/**
+ * EL CAMINO ACTIVO (2026-09-16), y por ahora el unico: el turno de UN SOLO AUTOR, donde el agente
+ * escribe el mensaje entero con los datos estructurados que le dio el servidor. Ahi la verificacion si
+ * decide: lo que no se puede verificar contra la base no sale (ver la escalera en agent.ts).
+ *
+ * Devuelve `verificado: false` cuando la consulta al catalogo fallo. No es lo mismo que "no hay
+ * hallazgos": no poder verificar es motivo suficiente para caer al fallback, porque la garantia de esta
+ * fase es "sale lo que existe en la base, o no sale". Un catalogo que no se pudo leer no respalda nada.
+ */
+export async function verifyAgainstCatalog(
+  businessId: string,
+  texts: readonly string[],
+  opts: { locale: string; currency: string }
+): Promise<{ verificado: boolean; findings: CatalogFinding[] }> {
+  try {
+    // Un texto sin una sola cifra con "$" no afirma ningun precio y no tiene nombre en posicion de
+    // lista: no hay nada que comparar, asi que tampoco se paga la consulta.
+    if (!texts.some((text) => collectCatalogClaims(text, { everyPrice: true }).length > 0)) {
+      return { verificado: true, findings: [] };
+    }
+    const facts = await loadCatalogFacts(businessId, opts.locale, opts.currency);
+    return { verificado: true, findings: validateAgainstCatalog(texts, facts, { everyPrice: true }) };
+  } catch (error) {
+    console.error("No se pudo verificar la salida contra el catalogo:", error);
+    return { verificado: false, findings: [] };
   }
 }
 

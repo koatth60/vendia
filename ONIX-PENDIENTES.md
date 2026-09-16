@@ -119,6 +119,21 @@ Están detallados en la memoria (`onix-pendientes-post-15-fases`). Resumen:
 
 ---
 
+## 5b. Datos mal cargados en el catálogo (lo arregla el dueño desde el panel, no el código)
+
+Encontrado el 2026-09-16 mirando el turno de las 22:25:16 UTC.
+
+- **"Smartwatch serie 12 mini"** — la línea 7 de su descripción dice `Cargador les (WhatsApp,`.
+  Es un pegado de dos columnas que quedó entreverado al cargar el producto. Hay que reescribir
+  esa línea desde el panel.
+
+No se limpia desde el código, y es a propósito: una descripción es texto que escribió el
+negocio, y un limpiador automático tendría que adivinar qué quiso decir. Eso es lectura de
+prosa, que es exactamente la clase de arreglo que este repositorio no admite. Vale la pena
+revisar el resto de las descripciones de ese negocio por el mismo pegado.
+
+---
+
 ## 6. Cerrado recientemente
 
 Para no volver a abrirlos por error.
