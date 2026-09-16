@@ -26,3 +26,14 @@ test("matchesConfiguredPaymentMethod: a fabricated label still fails to match", 
   assert.equal(matchesConfiguredPaymentMethod("PayPal", REAL_METHODS), false);
   assert.equal(matchesConfiguredPaymentMethod("Efectivo", REAL_METHODS), false);
 });
+
+// Los tres casos medidos el 2026-09-16 (dos en la corrida de regresion, uno en produccion). Siguen sin
+// matchear como texto libre, y esta bien: el guard no puede distinguir una parafrasis legitima de una
+// forma de pago inventada. Por eso la solucion no fue aflojar el guard sino sacarle el dato al modelo -
+// close_conversation ahora recibe paymentMethodId y el servidor resuelve la etiqueta contra la base (ver
+// tools.closePaymentMethod.test.ts). Este test existe para que nadie "arregle" esto ablandando el guard.
+test("matchesConfiguredPaymentMethod: una parafrasis del canal sigue sin matchear (por eso existe paymentMethodId)", () => {
+  assert.equal(matchesConfiguredPaymentMethod("Nequi (transferencia anticipada del producto)", REAL_METHODS), false);
+  assert.equal(matchesConfiguredPaymentMethod("Nequi (transferencia anticipada)", REAL_METHODS), false);
+  assert.equal(matchesConfiguredPaymentMethod("Contra entrega total", REAL_METHODS), false);
+});

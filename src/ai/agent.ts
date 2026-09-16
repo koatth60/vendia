@@ -1299,9 +1299,14 @@ export async function generateReply(
         // (createOrder persists whatever close_conversation was called with) - validate it against this
         // business's REAL active payment methods before the tool ever runs, same shape as the
         // send_product_media guard above (reliability plan Phase 2, item 1, 2026-09-13).
+        // 2026-09-16: cuando close_conversation trae paymentMethodId, la etiqueta la resuelve el servidor
+        // contra la base (ver tools.ts) y este guard no tiene nada que validar - el texto libre que venga
+        // al lado es prosa para el cliente, no el dato que se guarda. El guard sigue igual de estricto en
+        // el camino de respaldo, donde el label SI es lo que se persiste.
         if (
           call.function.name === "close_conversation" &&
           input.outcome !== "LOST" &&
+          !(typeof input.paymentMethodId === "string" && input.paymentMethodId.trim()) &&
           typeof input.paymentMethodLabel === "string" &&
           input.paymentMethodLabel.trim()
         ) {
@@ -1319,7 +1324,7 @@ export async function generateReply(
                 closed: false,
                 error: `"${input.paymentMethodLabel}" no es una forma de pago real configurada para este negocio - no se cerro nada. Formas de pago reales: ${realMethods
                   .map((m) => m.label)
-                  .join(", ")}. Usa exactamente uno de esos labels, tal como lo devolvio get_payment_methods.`,
+                  .join(", ")}. Mejor: volve a llamar close_conversation con paymentMethodId (el id que devuelve get_payment_methods) y el sistema escribe solo el nombre.`,
               }),
             });
             continue;

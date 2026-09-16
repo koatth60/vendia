@@ -436,9 +436,15 @@ export const catalogTools: OpenAI.Chat.ChatCompletionTool[] = [
             type: "string",
             description: "SOLO para outcome=SOLD: la direccion de envio que dio el cliente, si aplica.",
           },
+          paymentMethodId: {
+            type: "string",
+            description:
+              "SOLO para outcome=SOLD: el id real de la forma de pago que eligio el cliente, tal como lo devolvio get_payment_methods. El sistema resuelve solo el nombre que se guarda en el pedido, asi que podes describirsela al cliente con tus palabras.",
+          },
           paymentMethodLabel: {
             type: "string",
-            description: "SOLO para outcome=SOLD: el nombre de la forma de pago elegida (ej: {{METODOS_PAGO}}), tal como la devolvio get_payment_methods.",
+            description:
+              "Solo si no tenes el paymentMethodId: el nombre de la forma de pago elegida (ej: {{METODOS_PAGO}}), exactamente como lo devolvio get_payment_methods.",
           },
           shippingCost: {
             type: "number",
@@ -766,6 +772,7 @@ const TOOL_INPUT_SCHEMAS: Record<string, z.ZodTypeAny> = {
   close_conversation: z.object({
     summary: SCALAR_INPUT.optional(),
     shippingAddress: SCALAR_INPUT.optional(),
+    paymentMethodId: SCALAR_INPUT.optional(),
     paymentMethodLabel: SCALAR_INPUT.optional(),
     shippingCost: SCALAR_INPUT.optional(),
     items: z.array(ORDER_ITEM_INPUT).optional(),
@@ -1523,11 +1530,36 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
         // modelo mande aca - close_conversation ya no puede cerrar un pedido distinto del que el motor
         // vino armando.
         const shippingAddress = saleStateOn ? saleState?.address ?? null : input.shippingAddress ? String(input.shippingAddress).trim() : null;
-        const paymentMethodLabel = saleStateOn
-          ? saleState?.paymentMethodLabel ?? null
-          : input.paymentMethodLabel
-            ? String(input.paymentMethodLabel).trim()
-            : null;
+        // 2026-09-16: la etiqueta de la forma de pago la resuelve el SERVIDOR desde el id, igual que
+        // src/orders/saleState.ts. Antes close_conversation le pedia al modelo REPRODUCIR DE MEMORIA la
+        // cadena exacta de get_payment_methods, y el guard de agent.ts rechazaba el cierre por cualquier
+        // variacion razonable ("Nequi (transferencia anticipada del producto)" contra "Nequi"): el
+        // cliente leia "el sistema no me deja cerrar la venta automaticamente". Con el id, el modelo
+        // queda libre de describirle la forma de pago al cliente con sus palabras.
+        // El label sigue aceptado como camino de respaldo (con su guard intacto) para no romper una
+        // conversacion en curso en el medio de un despliegue: el id gana cuando viene.
+        const paymentMethodId = input.paymentMethodId ? String(input.paymentMethodId).trim() : "";
+        let paymentMethodLabel: string | null = null;
+        if (saleStateOn) {
+          paymentMethodLabel = saleState?.paymentMethodLabel ?? null;
+        } else if (paymentMethodId) {
+          // Sin filtro `active`, igual que saleState.ts: si el dueno desactivo el metodo despues de que
+          // el cliente lo eligio, la etiqueta sigue siendo real y la venta no tiene por que caerse.
+          const method = await prisma.paymentMethod.findFirst({ where: { id: paymentMethodId, businessId } });
+          if (!method) {
+            console.error(
+              `close_conversation bloqueado: paymentMethodId inexistente (businessId=${businessId}):`,
+              paymentMethodId
+            );
+            return {
+              closed: false,
+              note: "Ese paymentMethodId no existe en este negocio - no se cerro nada, no se creo ningun pedido. Volve a llamar get_payment_methods y pasa uno de los id que devuelve.",
+            };
+          }
+          paymentMethodLabel = method.label;
+        } else if (input.paymentMethodLabel) {
+          paymentMethodLabel = String(input.paymentMethodLabel).trim();
+        }
         const shippingCost = saleStateOn
           ? saleState?.shippingCost ?? null
           : input.shippingCost !== undefined && input.shippingCost !== null
