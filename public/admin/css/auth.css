@@ -280,16 +280,21 @@ body.auth-split .foot { text-align: left; margin-top: 20px; }
 }
 .show-headline b { font-weight: 600; color: var(--onix-accent); }
 
+/* El panel del chat va sobre superficie neutra, igual que .show-order, y el
+   color lo ponen las burbujas. Estuvo en --onix-accent-soft, que en tema claro
+   es casi exactamente el mismo verde que --onix-bubble-out, asi que las
+   burbujas de Onix desaparecian y el texto quedaba flotando. En oscuro no se
+   notaba porque ahi bubble-out es un verde solido. */
 .show-chat {
   padding: 16px;
-  border: 1px solid var(--onix-accent-line);
+  border: 1px solid var(--onix-border);
   border-radius: var(--onix-radius-panel);
-  background: var(--onix-accent-soft);
+  background: var(--onix-surface);
 }
 .show-chat-head {
   display: flex; align-items: center; gap: 10px;
   padding-bottom: 13px; margin-bottom: 14px;
-  border-bottom: 1px solid var(--onix-accent-line);
+  border-bottom: 1px solid var(--onix-border);
 }
 .show-avatar {
   display: flex; align-items: center; justify-content: center;
