@@ -149,6 +149,44 @@
   .plan.highlight a { background: var(--green); color: var(--onix-invert-ink); }
   .plans-note { text-align: center; font-size: 12.5px; color: var(--muted); margin-top: 28px; }
 
+  /* Precios: matriz comparativa, tablas de tarifas y SLA. Todo sale de los
+     mismos tokens que el resto de la pagina, asi que claro y oscuro son el
+     mismo CSS y no dos hojas. */
+  .plan-vol { font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--green-dark); margin-bottom: 14px; }
+  .plan.highlight .plan-vol { color: var(--green); }
+  .plan-setup { font-size: 12.5px; color: var(--muted); margin-bottom: 18px; }
+  .plan.highlight .plan-setup { color: var(--dark-muted); }
+  .plan-list { list-style: none; margin: 20px 0 0; padding: 0; display: flex; flex-direction: column; gap: 9px; }
+  .plan-list li { display: flex; gap: 9px; font-size: 12.8px; line-height: 1.45; color: var(--ink-soft); }
+  .plan.highlight .plan-list li { color: var(--dark-muted); }
+  .plan-list svg { flex-shrink: 0; margin-top: 2px; stroke: var(--green-dark); }
+  .plan.highlight .plan-list svg { stroke: var(--green); }
+
+  .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 18px; background: var(--card); }
+  table.grid { width: 100%; border-collapse: collapse; min-width: 700px; font-size: 13px; }
+  table.grid th, table.grid td { text-align: left; padding: 11px 16px; border-bottom: 1px solid var(--border); vertical-align: top; line-height: 1.45; }
+  table.grid tr:last-child th, table.grid tr:last-child td { border-bottom: none; }
+  table.grid thead th { font-family: var(--display); font-size: 13.5px; font-weight: 600; background: var(--onix-surface-2); white-space: nowrap; }
+  table.grid tbody th { font-weight: 600; color: var(--ink); width: 26%; }
+  table.grid td { color: var(--muted); }
+  table.grid .col-hi { background: var(--green-light); }
+  table.grid thead .col-hi { color: var(--green-dark); }
+  table.grid tr.row-price th, table.grid tr.row-price td { color: var(--ink); font-weight: 600; }
+  .mark { display: inline-flex; align-items: flex-start; gap: 7px; }
+  .mark svg { flex-shrink: 0; margin-top: 2px; }
+  .mark.yes svg { stroke: var(--green-dark); }
+  .mark.no, .mark.no svg { stroke: var(--muted); color: var(--muted); }
+  .table-note { font-size: 12.5px; color: var(--muted); margin: 16px 0 0; line-height: 1.6; }
+
+  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+  .stat { border: 1px solid var(--border); border-radius: 18px; padding: 24px 22px; background: var(--card); }
+  .stat-value { font-family: var(--display); font-size: 25px; font-weight: 700; margin-bottom: 6px; }
+  .stat h3 { font-size: 14px; margin-bottom: 6px; }
+  .stat p { font-size: 12.8px; color: var(--muted); line-height: 1.55; margin: 0; }
+  .sub-head { text-align: center; max-width: 560px; margin: 68px auto 26px; }
+  .sub-head h3 { font-size: 21px; margin-bottom: 8px; }
+  .sub-head p { font-size: 13.5px; color: var(--muted); line-height: 1.6; margin: 0; }
+
   .faq { max-width: 720px; margin: 0 auto; padding: 0 48px 96px; }
   .faq-inner { border-top: 1px solid var(--border); }
   .faq-item { padding: 22px 0; border-bottom: 1px solid var(--border); }
@@ -173,7 +211,7 @@
   }
 
   @media (max-width: 900px) {
-    .hero-grid, .steps, .features, .plans, .services { grid-template-columns: 1fr; }
+    .hero-grid, .steps, .features, .plans, .services, .stats { grid-template-columns: 1fr; }
     .mock-wrap { height: 460px; margin-top: 20px; }
   }
   @media (max-width: 560px) {
@@ -250,7 +288,7 @@
             Crear mi cuenta
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
           </a>
-          <span class="sub-cta">Sin tarjeta de crédito para empezar a probar</span>
+          <span class="sub-cta">Sin permanencia obligatoria — puedes ir mes a mes</span>
         </div>
       </div>
 
@@ -413,26 +451,279 @@
     </div>
     <div class="plans">
       <div class="plan">
-        <div class="plan-name">Básico</div>
-        <div class="plan-price">$36.000<span> COP/mes</span></div>
-        <div class="plan-msgs">≈ $9 USD · hasta 2.000 mensajes con IA</div>
+        <div class="plan-name">Starter</div>
+        <div class="plan-vol">Hasta <span class="onix-num">500</span> chats/mes</div>
+        <div class="plan-price"><span class="onix-num">$350.000</span><span> COP/mes</span></div>
+        <div class="plan-setup">Setup inicial <span class="onix-num">$600.000</span> COP, pago único</div>
         <a href="/signup.html">Elegir plan</a>
+        <ul class="plan-list">
+          <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Agente de IA 24/7: atiende, cotiza fletes y cierra la venta</li>
+          <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Panel completo de pedidos y métricas</li>
+          <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Catálogo por categorías y variantes</li>
+          <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Inventario en tiempo real, 1 bodega</li>
+          <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Soporte por WhatsApp y correo, respuesta en 4 h</li>
+        </ul>
       </div>
       <div class="plan highlight">
         <span class="badge">MÁS ELEGIDO</span>
-        <div class="plan-name">Emprendedor</div>
-        <div class="plan-price">$60.000<span> COP/mes</span></div>
-        <div class="plan-msgs">≈ $15 USD · hasta 5.000 mensajes con IA</div>
+        <div class="plan-name">Crecimiento</div>
+        <div class="plan-vol">Hasta <span class="onix-num">1.200</span> chats/mes</div>
+        <div class="plan-price"><span class="onix-num">$650.000</span><span> COP/mes</span></div>
+        <div class="plan-setup">Setup inicial <span class="onix-num">$900.000</span> COP, pago único</div>
         <a href="/signup.html">Elegir plan</a>
+        <ul class="plan-list">
+          <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Todo lo del plan Starter</li>
+          <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Visión artificial: lee capturas de TikTok e Instagram Live</li>
+          <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Recuperación automática de carritos</li>
+          <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Productos relacionados y combos sugeridos</li>
+          <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Postventa y garantías automáticas, soporte en 2 h</li>
+        </ul>
       </div>
       <div class="plan">
-        <div class="plan-name">Negocio</div>
-        <div class="plan-price">$116.000<span> COP/mes</span></div>
-        <div class="plan-msgs">≈ $29 USD · mensajes ilimitados</div>
+        <div class="plan-name">Escala</div>
+        <div class="plan-vol">Hasta <span class="onix-num">2.700</span> chats/mes</div>
+        <div class="plan-price"><span class="onix-num">$1.200.000</span><span> COP/mes</span></div>
+        <div class="plan-setup">Setup inicial <span class="onix-num">$1.500.000</span> COP, pago único</div>
         <a href="/signup.html">Elegir plan</a>
+        <ul class="plan-list">
+          <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Todo lo del plan Crecimiento</li>
+          <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Multi-bodega y sucursales</li>
+          <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Envíos masivos y seguimiento de pauta en Meta Ads</li>
+          <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Reportes de conversión</li>
+          <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Canal VIP directo, respuesta en 10 minutos</li>
+        </ul>
       </div>
     </div>
-    <p class="plans-note">Precios de lanzamiento para Onix. Necesitas una clave de activación para registrarte — te la damos al confirmar el pago. ¿Necesitas un sitio web, landing o software a medida? <a href="https://wa.me/573204500599" target="_blank" rel="noopener">escríbenos</a> y lo cotizamos aparte.</p>
+    <p class="plans-note">Precios en pesos colombianos. El setup es un pago único y te lo descontamos según cómo contrates — lo ves más abajo. ¿Necesitas un sitio web, landing o software a medida? <a href="https://wa.me/573204500599" target="_blank" rel="noopener">escríbenos</a> y lo cotizamos aparte.</p>
+
+    <div class="sub-head">
+      <h3>Comparación completa</h3>
+      <p>Lo que trae cada plan, módulo por módulo.</p>
+    </div>
+    <div class="table-wrap">
+      <table class="grid">
+        <thead>
+          <tr>
+            <th>Módulo</th>
+            <th>Starter</th>
+            <th class="col-hi">Crecimiento</th>
+            <th>Escala</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th>Volumen mensual</th>
+            <td>Hasta <span class="onix-num">500</span> chats</td>
+            <td class="col-hi">Hasta <span class="onix-num">1.200</span> chats</td>
+            <td>Hasta <span class="onix-num">2.700</span> chats</td>
+          </tr>
+          <tr>
+            <th>Agente de IA omnicanal 24/7</th>
+            <td>Atiende, cotiza fletes y cierra ventas</td>
+            <td class="col-hi">Atiende, cotiza fletes y cierra ventas</td>
+            <td>Atiende, cotiza fletes y cierra ventas</td>
+          </tr>
+          <tr>
+            <th>Gestor de pedidos y métricas</th>
+            <td>Panel completo</td>
+            <td class="col-hi">Panel completo</td>
+            <td>Panel completo + reportes de conversión</td>
+          </tr>
+          <tr>
+            <th>Catálogo dinámico interactivo</th>
+            <td>Categorías y variantes</td>
+            <td class="col-hi">Categorías y variantes</td>
+            <td>Categorías y variantes</td>
+          </tr>
+          <tr>
+            <th>Inventario en tiempo real</th>
+            <td>1 bodega, sin sobreventas</td>
+            <td class="col-hi">1 bodega, sin sobreventas</td>
+            <td>Multi-bodega y sucursales</td>
+          </tr>
+          <tr>
+            <th>Visión artificial (capturas de TikTok e IG Live)</th>
+            <td><span class="mark no"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke-width="2.4" stroke-linecap="round"><path d="M6 12h12"/></svg>Solo lectura de texto</span></td>
+            <td class="col-hi"><span class="mark yes"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Incluida</span></td>
+            <td><span class="mark yes"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Incluida</span></td>
+          </tr>
+          <tr>
+            <th>Carrito y recuperación</th>
+            <td>Solo carrito en sesión</td>
+            <td class="col-hi">Recuperación automática</td>
+            <td>Recuperación automática</td>
+          </tr>
+          <tr>
+            <th>Productos relacionados (cross-sell)</th>
+            <td><span class="mark no"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke-width="2.4" stroke-linecap="round"><path d="M6 12h12"/></svg>No incluido</span></td>
+            <td class="col-hi"><span class="mark yes"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Combos sugeridos</span></td>
+            <td><span class="mark yes"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Combos sugeridos</span></td>
+          </tr>
+          <tr>
+            <th>Postventa y garantías automáticas</th>
+            <td><span class="mark no"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke-width="2.4" stroke-linecap="round"><path d="M6 12h12"/></svg>No incluido</span></td>
+            <td class="col-hi"><span class="mark yes"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Tutoriales y guías tras la entrega</span></td>
+            <td><span class="mark yes"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Tutoriales y guías tras la entrega</span></td>
+          </tr>
+          <tr>
+            <th>Marketing y publicidad (Meta Ads)</th>
+            <td><span class="mark no"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke-width="2.4" stroke-linecap="round"><path d="M6 12h12"/></svg>No incluido</span></td>
+            <td class="col-hi"><span class="mark no"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke-width="2.4" stroke-linecap="round"><path d="M6 12h12"/></svg>No incluido</span></td>
+            <td><span class="mark yes"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Envíos masivos y seguimiento de pauta</span></td>
+          </tr>
+          <tr>
+            <th>Soporte técnico y SLA</th>
+            <td>WhatsApp y correo, <span class="onix-num">4 h</span></td>
+            <td class="col-hi">WhatsApp prioritario, <span class="onix-num">2 h</span></td>
+            <td>Canal VIP directo, <span class="onix-num">10 min</span></td>
+          </tr>
+          <tr class="row-price">
+            <th>Setup inicial (pago único)</th>
+            <td><span class="onix-num">$600.000</span> COP</td>
+            <td class="col-hi"><span class="onix-num">$900.000</span> COP</td>
+            <td><span class="onix-num">$1.500.000</span> COP</td>
+          </tr>
+          <tr class="row-price">
+            <th>Mensualidad</th>
+            <td><span class="onix-num">$350.000</span> COP/mes</td>
+            <td class="col-hi"><span class="onix-num">$650.000</span> COP/mes</td>
+            <td><span class="onix-num">$1.200.000</span> COP/mes</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="sub-head">
+      <h3>Cómo quieres contratar</h3>
+      <p>El mismo plan, tres formas de empezar.</p>
+    </div>
+    <div class="services">
+      <div class="service-card">
+        <div class="service-tag">Mes a mes</div>
+        <h3>Flexible</h3>
+        <p>Pagas el setup de tu plan más la mensualidad, sin compromiso de permanencia.</p>
+      </div>
+      <div class="service-card highlight">
+        <div class="service-tag">Contrato a 12 meses</div>
+        <h3>Te condonamos el <span class="onix-num">70%</span> del setup</h3>
+        <p>Firmas por un año y solo pagas el <span class="onix-num">30%</span> del setup inicial. Es la opción que eligen casi todos.</p>
+      </div>
+      <div class="service-card">
+        <div class="service-tag">Pago anual anticipado</div>
+        <h3>Setup gratis y <span class="onix-num">1</span> mes de regalo</h3>
+        <p>Pagas el año completo por adelantado: no pagas setup y recibes un mes sin costo.</p>
+      </div>
+    </div>
+
+    <div class="sub-head">
+      <h3>Qué incluye el setup</h3>
+      <p>Una semana de trabajo dedicado con un especialista de nuestro equipo.</p>
+    </div>
+    <div class="steps">
+      <div class="step">
+        <div class="step-num">01</div>
+        <h3>Carga del catálogo base</h3>
+        <p>Dejamos el sistema parametrizado y entrenado con la información real de tu marca e inventario.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">02</div>
+        <h3>Pruebas del flujo de venta</h3>
+        <p>Probamos la conversación de punta a punta y validamos el cálculo de envíos antes de salir al aire.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">03</div>
+        <h3>Capacitación al equipo</h3>
+        <p><span class="onix-num">2</span> horas de entrenamiento a tu personal para que manejen el panel sin depender de nosotros.</p>
+      </div>
+    </div>
+
+    <div class="sub-head">
+      <h3>Servicios adicionales de catálogo</h3>
+      <p>Si prefieres que nosotros lo montemos y lo mantengamos al día.</p>
+    </div>
+    <div class="table-wrap">
+      <table class="grid">
+        <thead>
+          <tr>
+            <th>Modalidad</th>
+            <th>Qué incluye</th>
+            <th>Tarifa</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th>Autogestionado</th>
+            <td>Entregas tu catálogo estructurado en Excel o JSON, listo para cargar.</td>
+            <td><span class="onix-num">$0</span> COP · incluido</td>
+          </tr>
+          <tr>
+            <th>Pack estándar (<span class="onix-num">10</span> productos)</th>
+            <td>Carga y estructuración manual de nombres, precios, variantes y fotos.</td>
+            <td><span class="onix-num">$120.000</span> COP · pago único</td>
+          </tr>
+          <tr>
+            <th>Pack avanzado de postventa</th>
+            <td>Estructuración compleja con guías de uso, tutoriales, videos y preguntas frecuentes por producto.</td>
+            <td><span class="onix-num">$250.000</span> COP · pago único</td>
+          </tr>
+          <tr>
+            <th>Suscripción mensual estándar</th>
+            <td>Hasta <span class="onix-num">20</span> actualizaciones o rotaciones de productos al mes, sin costo por evento.</td>
+            <td><span class="onix-num">$150.000</span> COP/mes</td>
+          </tr>
+          <tr>
+            <th>Suscripción mensual Plus</th>
+            <td>Hasta <span class="onix-num">20</span> productos nuevos al mes, más la configuración de postventa, tutoriales, manuales y garantías por producto.</td>
+            <td><span class="onix-num">$380.000</span> COP/mes</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="sub-head">
+      <h3>Disponibilidad y tarifas de uso</h3>
+      <p>Lo que pasa cuando tu operación crece más rápido que tu plan.</p>
+    </div>
+    <div class="stats">
+      <div class="stat">
+        <div class="stat-value onix-num">99,5%</div>
+        <h3>Uptime garantizado</h3>
+        <p>Operatividad mensual continua del bot. Excluye caídas masivas de la API de WhatsApp o de nuestros proveedores de nube e IA.</p>
+      </div>
+      <div class="stat">
+        <div class="stat-value onix-num">$350</div>
+        <h3>Por chat adicional</h3>
+        <p>Al superar el límite mensual de tu plan, cada conversación extra se factura a <span class="onix-num">$350</span> COP. Tu bot no se apaga.</p>
+      </div>
+      <div class="stat">
+        <div class="stat-value onix-num">$50.000</div>
+        <h3>Hora de desarrollo extra</h3>
+        <p>Modificaciones fuera del alcance estándar, como reestructurar flujos completos, se cobran por hora.</p>
+      </div>
+    </div>
+    <p class="table-note">Los envíos masivos fuera de la ventana de 24 horas de WhatsApp tienen un costo de mensajería de Meta de <span class="onix-num">USD 150</span> por cada <span class="onix-num">10.000</span> mensajes. Es un cobro de Meta y va aparte de tu plan.</p>
+
+    <div class="sub-head">
+      <h3>Crece y descuenta</h3>
+      <p>Programa de referidos: si traes negocios, pagas menos.</p>
+    </div>
+    <div class="steps">
+      <div class="step">
+        <div class="step-num">1 REFERIDO</div>
+        <h3><span class="onix-num">50%</span> de descuento</h3>
+        <p>En tu siguiente mensualidad, si el referido entra en tu mismo plan o uno superior. Si entra en un plan inferior, el descuento es del <span class="onix-num">25%</span>.</p>
+      </div>
+      <div class="step dark">
+        <div class="step-num">2 REFERIDOS</div>
+        <h3>Mensualidad gratis</h3>
+        <p>Ese mes no pagas nada, si ambos entran en tu mismo plan o uno superior. Si entran en un plan inferior, pagas la mitad.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">3+ EMBAJADOR</div>
+        <h3><span class="onix-num">20%</span> de comisión</h3>
+        <p>Desde el tercer referido recibes comisión sobre sus tres primeras mensualidades.</p>
+      </div>
+    </div>
   </section>
 
   <section class="faq" id="faq">
@@ -450,8 +741,16 @@
         <p>Depende de tu caso — te lo confirmamos al registrarte. Muchos negocios prefieren empezar con una línea nueva dedicada al bot, para no arriesgar su WhatsApp actual.</p>
       </div>
       <div class="faq-item">
-        <h3>¿Qué pasa si supero los mensajes de mi plan?</h3>
-        <p>Te avisamos para que subas de plan. Tu bot no se corta de un día para el otro.</p>
+        <h3>¿Qué pasa si supero los chats de mi plan?</h3>
+        <p>Tu bot no se corta. Cada conversación extra se factura a <span class="onix-num">$350</span> COP y te avisamos para que evalúes subir de plan.</p>
+      </div>
+      <div class="faq-item">
+        <h3>¿Para qué es el setup inicial?</h3>
+        <p>Es una semana de trabajo dedicado con un especialista: cargamos tu catálogo base, entrenamos al bot con la información de tu marca, probamos el flujo de venta completo y capacitamos a tu equipo. Se paga una sola vez. Si firmas a <span class="onix-num">12</span> meses te condonamos el <span class="onix-num">70%</span>, y si pagas el año por adelantado no lo pagas.</p>
+      </div>
+      <div class="faq-item">
+        <h3>¿Tengo que quedarme amarrado a un contrato?</h3>
+        <p>No. Puedes ir mes a mes pagando el setup completo. El contrato a <span class="onix-num">12</span> meses existe porque te descuenta casi todo el setup, no porque sea obligatorio.</p>
       </div>
       <div class="faq-item">
         <h3>¿Cómo pago?</h3>
