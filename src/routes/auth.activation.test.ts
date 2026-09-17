@@ -25,6 +25,12 @@ function api(path: string, body: unknown) {
   });
 }
 
+// El cuerpo que devuelven /auth/signup y /auth/login, que es lo unico que miran estas pruebas.
+// `res.json()` devuelve unknown: sin este tipo el archivo corre con tsx pero `npx tsc --noEmit`
+// (y `npm run build`) no compila.
+type AccountBody = { id: string; active: boolean; planTier: string };
+const accountOf = (res: Response) => res.json() as Promise<AccountBody>;
+
 before(async () => {
   const app = express();
   app.use(express.json());
@@ -56,7 +62,7 @@ test("sin clave de activacion la cuenta se crea, pero inactiva", async () => {
   });
 
   assert.equal(res.status, 201);
-  const body = await res.json();
+  const body = await accountOf(res);
   createdBusinessIds.push(body.id);
 
   assert.equal(body.active, false);
@@ -98,7 +104,7 @@ test("con una clave valida la cuenta entra activada y la clave queda usada", asy
   });
 
   assert.equal(res.status, 201);
-  const body = await res.json();
+  const body = await accountOf(res);
   createdBusinessIds.push(body.id);
 
   assert.equal(body.active, true);
@@ -115,12 +121,12 @@ test("una cuenta sin activar entra a su panel, con la contrasena correcta", asyn
 
   const signup = await api("/auth/signup", { businessName: "Negocio en espera", email, password });
   assert.equal(signup.status, 201);
-  createdBusinessIds.push((await signup.json()).id);
+  createdBusinessIds.push((await accountOf(signup)).id);
 
   const login = await api("/auth/login", { email, password });
   // Antes devolvia 401 "Credenciales inválidas", que era mentira: la contrasena si era la suya.
   assert.equal(login.status, 200);
-  const body = await login.json();
+  const body = await accountOf(login);
   assert.equal(body.active, false);
 });
 
@@ -132,7 +138,7 @@ test("la contrasena equivocada sigue sin entrar, activa o no la cuenta", async (
     password: "unaClaveLarga123",
   });
   assert.equal(signup.status, 201);
-  createdBusinessIds.push((await signup.json()).id);
+  createdBusinessIds.push((await accountOf(signup)).id);
 
   const login = await api("/auth/login", { email, password: "otraCosa999" });
   assert.equal(login.status, 401);
