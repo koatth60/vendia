@@ -13,7 +13,8 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "prisma:generate": "prisma generate",
-    "prisma:migrate": "prisma migrate dev"
+    "prisma:migrate": "prisma migrate dev",
+    "backfill:peaks": "tsx scripts/backfill-voice-peaks.ts"
   },
   "keywords": [],
   "author": "",
