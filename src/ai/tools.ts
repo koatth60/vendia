@@ -17,6 +17,7 @@ import {
   CATALOG_BLOCK_MARKER,
 } from "./fixedBlockMarkers";
 import { listActivePaymentMethods, requiresPaymentConfirmation, resolveConfiguredPaymentMethod } from "../catalog/paymentMethods";
+import { faltaComprobanteDePago, FALTA_COMPROBANTE_NOTE } from "../orders/paymentProof";
 import { listShippingRates, resolveShippingRateForCity } from "../catalog/shippingRates";
 import { recordAgentIncident } from "./incidents";
 import { getSaleGate } from "./configHealth";
@@ -264,10 +265,15 @@ export const catalogTools: OpenAI.Chat.ChatCompletionTool[] = [
     function: {
       name: "get_shipping_payment_modalities",
       description:
-        "Obtiene las modalidades reales de pago del ENVIO que ofrece este negocio (ej: todo anticipado, producto anticipado + envio contraentrega, todo contraentrega) - distinto del canal de pago ({{METODOS_PAGO}}/etc, ver get_payment_methods). Usar cuando el cliente este por confirmar una compra y el negocio tiene esto configurado.",
+        "Obtiene las modalidades reales de pago del ENVIO que ofrece este negocio (ej: todo anticipado, producto anticipado + envio contraentrega, todo contraentrega) - distinto del canal de pago ({{METODOS_PAGO}}/etc, ver get_payment_methods). Usar cuando el cliente este por confirmar una compra. Pasa la ciudad si ya la sabes: no todas las zonas admiten las mismas.",
       parameters: {
         type: "object",
-        properties: {},
+        properties: {
+          city: {
+            type: "string",
+            description: "La ciudad de entrega, si el cliente ya la dijo. Sin ella se devuelven las modalidades generales del negocio, que pueden no aplicar en esa zona.",
+          },
+        },
       },
     },
   },
@@ -800,6 +806,7 @@ const TOOL_INPUT_SCHEMAS: Record<string, z.ZodTypeAny> = {
     mediaType: SCALAR_INPUT.optional(),
   }),
   get_shipping_rate_for_city: z.object({ city: SCALAR_INPUT.optional() }),
+  get_shipping_payment_modalities: z.object({ city: SCALAR_INPUT.optional() }),
   save_customer_name: z.object({ name: SCALAR_INPUT.optional() }),
   save_customer_contact_info: z.object({
     idNumber: SCALAR_INPUT.optional(),
@@ -1146,7 +1153,17 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
       return {
         // `id` agregado en Fase 2 (2026-09-15): lo necesita set_payment_method para guardar cual eligio
         // el cliente sin ambiguedad de label (dos metodos podrian compartir el mismo label).
-        methods: methods.map((m) => ({ id: m.id, type: m.type, label: m.label, details: m.details })),
+        // `seCobraAlRecibir` sale de PaymentMethod.settlement, el mismo dato con el que el servidor decide
+        // si hay que pedir comprobante y si hay que despertar al dueno. Viaja con el metodo a proposito:
+        // sin el, el agente no tiene como saber que a este metodo no le corresponde ninguna foto de pago,
+        // y la unica forma de que lo supiera era una regla escrita en el prompt.
+        methods: methods.map((m) => ({
+          id: m.id,
+          type: m.type,
+          label: m.label,
+          details: m.details,
+          seCobraAlRecibir: m.settlement === "ON_DELIVERY",
+        })),
         note: `No escribas tú el numero/llave/titular: pon la marca ${PAYMENT_BLOCK_MARKER} donde quieras mostrarlos y el sistema la reemplaza por estos datos reales antes de enviar.`,
       };
     }
@@ -1184,16 +1201,31 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
         matched: true,
         label: resolved.label,
         cost: resolved.cost.toString(),
+        // Las modalidades de ESTA zona salen en la misma respuesta que la tarifa (2026-09-17): es la
+        // misma pregunta del cliente y el mismo viaje a la base, y asi el agente no puede ofrecerle
+        // contraentrega a una ciudad donde el negocio no la hace. Antes eso vivia como prosa en las
+        // instrucciones del negocio ("si la ciudad es Bogota o Soacha, ofrece ademas...").
+        modalidadesDePago: resolved.paymentModalities.map((m) => ({ code: m, label: SHIPPING_MODALITY_LABELS[m] })),
         note: `No escribas tú el numero: pon la marca ${SHIPPING_BLOCK_MARKER} donde quieras mostrarlo y el sistema la reemplaza por este costo real.`,
       };
     }
     case "get_shipping_payment_modalities": {
-      const business = await prisma.business.findUnique({ where: { id: businessId }, select: { shippingPaymentModalities: true } });
-      const modalities = business?.shippingPaymentModalities ?? [];
+      // Con ciudad, las de esa zona; sin ciudad, las del negocio. La zona manda porque la contraentrega
+      // casi nunca es una politica del negocio entero (ver ShippingRate.paymentModalities).
+      const city = String(input.city ?? "").trim();
+      const deLaZona = city ? (await resolveShippingRateForCity(businessId, city))?.paymentModalities ?? null : null;
+      let modalities = deLaZona;
+      if (!modalities) {
+        const business = await prisma.business.findUnique({ where: { id: businessId }, select: { shippingPaymentModalities: true } });
+        modalities = business?.shippingPaymentModalities ?? [];
+      }
       if (modalities.length === 0) {
         return { modalities: [], note: "Este negocio no configuro modalidades de pago de envio. Segui el flujo generico de pago." };
       }
-      return { modalities: modalities.map((m) => ({ code: m, label: SHIPPING_MODALITY_LABELS[m] })) };
+      return {
+        modalities: modalities.map((m) => ({ code: m, label: SHIPPING_MODALITY_LABELS[m] })),
+        ...(city && deLaZona ? { note: `Estas son las modalidades que aplican en ${city}. No le ofrezcas otras.` } : {}),
+      };
     }
     case "save_customer_name": {
       const name = String(input.name ?? "").trim();
@@ -1818,6 +1850,14 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
           paymentMethodId: saleStateOn ? saleState?.paymentMethodId : paymentMethodId,
           paymentMethodLabel,
         });
+        // EL COMPROBANTE SE VERIFICA, NO SE PIDE POR PROMPT (2026-09-17). `debeConfirmar` ya significa
+        // "el pago de este pedido es por adelantado": con contraentrega es false y esto ni corre, que es
+        // exactamente lo que faltaba - hasta hoy la directiva del prompt le pedia al cliente la foto de un
+        // pago que todavia no habia ocurrido y frenaba una venta que debia cerrarse sola.
+        if (await faltaComprobanteDePago(businessId, context.conversationId, { pagoPorAdelantado: debeConfirmar })) {
+          return { closed: false, note: FALTA_COMPROBANTE_NOTE };
+        }
+
         const pending = debeConfirmar
           ? await requestSaleConfirmation(context, summary, { items, shippingAddress, paymentMethodLabel, shippingCost })
           : false;

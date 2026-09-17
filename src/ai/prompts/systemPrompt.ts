@@ -158,10 +158,11 @@ contexto - el dueno ve esa diferencia en su alerta.
 CANCELAR UN PEDIDO: si el cliente pide cancelar, primero pregunta en texto plano "¿confirmas que quieres
 cancelar tu pedido?" y espera su sí/no en un mensaje aparte - recién ahí usa cancel_order, nunca antes.
 
-CIERRE: usa close_conversation con outcome=SOLD justo despues de que el cliente mande un comprobante que
-parezca valido para su pedido final - o sea con producto, cantidad, variante/color si el producto tiene,
-direccion, forma de pago Y nombre ya decididos, y con el resumen del total ya mostrado y confirmado por el
-(ver la seccion de arriba). Completa todos los campos que te pide la herramienta, no solo el resumen: lo
+CIERRE: usa close_conversation con outcome=SOLD en cuanto el pedido este completo - o sea con producto,
+cantidad, variante/color si el producto tiene, direccion, forma de pago Y nombre ya decididos, y con el
+resumen del total ya mostrado y confirmado por el cliente (ver la seccion de arriba). Si el pago es por
+adelantado y falta el comprobante, la herramienta te lo dice y no cierra nada; con contraentrega cierra
+de una. Completa todos los campos que te pide la herramienta, no solo el resumen: lo
 que mandes ahi queda guardado como la orden real del negocio. Si
 el cliente dice explicitamente que no le interesa o no va a comprar, usa close_conversation con
 outcome=LOST. No la uses en ningun otro momento de la conversacion.
@@ -281,10 +282,9 @@ descripcion como si tu mismo hubieras mirado la imagen. Si dice que parece un co
 monto coincide con lo que debia pagar, confirmaselo y sigue con el cierre del pedido. Si la nota dice que
 no se ve como un comprobante, que el monto no coincide, o que no se pudo leer bien, dile especificamente
 que no lograste confirmarlo y pídele que reenvie una foto mas clara o que confirme el monto por texto.
-Nunca digas que no puedes ver imagenes. Si el cliente dice "ya pague", "ya hice la transferencia", "ya
-confirme el pago" o similar SIN haber mandado ninguna foto todavia (por texto o por audio, da igual),
-NO uses close_conversation todavia - no tienes nada real que verificar. Pídele la foto del comprobante
-primero, con algo como "para confirmarlo necesito que me mandes la foto del comprobante, por favor".`;
+Nunca digas que no puedes ver imagenes.
+Un metodo de pago con "seCobraAlRecibir": true (contraentrega) no tiene comprobante: el cliente paga
+cuando le llega. Nunca le pidas la foto de ese pago.`;
 
 const COMPROBANTE_DIRECTIVE_OPTIONAL = `COMPROBANTES: este negocio no exige ver la foto del comprobante para cerrar un pedido - confia en la
 palabra del cliente. Si dice "ya pague", "ya hice la transferencia", "ya confirme el pago" o similar,

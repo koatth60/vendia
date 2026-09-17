@@ -251,6 +251,15 @@ model ShippingRate {
   label      String
   cost       Decimal  @db.Decimal(12, 2)
   sortOrder  Int      @default(0)
+  // Que modalidades de pago del envio aplican EN ESTA ZONA (2026-09-17). Vacio = las del negocio
+  // (Business.shippingPaymentModalities), que es el comportamiento anterior a este campo.
+  //
+  // Existe porque la contraentrega casi nunca es una politica del negocio entero: es una politica por
+  // zona. MAG.IMP la tenia escrita como prosa en sus instrucciones ("si la ciudad es Bogota o Soacha,
+  // ofrece ademas Pago Contra Entrega Total"), o sea como una regla que el modelo tenia que recordar
+  // entre otras 89 lineas. Aca es un dato, sale con la tarifa en la misma llamada que ya resuelve la
+  // ciudad, y se responde con un SELECT.
+  paymentModalities ShippingPaymentModality[] @default([])
   createdAt  DateTime @default(now())
 
   @@index([businessId])

@@ -6097,6 +6097,29 @@ async function loadShipping() {
   await Promise.all([loadShippingRates(), loadShippingCityRules()]);
 }
 
+// Las modalidades de pago del envio de UNA zona (ShippingRate.paymentModalities). Vacio significa "esta
+// zona no tiene nada distinto": el bot usa las del negocio. No es lo mismo que "ninguna".
+const SHIP_RATE_MODALITIES = [
+  ['ship-rate-mod-prepaid-all', 'PREPAID_ALL', 'Todo por adelantado'],
+  ['ship-rate-mod-prepaid-product-cod-shipping', 'PREPAID_PRODUCT_COD_SHIPPING', 'Producto adelantado, envío contraentrega'],
+  ['ship-rate-mod-cod-all', 'COD_ALL', 'Todo contraentrega'],
+];
+
+function readShippingRateModalities() {
+  return SHIP_RATE_MODALITIES.filter(([id]) => document.getElementById(id).checked).map(([, code]) => code);
+}
+
+function setShippingRateModalities(codes) {
+  const marcadas = codes || [];
+  SHIP_RATE_MODALITIES.forEach(([id, code]) => {
+    document.getElementById(id).checked = marcadas.includes(code);
+  });
+}
+
+function shippingRateModalityLabels(codes) {
+  return SHIP_RATE_MODALITIES.filter(([, code]) => (codes || []).includes(code)).map(([, , label]) => label);
+}
+
 async function loadShippingRates() {
   const container = document.getElementById('shipping-rates-list');
   const select = document.getElementById('ship-city-rate');
@@ -6115,6 +6138,11 @@ async function loadShippingRates() {
             <div style="flex:1 1 220px; min-width:0;">
               <strong style="font-size:13.5px;">${escapeHtml(r.label)}</strong>
               <div style="font-size:12px; color:var(--muted); margin-top:2px;">${escapeHtml(formatMoney(r.cost, 'COP'))}</div>
+              <div style="font-size:12px; color:var(--muted); margin-top:2px;">${
+                shippingRateModalityLabels(r.paymentModalities).length > 0
+                  ? escapeHtml(shippingRateModalityLabels(r.paymentModalities).join(' · '))
+                  : 'Usa las formas de pago del negocio'
+              }</div>
             </div>
             <div style="display:flex; flex-wrap:wrap; gap:6px; flex-shrink:0;">
               <button class="btn-secondary" onclick="editShippingRate('${r.id}')">Editar</button>
@@ -6133,6 +6161,7 @@ function editShippingRate(id) {
   editingShippingRateId = id;
   document.getElementById('ship-rate-label').value = rate.label;
   document.getElementById('ship-rate-cost').value = rate.cost;
+  setShippingRateModalities(rate.paymentModalities);
   document.getElementById('ship-rate-submit-btn').textContent = 'Guardar cambios';
   document.getElementById('ship-rate-cancel-btn').style.display = 'inline-block';
   document.getElementById('ship-rate-label').scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -6142,6 +6171,7 @@ function cancelEditShippingRate() {
   editingShippingRateId = null;
   document.getElementById('ship-rate-label').value = '';
   document.getElementById('ship-rate-cost').value = '';
+  setShippingRateModalities([]);
   document.getElementById('ship-rate-submit-btn').textContent = '+ Agregar tarifa';
   document.getElementById('ship-rate-cancel-btn').style.display = 'none';
 }
@@ -6149,8 +6179,9 @@ function cancelEditShippingRate() {
 async function addShippingRate() {
   const label = document.getElementById('ship-rate-label').value.trim();
   const cost = Number(document.getElementById('ship-rate-cost').value);
+  const paymentModalities = readShippingRateModalities();
   if (!label || !Number.isFinite(cost) || cost < 0) {
-    setStatus('Completá el nombre y un costo válido', true);
+    setStatus('Completa el nombre y un costo válido', true);
     return;
   }
   try {
@@ -6158,14 +6189,14 @@ async function addShippingRate() {
       await apiFetch(`/admin/api/shipping-rates/${editingShippingRateId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ label, cost }),
+        body: JSON.stringify({ label, cost, paymentModalities }),
       });
       setStatus('Tarifa actualizada');
     } else {
       await apiFetch('/admin/api/shipping-rates', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ label, cost }),
+        body: JSON.stringify({ label, cost, paymentModalities }),
       });
       setStatus('Tarifa agregada');
     }

@@ -707,6 +707,20 @@
             <input id="ship-rate-cost" type="number" min="0" placeholder="Ej: 12000" />
           </div>
         </div>
+        <div class="section-title">Cómo se paga en esta zona<span class="section-count">déjalo sin marcar para usar lo del negocio</span></div>
+        <label class="toggle-row toggle-row-check">
+          <input type="checkbox" id="ship-rate-mod-prepaid-all" />
+          <div class="toggle-title">Producto + envío, todo por adelantado</div>
+        </label>
+        <label class="toggle-row toggle-row-check">
+          <input type="checkbox" id="ship-rate-mod-prepaid-product-cod-shipping" />
+          <div class="toggle-title">Producto por adelantado, envío contraentrega</div>
+        </label>
+        <label class="toggle-row toggle-row-check">
+          <input type="checkbox" id="ship-rate-mod-cod-all" />
+          <div class="toggle-title">Todo (producto + envío) contraentrega</div>
+        </label>
+        <p style="font-size:12px; color:var(--muted); margin:0 0 12px;">Si marcas alguna, el bot solo ofrece esas cuando el cliente es de esta zona. Si no marcas ninguna, ofrece las que configuraste en Agente &gt; Configuración. Con «todo contraentrega» no se pide comprobante: no hay pago que mostrar todavía.</p>
         <div class="actions-row">
           <button class="btn-secondary" id="ship-rate-cancel-btn" style="display:none;" onclick="cancelEditShippingRate()">Cancelar</button>
           <button class="btn-primary" id="ship-rate-submit-btn" onclick="addShippingRate()">+ Agregar tarifa</button>

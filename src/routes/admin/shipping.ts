@@ -1,4 +1,5 @@
 import { Router } from "express";
+import type { ShippingPaymentModality } from "@prisma/client";
 import {
   listShippingRates,
   createShippingRate,
@@ -16,6 +17,16 @@ import { businessIdOf } from "./shared";
 // get_shipping_rate_for_city, pero solo se podian cargar con scripts/seed-magimp-shipping.ts.
 export const shippingRouter = Router();
 
+// Las modalidades de pago del envio que aplican en una zona. Un valor que no sea uno de los tres se
+// descarta en vez de guardarse: la columna es un enum y un formulario a medias no puede dejar una tarifa
+// con una modalidad que el codigo no sabe leer. `undefined` (el campo no vino) deja la lista como esta.
+const MODALIDADES = ["PREPAID_ALL", "PREPAID_PRODUCT_COD_SHIPPING", "COD_ALL"];
+
+function modalidadesValidas(valor: unknown): ShippingPaymentModality[] | undefined {
+  if (!Array.isArray(valor)) return undefined;
+  return valor.map((v) => String(v)).filter((v): v is ShippingPaymentModality => MODALIDADES.includes(v));
+}
+
 shippingRouter.get("/api/shipping-rates", async (req, res) => {
   res.json(await listShippingRates(businessIdOf(req)));
 });
@@ -31,6 +42,7 @@ shippingRouter.post("/api/shipping-rates", requireOwner, async (req, res) => {
     label,
     cost,
     sortOrder: req.body?.sortOrder !== undefined ? Number(req.body.sortOrder) : undefined,
+    paymentModalities: modalidadesValidas(req.body?.paymentModalities),
   });
   res.status(201).json(rate);
 });
@@ -41,6 +53,7 @@ shippingRouter.put("/api/shipping-rates/:id", requireOwner, async (req, res) => 
       label: req.body?.label !== undefined ? String(req.body.label).trim() : undefined,
       cost: req.body?.cost !== undefined ? Number(req.body.cost) : undefined,
       sortOrder: req.body?.sortOrder !== undefined ? Number(req.body.sortOrder) : undefined,
+      paymentModalities: modalidadesValidas(req.body?.paymentModalities),
     });
     res.json(rate);
   } catch (error) {

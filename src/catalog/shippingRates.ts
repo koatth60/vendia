@@ -1,5 +1,6 @@
 import { prisma } from "../db/client";
 import { normalizeForMatch, escapeForRegExp } from "../search/text";
+import type { ShippingPaymentModality } from "@prisma/client";
 
 export async function listShippingRates(businessId: string) {
   return prisma.shippingRate.findMany({
@@ -8,8 +9,19 @@ export async function listShippingRates(businessId: string) {
   });
 }
 
-export async function createShippingRate(businessId: string, data: { label: string; cost: number; sortOrder?: number }) {
-  return prisma.shippingRate.create({ data: { businessId, label: data.label, cost: data.cost, sortOrder: data.sortOrder ?? 0 } });
+export async function createShippingRate(
+  businessId: string,
+  data: { label: string; cost: number; sortOrder?: number; paymentModalities?: ShippingPaymentModality[] }
+) {
+  return prisma.shippingRate.create({
+    data: {
+      businessId,
+      label: data.label,
+      cost: data.cost,
+      sortOrder: data.sortOrder ?? 0,
+      paymentModalities: data.paymentModalities ?? [],
+    },
+  });
 }
 
 // Fase 4 (ver ONIX-CRM-REORG-PLAN.md): estas dos tablas existian desde antes y el agente ya las
@@ -18,7 +30,7 @@ export async function createShippingRate(businessId: string, data: { label: stri
 export async function updateShippingRate(
   businessId: string,
   id: string,
-  data: Partial<{ label: string; cost: number; sortOrder: number }>
+  data: Partial<{ label: string; cost: number; sortOrder: number; paymentModalities: ShippingPaymentModality[] }>
 ) {
   const rate = await prisma.shippingRate.findFirst({ where: { id, businessId } });
   if (!rate) throw new Error("Tarifa de envío no encontrada");
@@ -95,5 +107,28 @@ export async function resolveShippingRateForCity(businessId: string, city: strin
     where: { businessId, label: rule.label },
     orderBy: { sortOrder: "asc" },
   });
-  return rate ? { label: rate.label, cost: rate.cost } : null;
+  if (!rate) return null;
+  // La modalidad de pago del envio viaja CON la tarifa (2026-09-17). Es el mismo viaje a la base y la
+  // misma pregunta del cliente ("¿a donde te lo mando?"), y sin esto la unica forma de saber que en esta
+  // zona se puede pagar todo al recibir era una frase escrita en las instrucciones del negocio.
+  return { label: rate.label, cost: rate.cost, paymentModalities: await modalidadesDeLaZona(businessId, rate) };
+}
+
+/**
+ * Las modalidades de pago del envio que aplican en una zona: las suyas si tiene, y si no las del negocio.
+ *
+ * El vacio no significa "ninguna", significa "no se configuro nada distinto para esta zona". Un negocio
+ * que ofrece lo mismo en todo el pais no tiene que cargar la lista tarifa por tarifa, y uno que tiene una
+ * excepcion la carga solo donde existe.
+ */
+export async function modalidadesDeLaZona(
+  businessId: string,
+  rate: { paymentModalities: ShippingPaymentModality[] }
+): Promise<ShippingPaymentModality[]> {
+  if (rate.paymentModalities.length > 0) return rate.paymentModalities;
+  const negocio = await prisma.business.findUnique({
+    where: { id: businessId },
+    select: { shippingPaymentModalities: true },
+  });
+  return negocio?.shippingPaymentModalities ?? [];
 }
