@@ -68,7 +68,39 @@
     height: 100%; min-height: 0;
     background: var(--onix-surface-nav);
     border-right: 1px solid var(--onix-border);
+    transition: width .16s ease;
   }
+  /* Retraida: solo los iconos. El ancho se fija aca en vez de redefinir
+     --onix-sidebar-w: la transicion de width no vuelve sola cuando lo unico que
+     cambia es la variable de la que sale el valor - la barra se quedaba clavada
+     en 64px al expandirla, con el token ya de vuelta en 248px. */
+  body.sidebar-collapsed .sidebar { width: 64px; }
+  body.sidebar-collapsed .brand-text,
+  body.sidebar-collapsed .brand-mark,
+  body.sidebar-collapsed .tab-label,
+  body.sidebar-collapsed .tab-count,
+  body.sidebar-collapsed .session-badge { display: none; }
+  body.sidebar-collapsed .sidebar-brand { justify-content: center; padding: 0; }
+  body.sidebar-collapsed .tabbar { padding: 14px 8px; }
+  body.sidebar-collapsed .tab-btn { justify-content: center; padding: 0; position: relative; }
+  body.sidebar-collapsed .sidebar-foot { flex-direction: column; gap: 10px; padding: 12px 8px; }
+  /* Sin lugar para el numero, queda el punto: que HAY sin leer se sigue viendo,
+     cuantos se lee al abrirla. */
+  body.sidebar-collapsed .tab-btn .unread-badge {
+    position: absolute; top: 4px; right: 6px; margin: 0;
+    min-width: 8px; width: 8px; height: 8px; padding: 0;
+    font-size: 0; overflow: hidden;
+  }
+
+  .sidebar-toggle {
+    margin-left: auto; flex-shrink: 0;
+    width: 30px; height: 30px; padding: 0; border: none; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    border-radius: var(--onix-radius-control);
+    background: transparent; color: var(--onix-muted);
+  }
+  .sidebar-toggle:hover { background: var(--onix-surface-2); color: var(--onix-ink); }
+  body.sidebar-collapsed .sidebar-toggle { margin-left: 0; }
   /* Si la navegación no cabe (pantalla baja), scrollea ella sola y el pie
      de la barra sigue pegado abajo. */
   .sidebar .tabbar { overflow-y: auto; min-height: 0; }
@@ -997,35 +1029,57 @@
   /* El triangulo de play se ve centrado cuando esta un pelo a la derecha: su
      masa visual cae a la izquierda del cuadro que ocupa. */
   .voice-icon-play { margin-left: 2px; }
-  .voice-track {
-    position: relative; flex: 1; min-width: 0; height: 4px;
-    border-radius: 999px; background: var(--onix-border-strong); cursor: pointer;
+  /* La onda. Son barras de verdad (una por tramo del audio), no un dibujo: las
+     alturas salen de los picos del archivo, ver voiceComputePeaks. Mientras no se
+     hayan calculado, todas van a la misma altura y se ve como una barra de
+     progreso comun - nunca una onda inventada. */
+  .voice-wave {
+    position: relative; flex: 1; min-width: 0; height: 26px;
+    display: flex; align-items: center; gap: 2px;
+    cursor: pointer;
   }
-  /* El area sensible al dedo es mas alta que la linea que se ve: 4px de alto
-     son imposibles de acertar, en un telefono y tambien con el mouse. */
-  .voice-track::before { content: ''; position: absolute; inset: -10px 0; }
-  .voice-track:focus-visible { outline: 2px solid var(--onix-accent); outline-offset: 4px; }
-  .voice-fill {
+  .voice-wave:focus-visible { outline: 2px solid var(--onix-accent); outline-offset: 3px; border-radius: 4px; }
+  .voice-bar {
+    flex: 1; min-width: 2px; height: 34%;
+    border-radius: 999px; background: var(--onix-border-strong);
+    transition: height .18s ease;
+  }
+  /* Lo ya escuchado es una COPIA de la misma onda recortada por ancho, encima de
+     la original. Colorear barra por barra deja el borde del avance saltando de a
+     una barra entera; asi el corte cae donde va, incluso a mitad de barra. */
+  .voice-wave-played {
     position: absolute; inset: 0 auto 0 0; width: 0;
-    border-radius: 999px; background: var(--onix-accent);
+    overflow: hidden; pointer-events: none;
   }
-  .voice-knob {
-    position: absolute; top: 50%; left: 0;
-    width: 10px; height: 10px; margin: -5px 0 0 -5px;
-    border-radius: 999px; background: var(--onix-accent);
-    opacity: 0; transition: opacity .12s ease;
+  .voice-wave-played-inner {
+    /* El ancho lo fija voiceSetProgress con el ancho real de la onda: la copia
+       tiene que medir lo mismo que el original aunque su contenedor este
+       recortado, o las barras de los dos colores no coinciden. */
+    position: absolute; inset: 0 auto 0 0; width: 100%;
+    display: flex; align-items: center; gap: 2px;
   }
-  .voice-player:hover .voice-knob, .voice-player.is-playing .voice-knob { opacity: 1; }
+  .voice-wave-played .voice-bar { background: var(--onix-accent); }
   .voice-time {
-    flex-shrink: 0; font-size: 11px; color: var(--onix-dim); min-width: 30px; text-align: right;
+    flex-shrink: 0; font-size: 11px; color: var(--onix-dim); min-width: 28px; text-align: right;
   }
+  /* Una nota de dos minutos a 1x es tiempo que nadie tiene. */
+  .voice-speed {
+    flex-shrink: 0; padding: 2px 6px; border: none; cursor: pointer;
+    border-radius: var(--onix-radius-chip);
+    background: var(--onix-surface-2); color: var(--onix-muted);
+    font-size: 10.5px; line-height: 1.4;
+  }
+  .voice-speed:hover { background: var(--onix-accent-soft); color: var(--onix-accent); }
 
   /* Dentro de una burbuja el reproductor no lleva su propia caja: la burbuja ya
      es la caja, y una pastilla adentro de otra se ve como un parche pegado. */
   .bubble .voice-player {
     background: transparent; border: none;
-    padding: 2px 0 6px; min-width: 190px; max-width: 240px;
+    padding: 2px 0 6px; min-width: 210px; max-width: 250px;
   }
+  /* Adentro de una burbuja verde el gris del borde no se distingue del fondo. */
+  .bubble-ASSISTANT .voice-bar { background: var(--onix-accent-line); }
+  .bubble-ASSISTANT .voice-speed { background: var(--onix-surface); }
 
   /* Barra de grabacion: ocupa el lugar de la fila de escribir, no se suma abajo,
      asi el compositor no cambia de alto al empezar a grabar. */

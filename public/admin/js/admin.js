@@ -3113,6 +3113,9 @@ function renderComposerPreview() {
         </div>`;
     })
     .join('');
+  // La nota recien grabada muestra su onda sin que haya que reproducirla: es un blob local, leerlo no
+  // cuesta una descarga. Va despues del innerHTML porque antes los reproductores todavia no existen.
+  preview.querySelectorAll('.voice-player').forEach((player) => voiceEnsureWave(player));
 }
 
 function removeComposerFile(index) {
@@ -3138,6 +3141,39 @@ function clearComposerFile() {
   renderComposerPreview();
 }
 
+// --- Barra lateral retraible ------------------------------------------------
+//
+// Retraida deja solo los iconos. El nombre de cada seccion no se pierde: pasa al title, que es lo que
+// muestra el navegador al pasar el mouse por encima.
+const SIDEBAR_KEY = 'onix-admin-sidebar';
+
+function applySidebarState(retraida) {
+  document.body.classList.toggle('sidebar-collapsed', retraida);
+  const boton = document.getElementById('sidebar-toggle');
+  if (boton) {
+    boton.setAttribute('aria-expanded', retraida ? 'false' : 'true');
+    const texto = retraida ? 'Expandir el menú' : 'Contraer el menú';
+    boton.title = texto;
+    boton.setAttribute('aria-label', texto);
+  }
+  document.querySelectorAll('.tabbar .tab-btn').forEach((btn) => {
+    const etiqueta = btn.querySelector('.tab-label');
+    if (etiqueta) btn.title = retraida ? etiqueta.textContent.trim() : '';
+  });
+}
+
+function toggleSidebar() {
+  const retraida = !document.body.classList.contains('sidebar-collapsed');
+  applySidebarState(retraida);
+  try { localStorage.setItem(SIDEBAR_KEY, retraida ? '1' : '0'); } catch {}
+}
+
+function restoreSidebarState() {
+  let guardado = null;
+  try { guardado = localStorage.getItem(SIDEBAR_KEY); } catch {}
+  applySidebarState(guardado === '1');
+}
+
 // --- Reproductor de notas de voz -------------------------------------------
 //
 // El <audio controls> del navegador trae su propia barra gris, su propio menu de tres puntos y su
@@ -3159,20 +3195,94 @@ function formatClock(segundos) {
  * @param src        url del audio
  * @param duracionMs conocida de antemano (una grabacion recien hecha), o 0 si hay que leerla del archivo
  */
+// Cuantas barras dibuja la onda. 44 es lo que entra sin amontonarse en el ancho de una burbuja; mas
+// barras no agregan informacion, solo ruido.
+const VOICE_BARS = 44;
+
+// Picos ya calculados, por url. El hilo se repinta entero con innerHTML cada vez que llega un mensaje:
+// sin esta cache, cada repintado volveria a descargar y decodificar todas las notas de voz visibles.
+const voicePeaksCache = new Map();
+
 function voicePlayerHtml(src, duracionMs) {
   const total = duracionMs > 0 ? formatClock(duracionMs / 1000) : '';
+  const picos = voicePeaksCache.get(src);
+  const barras = Array.from({ length: VOICE_BARS }, (_, i) => {
+    // Sin picos todavia, todas las barras van a la misma altura media: es una barra de progreso comun,
+    // no una onda inventada. La onda aparece cuando existe de verdad.
+    const alto = picos ? Math.max(0.12, picos[i]) : 0.34;
+    return `<span class="voice-bar" style="height:${(alto * 100).toFixed(1)}%"></span>`;
+  }).join('');
   return `
-    <div class="voice-player" data-src="${escapeHtml(src)}" data-duration-ms="${duracionMs || 0}">
+    <div class="voice-player${picos ? ' has-wave' : ''}" data-src="${escapeHtml(src)}" data-duration-ms="${duracionMs || 0}">
       <button type="button" class="voice-play" aria-label="Reproducir nota de voz">
-        <svg class="voice-icon-play" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.5v13l11-6.5z"></path></svg>
-        <svg class="voice-icon-pause" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7.5 5h3.2v14H7.5zM13.3 5h3.2v14h-3.2z"></path></svg>
+        <svg class="voice-icon-play" width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.5v13l11-6.5z"></path></svg>
+        <svg class="voice-icon-pause" width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7.5 5h3.2v14H7.5zM13.3 5h3.2v14h-3.2z"></path></svg>
       </button>
-      <div class="voice-track" role="slider" aria-label="Posición de la nota de voz" tabindex="0">
-        <div class="voice-fill"></div>
-        <div class="voice-knob"></div>
+      <div class="voice-wave" role="slider" aria-label="Posición de la nota de voz" tabindex="0">
+        ${barras}
+        <div class="voice-wave-played"><div class="voice-wave-played-inner">${barras}</div></div>
       </div>
       <span class="voice-time onix-num">${total}</span>
+      <button type="button" class="voice-speed onix-num" aria-label="Velocidad de reproducción">1×</button>
     </div>`;
+}
+
+// Los picos salen del AUDIO DE VERDAD, no de un dibujo decorativo: se descarga una vez, se decodifica y
+// se saca el valor maximo de cada tramo. Si no se puede (el navegador no decodifica ese formato, o el
+// bucket no habilita CORS para leerlo con fetch), no se inventa una onda: quedan las barras planas, que
+// son una barra de progreso honesta.
+async function voiceComputePeaks(src) {
+  if (voicePeaksCache.has(src)) return voicePeaksCache.get(src);
+  try {
+    const Contexto = window.AudioContext || window.webkitAudioContext;
+    if (!Contexto) return null;
+    const respuesta = await fetch(src);
+    if (!respuesta.ok) return null;
+    const bytes = await respuesta.arrayBuffer();
+    const contexto = new Contexto();
+    const audio = await contexto.decodeAudioData(bytes);
+    const datos = audio.getChannelData(0);
+    const porBarra = Math.floor(datos.length / VOICE_BARS) || 1;
+    const picos = [];
+    let maximo = 0;
+    for (let i = 0; i < VOICE_BARS; i++) {
+      let pico = 0;
+      const desde = i * porBarra;
+      // De a 16 muestras: recorrer las ~44.100 de cada tramo no cambia el dibujo y bloquea el hilo.
+      for (let j = desde; j < desde + porBarra && j < datos.length; j += 16) {
+        const valor = Math.abs(datos[j]);
+        if (valor > pico) pico = valor;
+      }
+      picos.push(pico);
+      if (pico > maximo) maximo = pico;
+    }
+    contexto.close();
+    // Normalizado: una nota grabada bajito tiene que verse igual de alta que una grabada fuerte, si no
+    // la mitad de las notas se ven como una linea recta.
+    const normalizados = picos.map((p) => (maximo > 0 ? p / maximo : 0));
+    voicePeaksCache.set(src, normalizados);
+    return normalizados;
+  } catch {
+    return null;
+  }
+}
+
+// Pinta la onda de un reproductor ya dibujado, sin volver a armar el HTML (repintar aca borraria el
+// progreso de la nota que esta sonando).
+function voiceApplyPeaks(player, picos) {
+  if (!player || !picos) return;
+  player.querySelectorAll('.voice-bar').forEach((barra, indice) => {
+    const alto = Math.max(0.12, picos[indice % VOICE_BARS]);
+    barra.style.height = `${(alto * 100).toFixed(1)}%`;
+  });
+  player.classList.add('has-wave');
+}
+
+async function voiceEnsureWave(player) {
+  const src = player.dataset.src;
+  if (!src || player.classList.contains('has-wave')) return;
+  const picos = await voiceComputePeaks(src);
+  if (picos) voiceApplyPeaks(player, picos);
 }
 
 // Una sola clase decide que icono se ve; el CSS hace el resto. No se toca el atributo hidden de los
@@ -3184,10 +3294,7 @@ function voicePlayerSetIcon(player, sonando) {
 function voicePlayerReset(player) {
   if (!player) return;
   voicePlayerSetIcon(player, false);
-  const fill = player.querySelector('.voice-fill');
-  if (fill) fill.style.width = '0%';
-  const knob = player.querySelector('.voice-knob');
-  if (knob) knob.style.left = '0%';
+  voiceSetProgress(player, 0);
   const tiempo = player.querySelector('.voice-time');
   const declarada = Number(player.dataset.durationMs) || 0;
   // Sin duracion declarada se deja vacio en vez de "0:00": una nota que dura 12 segundos anunciando
@@ -3203,13 +3310,26 @@ function voicePlayerProgreso() {
   const declarada = Number(voicePlayerActivo.dataset.durationMs) || 0;
   const total = declarada > 0 ? declarada / 1000 : (Number.isFinite(voiceAudio.duration) ? voiceAudio.duration : 0);
   const ratio = total > 0 ? Math.min(1, voiceAudio.currentTime / total) : 0;
-  const fill = voicePlayerActivo.querySelector('.voice-fill');
-  if (fill) fill.style.width = `${ratio * 100}%`;
-  const knob = voicePlayerActivo.querySelector('.voice-knob');
-  if (knob) knob.style.left = `${ratio * 100}%`;
+  voiceSetProgress(voicePlayerActivo, ratio);
   const tiempo = voicePlayerActivo.querySelector('.voice-time');
   // Mientras suena se muestra lo que va corriendo; detenido, cuanto dura.
   if (tiempo) tiempo.textContent = formatClock(voiceAudio.currentTime);
+}
+
+// La parte ya escuchada es una copia de la misma onda, recortada por ancho. Asi las barras de los dos
+// colores quedan exactamente alineadas, cosa que no pasa si se colorea barra por barra.
+function voiceSetProgress(player, ratio) {
+  const played = player.querySelector('.voice-wave-played');
+  if (!played) return;
+  const wave = player.querySelector('.voice-wave');
+  const inner = played.firstElementChild;
+  // La copia recortada tiene que MEDIR lo mismo que la onda original, o sus barras no caen en el mismo
+  // lugar. Se fija en pixeles porque su contenedor es justamente el que se achica.
+  if (wave && inner) {
+    const ancho = `${wave.clientWidth}px`;
+    if (inner.style.width !== ancho) inner.style.width = ancho;
+  }
+  played.style.width = `${(ratio * 100).toFixed(2)}%`;
 }
 
 function ensureVoiceAudio() {
@@ -3241,12 +3361,28 @@ function toggleVoicePlayer(player) {
   voicePlayerActivo = player;
   audio.src = player.dataset.src;
   audio.currentTime = 0;
+  audio.playbackRate = Number(player.dataset.speed) || 1;
   audio.play().catch(() => {});
   voicePlayerSetIcon(player, true);
+  // La onda se calcula cuando alguien quiere escuchar esa nota, no al pintar el hilo: abrir una
+  // conversacion no puede descargar y decodificar todas las notas de voz que tenga.
+  voiceEnsureWave(player);
+}
+
+// Las velocidades de WhatsApp. Una nota de dos minutos a 1x es tiempo que nadie tiene.
+const VOICE_SPEEDS = [1, 1.5, 2];
+
+function cycleVoiceSpeed(player) {
+  const actual = Number(player.dataset.speed) || 1;
+  const siguiente = VOICE_SPEEDS[(VOICE_SPEEDS.indexOf(actual) + 1) % VOICE_SPEEDS.length];
+  player.dataset.speed = String(siguiente);
+  const boton = player.querySelector('.voice-speed');
+  if (boton) boton.textContent = `${siguiente}×`;
+  if (voicePlayerActivo === player && voiceAudio) voiceAudio.playbackRate = siguiente;
 }
 
 function seekVoicePlayer(player, event) {
-  const track = player.querySelector('.voice-track');
+  const track = player.querySelector('.voice-wave');
   if (!track) return;
   const caja = track.getBoundingClientRect();
   const ratio = Math.min(1, Math.max(0, (event.clientX - caja.left) / caja.width));
@@ -3271,7 +3407,13 @@ document.addEventListener('click', (event) => {
     if (player) toggleVoicePlayer(player);
     return;
   }
-  const track = event.target.closest('.voice-track');
+  const velocidad = event.target.closest('.voice-speed');
+  if (velocidad) {
+    const player = velocidad.closest('.voice-player');
+    if (player) cycleVoiceSpeed(player);
+    return;
+  }
+  const track = event.target.closest('.voice-wave');
   if (track) {
     const player = track.closest('.voice-player');
     if (player) seekVoicePlayer(player, event);
@@ -5063,6 +5205,9 @@ function initRealtime() {
 }
 
 async function boot() {
+  // Antes de loadRole: es una preferencia guardada en este navegador, no depende de la sesion, y
+  // aplicarla despues de la primera pintura se ve como un salto de la barra lateral.
+  restoreSidebarState();
   await loadRole();
 
   // Deep-link (URL hash) gana sobre lo último guardado en localStorage - así un enlace compartido a
