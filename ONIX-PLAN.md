@@ -550,7 +550,7 @@ queda cerrada.**
 
 ---
 
-### E07 · El lock de conversación deja de vivir en memoria
+### E07 · El lock de conversación deja de vivir en memoria — **CERRADA el 2026-09-17** (commit `416dce7`), sin desplegar
 
 **Quita:** al operador, ser responsable de no escalar el proceso.
 **Porque:** lo que impide hoy que dos instancias dupliquen mensajes a clientes reales es una línea
@@ -561,6 +561,35 @@ entre procesos, se libera solo si el proceso muere, y no necesita Redis.
 **Se prueba:** dos procesos contra la misma conversación producen exactamente una respuesta.
 **Tamaño:** M. **Depende de:** `E06` (para saber si es la causa). **Bandera:** no.
 **Vuelta atrás:** revertir; vuelve el `Map`.
+
+**Lo que quedó** (`src/db/conversationLock.ts`): un lock consultivo de **sesión**
+(`pg_advisory_lock` / `pg_advisory_unlock`, espacio de nombres `ONIX`) sobre
+`hashtext(conversationId)`, con su propio pool de `pg`.
+
+**No es `pg_advisory_xact_lock`, que es lo que pedía esta ficha.** Un lock de transacción obliga a
+tener una transacción **abierta** durante toda la sección crítica, y la sección crítica de un turno
+es `generateReply` + el envío: hasta 10 minutos (`STALE_REPLY_MINUTES`). Eso es una transacción
+inactiva por minutos y por conversación, con el horizonte de `xmin` congelado y `VACUUM` frenado; y
+las transacciones interactivas de Prisma **vencen solas**, así que al vencer sueltan el lock mientras
+el turno sigue corriendo. Un lock que se suelta a mitad de la sección crítica es peor que no tener
+lock, porque parece que protege. El lock de sesión da la misma garantía entre procesos, tampoco
+necesita Redis, y también se libera solo si el proceso muere — porque al morir se cae la conexión,
+que es justo lo que la cuarta prueba comprueba.
+
+**La cadena en memoria se queda, con otro trabajo.** No son dos mecanismos para lo mismo: la cadena
+garantiza el **orden de llegada** dentro del proceso (el lock no puede: dos llamadas simultáneas
+compiten por una conexión del pool, y el orden en que la consiguen no está definido), y el lock
+garantiza la **exclusión entre procesos** (la cadena no puede: cada proceso tiene su propio `Map`).
+
+**Se probó** con dos pools distintos, que para Postgres es exactamente lo mismo que dos procesos:
+no se solapan en la misma conversación, sí corren en paralelo en conversaciones distintas, una
+sección que revienta suelta el lock, y un proceso que muere lo suelta solo.
+
+**Esto no baja el número de `RESPUESTA_DUPLICADA`** — `E06` ya mostró que ese detector cuenta sobre
+todo un turno mandando varios mensajes. Lo que quita es la responsabilidad del operador de no
+escalar el proceso, que es lo que `E23` necesita para poder separar `web` y `worker`. El comentario
+de `ecosystem.config.js` ya dice eso: `instances: 1` sigue ahí porque nada pide todavía dos
+procesos, no porque correr dos duplique respuestas.
 
 ---
 
