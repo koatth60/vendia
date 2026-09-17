@@ -4,18 +4,23 @@ import { randomUUID } from "node:crypto";
 import { prisma } from "../db/client";
 import { getOrCreateOpenConversation } from "../conversation/service";
 import { getOrRefreshContextSummary } from "./agent";
+import { getPostSaleContext, postSaleFactsForModel } from "../orders/postSale";
 
-// EL RESUMEN SEMBRADO LLEGA AL MODELO (2026-09-17, etapa E03 de ONIX-PLAN.md).
+// EL CLIENTE QUE VUELVE, Y DE DONDE SALE LO QUE EL MODELO SABE DE SU COMPRA (2026-09-17, etapa E03).
 //
-// Gratis y determinista: una conversacion con pocos mensajes NO llama a DeepSeek por este camino, asi
-// que este archivo es `*.test.ts` y no `*Paid.ts`. El camino que sí llama al modelo (una conversacion
-// larga que envejece mensajes) se sigue probando en contextSummaryPaid.ts.
+// Gratis y determinista: ninguno de estos caminos llama a DeepSeek, por eso es `*.test.ts` y no
+// `*Paid.ts`. El camino que sí llama al modelo (una conversacion larga que envejece mensajes) se
+// prueba en contextSummaryPaid.ts.
 //
-// El defecto: cuando un cliente que ya compro vuelve a escribir y su conversacion anterior quedo en
-// SOLD, getOrCreateOpenConversation abre una nueva y le SIEMBRA en `contextSummary` que compro, cuando
-// y si ya se despacho. getOrRefreshContextSummary devolvia null antes de leer esa fila cuando la
-// conversacion tenia 20 mensajes o menos - o sea, justo en el unico caso para el que el resumen fue
-// escrito. La conversacion de Andres tenia 14 mensajes el 2026-09-17.
+// Dos garantias, y la segunda nacio de un defecto que la primera dejo a la vista el mismo dia:
+//
+// 1. Un resumen ya guardado llega al modelo aunque la conversacion sea corta. Antes, la funcion
+//    devolvia null ANTES de leer la fila cuando habia 20 mensajes o menos.
+//
+// 2. Al abrir una conversacion nueva NO se siembra un resumen del pedido anterior. Eso existia y se
+//    borro: era un snapshot congelado al crear la conversacion, y de las siete conversaciones que lo
+//    tenian en produccion, CUATRO decian "todavia no ha sido despachado" sobre pedidos ya despachados.
+//    Lo que el modelo sabe de esa compra sale de postSale, que lee la base en cada turno.
 
 let businessId: string;
 let customerId: string;
@@ -38,9 +43,31 @@ after(async () => {
   await prisma.business.deleteMany({ where: { id: businessId } });
 });
 
-test("el cliente que ya compro y vuelve arranca con el resumen de su compra, no de cero", async () => {
+test("un resumen ya guardado llega al modelo aunque la conversacion tenga pocos mensajes", async () => {
+  const conversation = await getOrCreateOpenConversation(businessId, customerId);
+  await prisma.conversation.update({
+    where: { id: conversation.id },
+    data: { contextSummary: "El cliente comparo dos relojes y quedo en pensarlo." },
+  });
+  for (const [role, content] of [
+    ["CUSTOMER", "Hola"],
+    ["ASSISTANT", "Con gusto"],
+  ] as const) {
+    await prisma.message.create({ data: { conversationId: conversation.id, role, content } });
+  }
+
+  assert.equal(
+    await getOrRefreshContextSummary(conversation.id, businessId),
+    "El cliente comparo dos relojes y quedo en pensarlo."
+  );
+
+  await prisma.message.deleteMany({ where: { conversationId: conversation.id } });
+  await prisma.conversation.deleteMany({ where: { id: conversation.id } });
+});
+
+test("la conversacion nueva de un cliente que ya compro NO nace con un resumen congelado del pedido", async () => {
   const vieja = await prisma.conversation.create({ data: { customerId, status: "SOLD" } });
-  await prisma.order.create({
+  const order = await prisma.order.create({
     data: {
       businessId,
       customerId,
@@ -55,33 +82,22 @@ test("el cliente que ya compro y vuelve arranca con el resumen de su compra, no 
   // La conversacion vieja esta en SOLD, asi que esto abre una NUEVA - el caso de Andres.
   const nueva = await getOrCreateOpenConversation(businessId, customerId);
   assert.notEqual(nueva.id, vieja.id);
+  assert.equal(
+    (await prisma.conversation.findUniqueOrThrow({ where: { id: nueva.id } })).contextSummary,
+    null,
+    "un snapshot del pedido escrito una sola vez solo puede envejecer mal"
+  );
+  assert.equal(await getOrRefreshContextSummary(nueva.id, businessId), null);
 
-  const sembrado = (await prisma.conversation.findUniqueOrThrow({ where: { id: nueva.id } })).contextSummary;
-  assert.ok(sembrado, "getOrCreateOpenConversation tiene que sembrar el resumen de la compra anterior");
+  // Y lo que el modelo sabe de esa compra sale de la base EN ESTE MOMENTO, con el estado de ahora.
+  const antes = await getPostSaleContext(businessId, customerId, nueva.id);
+  assert.equal(postSaleFactsForModel(antes!).estado, "PENDING");
 
-  // Cuatro mensajes: muy por debajo de la ventana de 20 que antes hacia devolver null.
-  for (const [role, content] of [
-    ["CUSTOMER", "Oye confirmado lo del reloj"],
-    ["ASSISTANT", "Con gusto"],
-    ["CUSTOMER", "mañana a que horas llegaria"],
-    ["ASSISTANT", "Te confirmo"],
-  ] as const) {
-    await prisma.message.create({ data: { conversationId: nueva.id, role, content } });
-  }
-
-  const resumen = await getOrRefreshContextSummary(nueva.id, businessId);
-  assert.equal(resumen, sembrado, "el resumen sembrado tiene que llegar al turno, no quedarse en la base");
-  assert.match(resumen!, /Reloj Serie 12 Ultra 3/);
-});
-
-test("una conversacion corta sin resumen sembrado sigue devolviendo null, sin llamar al modelo", async () => {
-  const sinCompra = await prisma.customer.create({ data: { businessId, phoneNumber: `573007${Date.now()}` } });
-  const conversation = await getOrCreateOpenConversation(businessId, sinCompra.id);
-  await prisma.message.create({ data: { conversationId: conversation.id, role: "CUSTOMER", content: "Hola" } });
-
-  assert.equal(await getOrRefreshContextSummary(conversation.id, businessId), null);
-
-  await prisma.message.deleteMany({ where: { conversationId: conversation.id } });
-  await prisma.conversation.deleteMany({ where: { customerId: sinCompra.id } });
-  await prisma.customer.deleteMany({ where: { id: sinCompra.id } });
+  await prisma.order.update({ where: { id: order.id }, data: { fulfillmentStatus: "SHIPPED", shippedAt: new Date() } });
+  const despues = await getPostSaleContext(businessId, customerId, nueva.id);
+  assert.equal(
+    postSaleFactsForModel(despues!).estado,
+    "SHIPPED",
+    "despachar el pedido tiene que cambiar lo que el turno siguiente le dice al modelo"
+  );
 });

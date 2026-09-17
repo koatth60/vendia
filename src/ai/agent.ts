@@ -161,15 +161,10 @@ export async function getOrRefreshContextSummary(conversationId: string, busines
     select: { contextSummary: true, contextSummarizedUpTo: true },
   });
 
-  // Una conversacion corta no tiene mensajes viejos que resumir, pero SI puede tener un resumen
-  // sembrado: cuando un cliente que ya compro vuelve a escribir, getOrCreateOpenConversation le siembra
-  // en `contextSummary` que compro, cuando y si ya se despacho (ver summarizePreviousPurchase).
-  //
-  // Hasta hoy la primera linea de esta funcion era `if (total <= CONTEXT_SUMMARY_WINDOW) return null`, y
-  // ese `return` salia ANTES de leer la fila. O sea que el resumen sembrado se escribia en la base y no
-  // llegaba nunca al modelo, justo en el unico caso para el que fue escrito: la conversacion de Andres
-  // tenia 14 mensajes el 2026-09-17, y su resumen ("ya compro con nosotros el 16 de septiembre… ese
-  // pedido todavia no ha sido despachado") nunca salio de la base. Etapa E03 de ONIX-PLAN.md.
+  // Una conversacion corta no tiene mensajes viejos que resumir, pero SI puede tener un resumen ya
+  // guardado. Hasta hoy la primera linea de esta funcion era `if (total <= CONTEXT_SUMMARY_WINDOW)
+  // return null`, y ese `return` salia ANTES de leer la fila, asi que un resumen existente no llegaba
+  // al modelo hasta que la conversacion pasara de 20 mensajes. Etapa E03 de ONIX-PLAN.md.
   if (total <= CONTEXT_SUMMARY_WINDOW) return conversation?.contextSummary ?? null;
 
   const olderCount = total - CONTEXT_SUMMARY_WINDOW;

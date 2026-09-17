@@ -161,43 +161,31 @@ export async function getOrCreateOpenConversation(businessId: string, customerId
   }
 
   const conversation = await prisma.conversation.create({
-    data: { customerId, status: "NEW", contextSummary: await summarizePreviousPurchase(businessId, customerId) },
+    data: { customerId, status: "NEW" },
     include: { customer: true },
   });
   emitNewConversation(businessId, formatConversationRow(conversation));
   return conversation;
 }
 
-// Real (2026-09-15): una clienta cerro su compra y minutos despues escribio "Vale gracias". Como su
-// conversacion ya estaba en SOLD, eso abrio una conversacion NUEVA y vacia, donde el bot no tenia idea de
-// que acababa de comprar - le respondio "¿hay algo más en lo que te pueda ayudar?" como si no se
-// conocieran. El panel ya agrupa las conversaciones por cliente; lo que faltaba era que el BOT tambien
-// supiera. Se siembra el resumen de contexto con lo minimo para no arrancar de cero: que compro y cuando.
-// Una sola frase y solo de lo reciente - no es el historial completo, es el hilo que no hay que soltar.
-const PREVIOUS_PURCHASE_WINDOW_DAYS = 7;
-
-async function summarizePreviousPurchase(businessId: string, customerId: string): Promise<string | null> {
-  const since = new Date(Date.now() - PREVIOUS_PURCHASE_WINDOW_DAYS * 24 * 60 * 60 * 1000);
-  const order = await prisma.order.findFirst({
-    where: { customerId, createdAt: { gte: since } },
-    orderBy: { createdAt: "desc" },
-    include: { items: true },
-  });
-  if (!order) return null;
-
-  const productos = order.items.map((i) => `${i.quantity}x ${i.productName}`).join(", ");
-  // Fase 11: la fecha se escribe en el locale y la zona horaria del negocio, no siempre en es-CO. Un
-  // pedido de las 23:00 en Ciudad de Mexico no es del dia siguiente.
-  const { locale, timezone } = await getBusinessLocale(businessId);
-  const cuando = order.createdAt.toLocaleDateString(locale, { day: "numeric", month: "long", timeZone: timezone });
-  const estado =
-    order.fulfillmentStatus === "SHIPPED"
-      ? "ya fue despachado"
-      : order.fulfillmentStatus === "CANCELED"
-        ? "quedo cancelado"
-        : "todavia no ha sido despachado";
-  return `Este cliente ya compro con nosotros el ${cuando}: ${productos || "un pedido"} por un total de ${order.totalAmount.toString()} ${order.currency}, y ese pedido ${estado}. No lo trates como un cliente nuevo ni le pidas de nuevo los datos que ya dio, y si escribe por ese pedido respondele sobre el.`;
-}
+// UN RESUMEN CONGELADO DE UN PEDIDO VIVO MIENTE (2026-09-17).
+//
+// Aca vivia summarizePreviousPurchase: al abrir una conversacion nueva para un cliente que ya habia
+// comprado, se le sembraba en `contextSummary` una frase con que compro, cuando, por cuanto y si ya
+// se habia despachado. Se escribia UNA vez, al crear la conversacion, y no se volvia a tocar nunca.
+//
+// El pedido si cambia. Medido en produccion el 2026-09-17, sobre las siete conversaciones que tenian
+// esa frase sembrada: CUATRO decian "ese pedido todavia no ha sido despachado" cuando el pedido ya
+// estaba en SHIPPED. Una decia "un total de 0 COP" para un pedido de 149.000. El dato no envejecio
+// mal por accidente: envejecer mal es lo unico que un snapshot de un estado vivo puede hacer.
+//
+// Se borra entero, y no se reemplaza por una version que se refresque: lo que decia ya viaja en cada
+// turno, leido de la base en el momento, en el bloque del pedido cerrado (src/orders/postSale.ts),
+// que trae ademas el estado real, la fecha de despacho, la direccion y la forma de pago. Un segundo
+// autor del mismo hecho solo puede aportar una contradiccion.
+//
+// `Conversation.contextSummary` se conserva y sigue usandose para lo que fue escrito: el resumen que
+// el modelo arma de los mensajes que se caen de la ventana (ver getOrRefreshContextSummary).
 
 export async function recordMessage(
   businessId: string,
