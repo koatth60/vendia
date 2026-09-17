@@ -2094,6 +2094,19 @@ function closeThreadMenu() {
   if (btn) btn.setAttribute('aria-expanded', 'false');
 }
 
+// Un clic con el MOUSE en un boton de icono no tiene por que dejar el aro de foco puesto: el aro esta
+// para quien navega con el teclado y no sabe donde esta parado. Se evita en el origen - que el boton tome
+// el foco - en vez de esconder el aro con CSS, porque ":focus-visible" no se comporta igual en todos los
+// navegadores: el mismo clic que aca no lo dispara, en el navegador del dueno si.
+//
+// Con teclado no hay mousedown, asi que ese camino queda intacto: Tab + Enter sigue mostrando el aro.
+document.addEventListener('mousedown', (event) => {
+  const boton = event.target.closest(
+    '.composer-icon-btn, .composer-send-btn, .sidebar-toggle, .voice-play, .voice-speed, .thread-menu-item, .composer-chip-remove'
+  );
+  if (boton) event.preventDefault();
+});
+
 // Un menu que no se cierra solo es peor que no tener menu: cualquier clic afuera, y elegir una opcion,
 // lo cierran. Asi ninguna de las tres acciones necesita acordarse de cerrarlo.
 document.addEventListener('click', (event) => {
