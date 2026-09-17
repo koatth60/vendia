@@ -108,6 +108,14 @@ model Business {
   // lo ejecuta desde el codigo o escala. Off por defecto - encendido en un negocio a la vez. Ver
   // src/ai/requiredEffects.ts.
   requiredEffectsEnabled    Boolean                   @default(false)
+  // Listas interactivas de WhatsApp (2026-09-17): cuando el servidor presenta una categoria, la manda
+  // como lista tocable en vez de texto numerado, y la eleccion vuelve como el id del producto. Elegir
+  // deja de pasar por la prosa - es lo unico que hace imposible que "el numero 6" resuelva a un producto
+  // que tiene un 6 en el nombre.
+  //
+  // Off por defecto y con su interruptor en el panel: cambia la FORMA de un mensaje que ve el cliente, y
+  // eso no se puede validar sin una conversacion real. Apagada, sale el texto numerado de siempre.
+  interactiveListsEnabled   Boolean                   @default(false)
   // Fase 11 del plan maestro (2026-09-15), causa raiz C5: el pais del negocio deja de estar cableado en
   // el codigo. Elige la entrada de src/config/countries.ts que decide el formato de precio, que forma
   // tiene un telefono y un documento, como se reconoce una direccion despachable y como se le pide cada
@@ -162,6 +170,34 @@ enum ShippingPaymentModality {
   COD_ALL // paga todo (producto + envio) contraentrega
 }
 
+// CUANDO entra la plata, que es un eje distinto de PaymentMethodType (por que canal) y de
+// ShippingPaymentModality (quien paga el envio). Es lo unico que decide si hay algo que verificar antes
+// de despachar: con PREPAID el dueno es la unica persona que puede confirmar que el pago llego, con
+// ON_DELIVERY no hay nada que confirmar porque la plata se cobra al entregar.
+//
+// Defecto real (2026-09-17): close_conversation le pedia confirmacion al dueno SIEMPRE, sin mirar nunca
+// como se pagaba. Un pedido contraentrega quedaba esperando un "¿te llego el pago?" por un pago que,
+// por definicion, todavia no existe.
+// Quien (o que) dejo una conversacion en manos de una persona. Los cuatro PANEL_* los dispara el dueno
+// desde el panel; los demas ocurren sin que nadie toque nada.
+enum HumanControlReason {
+  PANEL_TOGGLE // apreto el boton de tomar el control
+  PANEL_MESSAGE // escribio un mensaje desde el panel
+  PANEL_TEMPLATE // mando una plantilla desde el panel
+  PANEL_QUEUE // dejo un mensaje encolado con la ventana de 24h cerrada
+  INTENT_ESCALATION // flag_conversation_intent: PQR, devolucion, no recibido, pide asesor
+  PHOTO_ESCALATION // ask_owner_about_photo: no se pudo identificar el producto de una foto
+  OWNER_QUESTION_TIMEOUT // el dueno nunca contesto una pregunta escalada
+  SALE_CONFIRMATION_TIMEOUT // el dueno nunca confirmo un pago
+  STALE_REPLY // la respuesta tardo demasiado y se descarto
+  REQUIRED_EFFECT // un efecto requerido no se cumplio ni con reintento ni con el respaldo por codigo
+}
+
+enum PaymentSettlement {
+  PREPAID // la plata tiene que entrar ANTES de despachar (transferencia, tarjeta, anticipado)
+  ON_DELIVERY // la plata se cobra al entregar (contraentrega)
+}
+
 model PaymentMethod {
   id         String            @id @default(cuid())
   business   Business          @relation(fields: [businessId], references: [id], onDelete: Cascade)
@@ -170,6 +206,9 @@ model PaymentMethod {
   label      String
   details    String
   active     Boolean           @default(true)
+  // PREPAID por defecto a proposito: es el comportamiento que ya existia (siempre confirmar). Un negocio
+  // que marca su metodo contraentrega como ON_DELIVERY deja de recibir preguntas que no puede contestar.
+  settlement PaymentSettlement @default(PREPAID)
   createdAt  DateTime          @default(now())
 }
 
@@ -708,6 +747,11 @@ model Conversation {
   // setConversationIntent; null para toda fila anterior a esta fase (nunca se le pregunto al modelo).
   intentExplicit               Boolean?
   humanControl                 Boolean                @default(false)
+  // POR QUE esta conversacion esta en manos de una persona. La duena pregunto, con razon, por que el bot
+  // "se callaba solo": la base no guardaba nada que pudiera contestarlo, asi que la unica respuesta
+  // posible era inferir del horario de los mensajes. Hay diez caminos que ponen humanControl en true y
+  // seis de ellos no los dispara ningun clic - sin este campo, cual fue es una conjetura (2026-09-17).
+  humanControlReason           HumanControlReason?
   humanControlAckSent          Boolean                @default(false)
   // Set/reset by setHumanControl every time humanControl flips (either direction) - the clock the
   // stalled-conversation watchdog measures against (jobs/escalationReminder.ts), independent of

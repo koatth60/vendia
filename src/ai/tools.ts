@@ -16,7 +16,7 @@ import {
   SALE_BLOCKED_BLOCK_MARKER,
   CATALOG_BLOCK_MARKER,
 } from "./fixedBlockMarkers";
-import { listActivePaymentMethods } from "../catalog/paymentMethods";
+import { listActivePaymentMethods, requiresPaymentConfirmation } from "../catalog/paymentMethods";
 import { listShippingRates, resolveShippingRateForCity } from "../catalog/shippingRates";
 import { recordAgentIncident } from "./incidents";
 import { getSaleGate } from "./configHealth";
@@ -495,7 +495,9 @@ export const catalogTools: OpenAI.Chat.ChatCompletionTool[] = [
     function: {
       name: "get_order_status",
       description:
-        "Consulta el estado real del pedido mas reciente del cliente (pendiente, enviado o cancelado), con resumen, nota de envio y total. Usa SIEMPRE que pregunte como va su pedido, si se lo enviaron, pida factura/guia, o algo que compro antes.",
+        // El pedido reciente (ultimos 30 dias) ya te llega SIEMPRE como dato del sistema, sin llamar nada:
+        // ver src/orders/postSale.ts. Esta herramienta quedo para lo que ese dato no cubre.
+        "Consulta el pedido mas reciente del cliente. Solo hace falta si pregunta por una compra vieja que no figure en los datos del pedido que ya tenes.",
       parameters: {
         type: "object",
         properties: {},
@@ -1275,7 +1277,7 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
       // mandarlo) - distinto de false, que es una afirmacion real de "esto lo deduje yo".
       const explicit = input.explicit === true ? true : input.explicit === false ? false : null;
       await setConversationIntent(businessId, context.conversationId, intent, explicit);
-      await setHumanControl(businessId, context.conversationId, true);
+      await setHumanControl(businessId, context.conversationId, true, "INTENT_ESCALATION");
 
       const business = await prisma.business.findUnique({ where: { id: businessId } });
       if (business?.contactPhone) {
@@ -1552,7 +1554,7 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
         };
       }
 
-      await setHumanControl(businessId, context.conversationId, true);
+      await setHumanControl(businessId, context.conversationId, true, "PHOTO_ESCALATION");
       await createPendingOwnerQuestion(
         context.conversationId,
         wamid,
@@ -1773,7 +1775,17 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
           };
         }
 
-        const pending = await requestSaleConfirmation(context, summary, { items, shippingAddress, paymentMethodLabel, shippingCost });
+        // No se le pide al dueno que confirme plata que todavia no existe. Con contraentrega no hay nada
+        // que verificar antes de despachar: el pedido se crea de una. Lo decide PaymentMethod.settlement,
+        // un dato del negocio - ver requiresPaymentConfirmation. Sin metodo identificable devuelve true,
+        // que es el comportamiento de siempre.
+        const debeConfirmar = await requiresPaymentConfirmation(businessId, {
+          paymentMethodId: saleStateOn ? saleState?.paymentMethodId : paymentMethodId,
+          paymentMethodLabel,
+        });
+        const pending = debeConfirmar
+          ? await requestSaleConfirmation(context, summary, { items, shippingAddress, paymentMethodLabel, shippingCost })
+          : false;
         if (pending) {
           return {
             closed: false,

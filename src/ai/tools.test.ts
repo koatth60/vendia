@@ -1680,3 +1680,87 @@ test("close_conversation SOLD cuando NINGUN item resuelve contra el catalogo tam
     await cleanup();
   }
 });
+
+// ==============================================================================================
+// No se le pide al dueno que confirme plata que todavia no existe (2026-09-17)
+// ==============================================================================================
+
+test("close_conversation SOLD con contraentrega crea el pedido sin pedirle confirmacion al dueno", async () => {
+  const business2 = await prisma.business.create({
+    data: {
+      name: `Test ${randomUUID()}`,
+      email: `test-${randomUUID()}@example.com`,
+      passwordHash: "x",
+      contactPhone: "573005552222",
+      contactName: "Owner",
+    },
+  });
+  await prisma.paymentMethod.create({
+    data: { businessId: business2.id, type: "EFECTIVO", label: "Contraentrega", details: "Paga al recibir", settlement: "ON_DELIVERY" },
+  });
+  await prisma.shippingRate.create({ data: { businessId: business2.id, label: "Estandar", cost: 9000 } });
+  await prisma.product.create({
+    data: { businessId: business2.id, name: "Reloj Contraentrega", description: "x", price: 140000, currency: "COP", stock: 5 },
+  });
+  const customer2 = await prisma.customer.create({ data: { businessId: business2.id, phoneNumber: `573010${Date.now()}` } });
+  const conversation2 = await prisma.conversation.create({ data: { customerId: customer2.id } });
+  await prisma.message.create({ data: { conversationId: conversation2.id, role: "CUSTOMER", content: "Hola" } });
+
+  stubWhatsappFetch();
+  try {
+    const context: ToolContext = {
+      businessId: business2.id,
+      conversationId: conversation2.id,
+      customerId: customer2.id,
+      credentials: { phoneNumberId: "test-id", accessToken: "test-token" },
+      recipientPhone: "573009998877",
+    };
+    const result = (await runCatalogTool(context, "close_conversation", {
+      outcome: "SOLD",
+      summary: "1x Reloj Contraentrega",
+      paymentMethodLabel: "Contraentrega",
+      shippingAddress: "Calle 22 #108-62",
+      items: [{ productName: "Reloj Contraentrega", quantity: 1 }],
+    })) as { closed: boolean; pending?: boolean };
+
+    assert.equal(result.closed, true, "contraentrega no tiene pago que verificar: el pedido se crea de una");
+    assert.equal(result.pending, undefined);
+    assert.equal(await prisma.order.count({ where: { conversationId: conversation2.id } }), 1);
+    const conversation = await prisma.conversation.findUniqueOrThrow({ where: { id: conversation2.id } });
+    assert.equal(conversation.pendingConfirmationAskedAt, null, "no puede quedar ninguna confirmacion viva");
+  } finally {
+    restoreFetch();
+    await prisma.orderItem.deleteMany({ where: { order: { conversationId: conversation2.id } } });
+    await prisma.order.deleteMany({ where: { conversationId: conversation2.id } });
+    await prisma.message.deleteMany({ where: { conversationId: conversation2.id } });
+    await prisma.conversation.deleteMany({ where: { id: conversation2.id } });
+    await prisma.paymentMethod.deleteMany({ where: { businessId: business2.id } });
+    await prisma.shippingRate.deleteMany({ where: { businessId: business2.id } });
+    await prisma.product.deleteMany({ where: { businessId: business2.id } });
+    await prisma.customer.deleteMany({ where: { id: customer2.id } });
+    await prisma.business.deleteMany({ where: { id: business2.id } });
+  }
+});
+
+test("close_conversation SOLD con transferencia sigue esperando la confirmacion del dueno", async () => {
+  const { context, cleanup } = await vendibleContext();
+  stubWhatsappFetch();
+  try {
+    await prisma.product.create({
+      data: { businessId: context.businessId, name: "Reloj Anticipado", description: "x", price: 140000, currency: "COP", stock: 5 },
+    });
+    const result = (await runCatalogTool(context, "close_conversation", {
+      outcome: "SOLD",
+      summary: "1x Reloj Anticipado",
+      paymentMethodLabel: "Nequi",
+      items: [{ productName: "Reloj Anticipado", quantity: 1 }],
+    })) as { closed: boolean; pending?: boolean };
+
+    assert.equal(result.closed, false);
+    assert.equal(result.pending, true);
+    assert.equal(await prisma.order.count({ where: { conversationId: context.conversationId } }), 0);
+  } finally {
+    restoreFetch();
+    await cleanup();
+  }
+});

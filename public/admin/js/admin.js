@@ -182,6 +182,7 @@ async function loadBusiness() {
     document.getElementById('bot-require-proof').checked = business.requirePaymentProof !== false;
     document.getElementById('bot-category').value = business.businessCategory || '';
     document.getElementById('bot-required-effects').checked = Boolean(business.requiredEffectsEnabled);
+    document.getElementById('bot-interactive-lists').checked = Boolean(business.interactiveListsEnabled);
     document.getElementById('bot-gendered-address').checked = Boolean(business.genderedAddressEnabled);
     document.getElementById('bot-female-term').value = business.femaleAddressTerm || '';
     document.getElementById('bot-male-term').value = business.maleAddressTerm || '';
@@ -536,6 +537,7 @@ async function saveBusiness() {
   const cartRecoveryTemplateName = document.getElementById('business-cart-recovery-template').value.trim();
   const cartRecoveryTemplateLanguage = document.getElementById('business-cart-recovery-language').value.trim() || 'es';
   const requiredEffectsEnabled = document.getElementById('bot-required-effects').checked;
+  const interactiveListsEnabled = document.getElementById('bot-interactive-lists').checked;
   const genderedAddressEnabled = document.getElementById('bot-gendered-address').checked;
   const femaleAddressTerm = document.getElementById('bot-female-term').value.trim();
   const maleAddressTerm = document.getElementById('bot-male-term').value.trim();
@@ -560,7 +562,7 @@ async function saveBusiness() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         name, description, customInstructions, assistantName, botTone, botDialect, botGreeting, botNeverSay,
-        autoSendPhotoOnQuote, offerPhotosBeforeSending, requirePaymentProof, requiredEffectsEnabled, businessCategory, contactName, contactPhone,
+        autoSendPhotoOnQuote, offerPhotosBeforeSending, requirePaymentProof, requiredEffectsEnabled, interactiveListsEnabled, businessCategory, contactName, contactPhone,
         ownerReminderMinutes, ownerQuestionTimeoutHours, intentEscalationTimeoutHours,
         followUpTemplateName, followUpTemplateLanguage, followUpDelayHours,
         abandonedAfterHours, cartRecoveryTemplateName, cartRecoveryTemplateLanguage,
@@ -1843,7 +1845,7 @@ async function pollConversation() {
     currentWindowOpen = conversation.windowOpen;
     currentHoursSinceLastCustomerMessage = conversation.hoursSinceLastCustomerMessage;
     currentQueuedOutbound = conversation.queuedOutbound || [];
-    renderHandoffState(conversation.humanControl);
+    renderHandoffState(conversation.humanControl, conversation.humanControlReason, conversation.humanControlSince);
     updateComposerVisibility();
     updateCloseSaleButtonVisibility(conversation.status);
     renderThreadMessages(document.getElementById('modal-thread'), conversation.messages);
@@ -2050,7 +2052,7 @@ async function openCustomer(customerId) {
     currentWindowOpen = data.windowOpen;
     currentHoursSinceLastCustomerMessage = data.hoursSinceLastCustomerMessage;
     currentQueuedOutbound = data.queuedOutbound || [];
-    renderHandoffState(data.humanControl);
+    renderHandoffState(data.humanControl, data.humanControlReason, data.humanControlSince);
     updateCloseSaleButtonVisibility(data.status);
     currentCustomerTags = [...(data.customer.tags || [])];
     currentCustomerName = data.customer.name || '';
@@ -2435,11 +2437,33 @@ async function confirmCloseSale() {
   }
 }
 
-function renderHandoffState(humanControl) {
+// Por qué esta conversación quedó en manos de una persona. Seis de los diez caminos que toman el
+// control no los dispara ningún clic, así que "Tú atiendes" a secas no alcanza para saber qué pasó.
+const HUMAN_CONTROL_REASONS = {
+  PANEL_TOGGLE: 'porque apretaste "Tomar control"',
+  PANEL_MESSAGE: 'porque enviaste un mensaje desde el panel',
+  PANEL_TEMPLATE: 'porque enviaste una plantilla desde el panel',
+  PANEL_QUEUE: 'porque dejaste un mensaje en cola (ventana de 24 h cerrada)',
+  INTENT_ESCALATION: 'porque el bot detectó un PQR, devolución, pedido no recibido o pedido de asesor',
+  PHOTO_ESCALATION: 'porque el bot no pudo identificar el producto de una foto y te preguntó',
+  OWNER_QUESTION_TIMEOUT: 'porque venció el plazo de una pregunta que quedó sin responder',
+  SALE_CONFIRMATION_TIMEOUT: 'porque venció el plazo de una confirmación de pago sin responder',
+  STALE_REPLY: 'porque el bot tardó demasiado y su respuesta se descartó',
+  REQUIRED_EFFECT: 'porque una acción obligatoria del bot no se pudo completar',
+};
+
+function humanControlExplanation(reason, since) {
+  const motivo = HUMAN_CONTROL_REASONS[reason];
+  if (!motivo) return 'Tú atiendes esta conversación.';
+  const cuando = since ? ` (${new Date(since).toLocaleString()})` : '';
+  return `Tú atiendes esta conversación ${motivo}${cuando}.`;
+}
+
+function renderHandoffState(humanControl, reason, since) {
   const btn = document.getElementById('modal-handoff-btn');
   const label = humanControl ? 'Devolver a la IA' : 'Tomar control';
   btn.querySelector('.btn-label').textContent = label;
-  btn.title = label;
+  btn.title = humanControl ? humanControlExplanation(reason, since) : label;
   btn.setAttribute('aria-label', label);
   // A ancho de telefono el texto se esconde y solo queda el icono - cambia
   // según el estado para no dejar el mismo dibujo diciendo dos cosas distintas.
@@ -2612,7 +2636,7 @@ async function toggleHandoff() {
       body: JSON.stringify({ active: nextActive }),
     });
     const data = await res.json();
-    renderHandoffState(data.humanControl);
+    renderHandoffState(data.humanControl, data.humanControlReason, data.humanControlSince);
   } catch (err) {
     setStatus(`No se pudo cambiar el control: ${err.message}`, true);
   }
@@ -2710,6 +2734,7 @@ async function loadPaymentMethods() {
         <div style="flex:1 1 220px; min-width:0;">
           <span class="category-tag" style="margin-right:8px;">${pmTypeLabel(m.type)}</span>
           <strong style="font-size:13.5px;">${escapeHtml(m.label)}</strong>
+          <span class="category-tag" style="margin-left:8px;">${m.settlement === 'ON_DELIVERY' ? 'Cobra al entregar' : 'Pago anticipado'}</span>
           <div style="font-size:12px; color:var(--muted); margin-top:2px; overflow-wrap:anywhere;">${escapeHtml(m.details)}</div>
         </div>
         <div style="display:flex; flex-wrap:wrap; gap:6px; flex-shrink:0;">
@@ -2732,6 +2757,7 @@ function editPaymentMethod(id) {
   onPmTypeChange();
   document.getElementById('pm-label').value = method.label;
   document.getElementById('pm-details').value = method.details;
+  document.getElementById('pm-settlement').value = method.settlement || 'PREPAID';
   document.getElementById('pm-submit-btn').textContent = 'Guardar cambios';
   document.getElementById('pm-cancel-btn').style.display = 'inline-block';
   document.getElementById('pm-label').scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -2741,6 +2767,7 @@ function cancelEditPaymentMethod() {
   editingPaymentMethodId = null;
   document.getElementById('pm-label').value = '';
   document.getElementById('pm-details').value = '';
+  document.getElementById('pm-settlement').value = 'PREPAID';
   document.getElementById('pm-submit-btn').textContent = '+ Agregar método de pago';
   document.getElementById('pm-cancel-btn').style.display = 'none';
 }
@@ -2749,6 +2776,7 @@ async function addPaymentMethod() {
   const type = document.getElementById('pm-type').value;
   const label = document.getElementById('pm-label').value.trim();
   const details = document.getElementById('pm-details').value.trim();
+  const settlement = document.getElementById('pm-settlement').value;
 
   if (!label || !details) {
     setStatus('Completá el nombre y los datos del método de pago', true);
@@ -2760,14 +2788,14 @@ async function addPaymentMethod() {
       await apiFetch(`/admin/api/payment-methods/${editingPaymentMethodId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type, label, details }),
+        body: JSON.stringify({ type, label, details, settlement }),
       });
       setStatus('Método de pago actualizado ✓');
     } else {
       await apiFetch('/admin/api/payment-methods', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type, label, details }),
+        body: JSON.stringify({ type, label, details, settlement }),
       });
       setStatus('Método de pago agregado ✓');
     }
@@ -3903,7 +3931,7 @@ function initRealtime() {
     }
     updateTotalUnreadBadge();
     if (c.id === currentConversationId) {
-      renderHandoffState(c.humanControl);
+      renderHandoffState(c.humanControl, c.humanControlReason, c.humanControlSince);
       updateCloseSaleButtonVisibility(c.status);
       // 2026-09-13 fix: a name saved mid-conversation (save_customer_name) used to never reach an
       // already-open chat header - only openCustomer() ever wrote #modal-title, so the owner kept

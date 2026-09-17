@@ -209,6 +209,14 @@
           </label>
 
           <label class="toggle-row">
+            <input type="checkbox" id="bot-interactive-lists" />
+            <div>
+              <div class="toggle-title">Mostrar las categorías como lista tocable de WhatsApp</div>
+              <div class="toggle-desc">El cliente elige tocando el producto en vez de escribir &quot;el 5&quot;, así que no puede quedar eligiendo otro. WhatsApp permite hasta 10 opciones por lista: una categoría más larga sigue saliendo como lista numerada.</div>
+            </div>
+          </label>
+
+          <label class="toggle-row">
             <input type="checkbox" id="bot-required-effects" />
             <div>
               <div class="toggle-title">Verificar que el bot haya hecho lo que dice que hizo</div>
@@ -633,6 +641,12 @@
             <input id="pm-label" placeholder="Ej: Nequi" />
           </div>
         </div>
+        <label>¿Cuándo entra la plata?</label>
+        <select id="pm-settlement">
+          <option value="PREPAID">Antes de despachar — te avisamos para que confirmes que llegó</option>
+          <option value="ON_DELIVERY">Al entregar (contraentrega) — el pedido se crea solo, sin preguntarte</option>
+        </select>
+        <p style="font-size:12px; color:var(--muted); margin:6px 0 0;">Con contraentrega no hay ningún pago que verificar antes de despachar, así que el bot no te va a preguntar &quot;¿te llegó el pago?&quot; por esas ventas.</p>
         <label id="pm-details-label">Datos (número de cuenta, llave, celular, etc.)</label>
         <textarea id="pm-details" placeholder="Ej: 300 123 4567 a nombre de Aurora Joyas"></textarea>
         <div class="actions-row">
