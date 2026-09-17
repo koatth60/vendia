@@ -273,19 +273,22 @@
         "type": "EFECTIVO",
         "label": "Contraentrega",
         "details": "Solo para Bogotá y Soacha.\nEl costo de envio es de 9,000 Bogotá, Soacha 10,000.\nSi vas a pagar por transferencia, el mensajero te indica el número de cuenta.",
-        "active": true
+        "active": true,
+        "settlement": "ON_DELIVERY"
       },
       {
         "type": "TRANSFERENCIA",
         "label": "Nequi, Llave o Daviplata",
         "details": "Número 3022168936 (Nequi, Daviplata o Llave).\nA nombre de : Liseth Herrera.\nPara compras Nacionales",
-        "active": true
+        "active": true,
+        "settlement": "PREPAID"
       },
       {
         "type": "TRANSFERENCIA",
         "label": "Bancolombia",
         "details": "Cuenta Bancolombia, Cuenta de ahorros\nNúmero:  67300055475\nAnombre de : Liseth herrera Narváez",
-        "active": true
+        "active": true,
+        "settlement": "PREPAID"
       }
     ],
     "shippingRates": [

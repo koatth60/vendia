@@ -41,7 +41,17 @@ interface CatalogBusiness {
     size?: string | null;
     variants?: { color: string | null; size: string | null; stock: number; active: boolean }[];
   }[];
-  paymentMethods: { type: "TRANSFERENCIA" | "TARJETA" | "EFECTIVO"; label: string; details: string; active: boolean }[];
+  // `settlement` decide si el pedido se cierra en el acto o queda esperando el comprobante. Estaba sin
+  // declarar y Prisma le ponia PREPAID por defecto, asi que en el negocio sembrado "Contraentrega" se
+  // comportaba como una transferencia - al reves que en produccion. Una venta contraentrega no se podia
+  // probar de punta a punta (2026-09-17).
+  paymentMethods: {
+    type: "TRANSFERENCIA" | "TARJETA" | "EFECTIVO";
+    label: string;
+    details: string;
+    active: boolean;
+    settlement?: "PREPAID" | "ON_DELIVERY";
+  }[];
   shippingRates: { label: string; cost: string; sortOrder: number }[];
   shippingCityRules: { city: string; label: string }[];
   faqEntries: { question: string; answer: string }[];

@@ -5,7 +5,7 @@ import { prisma } from "../db/client";
 import { deepseek } from "./client";
 import { generateReply } from "./agent";
 import { runCatalogTool, type ToolContext } from "./tools";
-import { recordMediaSent } from "../orders/saleState";
+import { recordMediaSent, getSaleState } from "../orders/saleState";
 import { seedReplayBusiness, teardownReplayBusiness } from "./replay/seed";
 import {
   computeRequiredEffects,
@@ -125,7 +125,13 @@ async function armSale(): Promise<void> {
     where: { businessId, active: true, variants: { none: {} } },
     select: { id: true },
   });
-  const method = await prisma.paymentMethod.findFirstOrThrow({ where: { businessId, active: true }, select: { id: true } });
+  // Una forma de pago PREPAGA, explicita: estas pruebas son las del comprobante, y con contraentrega no
+  // hay comprobante que mandar. Antes tomaba "la primera activa", que es un orden que el fixture puede
+  // cambiar sin que nadie se entere.
+  const method = await prisma.paymentMethod.findFirstOrThrow({
+    where: { businessId, active: true, settlement: "PREPAID" },
+    select: { id: true },
+  });
   const added = (await runCatalogTool(context, "set_order_item", { productId: product.id, quantity: 1 })) as { ok?: boolean };
   assert.ok(added.ok, "el test necesita un item real en el pedido en curso");
   const paid = (await runCatalogTool(context, "set_payment_method", { paymentMethodId: method.id })) as { ok?: boolean };
@@ -463,5 +469,120 @@ test("el fallback por codigo registra el pedido cuando el modelo no lo hace ni f
       { kind: "SALE_REGISTERED_AND_OWNER_NOTIFIED", tool: "close_conversation", reason: "assert", since: new Date(0) },
     ]),
     []
+  );
+});
+
+// ---------------------------------------------------------------------------------------------------
+// LA VENTA LISTA QUE NADIE REGISTRA (2026-09-17, etapa E09). El segundo disparador: sin foto de por
+// medio. Medido sobre 14 dias de produccion: 22 pedidos creados, close_conversation llamada en 2
+// turnos. Las otras 20 las cerro la duena a mano. El caso es Carlos Mendoza, contraentrega: no hay
+// comprobante, asi que el disparador de la imagen no podia salvarlo.
+// ---------------------------------------------------------------------------------------------------
+
+/** Deja el checkout COMPLETO: producto, forma de pago, nombre, documento, telefono y direccion. */
+async function armSaleCompleta(): Promise<void> {
+  // Contraentrega a proposito: es la forma de pago del caso real, y la unica que cierra el pedido en el
+  // acto. Con una transferencia, close_conversation pide el comprobante y deja la venta esperando a la
+  // duena - ese camino ya lo cubre la prueba del fallback de mas arriba.
+  const product = await prisma.product.findFirstOrThrow({
+    where: { businessId, active: true, variants: { none: {} } },
+    select: { id: true },
+  });
+  const contraentrega = await prisma.paymentMethod.findFirstOrThrow({
+    where: { businessId, active: true, settlement: "ON_DELIVERY" },
+    select: { id: true },
+  });
+  assert.ok((await runCatalogTool(context, "set_order_item", { productId: product.id, quantity: 1 })) as unknown);
+  assert.ok((await runCatalogTool(context, "set_payment_method", { paymentMethodId: contraentrega.id })) as unknown);
+  await runCatalogTool(context, "save_customer_name", { name: "Carlos Mendoza" });
+  const guardado = (await runCatalogTool(context, "save_customer_contact_info", {
+    idNumber: "106484013",
+    deliveryPhone: "3150496302",
+    address: "Bogotá, barrio Primavera, Transversal 42 #5A-28, casa 4to piso",
+  })) as { ok?: boolean };
+  assert.ok(guardado.ok !== false, "el test necesita los datos de entrega guardados");
+  const { checkout } = (await getSaleState(conversationId))!;
+  assert.deepEqual(checkout.faltan, [], "el checkout tiene que quedar completo para este grupo de pruebas");
+}
+
+/** Un mensaje del cliente POSTERIOR al momento en que el pedido quedo completo. */
+async function customerWritesAgain(text: string): Promise<void> {
+  await new Promise((r) => setTimeout(r, 15));
+  await prisma.message.create({ data: { conversationId, role: "CUSTOMER", content: text } });
+}
+
+test("el caso de Carlos: pedido completo, sin foto, y el modelo no llama nada - el pedido se crea igual", async () => {
+  await seedFor({ saleStateEnabled: true, requiredEffectsEnabled: true });
+  await armSaleCompleta();
+  await customerWritesAgain("Si");
+
+  // Exactamente lo que paso en produccion: el modelo copia la plantilla de cierre del negocio y no
+  // llama ninguna herramienta, en los tres intentos.
+  const cierreCopiado = "En total serian $94.000 pesos a pagar contra entrega. Por favor estar pendiente del cel.";
+  programModel([textOnly(cierreCopiado), textOnly(cierreCopiado), textOnly(cierreCopiado)]);
+
+  await generateReply(conversationId, context, personality, "Si");
+
+  const order = await prisma.order.findFirst({ where: { conversationId } });
+  assert.ok(order, "el pedido tiene que existir aunque el modelo no lo haya cerrado nunca");
+  assert.equal(requiredEffectStats.fallbackResolved, 1, "lo cerro el servidor, no el modelo");
+});
+
+test("sin una sola imagen en la conversacion, el efecto exigido es el cierre", async () => {
+  await seedFor({ saleStateEnabled: true, requiredEffectsEnabled: true });
+  await armSaleCompleta();
+  await customerWritesAgain("Si");
+
+  assert.equal(
+    await prisma.message.count({ where: { conversationId, mediaType: "IMAGE" } }),
+    0,
+    "el punto de esta prueba es que NO hay comprobante: contraentrega no lo tiene"
+  );
+  const exigidos = await computeRequiredEffects(conversationId, { mediaType: null });
+  assert.equal(exigidos.length, 1);
+  assert.equal(exigidos[0].kind, "SALE_REGISTERED_AND_OWNER_NOTIFIED");
+});
+
+test("el disparador invertido: en el turno donde el pedido se completa no se registra nada", async () => {
+  await seedFor({ saleStateEnabled: true, requiredEffectsEnabled: true });
+  await customerWritesAgain("Contra entrega");
+  await armSaleCompleta(); // el estado se completa DESPUES del ultimo mensaje del cliente
+
+  assert.deepEqual(
+    await computeRequiredEffects(conversationId, { mediaType: null }),
+    [],
+    "el cliente todavia no escribio nada con el pedido armado delante: le queda un mensaje entero para decir que no"
+  );
+
+  // Y en cuanto escribe, si.
+  await customerWritesAgain("Si, correcto");
+  const exigidos = await computeRequiredEffects(conversationId, { mediaType: null });
+  assert.equal(exigidos.length, 1);
+  assert.equal(exigidos[0].kind, "SALE_REGISTERED_AND_OWNER_NOTIFIED");
+});
+
+test("un pedido incompleto no se registra solo, por mas que el cliente escriba", async () => {
+  await seedFor({ saleStateEnabled: true, requiredEffectsEnabled: true });
+  await armSale(); // producto y forma de pago, pero sin nombre ni direccion
+  await customerWritesAgain("Si");
+
+  const { checkout } = (await getSaleState(conversationId))!;
+  assert.ok(checkout.faltan.length > 0, "el checkout de esta prueba tiene que estar incompleto");
+  assert.deepEqual(await computeRequiredEffects(conversationId, { mediaType: null }), []);
+});
+
+test("con un pedido ya registrado no se crea un segundo", async () => {
+  await seedFor({ saleStateEnabled: true, requiredEffectsEnabled: true });
+  await armSaleCompleta();
+  await customerWritesAgain("Si");
+  programModel([textOnly("Listo"), textOnly("Listo"), textOnly("Listo")]);
+  await generateReply(conversationId, context, personality, "Si");
+  assert.equal(await prisma.order.count({ where: { conversationId } }), 1);
+
+  await customerWritesAgain("Gracias");
+  assert.deepEqual(
+    await computeRequiredEffects(conversationId, { mediaType: null }),
+    [],
+    "el candado de idempotencia es la fila Order, no la memoria del turno"
   );
 });

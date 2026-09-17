@@ -186,18 +186,98 @@ export function isSaleFullyResolved(saleState: SaleStateSnapshot | null): boolea
 }
 
 /**
+ * Cuando quedo lista para registrarse una venta que NADIE registro, o null si no hay ninguna.
+ *
+ * EL AGUJERO QUE CIERRA, medido el 2026-09-17 sobre 14 dias de produccion: 22 pedidos creados, y el
+ * agente llamo close_conversation en 2 turnos. Las otras 20 ventas las cerro la duena a mano desde el
+ * panel. El caso completo es Carlos Mendoza (cmu4e3q9l001ozi2ka2x1t1b1, 19:27): SaleState con el item,
+ * checkout completo, Contraentrega, Bogota, total 94.000, y el cliente confirmando - y el bot mando el
+ * texto de cierre copiado de la plantilla del negocio sin llamar ninguna herramienta. Copiar la
+ * plantilla no crea nada: la conversacion quedo en NEW y el pedido no existe.
+ *
+ * Hasta hoy el unico disparador de este mecanismo era una imagen del cliente sin atender, o sea el
+ * comprobante de pago. Una venta contraentrega no tiene comprobante, asi que no disparaba nada - y
+ * contraentrega es la modalidad de la mayoria de las ventas de este negocio.
+ *
+ * LAS TRES CONDICIONES DE ADMISION:
+ *
+ *  - Disparador determinista: `SaleState.checkout.completo`, que computeCheckoutState calcula desde la
+ *    base, mas la fecha del ultimo mensaje del cliente. Dos SELECT. No se lee una sola palabra, ni del
+ *    cliente ni del modelo.
+ *  - Verificable con una consulta: existe o no una fila Order para esta conversacion.
+ *  - Con fallback sin modelo: registerSaleFromServer, que ya existe y ya corre para el otro disparador.
+ *
+ * POR QUE EL ULTIMO MENSAJE DEL CLIENTE TIENE QUE SER POSTERIOR AL ESTADO COMPLETO. Es el disparador
+ * invertido: el turno en el que el estado se completa - el cliente acaba de elegir la forma de pago - NO
+ * registra nada. Recien el turno siguiente, o sea despues de que el cliente volvio a escribir con el
+ * pedido ya armado delante, el pedido tiene que existir. Asi el cliente siempre tiene un mensaje entero
+ * para decir "esperate, no" antes de que se registre nada, y esa garantia no depende de leerle la
+ * respuesta: depende de comparar dos fechas.
+ */
+async function saleReadyToRegisterSince(
+  conversationId: string,
+  saleState: SaleStateSnapshot | null
+): Promise<Date | null> {
+  if (!saleState || !saleState.checkout.completo) return null;
+
+  const row = await prisma.saleState.findUnique({ where: { conversationId }, select: { updatedAt: true } });
+  if (!row) return null;
+
+  const ultimoDelCliente = await prisma.message.findFirst({
+    where: { conversationId, role: "CUSTOMER" },
+    orderBy: { createdAt: "desc" },
+    select: { createdAt: true },
+  });
+  if (!ultimoDelCliente) return null;
+
+  // El estado se completo DESPUES del ultimo mensaje del cliente: este es el turno en el que se
+  // completo, y el cliente todavia no dijo nada con el pedido armado delante. No se registra nada.
+  if (ultimoDelCliente.createdAt <= row.updatedAt) return null;
+
+  // El reloj del efecto arranca en el mensaje del cliente: lo que hay que probar es que el pedido existe
+  // al terminar ESTE turno.
+  return ultimoDelCliente.createdAt;
+}
+
+/**
  * Los efectos que ESTE turno esta obligado a producir, calculados solo desde estado de la base.
  *
- * Arranca con una sola fila a proposito: declarar un efecto como obligatorio cuando no lo era rompe
- * conversaciones que hoy funcionan bien. La estructura queda lista para mas filas (la de "se envio la
- * foto del producto en alcance" entra despues de la Fase B del plan de catalogo, cuando exista
- * resolveProductScope), pero no se agrega ninguna otra en esta fase.
+ * Dos disparadores, los dos leidos de la base y ninguno de prosa: una venta lista que nadie registro
+ * (2026-09-17) y una imagen del cliente sin atender (2026-09-16). El primero va antes porque es el mas
+ * fuerte: si el pedido se puede registrar, registrarlo es lo que hay que hacer, haya foto o no.
  */
 export async function computeRequiredEffects(
   conversationId: string,
   incomingMessage: IncomingMessageFacts
 ): Promise<RequiredEffect[]> {
-  // (a) hay una imagen del cliente SIN ATENDER en esta conversacion.
+  const conversation = await readConversationFacts(conversationId);
+  if (!conversation) return [];
+
+  // La conversacion no esta en manos de una persona.
+  if (conversation.humanControl) return [];
+
+  // Candado de idempotencia, comun a los dos disparadores: no existe ya un Order para esta conversacion,
+  // ni una confirmacion de pago esperando a la duena - entre pedirla y que conteste, el efecto YA ocurrio
+  // aunque todavia no haya fila.
+  if (conversation.hasOrder || conversation.pendingConfirmationAskedAt) return [];
+
+  const saleState = conversation.saleStateEnabled ? await getSaleState(conversationId) : null;
+
+  // DISPARADOR 1: la venta esta lista y nadie la registro.
+  const ventaLista = await saleReadyToRegisterSince(conversationId, saleState);
+  if (ventaLista) {
+    return [
+      {
+        kind: "SALE_REGISTERED_AND_OWNER_NOTIFIED",
+        tool: "close_conversation",
+        reason:
+          "el pedido de esta conversacion esta completo contra el catalogo (producto, datos de entrega y forma de pago) y el cliente volvio a escribir con el ya armado: tiene que quedar registrado antes de responderle",
+        since: ventaLista,
+      },
+    ];
+  }
+
+  // DISPARADOR 2: hay una imagen del cliente SIN ATENDER en esta conversacion.
   //
   // Antes la condicion era "el mensaje entrante trae mediaType IMAGE", y ese era el agujero F1. Caso real
   // de produccion (Milena, 2026-09-16 03:20-03:22): mando el comprobante y enseguida escribio "Te envie
@@ -212,20 +292,7 @@ export async function computeRequiredEffects(
   const imagenSinAtender = await findUnattendedCustomerImage(conversationId);
   if (!imagenSinAtender) return [];
 
-  const conversation = await readConversationFacts(conversationId);
-  if (!conversation) return [];
-
-  // (c) la conversacion no esta en manos de una persona
-  if (conversation.humanControl) return [];
-
-  // (d) no existe ya un Order para esta conversacion. Este es el candado de idempotencia: dos fotos
-  // seguidas no pueden crear dos pedidos ni dos avisos. La segunda condicion es el mismo candado un paso
-  // antes - requestSaleConfirmation deja pendingConfirmationMessageId puesto y el Order recien se crea
-  // cuando la duena contesta "si llego", asi que entre esos dos momentos el efecto YA ocurrio aunque no
-  // haya Order.
-  if (conversation.hasOrder || conversation.pendingConfirmationAskedAt) return [];
-
-  // (b) hay evidencia de venta en curso ESCRITA POR EL SERVIDOR
+  // Hay evidencia de venta en curso ESCRITA POR EL SERVIDOR.
   const evidence = await getServerSaleEvidence(conversationId);
   if (!hasServerSaleEvidence(conversation, evidence)) return [];
 
@@ -236,7 +303,7 @@ export async function computeRequiredEffects(
 
   // La distincion va explicita, no implicita: el cierre real solo cuando el negocio lleva el pedido en
   // el motor de venta Y ese pedido esta completo. En cualquier otro caso el efecto es el aviso.
-  if (conversation.saleStateEnabled && isSaleFullyResolved(await getSaleState(conversationId))) {
+  if (conversation.saleStateEnabled && isSaleFullyResolved(saleState)) {
     return [
       {
         kind: "SALE_REGISTERED_AND_OWNER_NOTIFIED",
@@ -512,7 +579,7 @@ export async function runRequiredEffectFallback(context: ToolContext, effect: Re
 /** Texto del aviso final al dueno cuando ni el reintento ni el fallback lograron el efecto. */
 export function escalationOwnerAlertText(kind: RequiredEffectKind): string {
   if (kind === "SALE_REGISTERED_AND_OWNER_NOTIFIED") {
-    return "Atencion: un cliente mando un comprobante con un pedido ya armado y el bot no logro registrarlo (ni el modelo ni el cierre automatico). Esa conversacion quedo esperandote en el panel - revisa el pago a mano.";
+    return "Atencion: un cliente tiene un pedido ya armado y el bot no logro registrarlo (ni el modelo ni el cierre automatico). Esa conversacion quedo esperandote en el panel - revisala a mano.";
   }
   return "Atencion: un cliente mando una imagen que puede ser un comprobante de pago y el bot no logro avisarte por el camino normal. Esa conversacion quedo esperandote en el panel - revísala a mano.";
 }
