@@ -108,3 +108,26 @@ test("un empate no elige ninguna: adivinar con que pago alguien es lo que no se 
   const ambiguas = [{ id: "a", label: "Transferencia" }, { id: "b", label: "Transferencia" }];
   assert.equal(resolveConfiguredPaymentMethod("transferencia", ambiguas), null);
 });
+
+test("la etiqueta que escribe el modelo de verdad tambien resuelve: no dos reglas distintas", async () => {
+  // Defecto real (2026-09-17, 05:11 UTC): close_conversation resolvia "Pago Contra Entrega Total
+  // (producto + envio al recibir)" a Contraentrega y lo guardaba asi, mientras requiresPaymentConfirmation
+  // hacia SU PROPIA busqueda por coincidencia exacta, no encontraba nada, y le preguntaba a la duena si le
+  // habia llegado un pago contraentrega. Las dos tienen que decidir con la misma regla.
+  for (const escrita of [
+    "Pago Contra Entrega Total (producto + envio al recibir)",
+    "Contra Entrega Total",
+    "contraentrega",
+    "Pago contra entrega",
+  ]) {
+    assert.equal(
+      await requiresPaymentConfirmation(businessId, { paymentMethodLabel: escrita }),
+      false,
+      `"${escrita}" es contraentrega: no hay pago que confirmar`
+    );
+  }
+
+  // Y lo que de verdad es anticipado sigue confirmandose.
+  assert.equal(await requiresPaymentConfirmation(businessId, { paymentMethodLabel: "Nequi" }), true);
+  assert.equal(await requiresPaymentConfirmation(businessId, { paymentMethodLabel: "transferencia a Bancolombia" }), true);
+});

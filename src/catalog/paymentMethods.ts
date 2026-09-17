@@ -96,13 +96,17 @@ export async function requiresPaymentConfirmation(
     if (byId) return byId.settlement !== "ON_DELIVERY";
   }
 
+  // La MISMA resolucion que usa close_conversation para decidir que etiqueta guardar. Tenia su propia
+  // busqueda por coincidencia exacta, y eso la volvia inutil justo en el caso real: el modelo escribe
+  // "Pago Contra Entrega Total (producto + envio al recibir)", resolveConfiguredPaymentMethod lo resuelve
+  // a "Contraentrega" sin problema, pero el `equals` exacto de aca no encontraba nada y devolvia "hay que
+  // confirmar". Dos funciones decidiendo lo mismo con reglas distintas: la de al lado guardaba
+  // contraentrega en el pedido mientras esta despertaba a la duena para preguntarle por ese pago.
   const label = chosen.paymentMethodLabel?.trim();
   if (label) {
-    const byLabel = await prisma.paymentMethod.findFirst({
-      where: { businessId, label: { equals: label, mode: "insensitive" } },
-      select: { settlement: true },
-    });
-    if (byLabel) return byLabel.settlement !== "ON_DELIVERY";
+    const configuradas = await prisma.paymentMethod.findMany({ where: { businessId }, select: { label: true, settlement: true } });
+    const resuelta = resolveConfiguredPaymentMethod(label, configuradas);
+    if (resuelta) return resuelta.settlement !== "ON_DELIVERY";
   }
 
   return true;
