@@ -463,6 +463,8 @@ en MAGByLizN pesaba más: 84 líneas contra 541. Toda etapa que se lleve un hech
 ---
 
 ### E06 · De dónde sale la respuesta duplicada — diagnóstico, sin cambio de código
+**Lectura del código HECHA el 2026-09-17** (hallazgos debajo de la ficha). Falta correr la
+clasificación contra producción para cerrarla.
 
 **Quita:** nada todavía. Es la única etapa de lectura del plan, y existe porque el incidente número
 uno no tiene causa raíz escrita en ningún lado.
@@ -477,6 +479,74 @@ y se escribe el resultado en este archivo, debajo de esta ficha. Nada más.
 **Se prueba:** no aplica.
 **Tamaño:** S. **Depende de:** nada.
 **Vuelta atrás:** no aplica.
+
+#### Lo que encontró la lectura del código (2026-09-17)
+
+**Qué cuenta exactamente el detector.** Dos filas `ASSISTANT` seguidas, ninguna con `mediaType`,
+menos de 12 s entre ellas y **sin ninguna fila del cliente en el medio** — cualquier `CUSTOMER`
+rompe la adyacencia y el par no se forma (`conversationHealth.ts:95-103`). Eso no es "dos turnos":
+es "de este lado salieron dos mensajes seguidos". Todo lo que sigue nace de esa distinción.
+
+**Las tres candidatas, medidas contra el árbol:**
+
+1. **El lock en memoria — no puede producir esta firma hoy.** Tres razones, las tres verificables sin
+   base de datos. `ecosystem.config.js` fija `exec_mode: "fork"` + `instances: 1`, así que no existe
+   el segundo proceso contra el cual el `Map` no protege. En `withConversationLock`
+   (`whatsapp.ts:106-128`) el `get` y el `set` del `Map` ocurren sin ningún `await` en medio, así que
+   dos webhooks no pueden leer el mismo `previous`. Y la fila `CUSTOMER` del mensaje entrante se
+   graba **adentro** de ese mismo lock (`whatsapp.ts:1045`): un mensaje que llega mientras se está
+   generando una respuesta se graba *después* de esa respuesta, así que la secuencia queda `C A C A`
+   y nunca forma un par. Lo que el lock no protege es todo lo que nunca se lo pide — punto 4.
+2. **El `burstBuffer` — tampoco.** Una ráfaga que se descarga mientras corre otra queda encolada
+   detrás del mismo lock, y le suma su ventana de silencio (8 s) más su propia generación antes de
+   escribir: el hueco entre las dos filas queda casi siempre por encima de los 12 s que el detector
+   mira. Que pierda mensajes en un reinicio es cierto y es el problema que `E08` arregla, pero
+   perder no es duplicar: el webhook ya devolvió 200 y Meta no reintenta.
+3. **Un turno que escribe varios mensajes — es la única de las tres que produce la firma**, y lo hace
+   por dos caminos distintos, los dos a menos de un segundo entre filas:
+   - `sendTextInChunks` (`outbound.ts:398`): toda respuesta de más de 700 caracteres sale partida, y
+     **cada trozo graba su propia fila** (`recordAs` por trozo, `outbound.ts:405`), con
+     `SPLIT_PAUSE_MS = 600` de pausa. Una respuesta larga de tres trozos deja dos pares, no uno.
+   - `sendCatalogBlocks` (`catalogBlocks.ts:92`): la frase del modelo sale primero y el bloque
+     compuesto por el servidor después, con `BLOCK_GAP_MS = 900` entre bloques, y cada bloque de
+     texto graba su fila. Solo ocurre cuando el bloque **no** viajó dentro del mensaje del modelo
+     (`AgentTurn.catalogInlined = false`), que es la columna con la que el script de abajo lo
+     confirma sin tener que adivinar.
+
+**Una cuarta clase que este plan no listaba: los escritores que nunca piden el lock.** Graban filas
+`ASSISTANT` en la conversación del cliente sin pasar por `withConversationLock`, así que pueden caer
+al lado de una respuesta del bot: la respuesta del dueño relevada al cliente (`whatsapp.ts:323, 345,
+403, 422, 433` — corre en el webhook del teléfono del **dueño**, que es otra conversación y otro
+lock), el cierre de venta por confirmación del dueño (`whatsapp.ts:502, 521`), el mensaje manual y la
+plantilla del panel (`admin/conversations.ts:247, 359`), los avisos de pedido (`admin/orders.ts:70,
+141`), los jobs (`followUp.ts:45`, `abandonment.ts:67`, `escalationReminder.ts`,
+`saleConfirmationChaser.ts`) y el drenaje de la cola (`outbound.ts:634`). Para el cliente esto sí es
+un mensaje encima de otro — el del dueño es el que se lee contradictorio — pero **no lo arreglan
+`E07` ni `E08`**, porque no hay dos turnos compitiendo: hay dos autores distintos.
+
+**Un defecto aparte, encontrado de paso.** `deliverOwnerAnswerToCustomer` (`whatsapp.ts:190`) manda
+con `onWindowClosed: "queue"` y **sin** `recordAs`, y el llamador graba la fila igual
+(`whatsapp.ts:323, 345, 403, 422, 433`). Si la ventana de 24 h estaba cerrada, el mensaje queda en
+cola y, al entregarse, `deliverQueuedItem` lo graba **otra vez** (`outbound.ts:634`): un envío, dos
+filas. El detector no lo ve (quedan separadas por minutos u horas), pero el modelo lee esa respuesta
+dos veces en el historial. No es de `E06` arreglarlo — queda anotado acá para que no se redescubra.
+
+**Lo que esto le hace a `E07` y `E08`.** Las dos siguen valiendo por lo que dicen quitar: `E07` le
+quita al operador ser responsable de no escalar el proceso, `E08` le quita a un reinicio poder
+perder una ráfaga. Pero **ninguna de las dos baja el número que este detector reporta**, salvo la
+porción que caiga en `DOS_TURNOS`. Si esa porción sale chica contra producción, lo que hay que
+cambiar es el detector: estaría contando como incidente algo que el sistema hace a propósito, y un
+detector que cuenta lo normal entrena a ignorar lo anormal — el mismo motivo por el que el
+2026-09-17 se le sacó el aviso al dueño.
+
+**Lo que falta para cerrar `E06`.** La clasificación contra producción, que no se puede hacer desde
+un entorno sin la base: `npx tsx scripts/e06-clasificar-duplicadas.ts` en el droplet (solo lectura,
+se puede correr con el bot andando) reconstruye los pares desde `Message` con la regla exacta del
+detector y los reparte en `TROZOS`, `BLOQUE_CATALOGO`, `DOS_TURNOS`, `OTRO_AUTOR`, `COLA` y
+`UN_TURNO_OTRO`, contrastando contra `AgentTurn.blocks` y `QueuedOutboundMessage`. Los reinicios de
+pm2 no están en la base; el script imprime la marca de hora de cada par para cruzarla a mano con
+`grep -iE "restart|starting" ~/.pm2/pm2.log`. **La tabla que salga va acá abajo, y con eso la etapa
+queda cerrada.**
 
 ---
 
