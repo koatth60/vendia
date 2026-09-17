@@ -355,6 +355,29 @@ pendientes y ya no lo son:
   el 2026-09-16 17:56 UTC, antes de ese cambio; no volvió a aparecer.
 - El reloj del turno (`src/ai/clock.ts`), commit `1d6bf28`. **Construido, sin desplegar** (`E01`).
 
+## Estado del repositorio al 2026-09-17
+
+Esto no es una etapa: es dónde quedó el árbol, para que una sesión nueva no tenga que deducirlo.
+
+**Ramas.** El trabajo del rediseño del sitio público y del alta vive en `redesign/completo`
+(`91bca98`), ya desplegada. Una sesión de nube agregó encima `redesign/completo-afikox`
+(`6a961b1`), que es la misma rama más un arreglo de tipos. **Fusionar `completo-afikox` en
+`completo` antes de desplegar**, porque el script de despliegue lee `completo`.
+
+**Desplegado en producción:** todo hasta `91bca98`, verificado con `curl` sobre `/health`.
+
+**Construido y NO verificado en producción:** la bandeja "Cuentas esperando activación" de
+`/zaqi-admin` (`GET /zaqi-admin/api/pending-activations`,
+`POST /zaqi-admin/api/pending-activations/:id/activate`). El código se leyó entero y las dos
+escrituras de credenciales de WhatsApp están cubiertas — la del cliente responde 403 mientras
+`active` sea false — pero la página nunca se vio renderizada con una sesión real. Falta recorrer
+el flujo completo: crear una cuenta sin clave, ver el aviso en el panel, activarla, comprobar que
+ya conecta WhatsApp.
+
+**Decisión pendiente, sin urgencia:** `POST /auth/request-key` y el modelo `KeyRequest` quedaron
+sin uso desde el front el 2026-09-17 — crear la cuenta *es* la solicitud. La sección "Solicitudes
+de clave" del panel de plataforma sigue mostrando filas históricas. No se borró nada.
+
 ---
 
 # PARTE IV — Las etapas
@@ -1713,3 +1736,11 @@ que explican por qué está hecho así.
 rename viejo) y una copia compilada de un test de costo real en `dist/` **facturó a DeepSeek en un
 `npm test` común**. Producción corre el código fuente con `tsx` y no usa `dist/`. Arreglarlo es una
 línea de `exclude`; va con la primera etapa que toque el build.
+
+**CI no revisa tipos.** `.github/workflows/test.yml` corre `npm ci`, `prisma generate`,
+`prisma migrate deploy` y `npm test`, nada más. `npm test` corre con `tsx`, que **borra los tipos
+sin mirarlos**: un archivo puede estar en verde en CI y no compilar. Medido el 2026-09-17:
+`src/routes/auth.activation.test.ts` pasó sus 5 pruebas mientras `npx tsc --noEmit` daba 11
+errores, o sea con `npm run build` roto y nadie enterado. Se arregló el archivo (`6a961b1`), no el
+agujero. El agujero se cierra con dos líneas en el workflow — `npx tsc --noEmit` y
+`npm run typecheck:all`, los dos en verde hoy — y va con la primera etapa que toque CI.
