@@ -32,16 +32,29 @@ echo "==> Migraciones"
 npx prisma migrate deploy
 npx prisma generate >/dev/null
 
+# Salud real: se pregunta al PUERTO, no al log. El log es ruidoso (cada acuse de WhatsApp escribe una
+# linea) y "Server listening" se sale de la ventana en segundos, asi que grepearlo daba falsas alarmas -
+# paso en el despliegue de d0a3eb2, con el proceso perfectamente arriba. Se reintenta hasta 30s porque
+# arrancar tarda mas que el sleep de antes.
+esta_arriba() {
+  for _ in $(seq 1 15); do
+    if curl -sf -o /dev/null "http://localhost:3000/webhook?hub.mode=subscribe&hub.verify_token=x&hub.challenge=1"       || [ "$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:3000/webhook?hub.mode=subscribe&hub.verify_token=x&hub.challenge=1")" = "403" ]; then
+      return 0
+    fi
+    sleep 2
+  done
+  return 1
+}
+
 echo "==> Reiniciando"
 pm2 restart vendia --update-env >/dev/null
-sleep 6
 systemctl reload nginx
 
 # Verificacion real, no un "exit 0" optimista: si el proceso no levanto, el despliegue fallo y hay que
 # enterarse ahora, no cuando escriba un cliente.
-if pm2 logs vendia --lines 20 --nostream --no-color 2>&1 | grep -q "Server listening"; then
+if esta_arriba; then
   echo "==> OK: $NUEVA arriba (anterior: $ANTERIOR)"
 else
-  echo "==> FALLO: el proceso no reporto 'Server listening'. Volve con ./scripts/rollback.sh" >&2
+  echo "==> FALLO: el puerto 3000 no responde despues de 30s. Volve con ./scripts/rollback.sh" >&2
   exit 1
 fi
