@@ -391,11 +391,11 @@ test("splitLongMessage corta duro si no hay ningun espacio (una sola palabra lar
 });
 
 test("computeTypingDelayMs tiene piso, techo, y crece con el largo del mensaje", () => {
-  assert.equal(computeTypingDelayMs(0), 500);
+  assert.equal(computeTypingDelayMs(0), 300);
   const short = computeTypingDelayMs(10);
   const long = computeTypingDelayMs(100);
   assert.ok(short < long, "un mensaje mas largo tiene que dar una demora mayor o igual");
-  assert.equal(computeTypingDelayMs(5000), 4000, "nunca deberia superar el tope de ~4s");
+  assert.equal(computeTypingDelayMs(5000), 1200, "nunca deberia superar el tope de 1.2s");
 });
 
 test("markCustomerMessageSeen manda status=read con el indicador de escribiendo", async () => {

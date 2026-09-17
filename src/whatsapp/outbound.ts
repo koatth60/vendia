@@ -192,13 +192,19 @@ export function splitLongMessage(text: string, maxLen = MAX_MESSAGE_LENGTH): str
   return chunks.length > 0 ? chunks : [text];
 }
 
-const TYPING_DELAY_FLOOR_MS = 500;
-const TYPING_DELAY_MS_PER_CHAR = 18;
-const TYPING_DELAY_CAP_MS = 4000;
+// Configurables por entorno para poder ajustar el ritmo sin volver a desplegar, igual que
+// WHATSAPP_BURST_WINDOW_MS en src/routes/whatsapp.ts.
+const TYPING_DELAY_FLOOR_MS = Number(process.env.TYPING_DELAY_FLOOR_MS ?? "") || 300;
+const TYPING_DELAY_MS_PER_CHAR = Number(process.env.TYPING_DELAY_MS_PER_CHAR ?? "") || 6;
+const TYPING_DELAY_CAP_MS = Number(process.env.TYPING_DELAY_CAP_MS ?? "") || 1200;
 
 // Se siente mas humano si la respuesta no sale instantanea. Proporcional al largo de lo que se va
 // a mandar (una respuesta corta no necesita el tope completo), con un piso para que ni un "sí"
-// salga en 0ms, y un techo de ~4s para no demorar de mas.
+// salga en 0ms, y un techo corto para no demorar de mas.
+//
+// Los valores son deliberadamente bajos: esta pausa se suma DESPUES de que el modelo ya tardo
+// varios segundos reales en responder, asi que el cliente ya espero. Un techo alto aca duplica esa
+// espera en vez de disimularla.
 export function computeTypingDelayMs(replyLength: number): number {
   return Math.min(TYPING_DELAY_CAP_MS, TYPING_DELAY_FLOOR_MS + replyLength * TYPING_DELAY_MS_PER_CHAR);
 }
