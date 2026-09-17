@@ -663,6 +663,12 @@ async function requestSaleConfirmation(context: ToolContext, summary: string, dr
 // 6.0b.
 const LIST_DESCRIPTION_MAX_CHARS = 150;
 
+// Lo que se le dice al modelo cuando intento cerrar una venta sin ninguna linea real. Vive aca, y no
+// dentro de close_conversation, para no alejar el chequeo de needsAttribute de su llamada a
+// resolveOrderItems (ver src/orders/resolveOrderItems.arch.test.ts, que mide esa distancia).
+const EMPTY_ORDER_NOTE =
+  "No se cerro nada y no se creo ningun pedido: no hay ningun producto en `items` ni en el pedido en curso, o ninguno de los que pasaste existe en el catalogo. Volve a llamar close_conversation con los productos reales que el cliente esta comprando.";
+
 // Defecto real de produccion (2026-09-15): send_product_media no distinguia foto de video. Un cliente
 // que pedia el video de un producto que solo tiene fotos recibia las fotos igual, y el modelo las
 // anunciaba como "aqui te va el video". Medido contra la base de MAGByLizN: 5 productos tienen video y
@@ -1720,8 +1726,15 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
           : input.shippingCost !== undefined && input.shippingCost !== null
             ? Number(input.shippingCost)
             : null;
-        const { items, unresolved, needsAttribute } = saleStateOn
-          ? { items: saleState?.items ?? [], unresolved: [] as string[], needsAttribute: [] as string[] }
+        // SaleState manda cuando TIENE lineas; vacio, el cierre NO se bloquea y los items se resuelven
+        // contra el catalogo igual que con la bandera apagada. Con saleStateEnabled en true el cierre
+        // exigia que set_order_item se hubiera llamado ANTES y, si el modelo no lo hizo, la venta no
+        // cerraba nunca: por eso encender la bandera dejaba al bot sin cerrar (diagnostico 2026-09-17).
+        // Se elimina una decision de ORDEN, no una garantia - resolveOrderItems valida cada linea contra
+        // el catalogo y saca el precio de la base, igual que set_order_item.
+        const desdeSaleState = saleStateOn ? saleState?.items ?? [] : [];
+        const { items, unresolved, needsAttribute } = desdeSaleState.length > 0
+          ? { items: desdeSaleState, unresolved: [] as string[], needsAttribute: [] as string[] }
           : await resolveOrderItems(
               businessId,
               Array.isArray(input.items) ? (input.items as { productName: string; quantity: number; variantLabel?: string }[]) : [],
@@ -1731,18 +1744,9 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
               context.conversationId
             );
 
-        // Un pedido sin lineas no es un pedido, con SaleState prendido o apagado. Este guard estaba dentro
-        // de `saleStateOn`; con SaleState apagado el modelo cerro con direccion y sin items y quedo un
-        // pedido de cero lineas y totalAmount 0 (produccion 2026-09-17, cmu4suduh001sq92ka4r3j35y). Es una
-        // red, no el piso: el piso es SaleState, donde las lineas las escribe set_order_item.
-        if (items.length === 0) {
-          return {
-            closed: false,
-            note: saleStateOn
-              ? "Todavia no hay ningun producto en el pedido en curso - usa set_order_item primero."
-              : "No se cerro nada y no se creo ningun pedido: no pasaste ningun producto en `items`, o ninguno de los que pasaste existe en el catalogo. Volve a llamar close_conversation con los productos reales que el cliente esta comprando.",
-          };
-        }
+        // Un pedido sin lineas no es un pedido (produccion 2026-09-17, cmu4suduh001sq92ka4r3j35y: quedo
+        // guardada una venta de cero lineas y totalAmount 0). Vale con SaleState prendido o apagado.
+        if (items.length === 0) return { closed: false, note: EMPTY_ORDER_NOTE };
 
         // Real production incident (2026-09-12): a sale closed without ever asking the customer's color.
         // Unlike `unresolved` below (which only warns the owner and still closes), this BLOCKS the close -

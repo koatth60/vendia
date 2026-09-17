@@ -165,11 +165,72 @@ test("close_conversation SOLD con la bandera activa arma el pedido pendiente des
 });
 
 test("close_conversation SOLD con la bandera activa bloquea si todavia no hay productos", async () => {
+  // Lo que se exige es que el pedido tenga lineas REALES, no que se hayan cargado por una via concreta:
+  // desde el 2026-09-17, con el pedido en curso vacio los items se resuelven contra el catalogo igual que
+  // con la bandera apagada (ver el bloque de mas abajo sobre el orden de las herramientas). Sin lineas por
+  // ningun camino, sigue sin cerrar y sin crear nada.
   const context = await freshContext();
   const result = (await runCatalogTool(context, "close_conversation", { outcome: "SOLD", summary: "x" })) as {
     closed: boolean;
     note?: string;
   };
   assert.equal(result.closed, false);
-  assert.match(result.note ?? "", /set_order_item/);
+  assert.match(result.note ?? "", /no se creo ningun pedido/i);
+  assert.equal(await prisma.order.count({ where: { conversationId: context.conversationId } }), 0);
+});
+
+// ==============================================================================================
+// Con SaleState prendido, el cierre no depende del ORDEN en que el modelo llamo las herramientas
+// ==============================================================================================
+//
+// Diagnostico del 2026-09-17 (punto 7 de los pendientes): encender saleStateEnabled dejaba al bot sin
+// cerrar ventas. close_conversation exigia que set_order_item se hubiera llamado ANTES, en el turno en
+// que el cliente eligio; si el modelo no lo hizo, el cierre quedaba rechazado para siempre. La garantia
+// (cada linea validada contra el catalogo, precio de la base) se conserva por el otro camino.
+
+test("close_conversation SOLD cierra aunque nadie haya llamado set_order_item, resolviendo contra el catalogo", async () => {
+  const context = await freshContext();
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => ({ ok: true, json: async () => ({ messages: [{ id: `wamid.${randomUUID()}` }] }) })) as unknown as typeof fetch;
+  try {
+    const producto = await prisma.product.create({
+      data: { businessId, name: "Reloj Sin SetOrderItem", description: "x", price: 100000, currency: "COP", stock: 4 },
+    });
+
+    const result = (await runCatalogTool(context, "close_conversation", {
+      outcome: "SOLD",
+      summary: "1x Reloj Sin SetOrderItem",
+      paymentMethodLabel: "Contraentrega",
+      items: [{ productName: "Reloj Sin SetOrderItem", quantity: 1 }],
+    })) as { closed: boolean; pending?: boolean; note?: string };
+
+    assert.notEqual(result.note, "Todavia no hay ningun producto en el pedido en curso - usa set_order_item primero.");
+    assert.ok(result.closed === true || result.pending === true, "el cierre avanza: o crea el pedido o lo deja esperando confirmacion");
+
+    const pedido = await prisma.order.findFirst({ where: { conversationId: context.conversationId }, include: { items: true } });
+    if (pedido) {
+      assert.equal(pedido.items.length, 1);
+      assert.equal(pedido.items[0].productId, producto.id, "la linea salio del catalogo real, no de la prosa");
+      assert.equal(String(pedido.items[0].unitPrice), "100000", "el precio sale de la base");
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+    await prisma.orderItem.deleteMany({ where: { order: { conversationId: context.conversationId } } });
+    await prisma.order.deleteMany({ where: { conversationId: context.conversationId } });
+    await prisma.product.deleteMany({ where: { businessId, name: "Reloj Sin SetOrderItem" } });
+  }
+});
+
+test("close_conversation SOLD con SaleState vacio Y sin items sigue bloqueado", async () => {
+  // Lo que se relaja es el ORDEN, no la exigencia de que el pedido tenga lineas reales.
+  const context = await freshContext();
+  const result = (await runCatalogTool(context, "close_conversation", {
+    outcome: "SOLD",
+    summary: "Venta sin productos",
+    items: [],
+  })) as { closed: boolean; note: string };
+
+  assert.equal(result.closed, false);
+  assert.match(result.note, /no se creo ningun pedido/i);
+  assert.equal(await prisma.order.count({ where: { conversationId: context.conversationId } }), 0);
 });
