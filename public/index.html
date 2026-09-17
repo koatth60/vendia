@@ -251,6 +251,7 @@
     background-repeat: no-repeat;
   }
 </style>
+<link rel="stylesheet" href="/css/landing.css?v=1" />
 </head>
 <body>
   <header>
@@ -363,7 +364,35 @@
     </div>
   </section>
 
-  <section class="block" id="como-funciona">
+  <!-- Tira de capacidades: decorativa y duplicada para que el bucle no corte,
+       por eso queda fuera del arbol de accesibilidad. Los mismos hechos estan
+       escritos en "Por que Onix". -->
+  <div class="zs-ticker" aria-hidden="true">
+    <div class="zs-ticker-track">
+      <div class="zs-ticker-row">
+        <span class="zs-chip">Responde a las 3 de la mañana</span>
+        <span class="zs-chip">Manda fotos reales del catálogo</span>
+        <span class="zs-chip">Cotiza el flete a tu ciudad</span>
+        <span class="zs-chip">Nunca inventa un precio</span>
+        <span class="zs-chip">Lee capturas de TikTok e Instagram</span>
+        <span class="zs-chip">Nequi, transferencia o contraentrega</span>
+        <span class="zs-chip">Confirma el pedido y te avisa</span>
+        <span class="zs-chip">Recupera al cliente que se enfrió</span>
+      </div>
+      <div class="zs-ticker-row">
+        <span class="zs-chip">Responde a las 3 de la mañana</span>
+        <span class="zs-chip">Manda fotos reales del catálogo</span>
+        <span class="zs-chip">Cotiza el flete a tu ciudad</span>
+        <span class="zs-chip">Nunca inventa un precio</span>
+        <span class="zs-chip">Lee capturas de TikTok e Instagram</span>
+        <span class="zs-chip">Nequi, transferencia o contraentrega</span>
+        <span class="zs-chip">Confirma el pedido y te avisa</span>
+        <span class="zs-chip">Recupera al cliente que se enfrió</span>
+      </div>
+    </div>
+  </div>
+
+  <section class="block zs-band" id="como-funciona">
     <div class="block-head">
       <div class="eyebrow-label">Cómo funciona Onix</div>
       <h2>Listo en tres pasos</h2>
@@ -444,7 +473,7 @@
     </div>
   </section>
 
-  <section class="plans-section" id="precios">
+  <section class="plans-section zs-band zs-band-soft" id="precios">
     <div class="block-head">
       <div class="eyebrow-label">Precios de Onix</div>
       <h2>Un plan para cada tamaño de negocio</h2>
@@ -778,5 +807,42 @@
   <a class="whatsapp-fab" href="https://wa.me/573204500599" target="_blank" rel="noopener" aria-label="Escríbenos por WhatsApp">
     <svg width="28" height="28" viewBox="0 0 24 24" fill="white"><path d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91c0 1.75.46 3.45 1.32 4.95L2 22l5.28-1.39a9.9 9.9 0 0 0 4.76 1.21h.01c5.46 0 9.9-4.45 9.9-9.91C21.96 6.45 17.5 2 12.04 2Zm5.79 14.03c-.24.68-1.4 1.3-1.93 1.35-.5.05-.99.24-3.3-.71-2.85-1.17-4.65-4.08-4.79-4.27-.14-.19-1.15-1.53-1.15-2.92 0-1.39.73-2.07.99-2.35.26-.28.56-.35.75-.35.19 0 .38 0 .54.01.17.01.4-.06.63.48.24.55.81 1.9.88 2.04.07.14.12.31.02.5-.1.19-.15.31-.29.48-.14.17-.3.37-.43.5-.14.14-.29.29-.13.57.17.28.75 1.24 1.61 2 1.11.99 2.04 1.29 2.32 1.44.28.14.44.12.6-.07.17-.19.71-.83.9-1.11.19-.28.38-.24.64-.14.26.1 1.65.78 1.93.92.28.14.47.21.54.33.07.12.07.68-.17 1.36Z"/></svg>
   </a>
+
+  <script>
+    // Dos gestos, los dos opcionales: la cabecera se despega al bajar y cada
+    // bloque aparece al entrar en pantalla. Si el navegador no tiene
+    // IntersectionObserver, o el sistema pide menos movimiento, no se agrega
+    // ninguna clase y la pagina se ve completa igual.
+    (function () {
+      var head = document.querySelector('header');
+      if (head) {
+        var mark = function () { head.classList.toggle('zs-stuck', window.scrollY > 8); };
+        mark();
+        window.addEventListener('scroll', mark, { passive: true });
+      }
+
+      var quiet = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      if (quiet || !('IntersectionObserver' in window)) return;
+
+      var targets = document.querySelectorAll(
+        '.block-head, .service-card, .step, .feature, .plan, .table-wrap, .stat, .sub-head, .faq-item'
+      );
+      var seen = new IntersectionObserver(function (entries) {
+        entries.forEach(function (e) {
+          if (!e.isIntersecting) return;
+          e.target.classList.add('zs-in');
+          seen.unobserve(e.target);
+        });
+      }, { rootMargin: '0px 0px -8% 0px', threshold: 0.08 });
+
+      targets.forEach(function (el) {
+        // Escalonado corto entre hermanos: la fila entra como una ola, no de golpe.
+        var pos = Array.prototype.indexOf.call(el.parentNode.children, el);
+        el.style.transitionDelay = Math.min(pos, 4) * 70 + 'ms';
+        el.classList.add('zs-reveal');
+        seen.observe(el);
+      });
+    })();
+  </script>
 </body>
 </html>

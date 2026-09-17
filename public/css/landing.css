@@ -1,0 +1,292 @@
+/* ============================================================================
+   Ritmo de la landing publica (zaqisolutions.com).
+
+   Se carga DESPUES del <style> de public/index.html, asi que puede ajustar
+   aquellas reglas sin tocarlas. Aqui vive una sola cosa: el ritmo de la pagina
+   de la mitad hacia abajo. Antes de esto, cuatro secciones seguidas repetian la
+   misma receta (titulo centrado + rejilla de tarjetas claras sobre fondo claro),
+   los bordes de 1px casi no se leian y nada se movia.
+
+   Tres decisiones:
+     1. Bandas de ancho completo que alternan la superficie, para que cada
+        seccion se apoye en un fondo distinto al de la anterior.
+     2. Una sola forma por seccion: tarjetas en Servicios, pasos conectados en
+        Como funciona, una rejilla unica con lineas finas en Por que Onix.
+        Asi deja de ser tarjeta sobre tarjeta.
+     3. Movimiento discreto: aparicion al entrar en pantalla y elevacion al
+        pasar el mouse.
+
+   Ningun color literal: todo sale de tokens.css, de modo que claro y oscuro son
+   el mismo CSS. La banda oscura (.cta-band) no se toca.
+   ========================================================================== */
+
+/* --- 1. Banda de ancho completo ------------------------------------------ */
+/* El pseudo-elemento se sale del contenedor de 1100px y pinta de borde a borde.
+   isolation:isolate lo mantiene detras del contenido de la seccion y delante
+   del fondo del body. */
+.zs-band { position: relative; isolation: isolate; }
+.zs-band::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: 0 auto;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 100vw;
+  transform: translateX(-50%);
+  background:
+    radial-gradient(84% 62% at 14% 0%, var(--onix-accent-ring), transparent 62%),
+    linear-gradient(var(--onix-surface-2), var(--onix-surface-2));
+  border-top: 1px solid var(--onix-border-soft);
+  border-bottom: 1px solid var(--onix-border-soft);
+}
+.zs-band.zs-band-soft::before {
+  background:
+    radial-gradient(70% 60% at 86% 4%, var(--onix-accent-ring), transparent 60%),
+    linear-gradient(var(--onix-surface-nav), var(--onix-surface-nav));
+}
+
+/* --- 2. Cabeceras de seccion --------------------------------------------- */
+section.block { padding-top: 96px; padding-bottom: 96px; }
+.block-head { margin-bottom: 56px; }
+.block-head h2,
+.plans-section .block-head h2 { font-size: clamp(27px, 3.4vw, 38px); line-height: 1.12; }
+.block-head .eyebrow-label { display: inline-flex; align-items: center; gap: 9px; }
+.block-head .eyebrow-label::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--onix-accent);
+  flex-shrink: 0;
+}
+/* Una sola seccion rompe el eje centrado, para que la pagina no lea toda igual. */
+section.block:not([id]) .block-head { text-align: left; margin-left: 0; max-width: 640px; }
+
+/* --- 3. Servicios: una tarjeta manda, dos acompanan ----------------------- */
+.services { grid-template-columns: 1.3fr 1fr 1fr; align-items: stretch; }
+.service-card {
+  box-shadow: var(--onix-shadow-card);
+  transition: transform .2s ease, box-shadow .2s ease, border-color .2s ease;
+}
+.service-card:hover {
+  transform: translateY(-4px);
+  box-shadow: var(--onix-shadow-card-hover);
+  border-color: var(--onix-border-strong);
+}
+.service-card.highlight {
+  padding: 38px 32px;
+  margin: -14px 0;
+  background: linear-gradient(162deg, var(--onix-accent-soft), var(--onix-surface) 76%);
+  border-color: var(--onix-accent-line);
+}
+.service-card.highlight:hover { border-color: var(--onix-accent); }
+.service-card.highlight h3 { font-size: 20px; }
+.service-link { transition: gap .16s ease; }
+.service-card:hover .service-link { gap: 10px; }
+
+/* --- 4. Tira de capacidades ---------------------------------------------- */
+/* Corta la cadencia de rejilla-tras-rejilla y es lo unico que se mueve solo. */
+.zs-ticker {
+  position: relative;
+  overflow: hidden;
+  padding: 18px 0;
+  background: var(--onix-accent-soft);
+  border-top: 1px solid var(--onix-accent-line);
+  border-bottom: 1px solid var(--onix-accent-line);
+  -webkit-mask-image: linear-gradient(90deg, transparent, var(--onix-ink) 7%, var(--onix-ink) 93%, transparent);
+  mask-image: linear-gradient(90deg, transparent, var(--onix-ink) 7%, var(--onix-ink) 93%, transparent);
+}
+.zs-ticker-track {
+  display: flex;
+  align-items: center;
+  width: max-content;
+  animation: zs-ticker 46s linear infinite;
+}
+/* Las dos filas son identicas, separacion incluida, para que el salto de -50%
+   caiga exacto y el bucle no se note. */
+.zs-ticker-row { display: flex; align-items: center; gap: 12px; padding-right: 12px; }
+.zs-ticker:hover .zs-ticker-track { animation-play-state: paused; }
+@keyframes zs-ticker {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+.zs-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--onix-ink-2);
+  background: var(--onix-surface);
+  border: 1px solid var(--onix-border);
+  border-radius: 999px;
+  padding: 9px 16px;
+}
+.zs-chip::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--onix-accent);
+  flex-shrink: 0;
+}
+
+/* --- 5. Pasos: tres momentos de una misma linea --------------------------- */
+.steps { position: relative; }
+/* La linea punteada pasa por detras a la altura de los numeros y une los tres. */
+.steps::before {
+  content: "";
+  position: absolute;
+  z-index: 0;
+  top: 52px;
+  left: 12%;
+  right: 12%;
+  border-top: 2px dashed var(--onix-accent-line);
+}
+.step {
+  position: relative;
+  z-index: 1;
+  overflow: hidden;
+  box-shadow: var(--onix-shadow-card);
+  transition: transform .2s ease, box-shadow .2s ease, border-color .2s ease;
+}
+.step:hover {
+  transform: translateY(-4px);
+  box-shadow: var(--onix-shadow-card-hover);
+  border-color: var(--onix-border-strong);
+}
+.step-num {
+  position: relative;
+  z-index: 1;
+  font-size: 14px;
+  letter-spacing: 0.06em;
+}
+/* Halo de acento en la esquina: profundidad sin agregar una sola palabra. */
+.step::after {
+  content: "";
+  position: absolute;
+  top: -26px;
+  right: -14px;
+  width: 128px;
+  height: 128px;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--onix-accent-ring), transparent 68%);
+  pointer-events: none;
+}
+.step.dark::after { background: radial-gradient(circle, var(--onix-accent-ring), transparent 62%); }
+/* El paso 3 es el unico oscuro. En tema oscuro casi se funde con la banda, asi
+   que lleva un filo de acento: la misma regla resuelve los dos temas. */
+.step.dark { box-shadow: inset 0 0 0 1px var(--onix-accent-line), var(--onix-shadow-card); }
+.step.dark:hover { box-shadow: inset 0 0 0 1px var(--onix-accent), var(--onix-shadow-card-hover); }
+
+/* --- 6. Por que Onix: una pieza, no cuatro tarjetas ----------------------- */
+/* El gap de 1px sobre un fondo de borde dibuja las lineas internas, asi que la
+   rejilla entera se lee como un solo objeto enmarcado. */
+.features {
+  gap: 1px;
+  background: var(--onix-border);
+  border: 1px solid var(--onix-border);
+  border-radius: 24px;
+  overflow: hidden;
+  box-shadow: var(--onix-shadow-card);
+}
+.feature {
+  border: none;
+  border-radius: 0;
+  background: var(--onix-surface);
+  padding: 34px 32px;
+  gap: 20px;
+  transition: background .18s ease;
+}
+.feature:hover { background: var(--onix-surface-2); }
+.feature-icon {
+  width: 52px;
+  height: 52px;
+  border-radius: 15px;
+  box-shadow: inset 0 0 0 1px var(--onix-accent-line);
+}
+.feature-icon svg { width: 24px; height: 24px; }
+.feature h3 { font-size: 17px; margin-bottom: 8px; }
+.feature p { font-size: 14px; }
+
+/* --- 7. Precios: las tarjetas flotan sobre la banda ----------------------- */
+.plan {
+  box-shadow: var(--onix-shadow-card);
+  transition: transform .2s ease, box-shadow .2s ease, border-color .2s ease;
+}
+.plan:hover {
+  transform: translateY(-4px);
+  box-shadow: var(--onix-shadow-card-hover);
+  border-color: var(--onix-border-strong);
+}
+.plan.highlight { box-shadow: var(--onix-shadow-card-hover); }
+.plan.highlight:hover { transform: translateY(-6px); }
+.table-wrap { box-shadow: var(--onix-shadow-card); }
+.stat {
+  box-shadow: var(--onix-shadow-card);
+  transition: transform .2s ease, box-shadow .2s ease;
+}
+.stat:hover { transform: translateY(-3px); box-shadow: var(--onix-shadow-card-hover); }
+
+/* --- 8. Preguntas: cada fila responde al mouse ---------------------------- */
+.faq-item {
+  position: relative;
+  padding: 24px 18px 24px 20px;
+  border-radius: var(--onix-radius-card);
+  transition: background .18s ease;
+}
+.faq-item::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 18px;
+  bottom: 18px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--onix-accent);
+  opacity: 0;
+  transition: opacity .18s ease;
+}
+.faq-item:hover { background: var(--onix-surface-2); }
+.faq-item:hover::before { opacity: 1; }
+
+/* --- 9. Cabecera que reacciona al scroll --------------------------------- */
+header { transition: box-shadow .2s ease, border-color .2s ease; }
+header.zs-stuck {
+  box-shadow: var(--onix-shadow-card);
+  border-bottom-color: var(--onix-border-strong);
+}
+
+/* --- 10. Aparicion al entrar en pantalla ---------------------------------- */
+/* La clase la pone el script solo cuando el sistema no pide menos movimiento,
+   asi que sin JS todo queda visible. */
+@media (prefers-reduced-motion: no-preference) {
+  .zs-reveal {
+    opacity: 0;
+    transform: translateY(16px);
+    transition: opacity .6s cubic-bezier(.22,.61,.36,1), transform .6s cubic-bezier(.22,.61,.36,1);
+  }
+  .zs-reveal.zs-in { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .zs-ticker-track { animation: none; }
+}
+
+/* --- 11. Pantallas chicas ------------------------------------------------- */
+@media (max-width: 900px) {
+  .services { grid-template-columns: 1fr; }
+  .service-card.highlight { margin: 0; }
+  .steps::before { display: none; }
+  .features { border-radius: 20px; }
+}
+@media (max-width: 560px) {
+  section.block { padding-top: 60px; padding-bottom: 60px; }
+  .block-head { margin-bottom: 34px; }
+  .feature { padding: 26px 22px; gap: 16px; }
+  .feature-icon { width: 46px; height: 46px; border-radius: 13px; }
+  .zs-chip { font-size: 12.5px; padding: 8px 14px; }
+  .faq-item { padding: 20px 14px 20px 16px; }
+}

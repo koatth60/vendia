@@ -128,6 +128,11 @@
   --onix-shadow-sm: 0 1px 2px rgba(15, 26, 21, 0.05);
   --onix-shadow-md: 0 8px 24px rgba(15, 26, 21, 0.07);
   --onix-shadow-lg: 0 24px 64px rgba(15, 26, 21, 0.28);
+  /* Tarjetas de la landing: elevacion apenas perceptible en reposo y un paso
+     mas al pasar el mouse. En oscuro la elevacion no se lee, asi que ahi el
+     realce lo hace el borde y la sombra casi desaparece. */
+  --onix-shadow-card: 0 1px 2px rgba(15, 26, 21, 0.04), 0 10px 28px -18px rgba(15, 26, 21, 0.20);
+  --onix-shadow-card-hover: 0 2px 6px rgba(15, 26, 21, 0.05), 0 24px 48px -24px rgba(15, 26, 21, 0.30);
 
   /* Velo del modal y aro del punto de color: no son "un gris", cambian de
      tema como todo lo demás. */
@@ -210,6 +215,8 @@
     --onix-shadow-sm: none;
     --onix-shadow-md: none;
     --onix-shadow-lg: 0 24px 64px rgba(0, 0, 0, 0.55);
+    --onix-shadow-card: none;
+    --onix-shadow-card-hover: 0 18px 40px -26px rgba(0, 0, 0, 0.75);
     --onix-scrim: rgba(0, 0, 0, 0.62);
     --onix-swatch-ring: rgba(232, 237, 234, 0.18);
 
@@ -281,6 +288,8 @@
   --onix-shadow-sm: none;
   --onix-shadow-md: none;
   --onix-shadow-lg: 0 24px 64px rgba(0, 0, 0, 0.55);
+  --onix-shadow-card: none;
+  --onix-shadow-card-hover: 0 18px 40px -26px rgba(0, 0, 0, 0.75);
   --onix-scrim: rgba(0, 0, 0, 0.62);
   --onix-swatch-ring: rgba(232, 237, 234, 0.18);
 

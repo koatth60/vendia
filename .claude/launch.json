@@ -4,8 +4,20 @@
     {
       "name": "vendia-dev",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
+      "runtimeArgs": [
+        "run",
+        "dev"
+      ],
       "port": 3000
+    },
+    {
+      "name": "landing-estatica",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "scripts/serve-public.mjs",
+        "4311"
+      ],
+      "port": 4311
     }
   ]
 }
