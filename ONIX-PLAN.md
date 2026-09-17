@@ -374,6 +374,12 @@ escrituras de credenciales de WhatsApp están cubiertas — la del cliente respo
 el flujo completo: crear una cuenta sin clave, ver el aviso en el panel, activarla, comprobar que
 ya conecta WhatsApp.
 
+**Deriva de esquema encontrada el 2026-09-17** (al generar la migración de `E08`): la base tiene un
+índice `Conversation_pendingConfirmationNextAttemptAt_idx` que `schema.prisma` ya no declara, así que
+`prisma migrate dev` propone borrarlo en cada migración nueva. Se quitó a mano del SQL de `E08`
+—ninguna migración de este plan borra nada— y hay que quitarlo a mano de la siguiente también, hasta
+que se decida aparte si el índice se declara de nuevo o se borra en una migración propia.
+
 **Decisión pendiente, sin urgencia:** `POST /auth/request-key` y el modelo `KeyRequest` quedaron
 sin uso desde el front el 2026-09-17 — crear la cuenta *es* la solicitud. La sección "Solicitudes
 de clave" del panel de plataforma sigue mostrando filas históricas. No se borró nada.
@@ -593,7 +599,7 @@ procesos, no porque correr dos duplique respuestas.
 
 ---
 
-### E08 · La ráfaga no muere con el proceso
+### E08 · La ráfaga no muere con el proceso — **CERRADA el 2026-09-17** (commit `7644d70`), sin desplegar
 
 **Quita:** al operador, que un reinicio pierda los mensajes agrupados.
 **Porque:** `burstBuffer` vive en memoria. Un reinicio en medio de una ráfaga la pierde entera, y una
@@ -603,6 +609,35 @@ ráfaga a medias es una de las formas en que salen dos respuestas.
 un reinicio en el medio.
 **Tamaño:** M. **Depende de:** `E06`. **Bandera:** no.
 **Vuelta atrás:** revertir el código; la tabla queda muerta.
+
+**Lo que quedó.** Tabla `PendingBurst` (migración `20260917233820_rafaga_persistente`, aditiva: tabla
+nueva y dos índices, nada existente se toca) con una fila por mensaje entrante;
+`src/conversation/pendingBursts.ts` tiene el encolado, el reclamo y el drenaje, y
+`src/jobs/pendingBursts.ts` mira el reloj cada segundo. La ventana de silencio y su tope no cambian
+de valor, solo de lugar. `src/whatsapp/burstBuffer.ts` y su prueba se borraron: no los usaba nadie
+más.
+
+**Cuatro decisiones que valen más que el código.**
+1. El negocio, el cliente y las credenciales **no** se guardan en la fila: se leen de la base al
+   contestar. Es la regla que dejó el despliegue de `E01`–`E05c` — un hecho que se escribe una vez y
+   se lee muchas es un hecho que va a mentir.
+2. El drenaje **arranca** los turnos y no los espera. Esperar uno por uno habría puesto a cada
+   cliente en fila detrás del turno más lento de otro negocio, que es justo lo que la versión con
+   timers no hacía.
+3. Una ráfaga reclamada por un proceso que murió se suelta a los 10 minutos (`STALE_REPLY_MINUTES`).
+   Al volver a tomarse, `runGenerateAndSend` la descarta por vieja y pasa la conversación a una
+   persona — que es exactamente lo que corresponde con un mensaje de hace diez minutos.
+4. Un turno que revienta borra igual su ráfaga. Reintentar después de un envío a medias es como se
+   le manda dos veces lo mismo a un cliente.
+
+**El apagado ordenado cambió de sentido.** Ya no fuerza la descarga (arrancar turnos justo antes de
+morir era como se quedaban a medias): ahora solo adelanta el `flushAt` de lo pendiente, para que al
+volver se drene de una en vez de terminar de esperar una ventana que empezó antes del reinicio.
+
+**Se probó** con 9 pruebas, entre ellas la que pedía la ficha — tres mensajes en dos segundos
+producen **una** sola generación, también con un reinicio en el medio — más el reclamo exclusivo
+entre dos procesos, el rescate de una ráfaga cuyo proceso murió con el reclamo puesto, y que dos
+conversaciones distintas se contestan en paralelo.
 
 ---
 
