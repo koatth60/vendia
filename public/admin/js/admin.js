@@ -43,10 +43,12 @@ function fitChatSplit() {
     return;
   }
   const top = split.getBoundingClientRect().top;
-  // Cero: la Bandeja llega hasta el borde de abajo de la ventana. Con 16px quedaba una franja muerta
-  // debajo del compositor, que en una laptop es alto de conversacion tirado.
-  const bottomMargin = 0;
-  const available = window.innerHeight - top - bottomMargin;
+  // El alto se le pone al split, pero lo que tiene que terminar justo en el borde de abajo es la
+  // TARJETA que lo envuelve, que mide un par de pixeles mas por su borde. Sin descontarlos, la tarjeta
+  // se pasa de la ventana y aparece una barra de scroll para dos pixeles.
+  const card = split.closest('.card');
+  const extra = card ? Math.ceil(card.getBoundingClientRect().height - split.getBoundingClientRect().height) : 0;
+  const available = window.innerHeight - top - extra;
   split.style.height = `${Math.max(480, available)}px`;
 }
 window.addEventListener('resize', () => {
@@ -289,7 +291,7 @@ async function loadWhatsappTemplatesInto(prefix, emptyLabel) {
       select.insertAdjacentHTML('beforeend', `<option value="${escapeHtml(savedValue)}">${escapeHtml(savedValue)} (no encontrada o no aprobada)</option>`);
     }
     select.value = savedValue || '';
-    hint.textContent = data.note || (templates.length === 0 ? 'No se encontraron plantillas aprobadas en tu cuenta de WhatsApp.' : 'Elegí una plantilla para ver exactamente qué dice.');
+    hint.textContent = data.note || (templates.length === 0 ? 'No se encontraron plantillas aprobadas en tu cuenta de WhatsApp.' : 'Elige una plantilla para ver exactamente qué dice.');
     onTemplateSelectChange(prefix);
   } catch (err) {
     hint.textContent = `No se pudo cargar la lista de plantillas: ${err.message}`;
@@ -639,7 +641,7 @@ async function loadProducts() {
     if (totalCount) totalCount.textContent = total;
 
     container.innerHTML = items.length === 0
-      ? `<div class="card empty-state">${q ? 'Ningún producto coincide con la búsqueda.' : 'Todavía no cargaste productos. Agregá el primero en el formulario de la izquierda.'}</div>`
+      ? `<div class="card empty-state">${q ? 'Ningún producto coincide con la búsqueda.' : 'Todavía no cargaste productos. Agrega el primero en el formulario de la izquierda.'}</div>`
       : `<div class="product-grid">${items.map(renderCard).join('')}</div>`;
 
     const totalPages = Math.max(1, Math.ceil(total / pageSize));
@@ -2532,12 +2534,12 @@ function onCloseSaleProductInput(input) {
   const product = closeSaleProductByExactName(input.value);
   input.dataset.productId = product ? product.id : '';
   renderCloseSaleVariantSelect(row, product);
-  closeSaleRowWarning(row, product && product.variants.length > 0 ? 'Elegí color/talla antes de confirmar.' : '');
+  closeSaleRowWarning(row, product && product.variants.length > 0 ? 'Elige color/talla antes de confirmar.' : '');
 }
 
 function onCloseSaleVariantChange(select) {
   const row = select.closest('.close-sale-item-row');
-  closeSaleRowWarning(row, select.value ? '' : 'Elegí color/talla antes de confirmar.');
+  closeSaleRowWarning(row, select.value ? '' : 'Elige color/talla antes de confirmar.');
 }
 
 async function loadCloseSaleCatalog() {
@@ -2566,7 +2568,7 @@ function addCloseSaleItemRowFromExtraction(item) {
   productInput.value = product ? product.name : (item.productName || '');
   productInput.dataset.productId = product ? product.id : '';
   renderCloseSaleVariantSelect(row, product);
-  closeSaleRowWarning(row, product && product.variants.length > 0 ? 'Elegí color/talla antes de confirmar.' : '');
+  closeSaleRowWarning(row, product && product.variants.length > 0 ? 'Elige color/talla antes de confirmar.' : '');
 }
 
 // EL PRECIO ACORDADO (ONIX-PLAN-CATALOGO-Y-MEDIOS.md, seccion 12) - el camino sin modelo.
@@ -2617,7 +2619,7 @@ async function loadAgreedPrices() {
     const data = await res.json();
     agreedPriceRowsCache = data.items || [];
     if (agreedPriceRowsCache.length === 0) {
-      status.textContent = 'Esta conversación todavía no tiene productos en la venta. Onix los anota cuando el cliente elige qué quiere, o podés crearla a mano con "Crear venta".';
+      status.textContent = 'Esta conversación todavía no tiene productos en la venta. Onix los anota cuando el cliente elige qué quiere, o puedes crearla a mano con "Crear venta".';
       return;
     }
     status.textContent = (data.needsAttribute || []).length > 0
@@ -2741,7 +2743,7 @@ async function confirmCloseSale() {
     // bloquea acá mismo, antes de mandar la petición, con el mismo criterio que needsAttribute del
     // servidor (que sigue siendo quien realmente lo hace cumplir).
     if (variantSelect.style.display !== 'none' && !variantSelect.value) {
-      closeSaleRowWarning(row, 'Elegí color/talla antes de confirmar.');
+      closeSaleRowWarning(row, 'Elige color/talla antes de confirmar.');
       missingVariant = true;
       continue;
     }
@@ -2830,7 +2832,7 @@ function renderHandoffState(humanControl, reason, since) {
       ? 'Escribe como el negocio…'
       // Corto a proposito: con el clip y el microfono adentro del campo, el texto largo envolvia a dos
       // renglones y el compositor arrancaba con el doble de alto.
-      : 'Escribí para tomar el control…';
+      : 'Escribe para tomar el control…';
   }
   const hint = document.getElementById('bot-auto-hint');
   if (hint) hint.hidden = humanControl;
@@ -2888,7 +2890,7 @@ async function queueMessageForCustomer() {
   const input = document.getElementById('modal-queue-input');
   const text = (input.value || '').trim();
   if (!text) {
-    setStatus('Escribí el mensaje que querés dejar listo', true);
+    setStatus('Escribe el mensaje que quieres dejar listo', true);
     return;
   }
   const body = new FormData();
@@ -2963,7 +2965,7 @@ async function sendTemplateToCustomer() {
   const select = document.getElementById('modal-template-select');
   const [templateName, language] = (select.value || '').split('|');
   if (!templateName || !language) {
-    setStatus('Elegí una plantilla para enviar', true);
+    setStatus('Elige una plantilla para enviar', true);
     return;
   }
   select.disabled = true;
@@ -3767,14 +3769,14 @@ async function startVoiceRecording() {
     return;
   }
   if (typeof MediaRecorder === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
-    setStatus('Este navegador no puede grabar audio. Podés adjuntar un archivo de audio con el clip.', true);
+    setStatus('Este navegador no puede grabar audio. Puedes adjuntar un archivo de audio con el clip.', true);
     return;
   }
   try {
     voiceStream = await navigator.mediaDevices.getUserMedia({ audio: true });
   } catch (err) {
     // Permiso denegado es lo mas comun, y el mensaje del navegador no dice donde se arregla.
-    setStatus(`No se pudo usar el micrófono: ${err.message}. Revisá el permiso del micrófono en el navegador.`, true);
+    setStatus(`No se pudo usar el micrófono: ${err.message}. Revisa el permiso del micrófono en el navegador.`, true);
     return;
   }
   const mimeType = pickVoiceMimeType();
@@ -4761,8 +4763,8 @@ function configHealthChecklistHtml(health) {
     {
       ok: health.hasApprovedOwnerAlertTemplate === null ? null : health.hasApprovedOwnerAlertTemplate,
       label: 'Plantilla "onix_owner_alert" aprobada por WhatsApp',
-      missing: 'Sin esta plantilla aprobada, una escalación nocturna (fuera de la ventana de 24h del dueño) puede no llegarle nunca - revisá Agente > Canales > Plantillas.',
-      unknown: 'No se pudo verificar todavía (conectá WhatsApp Business primero en Agente > Canales).',
+      missing: 'Sin esta plantilla aprobada, una escalación nocturna (fuera de la ventana de 24h del dueño) puede no llegarle nunca - revisa Agente > Canales > Plantillas.',
+      unknown: 'No se pudo verificar todavía (conecta WhatsApp Business primero en Agente > Canales).',
     },
   ];
   const ICON = {
@@ -5226,8 +5228,8 @@ function initRealtime() {
   socket.on('delivery:failed', (failure) => {
     setStatus(
       failure && failure.critical
-        ? 'Un mensaje al dueño no se pudo entregar - revisá Agente > Salud'
-        : 'Un mensaje a un cliente no se pudo entregar - revisá Agente > Salud',
+        ? 'Un mensaje al dueño no se pudo entregar - revisa Agente > Salud'
+        : 'Un mensaje a un cliente no se pudo entregar - revisa Agente > Salud',
       true
     );
     if (document.querySelector('.tab-btn[data-tab="health"]')?.classList.contains('active')) loadHealth();
@@ -5615,7 +5617,7 @@ async function addCrmNote() {
   if (!currentCrmProfile) return;
   const body = document.getElementById('crm-note-body').value.trim();
   if (!body) {
-    setStatus('Escribí algo en la nota', true);
+    setStatus('Escribe algo en la nota', true);
     return;
   }
   try {
@@ -5673,7 +5675,7 @@ function saleGateBlockCardHtml(health) {
   }).join('');
   return `
     <div class="section-title">El bot todavía no puede registrar ventas</div>
-    <div style="font-size:12.5px; color:var(--muted); margin:-4px 0 10px;">Sin esto, no puede mostrarle un total al cliente ni registrar un pago - mientras tanto deja el pedido anotado y te avisa para que lo confirmes vos.</div>
+    <div style="font-size:12.5px; color:var(--muted); margin:-4px 0 10px;">Sin esto, no puede mostrarle un total al cliente ni registrar un pago - mientras tanto deja el pedido anotado y te avisa para que lo confirmes tú.</div>
     ${rows}
   `;
 }
@@ -5955,7 +5957,7 @@ async function loadHealth() {
           El cliente ya pagó y el pedido <strong>no se crea</strong> hasta que respondas si el pago te
           llegó. Te lo volvemos a preguntar por WhatsApp, cada vez más espaciado (no queremos llenarte el
           teléfono), hasta que contestes; el número de la izquierda es cuántas veces te lo mandamos.
-          Contestá por WhatsApp citando ese mensaje: no se puede cerrar desde acá, sos la única que puede
+          Contestá por WhatsApp citando ese mensaje: no se puede cerrar desde acá, eres la única que puede
           ver si la plata entró.
         </div>
         ${confirmationRows}
@@ -5995,7 +5997,7 @@ async function loadHealth() {
       <div class="card">
         <div style="font-size:12.5px; color:var(--muted); margin-bottom:6px;">
           El bot no supo qué contestar y te escaló esto. Si ya lo resolviste por fuera (por WhatsApp
-          citando el mensaje, por teléfono, en persona), marcalo como resuelto para sacarlo de la lista.
+          citando el mensaje, por teléfono, en persona), márcalo como resuelto para sacarlo de la lista.
         </div>
         ${pendingRows}
       </div>
@@ -6008,7 +6010,7 @@ async function loadHealth() {
         ${failureRows}
       </div>
 
-      <div class="section-title">Conversación del bot con vos</div>
+      <div class="section-title">Conversación del bot contigo</div>
       <div class="card chat-thread" style="max-height:420px; overflow-y:auto;">${logRows}</div>
     `;
   } catch (err) {
@@ -6085,7 +6087,7 @@ async function loadShippingRates() {
     shippingRatesCache = await res.json();
 
     select.innerHTML = shippingRatesCache.length === 0
-      ? '<option value="">Primero agregá una tarifa</option>'
+      ? '<option value="">Primero agrega una tarifa</option>'
       : shippingRatesCache.map((r) => `<option value="${escapeHtml(r.label)}">${escapeHtml(r.label)} (${escapeHtml(formatMoney(r.cost, 'COP'))})</option>`).join('');
 
     container.innerHTML = shippingRatesCache.length === 0
@@ -6220,7 +6222,7 @@ async function addShippingCityRule() {
   const city = document.getElementById('ship-city-name').value.trim();
   const label = document.getElementById('ship-city-rate').value;
   if (!city || !label) {
-    setStatus('Completá la ciudad y elegí una tarifa', true);
+    setStatus('Completá la ciudad y elige una tarifa', true);
     return;
   }
   try {
@@ -6262,7 +6264,7 @@ async function loadTagManager() {
     const res = await apiFetch('/admin/api/crm/tags');
     const tags = await res.json();
     container.innerHTML = tags.length === 0
-      ? '<div style="font-size:12.5px; color:var(--muted);">Sin etiquetas propias todavía - podés escribir cualquier etiqueta en la ficha del cliente, esto solo le da color y autocompletado.</div>'
+      ? '<div style="font-size:12.5px; color:var(--muted);">Sin etiquetas propias todavía - puedes escribir cualquier etiqueta en la ficha del cliente, esto solo le da color y autocompletado.</div>'
       : tags.map((t) => `
           <span class="channel-pill" style="background:${escapeHtml(t.color)}22; color:${escapeHtml(t.color)};">
             ${escapeHtml(t.label)}
@@ -6512,20 +6514,20 @@ window.addEventListener('message', (event) => {
 function whyNoSignupAssets() {
   const ev = waLastSignupEvent;
   if (!ev) {
-    return 'Facebook no mandó ningún dato del registro. Si cerraste la ventana antes de terminar, volvé a empezar y completá todos los pasos.';
+    return 'Facebook no mandó ningún dato del registro. Si cerraste la ventana antes de terminar, vuelve a empezar y completá todos los pasos.';
   }
   if (ev.event === 'CANCEL') {
     const step = ev.data && ev.data.current_step ? ` Quedó en el paso: ${ev.data.current_step}.` : '';
-    return `Cancelaste el registro antes de terminar.${step} Volvé a darle y completá hasta verificar el número por SMS.`;
+    return `Cancelaste el registro antes de terminar.${step} Vuelve a darle y completá hasta verificar el número por SMS.`;
   }
   if (ev.event === 'FINISH_ONLY_WABA') {
-    return 'Se creó la cuenta de WhatsApp Business pero no llegaste a agregar y verificar un número. Volvé a darle y completá ese paso.';
+    return 'Se creó la cuenta de WhatsApp Business pero no llegaste a agregar y verificar un número. Vuelve a darle y completá ese paso.';
   }
   if (ev.event === 'ERROR') {
     const detail = ev.data && ev.data.error_message ? ` Facebook dijo: ${ev.data.error_message}` : '';
     return `Facebook reportó un error durante el registro.${detail}`;
   }
-  return `Facebook terminó con "${ev.event}" y sin número. Volvé a intentar completando hasta la verificación por SMS.`;
+  return `Facebook terminó con "${ev.event}" y sin número. Vuelve a intentar completando hasta la verificación por SMS.`;
 }
 
 async function loadWhatsappConnection() {
@@ -6565,7 +6567,7 @@ function renderWhatsappConnection(conn) {
     if (conn.connectionBroken) {
       stateEl.innerHTML = `
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--onix-danger)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5v5.5"/><circle cx="12" cy="16.2" r="0.15" fill="var(--onix-danger)"/></svg>
-        <span>Conexión caída — <strong>${label}</strong>. El token de WhatsApp venció o fue revocado, volvé a conectar desde acá.</span>
+        <span>Conexión caída — <strong>${label}</strong>. El token de WhatsApp venció o fue revocado, vuelve a conectar desde acá.</span>
         ${connectButton('Reconectar WhatsApp')}`;
       return;
     }
@@ -6579,7 +6581,7 @@ function renderWhatsappConnection(conn) {
     if (daysLeft !== null && daysLeft <= 7) {
       stateEl.innerHTML = `
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--onix-warn)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5v5.5"/><circle cx="12" cy="16.2" r="0.15" fill="var(--onix-warn)"/></svg>
-        <span>Conectado — <strong>${label}</strong>. El token expira en ${daysLeft} día${daysLeft === 1 ? '' : 's'}, volvé a conectar antes de esa fecha para que no se corte.</span>
+        <span>Conectado — <strong>${label}</strong>. El token expira en ${daysLeft} día${daysLeft === 1 ? '' : 's'}, vuelve a conectar antes de esa fecha para que no se corte.</span>
         ${connectButton('Reconectar WhatsApp')}`;
       return;
     }
@@ -6591,7 +6593,7 @@ function renderWhatsappConnection(conn) {
   }
 
   if (!waConnectConfig || !waConnectConfig.ready) {
-    stateEl.innerHTML = '<span class="hint">La conexión automática todavía no está configurada en el servidor. Avisale al equipo de Zaqi.</span>';
+    stateEl.innerHTML = '<span class="hint">La conexión automática todavía no está configurada en el servidor. Avísale al equipo de Zaqi.</span>';
     return;
   }
 

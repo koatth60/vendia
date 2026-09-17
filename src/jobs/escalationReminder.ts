@@ -33,7 +33,7 @@ async function canReachCustomer(conversationId: string): Promise<boolean> {
 // dueno es el unico que puede desbloquearlo (mandando una plantilla desde el panel), asi que tiene que
 // decirlo el mismo recordatorio. Una sola linea: la plantilla onix_owner_alert rechaza saltos de linea.
 const WINDOW_CLOSED_NOTE =
-  " OJO: pasaron mas de 24h desde el ultimo mensaje de este cliente, WhatsApp ya no deja mandarle texto libre - entra al panel y mandale una plantilla aprobada para reabrir el chat.";
+  " OJO: pasaron mas de 24h desde el ultimo mensaje de este cliente, WhatsApp ya no deja mandarle texto libre - entra al panel y mándale una plantilla aprobada para reabrir el chat.";
 
 const STAGE_2_THRESHOLD_MS = 24 * 60 * 60 * 1000;
 
@@ -59,7 +59,7 @@ function describeStalledOrigin(conversation: { intent: string | null; intentExpl
     // caso real que motivo esto. Sin esta distincion el dueno no tiene forma de saber, desde el aviso,
     // si vale la pena entrar corriendo o si primero conviene revisar el chat.
     const inferredNote = conversation.intentExplicit === false ? " (el bot lo dedujo del contexto, no te confies del todo)" : "";
-    return `reporto ${INTENT_LABELS[conversation.intent]}${inferredNote} y el bot dejo de responderle, quedo esperando por vos`;
+    return `reporto ${INTENT_LABELS[conversation.intent]}${inferredNote} y el bot dejo de responderle, quedo esperando por ti`;
   }
   return "escribio y sigue esperando respuesta tuya";
 }

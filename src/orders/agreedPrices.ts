@@ -298,7 +298,7 @@ export function ownerPriceFormatHint(slots: readonly PriceSlot[], locale: string
   return [
     `Respondeme citando (mantén presionado y "Responder") este mismo mensaje con ${cuantos}, solo los números y en pesos completos.`,
     `Ejemplo con los precios de ahora: ${ejemplo}`,
-    `Si no querés hacer precio especial, respondé "no".`,
+    `Si no quieres hacer precio especial, responde "no".`,
   ].join("\n");
 }
 

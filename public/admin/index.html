@@ -231,7 +231,7 @@
             <input type="checkbox" id="bot-required-effects" />
             <div>
               <div class="toggle-title">Verificar que el bot haya hecho lo que dice que hizo</div>
-              <div class="toggle-desc">Antes de enviar cada respuesta, revisa contra la base que el pedido haya quedado registrado y que vos te hayas enterado. Si falta, lo reintenta, lo registra solo, o te pasa la conversación.</div>
+              <div class="toggle-desc">Antes de enviar cada respuesta, revisa contra la base que el pedido haya quedado registrado y que tú te hayas enterado. Si falta, lo reintenta, lo registra solo, o te pasa la conversación.</div>
             </div>
           </label>
 
@@ -376,7 +376,7 @@
         </div>
         <label>Zona horaria</label>
         <input id="business-timezone" placeholder="Ej: America/Bogota" />
-        <div class="hint">Al cambiar el país, la moneda y la zona horaria se ajustan solas; podés dejarlas distintas si tu negocio cobra en otra moneda.</div>
+        <div class="hint">Al cambiar el país, la moneda y la zona horaria se ajustan solas; puedes dejarlas distintas si tu negocio cobra en otra moneda.</div>
 
         <label class="toggle-row">
           <input type="checkbox" id="business-requires-id-document" onchange="toggleIdExemptZones()" />
@@ -387,14 +387,14 @@
         </label>
         <label>Zonas donde NO se pide el documento</label>
         <input id="business-id-exempt-zones" placeholder="Ej: Bogota, Soacha" />
-        <div class="hint">Separadas por coma, con el mismo nombre que usás en tus tarifas de envío. En esas zonas el bot no le pide el documento al cliente; en el resto sí.</div>
+        <div class="hint">Separadas por coma, con el mismo nombre que usas en tus tarifas de envío. En esas zonas el bot no le pide el documento al cliente; en el resto sí.</div>
       </div>
 
       <div class="settings-group">
         <div class="settings-group-title">Horario de atención</div>
-        <p class="settings-desc">El bot contesta siempre, a cualquier hora. Esto es el horario real del negocio para atender y despachar, y es lo que le responde a un cliente que pregunta a qué hora abren. Dejá un día vacío si ese día no atendés.</p>
+        <p class="settings-desc">El bot contesta siempre, a cualquier hora. Esto es el horario real del negocio para atender y despachar, y es lo que le responde a un cliente que pregunta a qué hora abren. Deja un día vacío si ese día no atiendes.</p>
         <div id="business-hours-rows"></div>
-        <div class="hint">Formato de 24 horas (09:00, 18:30). Si no cargás ninguno, el bot simplemente no habla de horarios.</div>
+        <div class="hint">Formato de 24 horas (09:00, 18:30). Si no cargas ninguno, el bot simplemente no habla de horarios.</div>
       </div>
 
       <div class="settings-group settings-group-last">
@@ -413,7 +413,7 @@
         <div class="hint">Pasado el recordatorio, el bot te vuelve a escribir. Pasado el vencimiento, la conversación pasa a control manual para que la revises directamente.</div>
         <label style="margin-top:10px;">Vencimiento de una queja/PQR/pedido de agente sin atender (horas)</label>
         <input id="business-intent-escalation-timeout-hours" type="number" min="1" placeholder="48" />
-        <div class="hint">Si reportás una PQR, devolución, pedido no recibido o pedido de agente y no la atendés en este tiempo, el bot recupera el control solo en vez de quedar mudo para siempre.</div>
+        <div class="hint">Si reportas una PQR, devolución, pedido no recibido o pedido de agente y no la atiendes en este tiempo, el bot recupera el control solo en vez de quedar mudo para siempre.</div>
       </div>
 
       <div class="section-title owner-only">Zona de peligro</div>
@@ -512,7 +512,7 @@
       <div class="panel-header">
         <div>
           <div class="panel-title">Salud del bot</div>
-          <div class="panel-subtitle">Incidentes, mensajes que no llegaron y la conversación entre el bot y vos.</div>
+          <div class="panel-subtitle">Incidentes, mensajes que no llegaron y la conversación entre el bot y tú.</div>
         </div>
       </div>
       <div id="health-container"></div>
@@ -576,7 +576,7 @@
         <div class="hint">¿Este producto viene en varios colores o tallas, cada uno con su propio stock? Agregalos abajo antes de guardar - las fotos propias de cada variante sí se suben después, ya con el producto creado.</div>
         <div class="variant-section" style="border-top:none; padding-top:0; margin-top:10px;">
           <div class="variant-section-title">Colores/tallas (opcional)</div>
-          <div class="hint" style="margin-top:0; margin-bottom:6px;">Si tenés una foto propia de este color, adjuntala acá - queda ligada a esa variante desde el momento en que se crea. Una foto donde se ven varios colores juntos va aparte, subida a la tarjeta después de guardar (sirve como respaldo para cualquier color sin foto propia).</div>
+          <div class="hint" style="margin-top:0; margin-bottom:6px;">Si tienes una foto propia de este color, adjúntala acá - queda ligada a esa variante desde el momento en que se crea. Una foto donde se ven varios colores juntos va aparte, subida a la tarjeta después de guardar (sirve como respaldo para cualquier color sin foto propia).</div>
           <div id="p-draft-variant-list" class="variant-list"></div>
           <div class="variant-add-row">
             <span id="p-draft-variant-swatch-wrap"><span class="variant-swatch is-unknown"></span></span>
@@ -737,7 +737,7 @@
       </div>
       <div class="card">
         <div class="settings-group-title" style="margin-top:0;">Seguimiento post-venta</div>
-        <p class="settings-desc">Le manda automáticamente una plantilla de WhatsApp a los clientes X horas después de registrar la venta (ej: "¿cómo te fue con tu compra?"). Requiere que la plantilla ya esté <strong>aprobada por Meta</strong> (categoría Utility, se aprueba en minutos/días, no necesita Tech Provider). Dejá el nombre vacío para desactivarlo.</p>
+        <p class="settings-desc">Le manda automáticamente una plantilla de WhatsApp a los clientes X horas después de registrar la venta (ej: "¿cómo te fue con tu compra?"). Requiere que la plantilla ya esté <strong>aprobada por Meta</strong> (categoría Utility, se aprueba en minutos/días, no necesita Tech Provider). Deja el nombre vacío para desactivarlo.</p>
         <div class="grid-2">
           <div>
             <label>Plantilla aprobada</label>
@@ -762,7 +762,7 @@
 
       <div class="card">
         <div class="settings-group-title" style="margin-top:0;">Recuperación de carrito abandonado</div>
-        <p class="settings-desc">Si un cliente arma un pedido y deja de responder, esto pasa su conversación a "Abandonado" y le manda una plantilla de WhatsApp para retomarlo (ej: "¿seguís interesado? tu pedido sigue guardado"). Necesita una plantilla <strong>aprobada por Meta</strong>, igual que el seguimiento post-venta. Dejá el nombre vacío para desactivar el envío (la conversación igual pasa a "Abandonado" para que el embudo la refleje).</p>
+        <p class="settings-desc">Si un cliente arma un pedido y deja de responder, esto pasa su conversación a "Abandonado" y le manda una plantilla de WhatsApp para retomarlo (ej: "¿sigues interesado? tu pedido sigue guardado"). Necesita una plantilla <strong>aprobada por Meta</strong>, igual que el seguimiento post-venta. Deja el nombre vacío para desactivar el envío (la conversación igual pasa a "Abandonado" para que el embudo la refleje).</p>
         <div class="grid-2">
           <div>
             <label>Plantilla aprobada</label>
@@ -932,7 +932,7 @@
                 <div id="agreed-price-status" style="font-size:12px; margin-bottom:10px;"></div>
                 <div id="agreed-price-rows"></div>
                 <div style="font-size:12px; color:var(--onix-muted); margin-top:10px; line-height:1.45;">
-                  El precio que guardes acá es el que Onix le cobra a este cliente: reemplaza al del catálogo en el resumen y en el pedido. Dejá el campo vacío para volver al precio de catálogo.
+                  El precio que guardes acá es el que Onix le cobra a este cliente: reemplaza al del catálogo en el resumen y en el pedido. Deja el campo vacío para volver al precio de catálogo.
                 </div>
               </div>
               <div id="close-sale-form" style="display:none; max-height:70vh; overflow-y:auto; padding:14px 16px; border-bottom:1px solid var(--border); background:var(--bg);">
@@ -1000,7 +1000,7 @@
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 12 20 4.5 15.5 20l-4-6.5z"/></svg>
                   </button>
                 </div>
-                <div style="font-size:12.5px; color:var(--onix-muted); line-height:1.4;">¿Querés dejar escrito lo que le vas a decir? Se le manda solo apenas responda.</div>
+                <div style="font-size:12.5px; color:var(--onix-muted); line-height:1.4;">¿Quieres dejar escrito lo que le vas a decir? Se le manda solo apenas responda.</div>
                 <div style="display:flex; gap:8px;">
                   <input id="modal-queue-input" type="text" placeholder="Mensaje para cuando vuelva a escribir…" style="flex:1;" />
                   <button class="composer-send-btn" type="button" title="Dejar en cola" aria-label="Dejar en cola" onclick="queueMessageForCustomer()">
@@ -1022,7 +1022,7 @@
                     <!-- textarea y no input: un mensaje de venta no siempre entra en un renglon. Crece
                          solo hasta 6 lineas y despues scrollea. Enter manda, Shift+Enter hace salto de
                          linea, como en WhatsApp Web. -->
-                    <textarea id="modal-composer-input" rows="1" placeholder="Escribí para tomar el control…" oninput="autoGrowComposer(this); queueDraftSave()" onkeydown="onComposerKeydown(event)"></textarea>
+                    <textarea id="modal-composer-input" rows="1" placeholder="Escribe para tomar el control…" oninput="autoGrowComposer(this); queueDraftSave()" onkeydown="onComposerKeydown(event)"></textarea>
                     <button class="composer-icon-btn composer-attach" type="button" id="composer-mic-btn" title="Grabar nota de voz" aria-label="Grabar nota de voz" onclick="startVoiceRecording()">
                       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"></rect><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0"></path><path d="M12 18v3"></path></svg>
                     </button>

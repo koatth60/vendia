@@ -11,7 +11,7 @@ const authLimiter = rateLimit({
   limit: 10,
   standardHeaders: true,
   legacyHeaders: false,
-  message: { error: "Demasiados intentos. Probá de nuevo en unos minutos." },
+  message: { error: "Demasiados intentos. Prueba de nuevo en unos minutos." },
 });
 
 authRouter.post("/signup", authLimiter, async (req, res) => {

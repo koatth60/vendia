@@ -354,8 +354,12 @@
     padding: 18px 28px 40px;
   }
   /* La Bandeja llega hasta el borde de abajo: su alto lo calcula fitChatSplit y
-     cualquier padding aca es un hueco muerto debajo del compositor. */
-  main.wide { padding-bottom: 0; }
+     cualquier padding aca es un hueco muerto debajo del compositor.
+     overflow:hidden - la Bandeja no scrollea NUNCA, su alto es exacto. Con auto,
+     un solo pixel de diferencia entre lo calculado y lo pintado (el borde de la
+     tarjeta, un redondeo del navegador) alcanzaba para que apareciera una barra
+     de scroll al costado de una pantalla que no tiene nada que scrollear. */
+  main.wide { padding-bottom: 0; overflow: hidden; }
 
   .tab-panel { display: none; animation: fadeIn .18s ease; }
   .tab-panel .card + .card { margin-top: 18px; }
@@ -1310,9 +1314,23 @@
     overflow-y: auto; overflow-x: hidden; background: var(--onix-surface-2);
     scrollbar-width: thin; scrollbar-color: var(--muted-soft) transparent;
   }
-  .chat-thread::-webkit-scrollbar { width: 6px; }
-  .chat-thread::-webkit-scrollbar-thumb { background: var(--muted-soft); border-radius: 999px; }
-  .chat-thread::-webkit-scrollbar-track { background: transparent; }
+  /* Las barras de scroll de todo el panel. Las del sistema traen flechas, fondo
+     gris y esquinas rectas: son de otro programa, no de este. Estas son una
+     pastilla flotante que sale de los tokens, asi que cambian con el tema como
+     todo lo demas.
+     El truco del borde transparente + background-clip:content-box es lo que deja
+     aire alrededor de la pastilla; sin eso el pulgar toca los bordes y se ve como
+     una barra pegada, no como algo que flota sobre el contenido. */
+  * { scrollbar-width: thin; scrollbar-color: var(--onix-border-strong) transparent; }
+  ::-webkit-scrollbar { width: 11px; height: 11px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb {
+    background: var(--onix-border-strong);
+    border: 3px solid transparent; background-clip: content-box;
+    border-radius: 999px;
+  }
+  ::-webkit-scrollbar-thumb:hover { background: var(--onix-faint); background-clip: content-box; }
+  ::-webkit-scrollbar-corner { background: transparent; }
 
   .bubble {
     position: relative; width: fit-content; max-width: 62%; padding: 6px 8px 5px; border-radius: 8px;

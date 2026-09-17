@@ -293,7 +293,7 @@ export async function handleOwnerReply(
         // Fila sin ranuras (solo posible si alguien la escribio a mano): no hay formulario que llenar, y
         // adivinar a que se referia seria justo lo que esta fase vino a borrar. Se cierra y se avisa.
         await clearPendingOwnerQuestion(pendingQuestion.questionId);
-        await replyToOwner(businessId, credentials, ownerPhone, "Esa consulta de precio ya no tiene los productos asociados - volvé a abrirla desde el panel.");
+        await replyToOwner(businessId, credentials, ownerPhone, "Esa consulta de precio ya no tiene los productos asociados - vuelve a abrirla desde el panel.");
         return;
       }
 
@@ -1115,7 +1115,7 @@ whatsappRouter.post("/webhook", async (req, res) => {
 
         if (capStatus.justCrossed && business.contactPhone) {
           const greeting = business.contactName ? `Hola ${business.contactName}` : "Hola";
-          const capAlertText = `${greeting}, tu negocio alcanzó el límite de ${capStatus.messageCap} mensajes de tu plan ${capStatus.planTier} este mes. El bot dejó de responder automáticamente hasta el próximo mes - escribime si querés subir de plan.`;
+          const capAlertText = `${greeting}, tu negocio alcanzó el límite de ${capStatus.messageCap} mensajes de tu plan ${capStatus.planTier} este mes. El bot dejó de responder automáticamente hasta el próximo mes - escríbeme si quieres subir de plan.`;
           await alertOwnerTracked(business.id, credentials, business.contactPhone!, capAlertText);
         }
         return;

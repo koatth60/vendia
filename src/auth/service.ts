@@ -57,7 +57,7 @@ export async function requestPasswordReset(email: string): Promise<void> {
     phoneNumberId: business.whatsappPhoneNumberId,
     accessToken: business.whatsappAccessToken,
   };
-  const resetText = `Tu código para restablecer tu contraseña es: ${code}. Válido por 10 minutos, ignorá este mensaje si no lo pediste vos.`;
+  const resetText = `Tu código para restablecer tu contraseña es: ${code}. Válido por 10 minutos, ignora este mensaje si no lo pediste tú.`;
   const result = await sendAlertToOwner(business.id, credentials, business.contactPhone, resetText);
   // Fase 8, punto 6: lo que se registra NO lleva el codigo. OwnerMessageLog se lee desde
   // /admin/api/owner-log (el panel del propio negocio, donde entra tambien un empleado) y desde la

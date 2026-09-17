@@ -64,5 +64,5 @@ export const RISK_WARNINGS: Record<Exclude<CandidateRisk, null>, string> = {
   dinero:
     "Compromete plata. Revisa si es una politica real del negocio o una concesion de esa venta en particular - si la apruebas, el bot se la va a ofrecer a todos.",
   datos_personales:
-    "La respuesta trae un numero largo (cedula, celular o cuenta). Sacalo antes de aprobar: esta FAQ se le lee a cualquier cliente.",
+    "La respuesta trae un numero largo (cedula, celular o cuenta). Quítalo antes de aprobar: esta FAQ se le lee a cualquier cliente.",
 };
