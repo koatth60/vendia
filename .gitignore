@@ -9,3 +9,4 @@ uploads/
 Thumbs.db
 *.pem
 .claude/settings.local.json
+.deploy-previous

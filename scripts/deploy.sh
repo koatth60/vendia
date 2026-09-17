@@ -1,84 +1,47 @@
 #!/usr/bin/env bash
-# Despliegue del droplet, en un solo comando:
+# Despliegue de Onix. Corre EN EL SERVIDOR, desde /opt/vendia.
 #
-#   bash /opt/vendia/scripts/deploy.sh [rama]
+# Lo unico que agrega sobre "git pull && pm2 restart" es lo que faltaba el 2026-09-17: dejar anotado
+# desde donde se vino, para que volver atras sea un comando y no un ejercicio de memoria a las 2 AM.
 #
-# Existe porque la red de la oficina bloquea el puerto 22 hacia el droplet, asi
-# que el deploy no se puede hacer por SSH desde afuera: se corre desde la
-# consola web de DigitalOcean, que entra por el backend de DO. El servidor si
-# alcanza a GitHub (llave de despliegue en /root/.ssh/github_deploy), asi que
-# el codigo baja por git en vez de subirse por SSH.
-#
-# Solo corre los pasos caros cuando de verdad hicieron falta: reinstala
-# dependencias si cambio package-lock.json, regenera Prisma si cambio el
-# esquema y aplica migraciones si aparecieron nuevas. Un cambio de CSS no
-# reinstala node_modules.
+#   ssh vendia "cd /opt/vendia && ./scripts/deploy.sh [rama]"
 set -euo pipefail
 
-BRANCH="${1:-redesign/completo}"
-APP_DIR="/opt/vendia"
-PM2_NAME="vendia"
+RAMA="${1:-redesign/completo}"
+ANTERIOR_FILE=".deploy-previous"
 
-cd "$APP_DIR"
+cd "$(dirname "$0")/.."
 
-echo "==> Bajando $BRANCH"
-BEFORE="$(git rev-parse HEAD)"
-git fetch origin "$BRANCH"
-git checkout -f -B "$BRANCH" "origin/$BRANCH"
-AFTER="$(git rev-parse HEAD)"
+ANTERIOR="$(git rev-parse HEAD)"
+echo "==> Version actual: $ANTERIOR"
 
-if [ "$BEFORE" = "$AFTER" ]; then
-  echo "    Ya estaba en $AFTER - no hay nada nuevo."
-else
-  echo "    $BEFORE -> $AFTER"
+git fetch origin "$RAMA"
+git pull --ff-only origin "$RAMA"
+
+NUEVA="$(git rev-parse HEAD)"
+if [ "$ANTERIOR" = "$NUEVA" ]; then
+  echo "==> Ya estaba en $NUEVA, no hay nada que desplegar"
+  exit 0
 fi
 
-changed() { git diff --name-only "$BEFORE" "$AFTER" | grep -q "$1"; }
+# Se escribe DESPUES del pull y antes de tocar nada que corra: si el pull falla, el archivo sigue
+# apuntando al despliegue anterior bueno, que es lo correcto.
+echo "$ANTERIOR" > "$ANTERIOR_FILE"
 
-if [ "$BEFORE" != "$AFTER" ] && changed '^package-lock\.json$'; then
-  echo "==> Cambiaron las dependencias: npm ci"
-  npm ci
-  echo "==> npm ci borro node_modules, hay que regenerar Prisma"
-  npx prisma generate
-elif [ "$BEFORE" != "$AFTER" ] && changed '^prisma/schema\.prisma$'; then
-  echo "==> Cambio el esquema: prisma generate"
-  npx prisma generate
-fi
+echo "==> Migraciones"
+npx prisma migrate deploy
+npx prisma generate >/dev/null
 
-# El cliente de Prisma vive en node_modules; si por lo que sea no esta, el
-# proceso arranca y se cae en bucle con "Cannot find module '.prisma/client'".
-if [ ! -d node_modules/.prisma/client ]; then
-  echo "==> Falta el cliente de Prisma: prisma generate"
-  npx prisma generate
-fi
-
-if [ "$BEFORE" != "$AFTER" ] && changed '^prisma/migrations/'; then
-  echo "==> Hay migraciones nuevas: prisma migrate deploy"
-  npx prisma migrate deploy
-fi
-
-echo "==> Compilando"
-npm run build
-
-echo "==> Reiniciando $PM2_NAME"
-PID_BEFORE="$(pm2 jlist | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const p=JSON.parse(s).find(x=>x.name==='$PM2_NAME');console.log(p?p.pid:'')})")"
-pm2 restart "$PM2_NAME" --update-env
-
-# Un "online" inmediato no dice nada: si arranca y se cae, pm2 lo relanza y
-# sigue diciendo online con un pid distinto cada vez. Por eso se mira dos veces
-# separadas y se compara el pid.
+echo "==> Reiniciando"
+pm2 restart vendia --update-env >/dev/null
 sleep 6
-PID_1="$(pm2 jlist | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const p=JSON.parse(s).find(x=>x.name==='$PM2_NAME');console.log(p?p.pid:'')})")"
-sleep 6
-PID_2="$(pm2 jlist | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const p=JSON.parse(s).find(x=>x.name==='$PM2_NAME');console.log(p?p.pid:'')})")"
+systemctl reload nginx
 
-echo
-if [ -n "$PID_1" ] && [ "$PID_1" = "$PID_2" ]; then
-  echo "OK - $PM2_NAME estable en el pid $PID_1 (antes: ${PID_BEFORE:-ninguno})"
-  echo "     commit desplegado: $(git log --oneline -1)"
+# Verificacion real, no un "exit 0" optimista: si el proceso no levanto, el despliegue fallo y hay que
+# enterarse ahora, no cuando escriba un cliente.
+if pm2 logs vendia --lines 20 --nostream --no-color 2>&1 | grep -q "Server listening"; then
+  echo "==> OK: $NUEVA arriba (anterior: $ANTERIOR)"
 else
-  echo "ATENCION - el pid cambio entre las dos lecturas ($PID_1 -> $PID_2)."
-  echo "           Eso es un bucle de reinicio. Ultimos errores:"
-  pm2 logs "$PM2_NAME" --lines 25 --nostream --err
+  echo "==> FALLO: el proceso no reporto 'Server listening'. Volve con ./scripts/rollback.sh" >&2
   exit 1
 fi

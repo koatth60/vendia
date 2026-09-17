@@ -1,8 +1,10 @@
 name: Tests
 
+# En TODAS las ramas, no solo master. El trabajo real vive en ramas de feature que se empujan directo,
+# sin pull request: con el filtro de rama, el workflow no corria en ninguno de los 13 despliegues del
+# 2026-09-17 y las pruebas pasaron solo porque alguien se acordo de correrlas a mano.
 on:
   push:
-    branches: [master]
   pull_request:
   workflow_dispatch: {}
 
