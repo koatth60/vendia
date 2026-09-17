@@ -2,7 +2,7 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { prisma } from "../db/client";
-import { requiresPaymentConfirmation, parseSettlement } from "./paymentMethods";
+import { requiresPaymentConfirmation, parseSettlement, resolveConfiguredPaymentMethod, matchesConfiguredPaymentMethod } from "./paymentMethods";
 
 // No se le pide al dueno que confirme plata que todavia no existe (2026-09-17). Con contraentrega no hay
 // nada que verificar antes de despachar; con transferencia si, porque el dueno es la unica persona que
@@ -76,4 +76,35 @@ test("el panel solo puede mandar los dos valores reales", () => {
   assert.equal(parseSettlement("PREPAID"), "PREPAID");
   assert.equal(parseSettlement("cualquier cosa"), undefined);
   assert.equal(parseSettlement(undefined), undefined);
+});
+
+// ==============================================================================================
+// "Contra entrega total" y "Contraentrega" son la misma forma de pago (2026-09-17)
+// ==============================================================================================
+
+test("una etiqueta escrita con espacios resuelve a la forma de pago cargada", () => {
+  // Defecto real: la duena tiene cargado "Contraentrega", el agente escribio "Contra entrega total", y
+  // el guard bloqueaba el cierre. Al cliente le llegaba que el sistema no dejaba cerrar la venta.
+  const reales = [{ id: "a", label: "Contraentrega" }, { id: "b", label: "Nequi, Llave o Daviplata" }, { id: "c", label: "Bancolombia" }];
+  assert.equal(resolveConfiguredPaymentMethod("Contra entrega total", reales)?.id, "a");
+  assert.equal(resolveConfiguredPaymentMethod("contra entrega", reales)?.id, "a");
+  assert.equal(resolveConfiguredPaymentMethod("Contraentrega", reales)?.id, "a");
+});
+
+test("nombrar una parte de la forma de pago cargada alcanza", () => {
+  const reales = [{ id: "a", label: "Contraentrega" }, { id: "b", label: "Nequi, Llave o Daviplata" }];
+  assert.equal(resolveConfiguredPaymentMethod("Nequi", reales)?.id, "b");
+  assert.equal(resolveConfiguredPaymentMethod("Daviplata", reales)?.id, "b");
+});
+
+test("una forma de pago que el negocio no tiene sigue sin resolver", () => {
+  const reales = [{ id: "a", label: "Contraentrega" }, { id: "b", label: "Bancolombia" }];
+  assert.equal(resolveConfiguredPaymentMethod("Pago con cripto", reales), null);
+  assert.equal(resolveConfiguredPaymentMethod("", reales), null);
+  assert.equal(matchesConfiguredPaymentMethod("Mercado Pago", reales), false);
+});
+
+test("un empate no elige ninguna: adivinar con que pago alguien es lo que no se hace", () => {
+  const ambiguas = [{ id: "a", label: "Transferencia" }, { id: "b", label: "Transferencia" }];
+  assert.equal(resolveConfiguredPaymentMethod("transferencia", ambiguas), null);
 });

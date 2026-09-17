@@ -1,4 +1,5 @@
 import { prisma } from "../db/client";
+import { normalizeForMatch, tokenize } from "../search/text";
 
 /** Ver PaymentSettlement en prisma/schema.prisma: CUANDO entra la plata, no por que canal. */
 export type PaymentSettlement = "PREPAID" | "ON_DELIVERY";
@@ -105,4 +106,56 @@ export async function requiresPaymentConfirmation(
   }
 
   return true;
+}
+
+/**
+ * La misma etiqueta escrita de las dos formas que el español admite: "Contraentrega" y "Contra entrega".
+ * Se comparan las dos sin espacios ni signos, porque el espacio ahí no significa nada.
+ *
+ * Defecto real de produccion: la duena tiene cargado "Contraentrega", el agente escribio "Contra entrega
+ * total", y el guard lo rechazo - ni la igualdad exacta ni la comparacion por tokens podian verlas
+ * iguales ("contra"+"entrega"+"total" contra el unico token "contraentrega"). El cierre quedaba
+ * bloqueado y el cliente leia que el sistema no dejaba cerrar la venta.
+ */
+function squash(text: string): string {
+  return normalizeForMatch(text).replace(/[^a-z0-9]/g, "");
+}
+
+/**
+ * CUAL de las formas de pago configuradas nombro el agente, no solo si nombro alguna.
+ *
+ * Devolver la forma REAL es lo que importa: lo que se guarda en el pedido pasa a ser la etiqueta que la
+ * duena cargo, no la que el modelo haya escrito. Su redaccion queda donde corresponde, en el mensaje al
+ * cliente, y deja de poder entrar a la base.
+ *
+ * Un empate (dos formas configuradas que encajan con lo mismo) NO elige: devuelve null y el guard
+ * bloquea, igual que antes. Adivinar con que metodo pago alguien es exactamente lo que no se hace.
+ */
+export function resolveConfiguredPaymentMethod<T extends { label: string }>(label: string, realMethods: T[]): T | null {
+  const escrito = squash(label);
+  if (!escrito) return null;
+
+  const exacta = realMethods.filter((m) => squash(m.label) === escrito);
+  if (exacta.length === 1) return exacta[0];
+
+  // Una contiene a la otra: "contraentregatotal" contiene "contraentrega", y "nequi" esta dentro de
+  // "nequillaveodaviplata". Las dos direcciones, porque el agente tanto agrega palabras como recorta.
+  const contenidas = realMethods.filter((m) => {
+    const real = squash(m.label);
+    return real.length > 0 && (escrito.includes(real) || real.includes(escrito));
+  });
+  if (contenidas.length === 1) return contenidas[0];
+
+  // Ultimo recurso, el criterio viejo: todas las palabras de lo escrito estan en la forma real.
+  const inputTokens = tokenize(label.trim());
+  if (inputTokens.length === 0) return null;
+  const porTokens = realMethods.filter((m) => {
+    const realTokens = new Set(tokenize(m.label));
+    return inputTokens.every((t) => realTokens.has(t));
+  });
+  return porTokens.length === 1 ? porTokens[0] : null;
+}
+
+export function matchesConfiguredPaymentMethod(label: string, realMethods: { label: string }[]): boolean {
+  return resolveConfiguredPaymentMethod(label, realMethods) !== null;
 }

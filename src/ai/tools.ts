@@ -16,7 +16,7 @@ import {
   SALE_BLOCKED_BLOCK_MARKER,
   CATALOG_BLOCK_MARKER,
 } from "./fixedBlockMarkers";
-import { listActivePaymentMethods, requiresPaymentConfirmation } from "../catalog/paymentMethods";
+import { listActivePaymentMethods, requiresPaymentConfirmation, resolveConfiguredPaymentMethod } from "../catalog/paymentMethods";
 import { listShippingRates, resolveShippingRateForCity } from "../catalog/shippingRates";
 import { recordAgentIncident } from "./incidents";
 import { getSaleGate } from "./configHealth";
@@ -1683,7 +1683,7 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
         // queda libre de describirle la forma de pago al cliente con sus palabras.
         // El label sigue aceptado como camino de respaldo (con su guard intacto) para no romper una
         // conversacion en curso en el medio de un despliegue: el id gana cuando viene.
-        const paymentMethodId = input.paymentMethodId ? String(input.paymentMethodId).trim() : "";
+        let paymentMethodId = input.paymentMethodId ? String(input.paymentMethodId).trim() : "";
         let paymentMethodLabel: string | null = null;
         if (saleStateOn) {
           paymentMethodLabel = saleState?.paymentMethodLabel ?? null;
@@ -1703,7 +1703,17 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
           }
           paymentMethodLabel = method.label;
         } else if (input.paymentMethodLabel) {
-          paymentMethodLabel = String(input.paymentMethodLabel).trim();
+          // Lo que se guarda es la etiqueta que la duena CARGO, no la que el modelo escribio. "Contra
+          // entrega total" y "Contraentrega" son la misma forma de pago; la redaccion del agente vive en
+          // el mensaje al cliente y no tiene por que entrar a la base ni a un pedido.
+          const configuradas = await listActivePaymentMethods(businessId);
+          const resuelta = resolveConfiguredPaymentMethod(String(input.paymentMethodLabel), configuradas);
+          if (resuelta) {
+            paymentMethodLabel = resuelta.label;
+            paymentMethodId = resuelta.id;
+          } else {
+            paymentMethodLabel = String(input.paymentMethodLabel).trim();
+          }
         }
         const shippingCost = saleStateOn
           ? saleState?.shippingCost ?? null

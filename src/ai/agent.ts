@@ -30,7 +30,11 @@ import {
 import { getLastPresentedProductIds, setLastPresentedProductIds, getMediaSentProductIds } from "../catalog/presentedList";
 import { recordAgentTurn } from "./agentTurns";
 import { findShadowCatalogFindings, verifyAgainstCatalog, serializeFinding } from "../catalog/outputValidation";
-import { listActivePaymentMethods } from "../catalog/paymentMethods";
+import { listActivePaymentMethods, resolveConfiguredPaymentMethod, matchesConfiguredPaymentMethod } from "../catalog/paymentMethods";
+
+// Re-export: el guard de close_conversation vive en este archivo y varias pruebas ya importaban estos
+// nombres desde aca. La logica vive en catalog/paymentMethods.ts, que es de donde son.
+export { resolveConfiguredPaymentMethod, matchesConfiguredPaymentMethod };
 import { buildCheckoutState } from "../orders/checkoutStateFromDb";
 import { getCustomerCommerceState } from "../orders/customerCommerceState";
 import { getAgreedPriceFacts } from "../orders/agreedPrices";
@@ -624,16 +628,6 @@ export function extractNameFromDeliveryAnswer(text: string, pais: CountryCode): 
 // 6/37 conversaciones reales de MAGByLizN, siempre por este mismo motivo (su unico metodo configurado
 // combina 3 canales). Acepta el match si todas las palabras del label del modelo aparecen entre las del
 // label real, ademas del match exacto original.
-export function matchesConfiguredPaymentMethod(label: string, realMethods: { label: string }[]): boolean {
-  const inputLabelNorm = normalizeForMatch(label.trim());
-  const inputTokens = tokenize(label.trim());
-  return realMethods.some((m) => {
-    if (normalizeForMatch(m.label) === inputLabelNorm) return true;
-    if (inputTokens.length === 0) return false;
-    const realTokens = new Set(tokenize(m.label));
-    return inputTokens.every((t) => realTokens.has(t));
-  });
-}
 
 export interface FixedBlockData {
   // Fase 11 del plan maestro (2026-09-15): las cifras de estos bloques se escribian con un separador de
