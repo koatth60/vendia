@@ -1,4 +1,3 @@
-import { SHIPPING_MODALITY_LABELS } from "../tools";
 import { PAYMENT_BLOCK_MARKER, ORDER_SUMMARY_BLOCK_MARKER } from "../fixedBlockMarkers";
 import type { CatalogPhotoScope } from "../../catalog/presenter";
 
@@ -499,15 +498,15 @@ inmediato al genero indicado y sigue asi el resto de la conversacion.`
     );
   }
 
+  // Las modalidades ya NO se listan aca (2026-09-17). Dependen de la ZONA - un negocio puede hacer
+  // contraentrega total en su ciudad y no en el resto del pais (ShippingRate.paymentModalities) - asi que
+  // una lista fija en el prompt seria un dato desactualizado para la mitad de las conversaciones, y el
+  // dato correcto lo devuelve la herramienta cuando se le pasa la ciudad.
   if (personality?.shippingPaymentModalities && personality.shippingPaymentModalities.length > 0) {
-    const options = personality.shippingPaymentModalities
-      .map((m) => SHIPPING_MODALITY_LABELS[m])
-      .filter(Boolean)
-      .join("; ");
     parts.push(
-      `MODALIDAD DE PAGO DEL ENVIO: este negocio ofrece estas modalidades reales: ${options}. Cuando el
-cliente este por confirmar una compra, usa get_shipping_payment_modalities para mostrarle EXACTAMENTE esas
-opciones (nunca inventes ni asumas cual eligio) y espera su respuesta explicita antes de seguir.`
+      `MODALIDAD DE PAGO DEL ENVIO: cuales aplican depende de la ciudad del cliente. Cuando este por
+confirmar una compra, usa get_shipping_payment_modalities pasandole su ciudad, mostrale EXACTAMENTE las que
+devuelva (nunca inventes ni asumas cual eligio) y espera su respuesta explicita antes de seguir.`
     );
   }
 

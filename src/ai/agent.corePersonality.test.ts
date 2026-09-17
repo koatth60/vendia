@@ -34,12 +34,16 @@ test("shipping payment modality: empty/undefined by default, no directive added"
   assert.doesNotMatch(prompt, /MODALIDAD DE PAGO DEL ENVIO/);
 });
 
-test("shipping payment modality: configured modalities are named in the directive with real Spanish labels", () => {
+// 2026-09-17: la directiva ya NO lista las modalidades. Cuales aplican depende de la ZONA
+// (ShippingRate.paymentModalities): un negocio puede hacer contraentrega total en su ciudad y no en el
+// resto del pais, asi que una lista fija en el prompt seria un dato equivocado en la mitad de las
+// conversaciones. El dato correcto lo devuelve la herramienta cuando se le pasa la ciudad.
+test("shipping payment modality: la directiva manda a pedir las modalidades por ciudad, no las lista", () => {
   const prompt = buildSystemPrompt({ shippingPaymentModalities: ["PREPAID_ALL", "COD_ALL"] });
   assert.match(prompt, /MODALIDAD DE PAGO DEL ENVIO/);
-  assert.match(prompt, /todo por adelantado/);
-  assert.match(prompt, /contraentrega/);
   assert.match(prompt, /get_shipping_payment_modalities/);
+  assert.match(prompt, /ciudad/);
+  assert.doesNotMatch(prompt, /todo por adelantado/, "las etiquetas son datos, y los datos no viven en el prompt");
 });
 
 test("shipping payment modality: empty array (explicit, not just missing) adds nothing", () => {
