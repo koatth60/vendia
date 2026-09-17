@@ -2,7 +2,8 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { prisma } from "../db/client";
-import { montoACobrarAlEntregar, resolverModalidadDelPedido } from "./paymentTiming";
+import { montoACobrarAlEntregar, resolverModalidadDelPedido, filtrarMetodosPorZona } from "./paymentTiming";
+import { recordShippingCity } from "./saleState";
 
 // Fase 3 (2026-09-17). El pedido guardaba el total y con que metodo, pero no CUANDO se cobra, asi que
 // "¿cuanto le cobro al mensajero?" solo se respondia releyendo el chat.
@@ -77,4 +78,32 @@ test("con una sola modalidad posible no hubo nada que elegir", async () => {
 test("sin nada con que resolver queda null, no una suposicion", async () => {
   const m = await resolverModalidadDelPedido(businessId, { cobraAlRecibir: false });
   assert.equal(m, null);
+});
+
+test("un metodo que cobra al recibir no se ofrece en una zona que no lo admite", async () => {
+  // Sin esto, "Contraentrega" es un metodo del negocio entero y se le ofrecia a cualquiera. MAG.IMP lo
+  // hace en Bogotá y Soacha y no fuera: a una clienta de Cali el bot le prometia algo que el negocio no
+  // iba a cumplir.
+  const customer = await prisma.customer.create({ data: { businessId, phoneNumber: `5732${Date.now()}` } });
+  const conv = await prisma.conversation.create({ data: { customerId: customer.id } });
+  const metodos = [
+    { label: "Nequi", settlement: "PREPAID" as const },
+    { label: "Contraentrega", settlement: "ON_DELIVERY" as const },
+  ];
+  try {
+    // Sin ciudad resuelta todavia no se esconde nada: no sabemos a donde va el pedido.
+    assert.equal((await filtrarMetodosPorZona(businessId, metodos, conv.id)).length, 2);
+
+    await recordShippingCity(conv.id, "Cali");
+    const enCali = await filtrarMetodosPorZona(businessId, metodos, conv.id);
+    assert.deepEqual(enCali.map((m) => m.label), ["Nequi"], "en Cali no se paga todo al recibir");
+
+    await recordShippingCity(conv.id, "Bogotá");
+    const enBogota = await filtrarMetodosPorZona(businessId, metodos, conv.id);
+    assert.equal(enBogota.length, 2, "en Bogotá sí, y el metodo vuelve a estar disponible");
+  } finally {
+    await prisma.saleState.deleteMany({ where: { conversationId: conv.id } });
+    await prisma.conversation.deleteMany({ where: { id: conv.id } });
+    await prisma.customer.deleteMany({ where: { id: customer.id } });
+  }
 });

@@ -18,12 +18,13 @@ import {
 } from "./fixedBlockMarkers";
 import { listActivePaymentMethods, requiresPaymentConfirmation, resolveConfiguredPaymentMethod } from "../catalog/paymentMethods";
 import { faltaComprobanteDePago, FALTA_COMPROBANTE_NOTE } from "../orders/paymentProof";
-import { resolverModalidadDelPedido } from "../orders/paymentTiming";
+import { resolverModalidadDelPedido, filtrarMetodosPorZona } from "../orders/paymentTiming";
 import { listShippingRates, resolveShippingRateForCity } from "../catalog/shippingRates";
 import { recordAgentIncident } from "./incidents";
 import { getSaleGate } from "./configHealth";
 import { normalizeForMatch } from "../search/text";
 import { totalStock } from "../catalog/stock";
+import type { ShippingPaymentModality } from "@prisma/client";
 import { formatPrice } from "../config/money";
 import { getBusinessLocale } from "../config/businessConfig";
 
@@ -647,6 +648,36 @@ interface PendingOrderDraft {
 // Toda la garantia de entrega (escalera botones -> texto -> plantilla, idempotencia, registro del wamid
 // para el acuse de Meta) vive en src/whatsapp/ownerConfirmation.ts, que es el mismo modulo que usa el
 // perseguidor - asi el primer pedido y cada reintento dejan exactamente el mismo estado.
+/**
+ * La linea que encabeza lo que se le pregunta al dueno: cuanto tenia que llegarle por adelantado.
+ *
+ * Con "todo por adelantado" es el total; con "producto por adelantado, envio contraentrega" es SOLO el
+ * producto, y ahi esta el caso que la hace falta - preguntarle "¿te llego el pago?" al lado de un resumen
+ * que dice el total lo manda a buscar una transferencia que nunca existio. Sin modalidad resuelta no se
+ * inventa ninguna cifra y la pregunta queda como estaba.
+ */
+function lineaDePagoEsperado(
+  modality: ShippingPaymentModality | null,
+  items: ResolvedOrderItem[],
+  shippingCost: number | null | undefined,
+  negocio: { currency: string; locale: string }
+): string {
+  const itemsTotal = items.reduce((sum, i) => sum + i.unitPrice * i.quantity, 0);
+  const envio = shippingCost || 0;
+  const moneda = items[0]?.currency || negocio.currency;
+  if (modality === "PREPAID_ALL") {
+    return `Tenia que llegarte $${formatPrice(itemsTotal + envio, moneda, negocio.locale)} (producto + envio).
+
+`;
+  }
+  if (modality === "PREPAID_PRODUCT_COD_SHIPPING") {
+    return `Tenia que llegarte $${formatPrice(itemsTotal, moneda, negocio.locale)}, solo el producto: el envio de $${formatPrice(envio, moneda, negocio.locale)} se cobra al entregar.
+
+`;
+  }
+  return "";
+}
+
 async function requestSaleConfirmation(context: ToolContext, summary: string, draft: PendingOrderDraft): Promise<boolean> {
   const result = await askOwnerToConfirmSale({
     businessId: context.businessId,
@@ -1154,7 +1185,16 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
       };
     }
     case "get_payment_methods": {
-      const methods = await listActivePaymentMethods(businessId);
+      // UN METODO QUE COBRA AL RECIBIR NO SE OFRECE DONDE NO SE HACE (2026-09-17).
+      //
+      // "Contraentrega" es un metodo de pago del negocio entero, pero pagar TODO al recibir casi nunca
+      // aplica en todo el pais: MAG.IMP lo hace en Bogota y Soacha y no fuera. Sin este filtro, a una
+      // clienta de Cali se le ofrecia igual y el bot le prometia algo que el negocio no iba a cumplir.
+      //
+      // El disparador es la ciudad que el SERVIDOR ya resolvio contra sus propias reglas (ver
+      // recordShippingCity), no una lectura del mensaje. Sin ciudad resuelta no se filtra nada: todavia no
+      // sabemos a donde va el pedido, y esconder un metodo por las dudas seria el error opuesto.
+      const methods = await filtrarMetodosPorZona(businessId, await listActivePaymentMethods(businessId), context.conversationId);
       if (methods.length === 0) {
         return { methods: [], note: "Este negocio todavia no configuro formas de pago. Dile al cliente que un asesor le va a confirmar como pagar." };
       }
@@ -1866,8 +1906,32 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
           return { closed: false, note: FALTA_COMPROBANTE_NOTE };
         }
 
+        // CUANDO SE PAGA ESTE PEDIDO (2026-09-17, fase 3). Se resuelve con datos - la modalidad declarada
+        // validada contra las de la zona, el settlement del metodo elegido, o la unica modalidad posible -
+        // y si ninguna de las tres alcanza queda null, que es lo honesto. De ahi sale el monto que el
+        // mensajero tiene que cobrar, guardado en el pedido y no deducido despues releyendo el chat.
+        //
+        // Se resuelve ANTES de la confirmacion porque tambien decide QUE preguntarle al dueno: no es lo
+        // mismo "¿te llego el pago?" por el total que por el producto solo.
+        const shippingModality = await resolverModalidadDelPedido(businessId, {
+          declarada: typeof input.shippingModality === "string" ? input.shippingModality : saleState?.shippingModality,
+          cobraAlRecibir: !debeConfirmar,
+          // La ciudad que el SERVIDOR resolvio contra sus propias reglas al calcular el envio, no la que
+          // el modelo escriba ahora: ver recordShippingCity en get_shipping_rate_for_city.
+          city: (await getServerSaleEvidence(context.conversationId))?.shippingCity ?? null,
+        });
+
         const pending = debeConfirmar
-          ? await requestSaleConfirmation(context, summary, { items, shippingAddress, paymentMethodLabel, shippingCost })
+          ? await requestSaleConfirmation(
+              context,
+              // LA PREGUNTA TIENE QUE DECIR CUANTO (2026-09-17). Con "producto por adelantado, envio
+              // contraentrega" el dueno recibe el producto solo, no el total, y preguntarle "¿te llego el
+              // pago?" al lado de un resumen que dice $154.000 lo hace buscar una transferencia que nunca
+              // existio. La linea la compone el servidor con el precio real, y viaja DENTRO del resumen
+              // para que los reintentos del perseguidor digan exactamente lo mismo (ver ownerConfirmation).
+              lineaDePagoEsperado(shippingModality, items, shippingCost, await getBusinessLocale(businessId)) + summary,
+              { items, shippingAddress, paymentMethodLabel, shippingCost }
+            )
           : false;
         if (pending) {
           return {
@@ -1877,18 +1941,6 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
             note: "El dueno del negocio tiene que confirmar el pago primero. No le digas al cliente que su compra quedo confirmada todavia - dile que estas verificando el pago con el equipo.",
           };
         }
-
-        // CUANDO SE PAGA ESTE PEDIDO (2026-09-17, fase 3). Se resuelve con datos - la modalidad declarada
-        // validada contra las de la zona, el settlement del metodo elegido, o la unica modalidad posible -
-        // y si ninguna de las tres alcanza queda null, que es lo honesto. De ahi sale el monto que el
-        // mensajero tiene que cobrar, guardado en el pedido y no deducido despues releyendo el chat.
-        const shippingModality = await resolverModalidadDelPedido(businessId, {
-          declarada: typeof input.shippingModality === "string" ? input.shippingModality : saleState?.shippingModality,
-          cobraAlRecibir: !debeConfirmar,
-          // La ciudad que el SERVIDOR resolvio contra sus propias reglas al calcular el envio, no la que
-          // el modelo escriba ahora: ver recordShippingCity en get_shipping_rate_for_city.
-          city: (await getServerSaleEvidence(context.conversationId))?.shippingCity ?? null,
-        });
 
         const order = await createOrder({
           businessId,

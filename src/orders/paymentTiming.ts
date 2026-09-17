@@ -1,6 +1,7 @@
-import type { ShippingPaymentModality } from "@prisma/client";
+import type { PaymentSettlement, ShippingPaymentModality } from "@prisma/client";
 import { prisma } from "../db/client";
 import { resolveShippingRateForCity } from "../catalog/shippingRates";
+import { getServerSaleEvidence } from "./saleState";
 
 // CUANDO SE PAGA ESTE PEDIDO (2026-09-17, fase 3).
 //
@@ -8,6 +9,8 @@ import { resolveShippingRateForCity } from "../catalog/shippingRates";
 // mensajero?" - la pregunta que el dueno se hace en cada despacho - solo se podia responder releyendo el
 // chat entero. Estas dos funciones lo resuelven con datos: la modalidad y el monto quedan escritos en el
 // Order y no dependen de que nadie se acuerde.
+
+const MODALIDADES: ShippingPaymentModality[] = ["PREPAID_ALL", "PREPAID_PRODUCT_COD_SHIPPING", "COD_ALL"];
 
 /**
  * Lo que hay que cobrar al entregar, segun la modalidad. `null` cuando no sabemos la modalidad: es
@@ -56,8 +59,12 @@ export async function resolverModalidadDelPedido(
   const disponibles = await modalidadesDisponibles(businessId, opts.city);
 
   const declarada = opts.declarada?.trim();
-  if (declarada && disponibles.includes(declarada as ShippingPaymentModality)) {
-    return declarada as ShippingPaymentModality;
+  if (declarada && MODALIDADES.includes(declarada as ShippingPaymentModality)) {
+    // Se acepta si aplica en la zona. Y tambien cuando el negocio no configuro NINGUNA modalidad: sin esa
+    // lista no hay dato que la contradiga, y descartarla seria inventarse una restriccion que nadie puso.
+    if (disponibles.length === 0 || disponibles.includes(declarada as ShippingPaymentModality)) {
+      return declarada as ShippingPaymentModality;
+    }
   }
 
   if (opts.cobraAlRecibir) return "COD_ALL";
@@ -79,4 +86,34 @@ async function modalidadesDisponibles(businessId: string, city?: string | null):
     select: { shippingPaymentModalities: true },
   });
   return negocio?.shippingPaymentModalities ?? [];
+}
+
+/**
+ * Saca de la lista los metodos que se cobran al recibir cuando la zona del cliente no admite pagar TODO
+ * al recibir. Un metodo "Contraentrega" configurado a nivel negocio no significa que aplique en cada
+ * ciudad: MAG.IMP lo hace en Bogota y Soacha y no fuera, y sin esto se le ofrecia igual a una clienta de
+ * Cali.
+ *
+ * No filtra nada en dos casos, los dos a proposito:
+ *   - La ciudad todavia no se resolvio. No sabemos a donde va el pedido, y esconder un metodo por las
+ *     dudas es el error opuesto: dejaria sin forma de pagar a alguien que si podia.
+ *   - Ni la zona ni el negocio tienen modalidades configuradas. Sin ese dato no hay nada contra que
+ *     decidir, y es exactamente el comportamiento anterior a que estas listas existieran.
+ */
+export async function filtrarMetodosPorZona<T extends { settlement: PaymentSettlement }>(
+  businessId: string,
+  metodos: T[],
+  conversationId: string
+): Promise<T[]> {
+  if (!metodos.some((m) => m.settlement === "ON_DELIVERY")) return metodos;
+
+  const evidencia = await getServerSaleEvidence(conversationId);
+  const ciudad = evidencia?.shippingCity?.trim();
+  if (!ciudad) return metodos;
+
+  const disponibles = await modalidadesDisponibles(businessId, ciudad);
+  if (disponibles.length === 0) return metodos;
+  if (disponibles.includes("COD_ALL")) return metodos;
+
+  return metodos.filter((m) => m.settlement !== "ON_DELIVERY");
 }

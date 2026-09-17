@@ -297,3 +297,49 @@ test("con SaleState prendido y sin set_payment_method, contraentrega NO le pide 
     await prisma.product.deleteMany({ where: { id: producto.id } });
   }
 });
+
+test("con envio contraentrega, al dueno se le pregunta por el pago del PRODUCTO, no por el total", async () => {
+  // Pedido del dueno del proyecto (2026-09-17): "avisarle y preguntarle si le llego el pago, y que le
+  // haga bien la pregunta". Con "producto por adelantado, envio contraentrega" lo que le llega es el
+  // producto solo; preguntarle "¿te llego el pago?" al lado de un resumen que dice el total lo manda a
+  // buscar una transferencia que nunca existio.
+  const nequi = await prisma.paymentMethod.create({
+    data: { businessId, type: "TRANSFERENCIA", label: "Nequi Flete", details: "300", settlement: "PREPAID" },
+  });
+  const producto = await prisma.product.create({
+    data: { businessId, name: "Reloj Flete", description: "x", price: 145000, currency: "COP", stock: 3 },
+  });
+  const context = await freshContext();
+  const originalFetch = globalThis.fetch;
+  const textosAlDueno: string[] = [];
+  globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body ?? "{}"));
+    if (typeof body?.interactive?.body?.text === "string") textosAlDueno.push(body.interactive.body.text);
+    if (typeof body?.text?.body === "string") textosAlDueno.push(body.text.body);
+    for (const c of body?.template?.components ?? []) {
+      for (const par of c?.parameters ?? []) if (typeof par?.text === "string") textosAlDueno.push(par.text);
+    }
+    return { ok: true, json: async () => ({ messages: [{ id: `wamid.${randomUUID()}` }] }) } as Response;
+  }) as typeof fetch;
+
+  try {
+    await runCatalogTool(context, "close_conversation", {
+      outcome: "SOLD",
+      summary: "1x Reloj Flete. Total $154.000.",
+      paymentMethodLabel: "Nequi Flete",
+      shippingAddress: "Calle 1 #2-3",
+      shippingCost: 9000,
+      shippingModality: "PREPAID_PRODUCT_COD_SHIPPING",
+      items: [{ productName: "Reloj Flete", quantity: 1 }],
+    });
+
+    const todo = textosAlDueno.join(" | ");
+    assert.ok(todo.includes("145.000"), `la pregunta tiene que nombrar el pago del producto; salio: ${todo}`);
+    assert.ok(todo.includes("se cobra al entregar"), `y decir que el envio se cobra despues; salio: ${todo}`);
+  } finally {
+    globalThis.fetch = originalFetch;
+    await prisma.conversation.update({ where: { id: context.conversationId }, data: { pendingConfirmationAskedAt: null, pendingConfirmationMessageId: null } });
+    await prisma.paymentMethod.deleteMany({ where: { id: nequi.id } });
+    await prisma.product.deleteMany({ where: { id: producto.id } });
+  }
+});
