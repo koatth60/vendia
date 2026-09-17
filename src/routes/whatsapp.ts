@@ -4,6 +4,7 @@ import { env } from "../config/env";
 import { toBusinessLocale, getBusinessLocale } from "../config/businessConfig";
 import { getPaymentExamples } from "../catalog/paymentMethods";
 import { prisma } from "../db/client";
+import { conversationLocker } from "../db/conversationLock";
 import {
   sendAlertToOwner,
   sendToCustomer,
@@ -84,13 +85,20 @@ export const whatsappRouter = Router();
 // their own reply - the customer got two different, sometimes flatly contradictory answers within
 // seconds of each other (confirmed against real conversations: one telling a customer "no manejamos
 // micrófonos" for a typo the OTHER reply correctly read as "audífonos", another saving the wrong name -
-// see looksLikeNonNameAnswer in agent.ts for a related but separate cause). pm2 runs this as a single
-// process (fork mode, not cluster - see ecosystem.config.js, `exec_mode: "fork"` + `instances: 1`, versioned
-// as of Fase 7 instead of living only in this comment), so a plain in-memory per-conversation queue is
-// enough - no Redis/DB lock needed. Each conversationId gets its own promise chain: a new webhook for that
-// conversation waits for the previous one's full handling (generateReply + the reply send + recordMessage)
-// to finish before it starts, so the two are serialized instead of racing. Different conversations are
-// unaffected and run fully in parallel, same as before.
+// see looksLikeNonNameAnswer in agent.ts for a related but separate cause).
+//
+// E07 (2026-09-17): esa serializacion dejo de depender de que haya UN SOLO PROCESO. Antes, lo unico
+// que impedia que dos instancias duplicaran la respuesta era `instances: 1` en ecosystem.config.js -
+// una decision que el operador tenia que acordarse de no cambiar, y que E23 (web + worker) va a
+// cambiar a proposito. Ahora son dos piezas, cada una con su propia garantia:
+//   - esta cadena de promesas por conversationId: el ORDEN DE LLEGADA dentro de este proceso. Un
+//     webhook espera a que termine el manejo completo del anterior (generateReply + envio +
+//     recordMessage) antes de empezar. Conversaciones distintas siguen corriendo en paralelo.
+//   - conversationLocker (src/db/conversationLock.ts): la EXCLUSION ENTRE PROCESOS, con un lock
+//     consultivo de Postgres. Ahi esta escrito por que es un lock de sesion y no uno de transaccion.
+// Ninguna de las dos alcanza sola: la cadena no ve a los otros procesos, y el lock no puede decidir
+// cual de dos llamadas simultaneas de ESTE proceso llego primero (dependeria de a quien le toque
+// antes una conexion del pool).
 const conversationLocks = new Map<string, Promise<void>>();
 
 // Fase 7 del plan maestro (2026-09-15): cuantos turnos (webhook -> generateReply -> envio -> recordMessage)
@@ -105,11 +113,12 @@ export function getActiveTurnCount(): number {
 
 export async function withConversationLock(conversationId: string, fn: () => Promise<void>): Promise<void> {
   const previous = conversationLocks.get(conversationId) ?? Promise.resolve();
-  // .then(fn, fn) runs fn once `previous` SETTLES, whether it resolved or rejected - a prior turn
+  // .then(x, x) runs the body once `previous` SETTLES, whether it resolved or rejected - a prior turn
   // throwing must never wedge every later turn for this conversation behind a permanently-rejected
   // promise.
   activeTurnCount++;
-  const run = previous.then(fn, fn);
+  const conLockDeProceso = () => conversationLocker.run(conversationId, fn);
+  const run = previous.then(conLockDeProceso, conLockDeProceso);
   // The map only ever stores a swallowed-error version of `run` - otherwise the NEXT caller's `previous`
   // would itself reject before its own turn even starts.
   const tail = run.catch(() => {});
