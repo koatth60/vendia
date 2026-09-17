@@ -1267,8 +1267,29 @@ se llama `recordAskOwnerResolution` (su único invocador en todo `src/` es `what
 escalación por WhatsApp. Hoy no solo no se aprende: se destruye.
 **Se hace:** el panel llama `recordAskOwnerResolution` con la pregunta del cliente y la respuesta del
 dueño, y el `PendingOwnerQuestion` se marca resuelto en vez de borrarse.
-**Se prueba:** una conversación con toma de control manual genera un candidato.
-**Tamaño:** S. **Depende de:** nada. **Es el ítem de mejor relación valor/tamaño de todo el plan.**
+**Y hay una segunda consecuencia, medida el 2026-09-17, que nadie había conectado: borrar esa fila hace
+que el bot repita mensajes.**
+
+Conversación `cmu4xfymx00bxq92kb1aj3iil` (Maira Rodríguez). La clienta mandó una foto a las 02:56
+preguntando *"¿Es ese el mismo?"*. El 17 a las 19:38 el bot llamó `ask_owner_about_photo` y le mandó la
+identificación: *"Según nuestro equipo, el producto que buscas es: Reloj … Serie 12 Ultra 3 - $140000
+COP"*. A las 19:42, ante un simple *"Ok" / "Si señora"*, **mandó exactamente el mismo mensaje otra vez**.
+
+El mecanismo, exacto: `ownerWasNotifiedSince` prueba que una imagen quedó atendida contando filas de
+`PendingOwnerQuestion` posteriores a ella. Cuando el dueño responde, esa fila **se borra**. Sin fila, la
+imagen del 02:56 queda "sin atender" **para siempre**, y cada turno siguiente vuelve a exigir el efecto
+`OWNER_NOTIFIED_ABOUT_IMAGE`, vuelve a forzar `ask_owner_about_photo` y vuelve a mandar la respuesta
+guardada. En esa conversación `PendingOwnerQuestion` está en **0** y `humanControl` en **true**: la dueña
+tuvo que tomar el control y no lo devolvió.
+
+O sea que esta etapa no es solo "no perder el dato del aprendizaje": **es la causa de un defecto que el
+cliente ve hoy.** Marcar la fila como resuelta en vez de borrarla arregla las dos cosas con el mismo
+cambio.
+
+**Se prueba:** una conversación con toma de control manual genera un candidato. Y: contestada la
+pregunta del dueño, un turno posterior **no** vuelve a exigir el efecto ni a reenviar la respuesta.
+**Tamaño:** S. **Depende de:** nada. **Es el ítem de mejor relación valor/tamaño de todo el plan**, y
+desde el 2026-09-17 además corrige un defecto visible.
 **Vuelta atrás:** revertir.
 
 ---
@@ -1607,7 +1628,7 @@ hasta que la etapa que lo arregla lo ponga en verde de verdad.
 
 | Tema | Etapas |
 |---|---|
-| **Lo que más duele hoy** | `E01`–`E05c` y `E09` desplegadas; sigue `E09b` |
+| **Lo que más duele hoy** | `E01`–`E05c`, `E09` y `E09b` desplegadas; sigue `E56`, después `E06` |
 | **El bot dice cosas falsas** | `E09`, `E09b`, `E10`, `E11`, `E12`, `E13` |
 | **Respuestas duplicadas** | `E06`, `E07`, `E08` |
 | **Fechas y tiempos de entrega** | `E01` y `E05` hechas; queda `E35` |
@@ -1622,11 +1643,10 @@ hasta que la etapa que lo arregla lo ponga en verde de verdad.
 | **Observabilidad** | `E24`, `E25`, `E62`, `E63`, `E65` |
 | **Vender más** | `E68`, `E69`, `E70`, `E71`, `E72`, `E73` |
 
-**Lo siguiente:** `E09b` (que el bot lea la FAQ del negocio), y después `E06`.
-
-`E09` se cerró y se desplegó el 2026-09-17. `E06` (`RESPUESTA_DUPLICADA`) sigue siendo el incidente más
-frecuente —41 de 95—, pero es una molestia: el cliente recibe dos mensajes. `E09b` va antes porque es
-un día de trabajo y devuelve al aire el único diferenciador que el proyecto tiene funcionando.
+**Lo siguiente: `E56`.** Es de una tarde, y desde el 2026-09-17 se sabe que no es solo aprendizaje: la
+fila que se borra al contestar es la prueba con la que el motor de efectos sabe que una imagen ya fue
+atendida, así que borrarla hace que el bot **repita mensajes** (caso Maira, en su ficha). Después `E06`,
+el diagnóstico de `RESPUESTA_DUPLICADA` — y `E56` puede resultar ser parte de su causa.
 
 **La más barata con más retorno:** `E56`. Una tarde, y deja de destruirse el dato que alimenta el
 único diferenciador que ningún competidor tiene.
