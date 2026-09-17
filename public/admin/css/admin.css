@@ -218,7 +218,12 @@
     height: 38px; flex-shrink: 0; padding: 0 28px;
     border-bottom: 1px solid var(--onix-border-soft);
   }
-  .subnav.active { display: flex; overflow-x: auto; }
+  /* overflow-y: hidden EXPLICITO. Con solo overflow-x: auto, el CSS obliga al otro
+     eje a 'auto' tambien, y el subrayado de la pestana activa vive en bottom:-1px
+     (se apoya en el borde de la franja a proposito): ese pixel desbordaba y el
+     navegador dibujaba una barra de scroll VERTICAL dentro de una franja de 38px,
+     al lado de "En vivo". */
+  .subnav.active { display: flex; overflow-x: auto; overflow-y: hidden; }
   /* El estado del tiempo real vive en esta fila, a la derecha, en vez de en una
      franja propia debajo. */
   .subnav .realtime-indicator { margin-left: auto; align-self: center; flex-shrink: 0; }
