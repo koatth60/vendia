@@ -279,6 +279,19 @@ Producción, MAGByLizN, siete días hasta el 2026-09-17 18:42 UTC. Es contra est
 | Fallos de entrega | **9** — 5 con código 131053, 4 con 131047 |
 | Costo de IA | **US$ 0,97** en 2.038 llamadas → **US$ 0,0115 por conversación** |
 
+Y dos números de 14 días que salieron el 2026-09-17 revisando dos conversaciones, y que reordenan el
+plan:
+
+| Qué | Cuánto |
+|---|---|
+| Pedidos creados | 22 |
+| **Turnos donde el agente llamó `close_conversation`** | **2** |
+| **Turnos donde llamó `get_faq`** (con 16 entradas activas) | **0** |
+
+**El bot registra el 9 % de las ventas en las que participa; el resto las cierra la dueña a mano. Y
+nunca lee las preguntas frecuentes del negocio.** Las dos son la misma falla: un hecho o un efecto que
+solo ocurre si el modelo se acuerda de llamar una herramienta. Las cierran `E09` y `E09b`.
+
 Desglose de los 95 incidentes, que es el mapa de lo que está roto hoy:
 
 | Incidente | Veces | Etapa que lo cierra |
@@ -471,22 +484,103 @@ un reinicio en el medio.
 
 ---
 
-### E09 · El resumen de cierre no sale sin pedido
+### E09 · El pedido lo crea el sistema, no la buena memoria del modelo
 
-**Quita:** al modelo, poder decirle al cliente que su pedido quedó registrado.
-**Porque:** `VENTA_SIN_PEDIDO` seis veces en siete días — "mandó el resumen de cierre y no hay
-pedido registrado". Y cuatro veces más salió una marca de bloque fijo sin resolver, que es el mismo
-hueco por el otro lado. Hoy eso lo detecta un regex sobre la prosa ya enviada: es diagnóstico, no
-garantía.
-**Se hace:** el mensaje de cierre con total deja de poder existir como texto del modelo. Se compone
-como bloque fijo del servidor, y el servidor solo lo emite **después** de que `createOrder` devolvió
-una fila. Si no hay fila, no hay bloque, y el modelo no tiene las cifras para inventarlo. El
-detector se queda como métrica, nunca como reparación.
-**Se prueba:** fixture donde `close_conversation` falla y el texto final no afirma ningún cierre.
-**Prompt:** se reduce la sección "CIERRE" a una línea: el estado del pedido lo dice el bloque de
-sistema. **−15 líneas.**
+**Quita:** al modelo, decidir si una venta cerrada se registra.
+**Porque:** medido el 2026-09-17 sobre 14 días de producción:
+
+| | |
+|---|---|
+| Pedidos creados | **22** |
+| Turnos donde el agente llamó `close_conversation` | **2** |
+| Turnos donde llamó `show_order_summary` | 5 |
+
+**El bot registra el 9 % de las ventas en las que participa. Las otras 20 las cerró la dueña a mano
+desde el panel.** No es un caso raro: es como funciona el producto hoy.
+
+El caso completo, conversación `cmu4e3q9l001ozi2ka2x1t1b1` (Carlos Mendoza, 2026-09-17 19:27). Todo
+estaba bien: `SaleState` con el ítem, `faltan: []`, `completo: true`, Contraentrega, `COD_ALL`, Bogotá,
+envío $9.000, total $94.000. El cliente confirmó. Y el bot mandó el cierre:
+
+> "¡Listo, Carlos! En total serían **$94.000** pesos a pagar contra entrega. Por favor estar pendiente
+> del cel que el mensajero se comunica contigo antes de la entrega, gracias por tu compra."
+
+Ese texto es, palabra por palabra, la plantilla de cierre de la Etapa 3 de `customInstructions`. El
+modelo la copió. **Copiarla no crea nada.** La conversación quedó en `NEW`, sin `Order`, y el pedido
+no existe para el negocio. El turno anterior (19:27:03) además agotó sus 5 iteraciones
+(`remove_order_item, search_products, set_order_item, remove_order_item, show_order_summary`) sin
+llegar a cerrar.
+
+Hoy esto solo lo detecta `VENTA_SIN_PEDIDO`, un regex sobre la prosa ya enviada. Es diagnóstico, no
+garantía — y en esta misma conversación ya había saltado el 2026-09-17 a las 05:17.
+
+**Se hace:** el cierre deja de ser texto que el modelo puede escribir.
+
+1. **El mensaje de cierre es un bloque fijo del servidor**, y el servidor solo lo emite **después** de
+   que `createOrder` devolvió una fila. Sin fila no hay bloque, y el modelo no tiene las cifras para
+   inventarlo (mismo mecanismo que ya usa el total).
+2. **Efecto requerido `ORDER_CREATED`.** Cumple las tres condiciones: disparador determinista
+   (`SaleState.checkout.completo === true` y el cliente confirmó con una llamada a herramienta, no con
+   prosa), verificable con una consulta (¿existe `Order` para esta conversación?), y con fallback sin
+   modelo — si el estado está completo y no hay fila, **el servidor crea el pedido él mismo** con
+   `resolveOrderItems`, que ya valida contra el catálogo y toma los precios de la base.
+3. El detector `VENTA_SIN_PEDIDO` se queda como métrica, nunca como reparación.
+
+**Se prueba:** fixture que reproduce el turno de Carlos: estado completo, cliente confirma, y al final
+del turno existe una fila `Order` con total 94.000 — la llame el modelo o no.
+**Prompt:** la sección "CIERRE" se reduce a una línea. **−15 líneas.** Y en `customInstructions` queda
+borrable la plantilla de cierre de la Etapa 3, que es la que el modelo copia.
+**Tamaño:** L. **Depende de:** nada. **Bandera:** sí — crea pedidos reales; sale en el piloto y se
+miran las primeras 48 h pedido por pedido.
+**Vuelta atrás:** apagar la bandera. Vuelve el cierre a mano, que es lo de hoy.
+
+---
+
+### E09b · La FAQ entra al turno como dato
+
+**Quita:** al modelo, decidir si va a mirar lo que el negocio ya respondió.
+**Porque:** medido el 2026-09-17 sobre 14 días: **`get_faq` se llamó 0 veces en 179 turnos.**
+
+MAGByLizN tiene **16 preguntas frecuentes activas**, y **12 salieron del ciclo de aprendizaje** — el
+único subsistema que este proyecto tiene funcionando como se diseñó, y el diferenciador que ningún
+competidor tiene. **El bot nunca las lee.**
+
+El caso, conversación `cmtxl4534001d8f2k8kie1cdg`, 2026-09-17 18:59. El cliente pregunta *"Dónde se
+ubican"*. El turno corre con `iter=1` y **cero herramientas**. El bot contesta:
+
+> "¡Liseth! Esa información no está disponible por el momento. Voy a consultar con el equipo y en un
+> momento te respondo."
+
+La FAQ del negocio, en la base, en ese mismo momento:
+
+> **"¿De qué ciudad son ustedes? ¿Tienen tienda física?"** → *"Somos una tienda 100 % virtual ubicada
+> en **Bogotá**. Hacemos envíos a todo el país por Interrapidísimo…"*
+
+Dos fallas en una frase: no leyó el dato que tenía, y prometió una consulta que tampoco abrió (eso es
+`E13`). La causa de la primera es la de siempre: **un hecho detrás de una herramienta que el modelo
+tiene que acordarse de llamar no es un hecho, es una posibilidad.**
+
+**Se hace:** las preguntas frecuentes activas entran como bloque `system`, en todos los turnos, igual
+que el catálogo y los datos del cliente. Dato, sin instrucción alrededor. Y se borra `get_faq`.
+
+**El costo está medido y es el argumento:** las 16 entradas son **2.170 caracteres, ~600 tokens**. El
+bloque es idéntico turno a turno, así que entra en caché — la tasa de acierto de este negocio es
+88 %. Contra eso, cada `get_faq` que el modelo *sí* llegara a llamar gasta una iteración completa del
+loop, que cuesta más que el bloque.
+
+**Se prueba:** fixture donde el cliente pregunta algo que está en la FAQ, el turno no llama ninguna
+herramienta, y `systemMustContain` encuentra la respuesta delante del modelo.
+**Prompt:** se borra la escalera *"revisá catálogo, `get_faq`, formas de pago Y las instrucciones
+específicas… recién ahí `ask_owner`"*, que existe entera para ordenar unas llamadas que dejan de ser
+necesarias. **−8 líneas**, más la descripción de la herramienta en `tools.ts`.
 **Tamaño:** M. **Depende de:** nada. **Bandera:** no.
 **Vuelta atrás:** revertir.
+
+> **Esto reemplaza a `E60`.** Esa etapa proponía recuperación por relevancia porque `get_faq` devolvía
+> la lista entera y no escalaba a 100 entradas. Con 16 entradas y 600 tokens cacheados el problema no
+> existe, y la etapa apuntaba a la mitad equivocada: no era que la FAQ llegara grande, era que **no
+> llegaba**. La recuperación por relevancia vuelve a hacer falta pasadas las ~80 entradas; queda
+> anotada dentro de `E59` como condición de crecimiento, no como etapa propia.
 
 ---
 
@@ -566,7 +660,10 @@ de la herramienta. **−4 líneas.**
 promesa, **11 veces** el bot prometió consultar sin abrir ninguna pregunta real, **3** más de
 `ESCALACION_PROMETIDA_SIN_HERRAMIENTA`. Son 25 en siete días. Hoy lo repara un regex sobre la prosa
 que el modelo ya escribió (`ESCALATION_CLAIM_PATTERN`), que es la clase de guard que no converge.
-Fixture `igmt9z` en `knownFailing` por esto.
+Fixture `igmt9z` en `knownFailing` por esto. Caso nuevo del 2026-09-17, conversación `cmtxl4534001d8f2k8kie1cdg`:
+el cliente preguntó "Dónde se ubican" y el bot contestó *"Voy a consultar con el equipo y en un momento
+te respondo"* — turno con **cero herramientas llamadas**, así que no hubo consulta ninguna. Y la
+respuesta estaba en la FAQ (ver `E09b`).
 **Se hace:** el efecto no puede ser "prometió → crear pregunta" (disparador de prosa, inadmisible).
 Se invierte: mientras el negocio no tenga el dato, las herramientas que necesitan ese dato devuelven
 error con el motivo, y el servidor inserta un bloque fijo. El modelo no tiene qué prometer porque ya
@@ -1223,24 +1320,25 @@ ni fecha de revisión. Una FAQ aprendida de "envío gratis" queda para siempre.
 **Se hace:** contador de uso, vínculo al candidato, y fecha de revisión con recordatorio para las
 entradas con precios o promociones, que `learnedFaqQuality.ts` ya sabe detectar.
 **Se prueba:** el contador sube cuando el modelo usa la entrada.
+**Condición de crecimiento (heredada de la retirada `E60`):** mientras la FAQ activa quepa en el
+bloque de `E09b` no hace falta recuperación. Pasadas las ~80 entradas deja de caber y hay que
+recuperar por relevancia; el contador de uso de esta etapa es justo el dato que dice cuáles conservar.
 **Tamaño:** M. **Depende de:** `E58`. **Bandera:** no.
 **Vuelta atrás:** revertir; las columnas quedan muertas.
 
 ---
 
-### E60 · `get_faq` devuelve lo que hace falta, no todo
+### E60 · ~~`get_faq` por relevancia~~ — **RETIRADA**, la reemplaza `E09b`
 
-**Quita:** al turno, pagar la FAQ entera en cada llamada.
-**Porque:** `get_faq` devuelve la lista completa sin límite. Con 24 entradas cuesta cientos de
-tokens; con 100 —que es a donde apunta el aprendizaje— son miles, en cada llamada, siempre fuera de
-caché. La misma clase de problema ya se midió y mitigó para productos
-(`LIST_DESCRIPTION_MAX_CHARS = 150`) y no se generalizó. Además la intercepción de FAQ antes de
-`ask_owner` gasta una iteración del loop y obliga a llamar `ask_owner` dos veces.
-**Se hace:** recuperación por relevancia, y la intercepción sale del loop: las FAQ relevantes se
-adjuntan al contexto o viajan junto al resultado de la primera herramienta.
-**Se prueba:** `get_faq` con 100 entradas devuelve menos de 800 tokens.
-**Tamaño:** M. **Depende de:** `E59`. **Bandera:** no.
-**Vuelta atrás:** revertir.
+Proponía recuperación por relevancia porque `get_faq` volcaba la lista entera. Medido el 2026-09-17,
+el problema era el contrario: **`get_faq` se llamó 0 veces en 179 turnos**, y la lista entera son 600
+tokens que caben cacheados en cada turno. `E09b` mete la FAQ como dato y borra la herramienta.
+
+Lo único que sobrevive de esta etapa es la condición de crecimiento, anotada en `E59`: pasadas las
+~80 entradas el bloque deja de caber y ahí sí hace falta recuperación.
+
+La otra mitad —sacar la intercepción de FAQ del loop, que gasta una iteración y obliga a llamar
+`ask_owner` dos veces— **se hace en `E13`**, que es donde vive la escalación.
 
 ---
 
@@ -1518,7 +1616,7 @@ hasta que la etapa que lo arregla lo ponga en verde de verdad.
 | Tema | Etapas |
 |---|---|
 | **Lo que más duele hoy** | `E01`–`E05c` hechas, falta desplegarlas; después `E06` |
-| **El bot dice cosas falsas** | `E09`, `E10`, `E11`, `E12`, `E13` |
+| **El bot dice cosas falsas** | `E09`, `E09b`, `E10`, `E11`, `E12`, `E13` |
 | **Respuestas duplicadas** | `E06`, `E07`, `E08` |
 | **Fechas y tiempos de entrega** | `E01` y `E05` hechas; queda `E35` |
 | **Nada se pierde** | `E14`, `E15`, `E16`, `E20`, `E21`, `E22` |
@@ -1528,12 +1626,17 @@ hasta que la etapa que lo arregla lo ponga en verde de verdad.
 | **Catálogo** | `E36`, `E37`, `E38`, `E39`, `E40`, `E61` |
 | **CRM** | `E02` hecha; quedan `E41`, `E42`, `E43`, `E44`, `E45`, `E46`, `E68` |
 | **Panel (rediseño)** | `E47`, `E48`, `E49`, `E50`, `E51`, `E52`, `E53`, `E54`, `E55` |
-| **FAQ que aprende** | `E56`, `E57`, `E58`, `E59`, `E60` |
+| **FAQ que aprende** | `E09b` (que la lea), `E56`, `E57`, `E58`, `E59` |
 | **Observabilidad** | `E24`, `E25`, `E62`, `E63`, `E65` |
 | **Vender más** | `E68`, `E69`, `E70`, `E71`, `E72`, `E73` |
 
-**Lo siguiente:** desplegar `E01`–`E05c`, mirar 48 horas contra la línea base, y recién ahí seguir con
-`E06` — el diagnóstico de `RESPUESTA_DUPLICADA`, que es 41 de los 95 incidentes de la semana.
+**Lo siguiente, y cambió el 2026-09-17:** `E09` y `E09b`, en ese orden, antes que `E06`.
+
+`E06` (`RESPUESTA_DUPLICADA`) sigue siendo el incidente más frecuente —41 de 95—, pero es una molestia:
+el cliente recibe dos mensajes. `E09` es otra cosa: **20 de cada 22 ventas no quedan registradas por el
+bot**, y la dueña las cierra a mano una por una. Eso no es un incidente, es el producto sin terminar.
+`E09b` va pegada porque es un día de trabajo y devuelve al aire el único diferenciador que el proyecto
+tiene funcionando.
 
 **La más barata con más retorno:** `E56`. Una tarde, y deja de destruirse el dato que alimenta el
 único diferenciador que ningún competidor tiene.
