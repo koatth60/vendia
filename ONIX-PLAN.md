@@ -484,55 +484,47 @@ un reinicio en el medio.
 
 ---
 
-### E09 · El pedido lo crea el sistema, no la buena memoria del modelo
+### E09 · El pedido lo crea el sistema — **CERRADA el 2026-09-17** (commit `f408d6b`), desplegada
 
-**Quita:** al modelo, decidir si una venta cerrada se registra.
-**Porque:** medido el 2026-09-17 sobre 14 días de producción:
+**Quitó:** al modelo, decidir si una venta cerrada se registra.
 
-| | |
-|---|---|
-| Pedidos creados | **22** |
-| Turnos donde el agente llamó `close_conversation` | **2** |
-| Turnos donde llamó `show_order_summary` | 5 |
+**Lo medido, sobre 14 días de producción:** 22 pedidos creados, y el agente llamó `close_conversation`
+en **2** turnos. Las otras 20 las cerró la dueña a mano desde el panel. El caso completo es Carlos
+Mendoza (`cmu4e3q9l001ozi2ka2x1t1b1`, 19:27): `SaleState` con el ítem, checkout completo,
+Contraentrega, Bogotá, total $94.000, el cliente confirmando — y el bot mandó el texto de cierre
+copiado palabra por palabra de la plantilla de la Etapa 3 de `customInstructions`, sin llamar ninguna
+herramienta. **Copiar la plantilla no crea nada.**
 
-**El bot registra el 9 % de las ventas en las que participa. Las otras 20 las cerró la dueña a mano
-desde el panel.** No es un caso raro: es como funciona el producto hoy.
+**Resultó mucho más chica de lo estimado (M, no L), y el porqué vale para el resto del plan.** La
+maquinaria estaba entera desde la Fase 2 del plan viejo: reintento con `tool_choice`, fallback por
+código (`registerSaleFromServer`, que crea el pedido por el mismo camino que `close_conversation`) y
+escalación al dueño. Lo único que faltaba era **el disparador**: el único que existía era "hay una
+imagen del cliente sin atender", o sea el comprobante de pago. **Una venta contraentrega no tiene
+comprobante**, y contraentrega es la modalidad de la mayoría de las ventas de este negocio.
 
-El caso completo, conversación `cmu4e3q9l001ozi2ka2x1t1b1` (Carlos Mendoza, 2026-09-17 19:27). Todo
-estaba bien: `SaleState` con el ítem, `faltan: []`, `completo: true`, Contraentrega, `COD_ALL`, Bogotá,
-envío $9.000, total $94.000. El cliente confirmó. Y el bot mandó el cierre:
+Disparador nuevo, con las tres condiciones:
 
-> "¡Listo, Carlos! En total serían **$94.000** pesos a pagar contra entrega. Por favor estar pendiente
-> del cel que el mensajero se comunica contigo antes de la entrega, gracias por tu compra."
+- **Determinista:** `SaleState.checkout.completo` más la fecha del último mensaje del cliente. Dos
+  `SELECT`, ni una palabra leída.
+- **Verificable:** existe o no una fila `Order` para esta conversación.
+- **Con fallback sin modelo:** `registerSaleFromServer`, que ya corría para el otro caso.
 
-Ese texto es, palabra por palabra, la plantilla de cierre de la Etapa 3 de `customInstructions`. El
-modelo la copió. **Copiarla no crea nada.** La conversación quedó en `NEW`, sin `Order`, y el pedido
-no existe para el negocio. El turno anterior (19:27:03) además agotó sus 5 iteraciones
-(`remove_order_item, search_products, set_order_item, remove_order_item, show_order_summary`) sin
-llegar a cerrar.
+**El disparador invertido, que es la garantía de que no se registra nada de más:** el turno en el que
+el estado se completa **no registra nada**. Recién el siguiente, cuando el cliente volvió a escribir
+con el pedido ya armado delante. Así siempre le queda un mensaje entero para decir "esperate, no", y
+esa garantía no depende de leerle la respuesta: son dos fechas.
 
-Hoy esto solo lo detecta `VENTA_SIN_PEDIDO`, un regex sobre la prosa ya enviada. Es diagnóstico, no
-garantía — y en esta misma conversación ya había saltado el 2026-09-17 a las 05:17.
+**Verificación en producción antes de que escribiera nadie:** de **62** conversaciones abiertas de
+negocios conectados, el efecto dispara en **1** — la de Carlos. Cero colateral.
 
-**Se hace:** el cierre deja de ser texto que el modelo puede escribir.
+**De paso, el negocio sembrado dejó de mentir.** `catalog.json` no declaraba `settlement`, así que
+Prisma le ponía `PREPAID` por defecto y "Contraentrega" se comportaba como una transferencia, al revés
+que en producción. **Una venta contraentrega no se podía probar de punta a punta.** Las dos pruebas
+del comprobante ahora fijan una forma de pago prepaga explícita en vez de tomar "la primera activa".
 
-1. **El mensaje de cierre es un bloque fijo del servidor**, y el servidor solo lo emite **después** de
-   que `createOrder` devolvió una fila. Sin fila no hay bloque, y el modelo no tiene las cifras para
-   inventarlo (mismo mecanismo que ya usa el total).
-2. **Efecto requerido `ORDER_CREATED`.** Cumple las tres condiciones: disparador determinista
-   (`SaleState.checkout.completo === true` y el cliente confirmó con una llamada a herramienta, no con
-   prosa), verificable con una consulta (¿existe `Order` para esta conversación?), y con fallback sin
-   modelo — si el estado está completo y no hay fila, **el servidor crea el pedido él mismo** con
-   `resolveOrderItems`, que ya valida contra el catálogo y toma los precios de la base.
-3. El detector `VENTA_SIN_PEDIDO` se queda como métrica, nunca como reparación.
-
-**Se prueba:** fixture que reproduce el turno de Carlos: estado completo, cliente confirma, y al final
-del turno existe una fila `Order` con total 94.000 — la llame el modelo o no.
-**Prompt:** la sección "CIERRE" se reduce a una línea. **−15 líneas.** Y en `customInstructions` queda
-borrable la plantilla de cierre de la Etapa 3, que es la que el modelo copia.
-**Tamaño:** L. **Depende de:** nada. **Bandera:** sí — crea pedidos reales; sale en el piloto y se
-miran las primeras 48 h pedido por pedido.
-**Vuelta atrás:** apagar la bandera. Vuelve el cierre a mano, que es lo de hoy.
+**Lo que queda pendiente de esta etapa:** borrar la plantilla de cierre de la Etapa 3 de
+`customInstructions` —la que el modelo copia— y las líneas de la sección "CIERRE" del prompt base.
+Va cuando haya 48 h de pedidos creados bien, no antes: hoy esa plantilla es el respaldo.
 
 ---
 
@@ -1615,7 +1607,7 @@ hasta que la etapa que lo arregla lo ponga en verde de verdad.
 
 | Tema | Etapas |
 |---|---|
-| **Lo que más duele hoy** | `E01`–`E05c` hechas, falta desplegarlas; después `E06` |
+| **Lo que más duele hoy** | `E01`–`E05c` y `E09` desplegadas; sigue `E09b` |
 | **El bot dice cosas falsas** | `E09`, `E09b`, `E10`, `E11`, `E12`, `E13` |
 | **Respuestas duplicadas** | `E06`, `E07`, `E08` |
 | **Fechas y tiempos de entrega** | `E01` y `E05` hechas; queda `E35` |
@@ -1630,13 +1622,11 @@ hasta que la etapa que lo arregla lo ponga en verde de verdad.
 | **Observabilidad** | `E24`, `E25`, `E62`, `E63`, `E65` |
 | **Vender más** | `E68`, `E69`, `E70`, `E71`, `E72`, `E73` |
 
-**Lo siguiente, y cambió el 2026-09-17:** `E09` y `E09b`, en ese orden, antes que `E06`.
+**Lo siguiente:** `E09b` (que el bot lea la FAQ del negocio), y después `E06`.
 
-`E06` (`RESPUESTA_DUPLICADA`) sigue siendo el incidente más frecuente —41 de 95—, pero es una molestia:
-el cliente recibe dos mensajes. `E09` es otra cosa: **20 de cada 22 ventas no quedan registradas por el
-bot**, y la dueña las cierra a mano una por una. Eso no es un incidente, es el producto sin terminar.
-`E09b` va pegada porque es un día de trabajo y devuelve al aire el único diferenciador que el proyecto
-tiene funcionando.
+`E09` se cerró y se desplegó el 2026-09-17. `E06` (`RESPUESTA_DUPLICADA`) sigue siendo el incidente más
+frecuente —41 de 95—, pero es una molestia: el cliente recibe dos mensajes. `E09b` va antes porque es
+un día de trabajo y devuelve al aire el único diferenciador que el proyecto tiene funcionando.
 
 **La más barata con más retorno:** `E56`. Una tarde, y deja de destruirse el dato que alimenta el
 único diferenciador que ningún competidor tiene.
