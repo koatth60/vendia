@@ -5052,9 +5052,9 @@ function updateTotalUnreadBadge() {
 }
 
 function setRealtimeStatus(connected) {
-  ['realtime-indicator-conversations', 'realtime-indicator-orders'].forEach((id) => {
-    const el = document.getElementById(id);
-    if (!el) return;
+  // Todos los que haya, sin nombrarlos de a uno: antes la lista quedaba desactualizada cada vez que un
+  // indicador se movia de lugar, y el que quedaba afuera se congelaba en "Conectando…" para siempre.
+  document.querySelectorAll('.realtime-indicator').forEach((el) => {
     el.classList.toggle('is-connected', connected);
     el.classList.toggle('is-disconnected', !connected);
     const label = el.querySelector('.realtime-indicator-text');

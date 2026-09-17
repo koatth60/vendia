@@ -203,10 +203,13 @@
      sola linea y no dos pegadas. */
   .subnav {
     display: none; align-items: stretch; gap: 2px;
-    height: 46px; flex-shrink: 0; padding: 0 28px;
+    height: 38px; flex-shrink: 0; padding: 0 28px;
     border-bottom: 1px solid var(--onix-border-soft);
   }
   .subnav.active { display: flex; overflow-x: auto; }
+  /* El estado del tiempo real vive en esta fila, a la derecha, en vez de en una
+     franja propia debajo. */
+  .subnav .realtime-indicator { margin-left: auto; align-self: center; flex-shrink: 0; }
   .subnav .tab-btn {
     position: relative; height: 100%; padding: 0 12px;
     font-size: 13px; font-weight: 500; letter-spacing: -0.005em;
@@ -339,7 +342,7 @@
      centrar una columna angosta deja dos franjas muertas a los costados. */
   main {
     flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden;
-    padding: 26px 28px 40px;
+    padding: 18px 28px 40px;
   }
   main.wide { padding-bottom: 16px; }
 
@@ -349,12 +352,18 @@
   @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 
   .panel-header { display: flex; align-items: baseline; justify-content: space-between; margin: 4px 0 16px; gap: 12px; }
+  /* Bandeja no lleva franja de titulo. El titulo repetia el nombre de la pestana
+     que esta justo arriba y el subtitulo describia lo que el contenido ya
+     muestra; entre los dos se comian 66px en una pantalla donde el chat tiene
+     alto FIJO, asi que cada pixel de cromo es un pixel menos de conversacion.
+     El boton de volver, que era lo unico irreemplazable de esa franja, se mudo a
+     la fila de pestanas. */
   /* Solo existe para volver de Bandeja a Inicio a ancho de telefono (ver media
      query mas abajo) - en escritorio el sidebar ya hace ese trabajo. */
   /* .panel-header + clase (no solo la clase) para pesar mas que .btn-ghost -
      esa regla vive mas abajo en el archivo y con la misma especificidad
      hubiera ganado por venir después, mostrando la flecha en escritorio. */
-  .panel-header .inbox-back-btn { display: none; }
+  .subnav .inbox-back-btn { display: none; }
   .panel-title { font-size: 20px; font-weight: 800; letter-spacing: -0.01em; }
   .panel-subtitle { font-size: 13px; color: var(--muted); margin-top: 3px; }
   .section-title {
@@ -1173,9 +1182,11 @@
        switchTab) - no hace falta una clase nueva para esta parte. */
     body.no-scroll .sidebar,
     body.no-scroll .topbar,
-    body.no-scroll .subnav {
+    body.chat-fullscreen .subnav {
       display: none;
     }
+    /* Pegada arriba de la lista, sin el padding lateral del escritorio. */
+    body.no-scroll .subnav.active { padding: 0 12px; }
     body.no-scroll .app {
       height: 100%; overflow: hidden;
     }
@@ -1202,27 +1213,14 @@
        después: el hilo se quedaba a 611px con 240px de hueco muerto abajo. */
     body.no-scroll .chat-split { height: 100%; }
 
-    /* Chat abierto: el hilo ocupa la pantalla entera, como WhatsApp. Su propia
-       cabecera (‹ volver + nombre + estado) hace de barra superior, así que la
-       barra "Conversaciones" de arriba ya no hace falta - solo mientras el
-       hilo esta abierto, prendido/apagado por openCustomer()/closeConversation(). */
-    body.chat-fullscreen .tab-panel[data-tab-panel="conversations"] .panel-header {
-      display: none;
-    }
-
-    /* Volver de Bandeja a Inicio: con el sidebar escondido a este ancho, es la
-       única salida de esta pantalla. Mismo selector con .panel-header que la
-       regla que lo esconde en escritorio, para pesar mas que .btn-ghost. */
-    .panel-header .inbox-back-btn {
+    /* Volver de Bandeja a Inicio: con la barra lateral escondida a este ancho, es
+       la unica salida de esta pantalla. Vive en la fila de pestanas, que es la
+       unica franja de cromo que queda cuando la lista esta a la vista. */
+    .subnav .inbox-back-btn {
       display: inline-flex;
-      /* !important: a este ancho ".panel-header button{min-height:44px}" y
-         ".panel-header>div:first-child button{width:auto}" (mas abajo, para
-         cualquier botón junto al título) pesan mas que esta regla por los
-         :first-child/button que suman - sin esto el botón salía chico y
-         angosto (20x44) en vez del cuadrado que es. */
-      width: var(--onix-h-btn) !important; height: var(--onix-h-btn) !important;
-      min-height: var(--onix-h-btn) !important;
-      padding: 0; flex-shrink: 0;
+      width: 30px; height: 30px; min-height: 30px;
+      padding: 0; flex-shrink: 0; align-self: center;
+      margin-right: 2px;
     }
 
     /* "Cerrar venta" / "Tomar control": no entran como texto junto al nombre -

@@ -86,9 +86,17 @@
         <div class="bot-status"><span class="bot-status-dot"></span>Agente activo</div>
       </header>
       <div class="subnav" data-section-group="crm">
+        <!-- Solo se ve a ancho de telefono (media query en admin.css): con la barra lateral escondida
+             para que la Bandeja ocupe la pantalla, es la unica salida hacia las otras secciones. -->
+        <button type="button" class="btn-ghost inbox-back-btn" onclick="switchSection('inicio')" title="Volver" aria-label="Volver">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 5.5 7 12l7.5 6.5"></path></svg>
+        </button>
         <button class="tab-btn" data-tab="conversations" onclick="switchTab('conversations')">Bandeja</button>
         <button class="tab-btn" data-tab="customers" onclick="switchTab('customers')">Clientes</button>
         <button class="tab-btn" data-tab="orders" onclick="switchTab('orders')">Pedidos</button>
+        <!-- El estado del tiempo real es de la CONEXION, no de una pestana: valia igual en Bandeja y en
+             Pedidos, y estaba repetido en las dos. Aca se escribe una vez y se ve en las tres. -->
+        <div class="realtime-indicator" id="realtime-indicator-crm"><span class="realtime-dot"></span><span class="realtime-indicator-text">Conectando…</span></div>
       </div>
       <div class="subnav" data-section-group="bot">
         <button class="tab-btn" data-tab="business" onclick="switchTab('business')">Personalidad</button>
@@ -825,21 +833,6 @@
     </div>
 
     <div class="tab-panel" data-tab-panel="conversations">
-      <div class="panel-header">
-        <div style="display:flex; align-items:center; gap:8px;">
-          <!-- Solo se ve a ancho de telefono (media query en admin.css): con el
-               chrome principal escondido en esta pantalla, es la única forma de
-               volver a Inicio/Catálogo/Bot/Negocio. -->
-          <button type="button" class="btn-ghost inbox-back-btn" onclick="switchSection('inicio')" title="Volver" aria-label="Volver">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 5.5 7 12l7.5 6.5"></path></svg>
-          </button>
-          <div>
-            <div class="panel-title">Conversaciones</div>
-            <div class="panel-subtitle">Lo que tus clientes le están hablando al bot, en vivo.</div>
-          </div>
-        </div>
-        <div class="realtime-indicator" id="realtime-indicator-conversations"><span class="realtime-dot"></span><span class="realtime-indicator-text">Conectando…</span></div>
-      </div>
       <div class="card" style="padding:0; overflow:hidden;">
         <div class="chat-split" id="chat-split">
           <div class="chat-split-col">
@@ -1065,7 +1058,6 @@
           <div class="panel-title">Pedidos</div>
           <div class="panel-subtitle">Ventas cerradas con productos, cantidades y total, generadas automáticamente por el bot.</div>
         </div>
-        <div class="realtime-indicator" id="realtime-indicator-orders"><span class="realtime-dot"></span><span class="realtime-indicator-text">Conectando…</span></div>
       </div>
 
       <div class="order-subtabs">
