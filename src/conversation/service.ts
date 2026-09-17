@@ -199,24 +199,6 @@ async function summarizePreviousPurchase(businessId: string, customerId: string)
   return `Este cliente ya compro con nosotros el ${cuando}: ${productos || "un pedido"} por un total de ${order.totalAmount.toString()} ${order.currency}, y ese pedido ${estado}. No lo trates como un cliente nuevo ni le pidas de nuevo los datos que ya dio, y si escribe por ese pedido respondele sobre el.`;
 }
 
-// "Previous conversation" for the continue-or-restart prompt some businesses' own scripts ask for (e.g.
-// MAGByLizN's Etapa 1.3) = this customer's most recent CLOSED (SOLD/LOST) conversation, excluding
-// whichever conversation is currently open. getOrCreateOpenConversation already guarantees the open one
-// is never SOLD/LOST, so the status filter alone would already exclude it - the id exclusion is a
-// harmless defensive belt-and-suspenders in case that invariant ever changes, not load-bearing today.
-export async function getPreviousClosedConversation(businessId: string, customerId: string, excludeConversationId: string) {
-  return prisma.conversation.findFirst({
-    where: {
-      customerId,
-      customer: { businessId },
-      id: { not: excludeConversationId },
-      status: { in: ["SOLD", "LOST"] },
-    },
-    include: { order: true },
-    orderBy: { updatedAt: "desc" },
-  });
-}
-
 export async function recordMessage(
   businessId: string,
   conversationId: string,

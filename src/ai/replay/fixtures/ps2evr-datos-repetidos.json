@@ -119,19 +119,11 @@
       "customer": "los mismos datos de antes",
       "modelResponses": [
         {
-          "content": "Santiago, dejame reviso tu pedido anterior para tener los datos a mano 😊",
-          "toolCalls": [
-            {
-              "name": "get_previous_conversation",
-              "arguments": {}
-            }
-          ]
-        },
-        {
           "content": "Santiago, no me aparece un pedido anterior registrado con tus datos 🤔\n\n¿Me los puedes compartir de nuevo, por favor? Necesito:\n• Ciudad\n• Barrio\n• Dirección\n• Casa o Apartamento y piso\n• Celular de contacto\n\nAsí te calculo el envío y seguimos con tu AIRPODS MAX azul 😊",
           "toolCalls": []
         }
-      ]
+      ],
+      "note": "Turno grabado con una llamada a get_previous_conversation, herramienta borrada el 2026-09-17 (etapa E05b): lo que devolvia ya viaja en cada turno como dato del servidor. La llamada se saca de la grabacion y queda el mensaje que el bot mando despues, que es lo que este fixture documenta: le vuelve a pedir al cliente datos que ya habia dado. Ese defecto lo cierra E02."
     },
     {
       "customer": "Cliente Ejemplo\n00000000\n3000000000\nCiudad Ejemplo\nBarrio Ejemplo\nCalle 10 # 20-30\nCasa",

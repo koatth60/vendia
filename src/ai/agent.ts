@@ -840,7 +840,7 @@ export function stripMarkdownEmphasis(text: string): string {
 // imita el formato de los tool calls que ve en su propio contexto. MEDIA_TAG_STRIP_PATTERN no lo
 // agarra porque ese patron exige la palabra foto/video adentro del corchete, y aca el corchete lleva
 // el nombre tecnico de la herramienta.
-const TOOL_CALL_LEAK_PATTERN = /\[\s*(?:send_product_media|get_product_details|search_products|find_products_by_attributes|ask_owner(?:_about_photo)?|save_customer_(?:name|contact_info)|get_faq|get_payment_methods|get_shipping_[a-z_]+|show_order_summary|close_sale|update_conversation_status|flag_conversation_intent|cancel_order|get_previous_conversation|list_all_products)\b[^\]]*\]/gi;
+const TOOL_CALL_LEAK_PATTERN = /\[\s*(?:send_product_media|get_product_details|search_products|find_products_by_attributes|ask_owner(?:_about_photo)?|save_customer_(?:name|contact_info)|get_faq|get_payment_methods|get_shipping_[a-z_]+|show_order_summary|close_sale|update_conversation_status|flag_conversation_intent|cancel_order|list_all_products)\b[^\]]*\]/gi;
 
 // El estado interno del sistema no es asunto del cliente. Real (2026-09-15): a una clienta que acababa
 // de pagar y mandar el comprobante el bot le respondio "tu pedido aún no aparece registrado en el

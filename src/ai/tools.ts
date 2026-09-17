@@ -45,7 +45,6 @@ import {
   saveCustomerContactInfo,
   recordMessage,
   createPendingOwnerQuestion,
-  getPreviousClosedConversation,
   findOpenPendingOwnerQuestionsForConversation,
 } from "../conversation/service";
 import {
@@ -525,19 +524,6 @@ export const catalogTools: OpenAI.Chat.ChatCompletionTool[] = [
       name: "cancel_order",
       description:
         "Cancela el pedido mas reciente de este cliente, sea de esta conversacion o de otra. USA ESTA HERRAMIENTA SOLO despues de que el cliente ya confirmo explicitamente que si quiere cancelar (ver CANCELAR UN PEDIDO en tus instrucciones) - nunca en el mismo turno en que recien lo pide. Si el pedido ya fue enviado, esta herramienta lo va a rechazar.",
-      parameters: {
-        type: "object",
-        properties: {},
-        required: [],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "get_previous_conversation",
-      description:
-        "Busca si este cliente tiene una conversacion anterior con este negocio que ya haya sido cerrada (vendida o perdida). Usa esto SOLO si las instrucciones de este negocio piden preguntar si el cliente quiere continuar una conversacion anterior o empezar una nueva - no la llames si el negocio no lo pide.",
       parameters: {
         type: "object",
         properties: {},
@@ -2073,21 +2059,6 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
       }
 
       return { canceled: true };
-    }
-    case "get_previous_conversation": {
-      const previous = await getPreviousClosedConversation(businessId, context.customerId, context.conversationId);
-      if (!previous) {
-        return {
-          found: false,
-          note: "Este cliente no tiene ninguna conversacion anterior cerrada. Tratalo como una conversacion nueva sin preguntar nada al respecto.",
-        };
-      }
-      return {
-        found: true,
-        outcome: previous.status,
-        summary: previous.contextSummary || previous.pendingOrderSummary || previous.order?.summary || "No hay un resumen guardado de esa conversacion.",
-        updatedAt: previous.updatedAt,
-      };
     }
     default:
       return { error: `Unknown tool: ${name}` };
