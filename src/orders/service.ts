@@ -1,5 +1,6 @@
 import { prisma } from "../db/client";
-import type { OrderFulfillmentStatus } from "@prisma/client";
+import type { OrderFulfillmentStatus, ShippingPaymentModality } from "@prisma/client";
+import { montoACobrarAlEntregar } from "./paymentTiming";
 import { findConfidentProductMatch, getProductById } from "../catalog/products";
 import { canonicalColors } from "../catalog/attributeTaxonomy";
 import { normalizeForMatch, escapeForRegExp } from "../search/text";
@@ -201,11 +202,19 @@ export async function createOrder(params: {
   shippingAddress?: string | null;
   paymentMethodLabel?: string | null;
   shippingCost?: number | null;
+  /** Ver src/orders/paymentTiming.ts: cuando se paga este pedido. Null = no se pudo resolver sin adivinar. */
+  shippingModality?: ShippingPaymentModality | null;
 }) {
   const { businessId, customerId, conversationId, summary, items, shippingAddress, paymentMethodLabel, shippingCost } = params;
   const currency = items[0]?.currency ?? "COP";
   const itemsTotal = items.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
   const totalAmount = itemsTotal + (shippingCost || 0);
+  // Lo que el mensajero tiene que cobrar. Se guarda calculado y no derivado al leer: el precio de un
+  // producto puede cambiar manana, y lo que se acordo en este pedido no.
+  const amountOnDelivery = montoACobrarAlEntregar(params.shippingModality ?? null, {
+    itemsTotal,
+    shippingCost: shippingCost || 0,
+  });
 
   // Stock was never decremented on a sale - a business could sell more units than it had in the
   // catalog and never find out until it physically ran out. Decrement in the same transaction as the
@@ -222,6 +231,8 @@ export async function createOrder(params: {
         paymentMethodLabel: paymentMethodLabel || null,
         shippingCost: shippingCost || null,
         totalAmount,
+        shippingModality: params.shippingModality ?? null,
+        amountOnDelivery,
         currency,
         items: {
           create: items.map((item) => ({

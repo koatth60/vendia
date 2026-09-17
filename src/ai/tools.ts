@@ -18,6 +18,7 @@ import {
 } from "./fixedBlockMarkers";
 import { listActivePaymentMethods, requiresPaymentConfirmation, resolveConfiguredPaymentMethod } from "../catalog/paymentMethods";
 import { faltaComprobanteDePago, FALTA_COMPROBANTE_NOTE } from "../orders/paymentProof";
+import { resolverModalidadDelPedido } from "../orders/paymentTiming";
 import { listShippingRates, resolveShippingRateForCity } from "../catalog/shippingRates";
 import { recordAgentIncident } from "./incidents";
 import { getSaleGate } from "./configHealth";
@@ -491,6 +492,12 @@ export const catalogTools: OpenAI.Chat.ChatCompletionTool[] = [
             description:
               "SOLO para outcome=SOLD: costo de envio confirmado al cliente (0 si gratis/no aplica). El total del pedido = precio(s) + este valor, asi que si cobraste o mencionaste envio, incluilo para que el total registrado sea el real.",
           },
+          shippingModality: {
+            type: "string",
+            enum: ["PREPAID_ALL", "PREPAID_PRODUCT_COD_SHIPPING", "COD_ALL"],
+            description:
+              "SOLO para outcome=SOLD: cuando paga el cliente, con el code exacto que devolvio get_shipping_payment_modalities para su ciudad. De aca sale cuanto tiene que cobrar el mensajero al entregar. Si mandas una que no aplica en esa zona se descarta y el sistema la resuelve solo.",
+          },
         },
         required: ["outcome"],
       },
@@ -824,6 +831,7 @@ const TOOL_INPUT_SCHEMAS: Record<string, z.ZodTypeAny> = {
     paymentMethodId: SCALAR_INPUT.optional(),
     paymentMethodLabel: SCALAR_INPUT.optional(),
     shippingCost: SCALAR_INPUT.optional(),
+    shippingModality: SCALAR_INPUT.optional(),
     items: z.array(ORDER_ITEM_INPUT).optional(),
   }),
   set_order_item: z.object({
@@ -1870,6 +1878,18 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
           };
         }
 
+        // CUANDO SE PAGA ESTE PEDIDO (2026-09-17, fase 3). Se resuelve con datos - la modalidad declarada
+        // validada contra las de la zona, el settlement del metodo elegido, o la unica modalidad posible -
+        // y si ninguna de las tres alcanza queda null, que es lo honesto. De ahi sale el monto que el
+        // mensajero tiene que cobrar, guardado en el pedido y no deducido despues releyendo el chat.
+        const shippingModality = await resolverModalidadDelPedido(businessId, {
+          declarada: typeof input.shippingModality === "string" ? input.shippingModality : saleState?.shippingModality,
+          cobraAlRecibir: !debeConfirmar,
+          // La ciudad que el SERVIDOR resolvio contra sus propias reglas al calcular el envio, no la que
+          // el modelo escriba ahora: ver recordShippingCity en get_shipping_rate_for_city.
+          city: (await getServerSaleEvidence(context.conversationId))?.shippingCity ?? null,
+        });
+
         const order = await createOrder({
           businessId,
           customerId: context.customerId,
@@ -1879,8 +1899,32 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
           shippingAddress,
           paymentMethodLabel,
           shippingCost,
+          shippingModality,
         });
         await askForCsat(context.credentials, order.id, context.recipientPhone);
+
+        // AVISO DE VENTA SIN PAGO PREVIO (2026-09-17). El camino con pago por adelantado ya le escribe al
+        // dueno ("¿te llego el pago?"); este no le escribia nada, asi que una venta contraentrega ocurria
+        // y el dueno solo se enteraba si entraba al panel. Y es justo la venta en la que tiene algo que
+        // hacer: decirle al mensajero cuanto cobrar.
+        const negocioDelAviso = await prisma.business.findUnique({
+          where: { id: businessId },
+          select: { contactPhone: true, contactName: true },
+        });
+        if (negocioDelAviso?.contactPhone) {
+          const cobrar = order.amountOnDelivery === null ? null : Number(order.amountOnDelivery);
+          const alerta = [
+            `${negocioDelAviso.contactName ? `Hola ${negocioDelAviso.contactName}` : "Hola"}, nueva venta de ${await describeCustomer(context.customerId, context.recipientPhone)}:`,
+            summary || "Sin resumen registrado.",
+            cobrar === null
+              ? "No quedo registrado cuanto hay que cobrar al entregar - revisalo en el panel."
+              : `Cobrar al entregar: $${formatPrice(cobrar, order.currency, (await getBusinessLocale(businessId)).locale)}`,
+          ].join("\n\n");
+          const aviso = await sendAlertToOwner(businessId, context.credentials, negocioDelAviso.contactPhone, alerta);
+          if (!aviso.delivered) {
+            console.error("No se pudo avisarle al dueno de la venta sin pago previo (no bloqueante):", aviso.failure?.message);
+          }
+        }
       }
 
       // La venta de esta conversacion termino (vendida o perdida) - SaleState ya se volco a Order (o no

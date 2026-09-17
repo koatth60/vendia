@@ -248,10 +248,17 @@ test("con SaleState prendido y sin set_payment_method, contraentrega NO le pide 
   });
   const context = await freshContext();
   const originalFetch = globalThis.fetch;
-  let avisosAlDueno = 0;
+  // Todo lo que sale hacia el dueno, sea texto, plantilla o botones: la pregunta de confirmacion y el
+  // aviso de la venta viajan por caminos distintos segun la ventana de 24h, asi que se miran los dos.
+  let preguntasDeConfirmacion = 0;
+  const textosAlDueno: string[] = [];
   globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
     const body = JSON.parse(String(init?.body ?? "{}"));
-    if (body.type === "interactive" || body.type === "template") avisosAlDueno++;
+    if (body.type === "interactive") preguntasDeConfirmacion++;
+    if (typeof body?.text?.body === "string") textosAlDueno.push(body.text.body);
+    for (const c of body?.template?.components ?? []) {
+      for (const par of c?.parameters ?? []) if (typeof par?.text === "string") textosAlDueno.push(par.text);
+    }
     return { ok: true, json: async () => ({ messages: [{ id: `wamid.${randomUUID()}` }] }) } as Response;
   }) as typeof fetch;
 
@@ -266,7 +273,18 @@ test("con SaleState prendido y sin set_payment_method, contraentrega NO le pide 
 
     assert.equal(result.pending, undefined, "contraentrega no tiene pago que verificar");
     assert.equal(result.closed, true, "el pedido se cierra solo, sin despertar a nadie");
-    assert.equal(avisosAlDueno, 0, "cero avisos al dueno");
+    assert.equal(preguntasDeConfirmacion, 0, "cero preguntas de confirmacion: no hay ningun pago que verificar");
+    assert.ok(
+      !textosAlDueno.some((t) => t.toLowerCase().includes("llego el pago")),
+      `no se le pregunta por un pago que se cobra al entregar; salio: ${JSON.stringify(textosAlDueno)}`
+    );
+    // Fase 3 (2026-09-17): lo que si le llega es el aviso de la venta, con lo que el mensajero tiene que
+    // cobrar. Antes de esta fase una venta contraentrega no le avisaba nada al dueno y se enteraba solo
+    // si entraba al panel - justo la venta en la que tiene algo que hacer.
+    assert.ok(
+      textosAlDueno.some((t) => t.includes("Cobrar al entregar")),
+      `el aviso de la venta tiene que decir cuanto cobrar; salio: ${JSON.stringify(textosAlDueno)}`
+    );
     assert.equal(await prisma.order.count({ where: { conversationId: context.conversationId } }), 1);
 
     const conversacion = await prisma.conversation.findUniqueOrThrow({ where: { id: context.conversationId } });

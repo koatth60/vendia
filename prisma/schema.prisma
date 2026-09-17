@@ -319,6 +319,17 @@ model Order {
   paymentMethodLabel String?
   shippingCost       Decimal?               @db.Decimal(12, 2)
   totalAmount        Decimal                @db.Decimal(12, 2)
+  // COMO SE PAGA ESTE PEDIDO (2026-09-17). Hasta hoy el pedido guardaba el total y con que metodo, pero
+  // no CUANDO se paga, asi que "¿cuanto le cobro al mensajero?" solo se podia responder releyendo el
+  // chat. Es la pregunta que el dueno se hace en cada despacho.
+  //
+  // `shippingModality` es la que eligio el cliente; null cuando el negocio no usa el concepto o cuando
+  // no se pudo resolver sin adivinar. `amountOnDelivery` es lo que hay que cobrar al entregar, en la
+  // misma moneda del pedido: 0 si ya esta todo pagado, el envio si solo falta el flete, el total si es
+  // contraentrega completa. Null significa "no lo sabemos", que NO es lo mismo que cero - y por eso son
+  // dos columnas y no un booleano.
+  shippingModality   ShippingPaymentModality?
+  amountOnDelivery   Decimal?               @db.Decimal(12, 2)
   currency           String
   csatRating         Int?
   csatAskedAt        DateTime?

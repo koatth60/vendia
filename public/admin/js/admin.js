@@ -4390,6 +4390,13 @@ function orderCardTop(o, actionsHtml = '') {
   const meta = [
     o.shippingAddress ? orderMetaItem('address', o.shippingAddress) : '',
     o.paymentMethodLabel ? orderMetaItem('payment', o.paymentMethodLabel) : '',
+    // Lo que el mensajero tiene que cobrar. `null` no es cero: significa que no quedo resuelto al
+    // cerrar la venta, y decirle "cobrar $0" a alguien por eso seria regalar el pedido.
+    o.amountOnDelivery !== null && o.amountOnDelivery !== undefined
+      ? orderMetaItem('payment', Number(o.amountOnDelivery) > 0
+          ? `Cobrar al entregar: ${formatMoney(o.amountOnDelivery, o.currency)}`
+          : 'Ya está pagado, no cobrar al entregar')
+      : '',
     o.customer.idNumber ? orderMetaItem('id', `Cédula ${o.customer.idNumber}`) : '',
     o.customer.deliveryPhone ? orderMetaItem('phone', o.customer.deliveryPhone) : '',
   ].join('');
