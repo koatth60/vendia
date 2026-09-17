@@ -1103,13 +1103,13 @@ export async function generateReply(
               // que una pregunta sobre una caracteristica que quedo afuera la contesta con el dato real.
               catalogBlocks.map((b) => b.modelText).join("\n---\n") +
               (catalogMediaProductIds().length > 0 ? `\n\nLas fotos de ese producto tambien salen solas, en este mismo turno.` : "") +
-              // La marca es una OFERTA, no un requisito: ponerla hace que el turno salga en un solo
-              // mensaje, y no ponerla deja exactamente el comportamiento anterior. Por eso se le puede
-              // decir, sin riesgo, que el texto sale igual - es cierto, y saberlo le quita la tentacion
-              // de escribir la lista de memoria por las dudas.
-              (catalogMarkerOffered
-                ? `\n\nPone ${CATALOG_BLOCK_MARKER} en su propia linea, adentro de tu mensaje, donde quieras que ese texto aparezca: asi al cliente le llega uno solo. Si no la pones, ese texto sale igual, en un mensaje aparte. No repitas la lista, ni nombres, ni precios, ni stock`
-                : `\n\nEscribi UNA sola frase corta de introduccion y nada mas. No repitas la lista, ni nombres, ni precios, ni stock`) +
+              // Lo que se le pide es lo mismo en los dos casos: una frase de introduccion. Donde va el
+              // bloque dejo de ser asunto suyo - con un solo bloque el servidor lo pega adentro de su
+              // mensaje (ver finalizeTurn), y con varios salen aparte. La instruccion de la marca que
+              // vivia aca se borro el 2026-09-17: el servidor se llevo ese trabajo, la directiva sobra.
+              `
+
+Escribi UNA sola frase corta de introduccion y nada mas. No repitas la lista, ni nombres, ni precios, ni stock` +
               (catalogMediaProductIds().length > 0
                 ? `, y no ofrezcas ni prometas fotos: ya van.`
                 : `. Si el cliente quiere fotos, el mensaje del sistema ya se las ofrece.`),
@@ -1216,10 +1216,34 @@ Este pedido YA ESTA CERRADO: no es el pedido en curso. Si el cliente pregunta po
       // esto el cliente recibia la ficha entera dos veces (2026-09-16, conversacion
       // cmu4e3q9l001ozi2ka2x1t1b1: seis mensajes para un "3").
       text = stripLinesAlreadyInBlocks(text, catalogBlocks);
-      catalogInlined = catalogMarkerOffered && text.includes(CATALOG_BLOCK_MARKER);
-      // Sin marca ofrecida, una marca escrita igual no tiene bloque que la respalde en esa posicion: se
-      // borra en silencio, como hasta ahora. No es un bloque fijo sin datos, asi que no es un incidente.
-      if (!catalogInlined) text = text.split(CATALOG_BLOCK_MARKER).join("").trim();
+      // UN SOLO MENSAJE, Y NO DEPENDE DEL MODELO (2026-09-17).
+      //
+      // La marca era una OFERTA: si el modelo la ponia, el bloque entraba adentro de su mensaje; si no,
+      // salia aparte y al cliente le llegaban dos. Medido en produccion sobre 7 dias: de 18 turnos de
+      // lista, la puso en 2. El 89% de las veces el cliente recibia la frase por un lado y la lista por
+      // otro, y cuando la frase decia "aqui te dejo estos" seguida de nada, se leia rota.
+      //
+      // Pedirselo mejor no es una opcion: es la misma clase de dependencia que venimos sacando. Con UN
+      // solo bloque el servidor arma el mensaje entero - en la posicion que el modelo eligio si puso la
+      // marca, y al final de su frase si no la puso. Nunca se le pide cooperacion para algo que se puede
+      // hacer con una concatenacion.
+      //
+      // Sigue siendo solo para UN bloque: con varios (el catalogo completo, un mensaje por categoria)
+      // meterlos todos en un mensaje devolveria la guillotina de 700 caracteres que el corte por
+      // categoria vino a reemplazar.
+      if (catalogMarkerOffered) {
+        catalogInlined = true;
+        if (!text.includes(CATALOG_BLOCK_MARKER)) {
+          const frase = text.trim();
+          text = frase ? `${frase}
+
+${CATALOG_BLOCK_MARKER}` : CATALOG_BLOCK_MARKER;
+        }
+      } else {
+        // Sin bloque unico no hay nada que insertar: una marca escrita igual se borra en silencio, como
+        // hasta ahora. No es un bloque fijo sin datos, asi que no es un incidente.
+        text = text.split(CATALOG_BLOCK_MARKER).join("").trim();
+      }
     }
 
     // Etapa 1 del estado de pedido: se calcula y se registra, NO se usa. Sirve para comparar durante unos

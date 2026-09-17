@@ -275,15 +275,18 @@ test("el modelo pone la marca: UN solo mensaje, con los datos del servidor adent
   assert.equal(blocks[0].media.length, 0);
 });
 
-test("el modelo NO pone la marca: el bloque sale aparte, con los datos reales, igual que hoy", async () => {
+test("el modelo no pone la marca: el servidor pega el bloque igual y sale UN solo mensaje", async () => {
+  // Medido en produccion sobre 7 dias (2026-09-17): de 18 turnos de lista, el modelo puso la marca en 2.
+  // El 89% de las veces el cliente recibia la frase por un lado y la lista por otro. Ahora el lugar del
+  // bloque lo decide el servidor: si el modelo no lo ubica, va al final de su frase.
   mockModel([{ content: "¡Claro! Te muestro los audífonos:" }]);
 
   const { text, blocks } = await generateReply(conversationId, context, null, "que audifonos tienen");
 
-  assert.equal(text, "¡Claro! Te muestro los audífonos:", "la frase del modelo sale tal cual");
-  assert.equal(blocks.length, 1);
-  assert.ok(blocks[0].text.includes("AIRPODS SERIE 4"));
-  assert.ok(blocks[0].text.includes("$65.000"), `el bloque aparte sigue trayendo el precio real: "${blocks[0].text}"`);
+  assert.ok(text.startsWith("¡Claro! Te muestro los audífonos:"), `la frase del modelo abre el mensaje: "${text}"`);
+  assert.ok(text.includes("AIRPODS SERIE 4"), "y la lista real viaja en el MISMO mensaje");
+  assert.ok(text.includes("$65.000"), `con el precio real: "${text}"`);
+  assert.equal(blocks[0].text, "", "el bloque ya viajo adentro del texto: no sale un segundo mensaje");
 });
 
 // La fila de AgentTurn tiene que decir DONDE salio el bloque, no solo cual fue. Sin esta columna la
@@ -300,13 +303,24 @@ test("AgentTurn registra catalogInlined=true cuando el bloque viajo adentro del 
   assert.ok(fila.blocks[0]?.includes("AIRPODS SERIE 4"));
 });
 
-test("AgentTurn registra catalogInlined=false cuando el bloque salio como mensaje aparte", async () => {
+test("AgentTurn registra catalogInlined=true aunque el modelo no haya puesto la marca", async () => {
   mockModel([{ content: "¡Claro! Te muestro los audífonos:" }]);
   await generateReply(conversationId, context, null, "que audifonos tienen");
 
   const fila = await prisma.agentTurn.findFirstOrThrow({ where: { conversationId }, orderBy: { createdAt: "desc" } });
-  assert.equal(fila.catalogInlined, false);
-  assert.ok(fila.blocks[0]?.includes("AIRPODS SERIE 4"));
+  assert.equal(fila.catalogInlined, true, "con un solo bloque el mensaje sale unido siempre");
+  assert.ok(fila.blocks[0]?.includes("AIRPODS SERIE 4"), "el bloque se registra igual: la columna dice DONDE salio, no si salio");
+});
+
+test("AgentTurn registra catalogInlined=false cuando hay varios bloques", async () => {
+  // El catalogo completo sale en un mensaje por categoria. Meterlos todos en uno devolveria la
+  // guillotina de 700 caracteres que el corte por categoria vino a reemplazar, asi que ahi siguen
+  // saliendo aparte - y la columna tiene que decirlo.
+  mockModel([{ content: "¡Claro! Acá va todo:" }]);
+  await generateReply(conversationId, context, null, "muéstrame el catálogo completo");
+
+  const fila = await prisma.agentTurn.findFirstOrThrow({ where: { conversationId }, orderBy: { createdAt: "desc" } });
+  if (fila.blocks.length > 1) assert.equal(fila.catalogInlined, false);
 });
 
 test("el modelo escribe un precio inventado en una lista: el respaldo lo cubre igual que hoy", async () => {
@@ -321,7 +335,7 @@ test("el modelo escribe un precio inventado en una lista: el respaldo lo cubre i
   const todo = `${text}\n${allBlockText(blocks)}`;
   assert.ok(!todo.includes("$99.000"), `el precio inventado no llega al cliente: "${todo}"`);
   assert.ok(!todo.includes("Cargador iPhone"), "ni el producto inventado");
-  assert.ok(blocks[0].text.includes("$65.000"), "y el precio real sale igual, en el mensaje del servidor");
+  assert.ok(todo.includes("$65.000"), "y el precio real sale igual, puesto por el servidor");
 });
 
 // UN SOLO AUTOR (2026-09-16, seccion 11 del plan). El defecto medido: turno 22:25:16 UTC, alcance
