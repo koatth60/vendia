@@ -19,6 +19,9 @@ import {
   markAsReadWithTypingIndicator,
   sendImageMessage,
   sendInteractiveButtonsMessage,
+  sendInteractiveListMessage,
+  LIST_MAX_ROWS,
+  type InteractiveListSection,
   sendOwnerAlert,
   sendTemplateMessage,
   sendTextMessage,
@@ -241,6 +244,7 @@ export type OutboundContent =
   | { kind: "image"; url: string; caption?: string }
   | { kind: "video"; url: string; caption?: string }
   | { kind: "buttons"; text: string; buttons: { id: string; title: string }[] }
+  | { kind: "list"; text: string; buttonText: string; sections: InteractiveListSection[] }
   | { kind: "template"; name: string; language: string; params?: string[] };
 
 // Una plantilla aprobada es el unico contenido que Meta entrega con la ventana cerrada; todo lo demas
@@ -257,6 +261,8 @@ function dispatch(credentials: WhatsappCredentials, to: string, content: Outboun
       return sendImageMessage(credentials, to, content.url, content.caption);
     case "video":
       return sendVideoMessage(credentials, to, content.url, content.caption);
+    case "list":
+      return sendInteractiveListMessage(credentials, to, content.text, content.buttonText, content.sections);
     case "buttons":
       return sendInteractiveButtonsMessage(credentials, to, content.text, content.buttons);
     case "template":
@@ -714,3 +720,9 @@ export async function drainOutboundQueue(
   }
   return tally;
 }
+
+// Regla del repositorio: nada fuera de este archivo importa src/whatsapp/client.ts (ver el test de
+// arquitectura). El limite de filas de Meta lo necesita quien ARMA la lista, no solo quien la manda, asi
+// que se re-exporta por la misma puerta que todo lo demas.
+export { LIST_MAX_ROWS };
+export type { InteractiveListSection };

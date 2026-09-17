@@ -30,6 +30,15 @@ export interface CatalogBlock {
   media: CatalogBlockMedia[];
   /** Ids de producto que este bloque nombra, en el orden en que aparecen numerados. */
   productIds: string[];
+  /**
+   * Las mismas opciones de este bloque, listas para una lista interactiva de WhatsApp: el cliente toca una
+   * fila y vuelve el id del producto, sin que nadie tenga que leer "el 5" de su prosa. Solo las llevan los
+   * bloques de LISTA (group/all); una ficha de producto no es una eleccion.
+   *
+   * Que se use o no lo decide el llamador (ver Business.interactiveListsEnabled): el texto numerado sigue
+   * existiendo y es lo que sale cuando la lista interactiva no aplica.
+   */
+  rows?: { id: string; title: string; description: string }[];
 }
 
 export interface RenderCatalogOptions {
@@ -243,7 +252,19 @@ function renderNumberedGroup(
       (product, i) => `${startNumber + offset + i}. *${product.name}* — ${priceLine(product, opts)}${stockSuffix(totalStock(product))}`
     );
     const text = heading && offset === 0 ? `*${heading}*\n${lines.join("\n")}` : lines.join("\n");
-    blocks.push({ text, modelText: text, media: [], productIds: chunk.map((p) => p.id) });
+    blocks.push({
+      text,
+      modelText: text,
+      media: [],
+      productIds: chunk.map((p) => p.id),
+      // El titulo de fila lo recorta el cliente de WhatsApp (24 caracteres, limite de Meta); el precio y
+      // el stock van en la descripcion, que admite 72.
+      rows: chunk.map((product) => ({
+        id: product.id,
+        title: product.name,
+        description: `${priceLine(product, opts)}${stockSuffix(totalStock(product))}`.trim(),
+      })),
+    });
   }
   return blocks;
 }

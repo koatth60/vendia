@@ -1,4 +1,4 @@
-import { sendToCustomer, type WhatsappCredentials } from "./outbound";
+import { sendToCustomer, LIST_MAX_ROWS, type WhatsappCredentials } from "./outbound";
 import { sendMediaWithSpacing } from "./productMedia";
 import { recordMediaSent } from "../orders/saleState";
 import { prisma } from "../db/client";
@@ -24,6 +24,20 @@ export interface SendCatalogBlocksArgs {
   credentials: WhatsappCredentials;
   to: string;
   blocks: CatalogBlock[];
+  /** Business.interactiveListsEnabled. Ver por que es una bandera en el esquema. */
+  interactiveLists?: boolean;
+}
+
+// Cuando un bloque de lista puede salir como lista TOCABLE de WhatsApp. Meta admite 10 filas en total,
+// asi que una categoria mas larga que eso sigue saliendo como texto numerado: partir la eleccion en dos
+// listas seria peor que la lista numerada que ya funciona.
+//
+// El texto del bloque igual se manda: es lo que queda en el historial y lo que ve quien abre la
+// conversacion en el panel. La lista es la forma de ELEGIR, no un reemplazo del contenido.
+function listableRows(block: CatalogBlock): NonNullable<CatalogBlock["rows"]> | null {
+  const rows = block.rows ?? [];
+  if (rows.length < 2 || rows.length > LIST_MAX_ROWS) return null;
+  return rows;
 }
 
 /**
@@ -42,7 +56,8 @@ export async function sendCatalogBlocks(args: SendCatalogBlocksArgs): Promise<vo
   for (let i = 0; i < blocks.length; i++) {
     if (i > 0) await sleep(BLOCK_GAP_MS);
     const block = blocks[i];
-    if (block.text.trim()) {
+    const rows = args.interactiveLists ? listableRows(block) : null;
+    if (block.text.trim() && !rows) {
       await sendToCustomer({
         businessId,
         conversationId,
@@ -51,6 +66,29 @@ export async function sendCatalogBlocks(args: SendCatalogBlocksArgs): Promise<vo
         content: { kind: "text", text: block.text },
         recordAs: { text: block.text },
       });
+    } else if (rows) {
+      // El cuerpo de la lista NO repite los productos: eso ya son las filas. Si Meta rechaza la lista
+      // (formato, version del cliente), se cae al texto numerado - el cliente nunca se queda sin la
+      // informacion por un problema de formato.
+      const sent = await sendToCustomer({
+        businessId,
+        conversationId,
+        credentials,
+        to,
+        content: { kind: "list", text: block.text, buttonText: "Ver opciones", sections: [{ title: "Opciones", rows }] },
+        recordAs: { text: block.text },
+      });
+      if (!sent.delivered) {
+        console.error("La lista interactiva no salio, se manda el texto numerado:", sent.failure?.message);
+        await sendToCustomer({
+          businessId,
+          conversationId,
+          credentials,
+          to,
+          content: { kind: "text", text: block.text },
+          recordAs: { text: block.text },
+        });
+      }
     }
 
     for (const media of block.media) {

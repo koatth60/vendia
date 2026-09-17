@@ -44,6 +44,7 @@ businessRouter.put("/api/business", requireOwner, async (req, res) => {
     offerPhotosBeforeSending,
     requirePaymentProof,
     requiredEffectsEnabled,
+    interactiveListsEnabled,
     businessCategory,
     contactPhone,
     contactName,
@@ -92,6 +93,7 @@ businessRouter.put("/api/business", requireOwner, async (req, res) => {
       // PUT viejo (o un formulario parcial) no apague la bandera sin querer - mismo patron que
       // genderedAddressEnabled abajo, no el Boolean() directo de los tres de arriba.
       requiredEffectsEnabled: requiredEffectsEnabled !== undefined ? Boolean(requiredEffectsEnabled) : undefined,
+      interactiveListsEnabled: interactiveListsEnabled !== undefined ? Boolean(interactiveListsEnabled) : undefined,
       businessCategory: businessCategory || null,
       contactPhone,
       contactName,

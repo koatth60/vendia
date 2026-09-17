@@ -154,6 +154,66 @@ export async function sendInteractiveButtonsMessage(
   return result.messages?.[0]?.id ?? "";
 }
 
+// LISTA INTERACTIVA. La eleccion vuelve como `interactive.list_reply.id`, o sea el id del producto tal
+// cual lo mando el servidor: elegir de una lista deja de pasar por la prosa del cliente y por el
+// resolvedor de texto. Es la unica forma de que "el 5" no pueda volver a resolver a un producto que
+// tiene un 5 en el nombre.
+//
+// Limites de Meta, y no son negociables: 10 filas EN TOTAL (sumando todas las secciones), titulo de fila
+// 24 caracteres, descripcion 72, texto del boton 20, titulo de seccion 24. Meta rechaza el mensaje
+// entero si alguno se pasa, asi que el recorte va aca y no en el llamador.
+export const LIST_MAX_ROWS = 10;
+const LIST_ROW_TITLE_MAX = 24;
+const LIST_ROW_DESCRIPTION_MAX = 72;
+const LIST_BUTTON_MAX = 20;
+const LIST_SECTION_TITLE_MAX = 24;
+
+export interface InteractiveListRow {
+  id: string;
+  title: string;
+  description?: string;
+}
+
+export interface InteractiveListSection {
+  title: string;
+  rows: InteractiveListRow[];
+}
+
+function cut(text: string, max: number): string {
+  const clean = text.replace(/\s+/g, " ").trim();
+  return clean.length <= max ? clean : `${clean.slice(0, max - 1).trimEnd()}…`;
+}
+
+export async function sendInteractiveListMessage(
+  credentials: WhatsappCredentials,
+  to: string,
+  bodyText: string,
+  buttonText: string,
+  sections: InteractiveListSection[]
+): Promise<string> {
+  const result = (await callGraphApi(credentials, {
+    messaging_product: "whatsapp",
+    ...recipientField(to),
+    type: "interactive",
+    interactive: {
+      type: "list",
+      body: { text: bodyText },
+      action: {
+        button: cut(buttonText, LIST_BUTTON_MAX),
+        sections: sections.map((section) => ({
+          title: cut(section.title, LIST_SECTION_TITLE_MAX),
+          rows: section.rows.map((row) => ({
+            id: row.id,
+            title: cut(row.title, LIST_ROW_TITLE_MAX),
+            ...(row.description ? { description: cut(row.description, LIST_ROW_DESCRIPTION_MAX) } : {}),
+          })),
+        })),
+      },
+    },
+  })) as { messages?: { id: string }[] };
+  return result.messages?.[0]?.id ?? "";
+}
+
 export interface ApprovedTemplate {
   name: string;
   language: string;
