@@ -12,7 +12,9 @@ Escrito el 2026-09-17, con los números de producción de ese día delante.
 
 ## Cómo se usa
 
-El trabajo está partido en **75 etapas numeradas `E01` a `E75`**, en el orden recomendado.
+El trabajo está partido en **etapas numeradas `E01` a `E75`**, en el orden recomendado. Las cinco
+primeras están **cerradas** (2026-09-17) y aparecen agrupadas al principio; `E05b` y `E05c` salieron de
+ellas y esperan tu visto bueno.
 
 **Cada etapa entra sola a producción y deja el sistema funcionando.** Esa es la regla que ordenó
 todo lo demás: si un trabajo no cabía en una etapa que se pueda desplegar sola, se partió hasta que
@@ -354,107 +356,72 @@ este bloque necesita nada del resto del plan.
 
 ---
 
-### E01 · El turno lleva reloj — **HECHO, sin desplegar**
+### E01–E05 · **CERRADAS el 2026-09-17** (commits `1d6bf28`, `de7b3b4`) — sin desplegar
 
-**Quita:** al modelo, qué día y qué hora es.
-**Porque:** medido el 2026-09-17 (conversación `cmu4wsaqb00blq92k2jgfjsgy`): la dueña escribió
-"mañana mismo se te despacha" a las 21:28 del 16, y a las 10:33 del 17 el bot repitió "Mañana se
-realiza el despacho", cuando el despacho era ese mismo día. La dueña lo corrigió a mano doce minutos
-después. Ese turno **sí** llamó `get_order_status` y **sí** recibió el estado real. No falló el
-dato, falló la fecha: el turno no llevaba ninguna marca de tiempo.
-**Se hace:** `src/ai/clock.ts`, puro. El instante en la zona del negocio entra como dato en todos
-los turnos; el historial lleva un marcador antes del primer mensaje de cada día calendario, como
-mensaje `system` y no pegado al texto. La edad del pedido pasa a contarse en días calendario del
-negocio y no en bloques de 24 horas.
-**Se prueba:** `src/ai/clock.test.ts` (10 casos, puros) + fixture `reloj-del-turno.json`.
-**Prompt:** sin cambios. Su borrado le toca a `E05`, que se lleva los tiempos de entrega.
-**Tamaño:** S. **Depende de:** nada. **Bandera:** no — no puede producir falso positivo.
-**Vuelta atrás:** revertir `1d6bf28`. Sin migración.
+El defecto de Andrés y Ariadna, completo. Se dejan nombradas y no se borran porque el resto del plan
+las referencia como dependencia, y porque `E03` corrigió un diagnóstico que este mismo plan tenía mal
+escrito.
 
----
+| | Qué quedó |
+|---|---|
+| **E01** · El turno lleva reloj | `src/ai/clock.ts`. El instante en la zona del negocio entra en todos los turnos; el historial lleva un marcador por día calendario. La edad del pedido se cuenta en días calendario y no en bloques de 24 h. |
+| **E02** · La identidad del cliente entra al turno | `src/crm/customerFacts.ts`. Nombre, documento, teléfono de entrega y dirección, leídos de `Customer`. Sin un solo dato guardado no sale ningún mensaje. |
+| **E03** · Un pedido en curso que no existe no se anuncia | `formatSaleStateForPrompt` sale con cero productos elegidos. Y el resumen sembrado de la compra anterior llega al modelo. |
+| **E04** · Sale del prompt lo que E02 volvió innecesario | 541 → **540 líneas**. |
+| **E05** · La fecha de despacho es un cálculo | `src/shipping/dispatchPromise.ts`, cinco columnas aditivas en `ShippingRate`, con su interfaz en el panel. |
 
-### E02 · La identidad del cliente entra al turno
+**`E03` corrige el diagnóstico de este plan.** Lo que estaba escrito acá era que al modelo le faltaba
+el dato. Medido contra producción, era lo contrario: **se lo dábamos mal.**
+`formatSaleStateForPrompt` salía con la condición `items vacíos Y faltan vacío`, que no se cumple
+nunca — sin productos elegidos, `computeCheckoutState` siempre lista faltantes. O sea que el bloque
+salía SIEMPRE, y el 2026-09-17, con el pedido de Andrés ya despachado, decía:
 
-**Quita:** al modelo, qué datos del cliente faltan.
-**Porque:** medido el 2026-09-17. Andrés cerró un pedido el 16 a las 19:36; su conversación quedó en
-`SOLD`, escribió de nuevo 23 minutos después y eso abrió una conversación NUEVA. El bot le pidió
-ciudad, barrio, nombre completo, celular y dirección. Se los volvió a pedir al día siguiente. La
-base ya tenía los cuatro: `name "Andrés"`, `idNumber 3103325677`, `deliveryPhone 3103325677`,
-`address "Calle 22 #108-62, Fontibón Ferrocarril, Bogotá"`. **Esos campos no entran a ningún prompt,
-nunca.** El único camino por el que llegaban era `SaleState`, que es por conversación.
-**Se hace:** `src/crm/customerFacts.ts`, con la misma forma que `getCustomerCommerceState`: lee la
-base, devuelve dato estructurado, `generateReply` lo inyecta como `system`. Sin prosa alrededor.
-Entra identidad (nombre, documento, teléfono de entrega, dirección), historial de compra (ítems con
-fecha, variante y precio pagado) y métricas (cantidad de pedidos, días desde la última compra).
-**Independiente de `saleStateEnabled`**: los datos del cliente viven en `Customer`, que es una tabla
-que funciona, y no tienen por qué depender del motor de venta para llegar al prompt.
-**Se prueba:** fixture de replay con `systemMustContain` sobre el nombre y la dirección guardados +
-pruebas puras del compositor.
-**Prompt:** su borrado es `E04`.
-**Tamaño:** M. **Depende de:** nada. **Bandera:** sí, por `customerDataPolicy` — ver `D1`.
-**Vuelta atrás:** revertir; el bloque deja de inyectarse. Sin migración.
+> PEDIDO EN CURSO: (todavia sin productos). Falta: que producto quieres y cuantas unidades, **tu
+> nombre y apellido**, **tu barrio, la direccion exacta, y si es casa o apartamento con piso**, como
+> prefieres pagar.
+
+El modelo pidió exactamente eso. **No desobedeció: obedeció un dato falso que le dimos nosotros.**
+Es la lección que vale para el resto del plan: antes de culpar al modelo, hay que mirar qué le puso
+el servidor delante.
+
+**Lo que quedó fuera de `E04`, y por qué.** La deducción del plan era que había 20 líneas de prompt
+para borrar. No las hay: lo que `E02` y `E03` vuelven borrable no está en `systemPrompt.ts` sino en
+dos lugares que necesitan tu visto bueno, porque uno es texto tuyo. Quedan como `E05b` y `E05c`.
 
 ---
 
-### E03 · El pedido en curso no muere con la conversación
+### E05b · Se borra la herramienta `get_previous_conversation`
 
-**Quita:** al modelo, tener que reconstruir una venta que ya estaba armada.
-**Porque:** misma conversación de Andrés. `getSaleState(conversationId)` es por conversación, así
-que la conversación nueva arrancó sin `SaleState` y el bloque "PEDIDO EN CURSO … Falta: X" no se
-inyectó. La directiva del prompt dice *"no le pidas al cliente ningún dato que ese bloque no liste
-en Falta"* — sin bloque, no dice nada, y lo que sí dice algo es la prosa incondicional de
-`customInstructions`. Además: `summarizePreviousPurchase` siembra un resumen del pedido anterior al
-crear la conversación, y `getOrRefreshContextSummary` lo descarta con
-`if (total <= CONTEXT_SUMMARY_WINDOW) return null`. La conversación de Andrés tenía 14 mensajes. **Ese
-resumen nunca llegó al modelo, justo en el caso para el que se escribió.**
-**Se hace:** el `SaleState` de una conversación nueva se siembra desde `Customer` y desde el último
-pedido, para que el bloque exista siempre y "Falta" sea verdad. Y `getOrRefreshContextSummary`
-devuelve el resumen sembrado aunque la conversación tenga menos de 20 mensajes.
-**Se prueba:** fixture donde el cliente cierra, vuelve a escribir y el bloque "PEDIDO EN CURSO"
-existe con cero datos en "Falta".
-**Prompt:** su borrado es `E04`.
-**Tamaño:** M. **Depende de:** `E02`. **Bandera:** no.
-**Vuelta atrás:** revertir. Sin migración.
+**Quita:** al modelo, decidir si va a buscar la conversación anterior del cliente.
+**Porque:** su respuesta (el resumen de la compra anterior) ya viaja en el turno, siempre, en tres
+bloques que el servidor pone solo: el resumen sembrado (`E03`), el pedido cerrado (`postSale`) y los
+pedidos del cliente (`customerCommerceState`). La herramienta se llamó **4 veces en 14 días**, y cada
+llamada gasta una iteración completa del modelo para traer algo que ya estaba delante. Su esquema,
+además, viaja en **cada** petición.
+**Se hace:** se borran la definición y el handler en `src/ai/tools.ts`, sus tres pruebas, y la
+mención en el fixture `ps2evr`. **Y en la misma etapa** sale el paso 3 de `customInstructions` de
+MAGByLizN, que hoy dice textualmente: *"Usa la herramienta get_previous_conversation ANTES de decir
+nada sobre conversaciones anteriores…"*. Si no salen juntos, queda una instrucción apuntando a una
+herramienta que no existe.
+**Tamaño:** S. **Depende de:** tu visto bueno para tocar `customInstructions`.
+**Vuelta atrás:** revertir el commit y restaurar el párrafo desde la copia de seguridad del servidor.
 
 ---
 
-### E04 · Se borra lo que `E02` y `E03` volvieron innecesario
+### E05c · La lista de datos de entrega sale de las instrucciones del negocio
 
-**Quita:** a la configuración del negocio, tener que recordarle al modelo qué pedir.
-**Porque:** es la regla del plan: cada hecho que el servidor se lleva es una directiva que se borra.
-Sin esta etapa, `E02` y `E03` son "la mitad del trabajo", que es el error histórico del proyecto.
-**Se hace:** sale el párrafo de `save_customer_name` / `save_customer_contact_info` del prompt base,
-y sale la Etapa 2 ("Datos de Envío, Ciudad y Tarifario", con su *"Solicita los datos de entrega
-exactos según la ubicación"*) de `customInstructions` de MAGByLizN, que es la prosa incondicional
-que disparaba el re-pedido.
-**Se prueba:** los fixtures de replay dan idéntico. El cambio de `customInstructions` se mira contra
-una conversación real de un cliente repetido en las 48 h siguientes.
-**Prompt:** **−20 líneas**, más una reducción mayor en las instrucciones del negocio.
-**Tamaño:** S. **Depende de:** `E02`, `E03`. **Bandera:** no.
-**Vuelta atrás:** revertir el commit; `customInstructions` tiene copia de seguridad en el servidor.
-
----
-
-### E05 · La fecha de despacho es un cálculo, no una frase
-
-**Quita:** al modelo, cuándo se despacha y cuándo llega.
-**Porque:** las reglas de entrega de MAGByLizN viven como prosa relativa al reloj dentro de
-`customInstructions`: *"Bogotá/Soacha: si compra antes de las 11:00 AM puede llegar el mismo día; si
-es después, llega al día siguiente (11:00 AM - 9:00 PM)"*, *"los domingos no se pueden hacer envíos"*.
-Con `E01` el modelo ya sabe qué hora es, pero sigue teniendo que evaluar la regla a mano en cada
-turno. Un cálculo del servidor no se equivoca.
-**Se hace:** `ShippingRate` y `ShippingCityRule` ganan `cutoffTime`, `sameDayBeforeCutoff`,
-`businessDaysMin/Max` y `diasSinDespacho` (columnas aditivas, nullable). El servidor calcula, para
-**este** pedido y **este** momento, la fecha real de despacho y la ventana de entrega, y la manda
-como dato. **Con la UI del panel en la misma etapa**, que es la regla del repositorio para todo
-toggle de núcleo.
-**Se prueba:** pruebas puras del calculador con los bordes (antes y después del corte, domingo,
-víspera de domingo) + fixture.
-**Prompt:** sale la sección "Tiempos de Entrega" de `customInstructions`. **−0 del prompt base**, que
-no la tiene.
-**Tamaño:** L. **Depende de:** `E01`. **Bandera:** no; un negocio sin las columnas cargadas se
-comporta exactamente como hoy.
-**Vuelta atrás:** revertir el código; las columnas quedan muertas.
+**Quita:** al negocio, mantener a mano una lista que el servidor ya calcula.
+**Porque:** el punto 6 de la Etapa 2 de `customInstructions` de MAGByLizN enumera, por zona, los
+datos de entrega a pedir (Nombre y Apellido, Celular, Ciudad, Barrio, Dirección, Casa o Apartamento y
+piso; y el Número de Identificación fuera de Bogotá). **16 líneas.** `computeCheckoutState` ya calcula
+exactamente eso, por país y por zona, y lo devuelve en "Falta". Son dos autores para el mismo dato, y
+cuando se desincronicen va a ganar el equivocado.
+**Se hace:** salen esas 16 líneas. La regla de documento por zona ya vive en
+`Business.requiresIdDocument` + `idDocumentExemptZones`; hay que verificar que estén cargadas antes
+de borrar.
+**Se prueba:** una conversación real de cierre en las 48 h siguientes.
+**Tamaño:** S. **Depende de:** tu visto bueno. **Es texto tuyo, no del código.**
+**Vuelta atrás:** restaurar desde la copia de seguridad del servidor.
 
 ---
 
@@ -1527,7 +1494,7 @@ Cuatro números, revisados al cerrar cada etapa, contra la línea base de la Par
    etapa le quita al modelo una decisión que podía equivocar. **El objetivo no es bajar el número:
    es que los guards que lo producen dejen de existir.** Un número que baja con los mismos guards
    puestos no prueba nada.
-2. **Líneas de `src/ai/prompts/systemPrompt.ts`.** **541 hoy.** Objetivo al cerrar el Bloque 6:
+2. **Líneas de `src/ai/prompts/systemPrompt.ts`.** 541 al empezar, **540 desde `E04`**. Objetivo al cerrar el Bloque 6:
    **por debajo de 400**. Si sube, algo se convirtió en chatbot sin que nadie lo decidiera.
 3. **Turnos perdidos** — mensajes de `CUSTOMER` sin ninguna respuesta de `ASSISTANT`. **2 hoy**, y
    hoy solo se pueden contar con una consulta a mano. A partir de `E22` tiene que ser **cero, y
@@ -1549,24 +1516,23 @@ hasta que la etapa que lo arregla lo ponga en verde de verdad.
 
 | Tema | Etapas |
 |---|---|
-| **Lo que más duele hoy** | `E01` (desplegar), `E02`, `E03`, `E04`, `E06` |
+| **Lo que más duele hoy** | `E01`–`E05` hechas, falta desplegarlas; después `E06` |
 | **El bot dice cosas falsas** | `E09`, `E10`, `E11`, `E12`, `E13` |
 | **Respuestas duplicadas** | `E06`, `E07`, `E08` |
-| **Fechas y tiempos de entrega** | `E01`, `E05`, `E35` |
+| **Fechas y tiempos de entrega** | `E01` y `E05` hechas; queda `E35` |
 | **Nada se pierde** | `E14`, `E15`, `E16`, `E20`, `E21`, `E22` |
 | **Envíos que fallan** | `E17`, `E18`, `E19` |
 | **Seguridad** | `E26`, `E27`, `E28`, `E29`, `E30` |
 | **Pedidos** | `E31`, `E32`, `E33`, `E34`, `E35` |
 | **Catálogo** | `E36`, `E37`, `E38`, `E39`, `E40`, `E61` |
-| **CRM** | `E02`, `E41`, `E42`, `E43`, `E44`, `E45`, `E46`, `E68` |
+| **CRM** | `E02` hecha; quedan `E41`, `E42`, `E43`, `E44`, `E45`, `E46`, `E68` |
 | **Panel (rediseño)** | `E47`, `E48`, `E49`, `E50`, `E51`, `E52`, `E53`, `E54`, `E55` |
 | **FAQ que aprende** | `E56`, `E57`, `E58`, `E59`, `E60` |
 | **Observabilidad** | `E24`, `E25`, `E62`, `E63`, `E65` |
 | **Vender más** | `E68`, `E69`, `E70`, `E71`, `E72`, `E73` |
 
-**Si solo puedes hacer una cosa esta semana:** `E02` + `E03` + `E04`, juntas. Son el defecto que el
-dueño encontró el 2026-09-17, tienen la mitad del trabajo ya hecha (`E01` está en el repositorio), y
-`E04` es la primera etapa del proyecto que va a bajar las líneas del prompt.
+**Lo siguiente:** desplegar `E01`–`E05`, mirar 48 horas contra la línea base, y recién ahí seguir con
+`E06`. `E05b` y `E05c` salen el mismo día si das el visto bueno.
 
 **La más barata con más retorno:** `E56`. Una tarde, y deja de destruirse el dato que alimenta el
 único diferenciador que ningún competidor tiene.
@@ -1580,7 +1546,7 @@ que explican por qué está hecho así.
 
 | Etapa | Origen |
 |---|---|
-| `E01`, `E05` | Hallazgo de esta sesión (2026-09-17). No estaba en ningún plan. |
+| `E01`, `E05`, `E05b`, `E05c` | Hallazgo de esta sesión (2026-09-17). No estaba en ningún plan. |
 | `E02`, `E03`, `E04`, `E41`, `E43`, `E44` | `ONIX-PLAN-INFRAESTRUCTURA.md`, Fase 5 — más el hallazgo del 2026-09-17 |
 | `E06`, `E07`, `E08`, `E23`, `E24` | `ONIX-PLAN-INFRAESTRUCTURA.md`, Fase 2 |
 | `E09`, `E13` | `ONIX-PLAN-MAESTRO.md`, Fases 3 y 4 — más la línea base de esta sesión |
