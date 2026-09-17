@@ -629,6 +629,13 @@ model ProductMedia {
   type      MediaType
   url       String
   s3Key     String
+  // El id que devolvio Meta al SUBIRLE este archivo, para no volver a subirlo en cada envio y, sobre
+  // todo, para no darle una URL nuestra que tenga que descargar (ver uploadMediaToWhatsapp). Un id vive
+  // 30 dias y es de la linea que lo subio, asi que se guarda junto al numero: si el negocio reconecta
+  // WhatsApp con otra linea, el id viejo deja de servir y se vuelve a subir solo.
+  whatsappMediaId        String?
+  whatsappMediaAt        DateTime?
+  whatsappMediaPhoneId   String?
   createdAt DateTime        @default(now())
 }
 

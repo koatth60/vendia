@@ -20,6 +20,18 @@ function recipientField(to: string): { to: string } | { recipient: string } {
   return isBsuid(to) ? { recipient: to } : { to };
 }
 
+/**
+ * ¿Lo que se va a enviar es un id de medio ya subido a Meta, o una URL para que Meta la descargue?
+ *
+ * Se distingue por la forma y no por un parametro nuevo a proposito: los dos caminos entran por la misma
+ * puerta (sendImageMessage/sendVideoMessage reciben "lo que hay que mandar"), asi que ningun llamador
+ * tiene que enterarse de cual es cual ni pasar una bandera de mas. Un id de Meta es una cadena de digitos;
+ * una URL nunca lo es.
+ */
+export function isUploadedMediaId(value: string): boolean {
+  return value.length > 0 && value.length < 40 && /^\d+$/.test(value);
+}
+
 // Meta answers a failed send with a JSON envelope: { error: { message, type, code, error_subcode,
 // error_data: { details } } }. `code` is the only stable, machine-readable part of it - the message
 // text is prose Meta rewrites whenever it likes, and every caller that branched on it was really
@@ -341,6 +353,47 @@ export async function sendTemplateMessage(
   return result.messages?.[0]?.id ?? "";
 }
 
+// SUBIR EL ARCHIVO A META, en vez de darle un link nuestro para que lo descargue (2026-09-17).
+//
+// Como funcionaba hasta hoy: se le mandaba a Meta la URL firmada de S3 y Meta iba a buscarla. Cuando esa
+// descarga falla, Meta responde 131053 ("Downloading media from weblink failed with http code 500") y la
+// foto NUNCA llega - pero el envio ya habia devuelto un wamid, asi que la conversacion sigue como si
+// hubiera llegado y el error recien aparece horas despues por el webhook de estados. Tres veces en siete
+// dias, todas contra clientes reales.
+//
+// Subiendo los bytes desaparece la clase entera: el archivo viaja una sola vez, el error (si lo hay) es
+// SINCRONO y se puede reintentar o degradar en el acto, y el id que devuelve Meta se puede reusar 30
+// dias, asi que la misma foto de catalogo no se vuelve a subir en cada envio.
+const MEDIA_UPLOAD_TIMEOUT_MS = Number(process.env.WHATSAPP_MEDIA_TIMEOUT_MS ?? "") || 60000;
+
+/** Un id de medio de Meta vive 30 dias; se renueva bastante antes para no cortarlo justo al limite. */
+export const WHATSAPP_MEDIA_TTL_DAYS = 25;
+
+export async function uploadMediaToWhatsapp(
+  credentials: WhatsappCredentials,
+  buffer: Buffer,
+  contentType: string,
+  filename = "media"
+): Promise<string> {
+  const form = new FormData();
+  form.append("messaging_product", "whatsapp");
+  form.append("type", contentType);
+  form.append("file", new Blob([new Uint8Array(buffer)], { type: contentType }), filename);
+
+  const response = await fetch(`${GRAPH_BASE_URL}/${credentials.phoneNumberId}/media`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${credentials.accessToken}` },
+    body: form,
+    signal: AbortSignal.timeout(MEDIA_UPLOAD_TIMEOUT_MS),
+  });
+
+  const text = await response.text();
+  if (!response.ok) throw new Error(`Meta rechazo la subida del medio (${response.status}): ${text.slice(0, 300)}`);
+  const parsed = JSON.parse(text) as { id?: string };
+  if (!parsed.id) throw new Error(`Meta acepto la subida pero no devolvio id: ${text.slice(0, 200)}`);
+  return parsed.id;
+}
+
 export async function sendImageMessage(
   credentials: WhatsappCredentials,
   to: string,
@@ -351,7 +404,9 @@ export async function sendImageMessage(
     messaging_product: "whatsapp",
     ...recipientField(to),
     type: "image",
-    image: { link: imageUrl, caption },
+    // Un id ya subido a Meta o, si no lo hay, el link de siempre. Los dos caminos conviven: el id es el
+    // preferido, el link es el respaldo cuando la subida no se pudo hacer.
+    image: isUploadedMediaId(imageUrl) ? { id: imageUrl, caption } : { link: imageUrl, caption },
   })) as { messages?: { id: string }[] };
   return result.messages?.[0]?.id ?? "";
 }
@@ -433,7 +488,7 @@ export async function sendVideoMessage(
     messaging_product: "whatsapp",
     ...recipientField(to),
     type: "video",
-    video: { link: videoUrl, caption },
+    video: isUploadedMediaId(videoUrl) ? { id: videoUrl, caption } : { link: videoUrl, caption },
   })) as { messages?: { id: string }[] };
   return result.messages?.[0]?.id ?? "";
 }

@@ -137,3 +137,17 @@ export async function getPresignedMediaUrl(key: string): Promise<string> {
 export async function deleteMedia(key: string): Promise<void> {
   await getS3Client().send(new DeleteObjectCommand({ Bucket: env.aws.bucket, Key: key }));
 }
+
+/**
+ * Los bytes de un objeto de S3, en memoria.
+ *
+ * Existe para poder SUBIRLE el archivo a Meta en vez de darle una URL nuestra para que lo descargue
+ * (ver uploadMediaToWhatsapp). Es la unica lectura de contenido que hace este modulo: todo lo demas
+ * entrega URLs firmadas.
+ */
+export async function downloadMediaBytes(key: string): Promise<{ buffer: Buffer; contentType: string }> {
+  const result = await getS3Client().send(new GetObjectCommand({ Bucket: env.aws.bucket, Key: key }));
+  const bytes = await result.Body?.transformToByteArray();
+  if (!bytes) throw new Error(`El objeto ${key} no devolvio contenido`);
+  return { buffer: Buffer.from(bytes), contentType: result.ContentType ?? "application/octet-stream" };
+}

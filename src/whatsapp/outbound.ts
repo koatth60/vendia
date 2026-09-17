@@ -20,6 +20,9 @@ import {
   sendImageMessage,
   sendInteractiveButtonsMessage,
   sendInteractiveListMessage,
+  uploadMediaToWhatsapp,
+  isUploadedMediaId,
+  WHATSAPP_MEDIA_TTL_DAYS,
   LIST_MAX_ROWS,
   type InteractiveListSection,
   sendOwnerAlert,
@@ -724,5 +727,5 @@ export async function drainOutboundQueue(
 // Regla del repositorio: nada fuera de este archivo importa src/whatsapp/client.ts (ver el test de
 // arquitectura). El limite de filas de Meta lo necesita quien ARMA la lista, no solo quien la manda, asi
 // que se re-exporta por la misma puerta que todo lo demas.
-export { LIST_MAX_ROWS };
+export { LIST_MAX_ROWS, uploadMediaToWhatsapp, isUploadedMediaId, WHATSAPP_MEDIA_TTL_DAYS };
 export type { InteractiveListSection };

@@ -1,5 +1,6 @@
 import { sendToCustomer, type WhatsappCredentials } from "./outbound";
 import { recordMessage } from "../conversation/service";
+import { resolveSendableMedia, forgetWhatsappMediaId } from "./mediaUpload";
 
 // WhatsApp a veces no entrega/renderiza una imagen si sale inmediatamente despues de otra - una pausa
 // corta entre envios consecutivos evita esa colision.
@@ -30,13 +31,30 @@ export async function sendMediaWithSpacing(
     if (i > 0) await sleep(1200);
     const item = media[i];
     const mediaType = item.type === "IMAGE" ? "IMAGE" : "VIDEO";
-    const result = await sendToCustomer({
+    // El archivo se le SUBE a Meta y viaja un id; solo si esa subida falla se cae al link de S3, que es
+    // el camino que producia el 131053 (ver src/whatsapp/mediaUpload.ts).
+    const enviable = await resolveSendableMedia(credentials, item);
+    let result = await sendToCustomer({
       businessId,
       conversationId,
       credentials,
       to: recipientPhone,
-      content: mediaType === "IMAGE" ? { kind: "image", url: item.url } : { kind: "video", url: item.url },
+      content: mediaType === "IMAGE" ? { kind: "image", url: enviable } : { kind: "video", url: enviable },
     });
+    // Un id que Meta ya no reconoce (vencido, o borrado de su lado) se cura solo: se olvida el cacheado y
+    // se reintenta una vez subiendo el archivo de nuevo. Sin esto, un id muerto dejaria ese producto sin
+    // fotos hasta que alguien lo notara.
+    if (!result.delivered && enviable !== item.url) {
+      await forgetWhatsappMediaId(item.s3Key);
+      const reintento = await resolveSendableMedia(credentials, item);
+      result = await sendToCustomer({
+        businessId,
+        conversationId,
+        credentials,
+        to: recipientPhone,
+        content: mediaType === "IMAGE" ? { kind: "image", url: reintento } : { kind: "video", url: reintento },
+      });
+    }
     // Se propaga como antes: quien llama a esto necesita saber que la foto NO salio, porque si no el
     // modelo sigue la conversacion como si el cliente ya la estuviera viendo.
     if (!result.delivered) throw new Error(result.failure?.message ?? "No se pudo enviar el medio del producto");
