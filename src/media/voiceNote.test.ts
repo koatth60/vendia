@@ -6,7 +6,7 @@ import { readFile, unlink } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { toOggOpus, VoiceNoteError } from "./voiceNote";
+import { toOggOpus, extractPeaks, VOICE_PEAKS, VoiceNoteError } from "./voiceNote";
 
 const execFileAsync = promisify(execFile);
 
@@ -79,4 +79,43 @@ test("algo que no es audio no se convierte: rebota con VoiceNoteError", async (t
   }
 
   await assert.rejects(() => toOggOpus(Buffer.from("esto no es audio")), VoiceNoteError);
+});
+
+test("los picos salen del audio: un silencio y un sonido no dibujan la misma onda", async (t) => {
+  if (!(await hasFfmpeg())) {
+    t.skip("ffmpeg no esta instalado en esta maquina");
+    return;
+  }
+
+  // Audio con volumen que sube y baja: la onda TIENE que variar.
+  const ruta = join(tmpdir(), `${randomUUID()}-variable.ogg`);
+  try {
+    await execFileAsync("ffmpeg", [
+      "-y", "-f", "lavfi", "-i", "sine=frequency=300:duration=4",
+      "-af", "volume='0.05+0.95*abs(sin(3*t))':eval=frame",
+      "-c:a", "libopus", "-b:a", "32k", "-ac", "1", "-f", "ogg", ruta,
+    ]);
+    const crudo = await extractPeaks(await readFile(ruta));
+    assert.ok(crudo, "se esperaba una onda");
+    const valores = crudo!.split(",").map(Number);
+    assert.equal(valores.length, VOICE_PEAKS, "una barra por valor, sin interpolar en el panel");
+    assert.ok(valores.every((v) => v >= 0 && v <= 99), "los valores van de 0 a 99");
+    assert.equal(Math.max(...valores), 99, "normalizado: el pico mas alto siempre llega al tope");
+    // Lo que se comprueba de verdad: la onda sigue al audio. Con un volumen que sube y baja, el valle
+    // tiene que quedar MUY por debajo del pico; si fuera un dibujo decorativo, esto no se cumpliria.
+    assert.ok(Math.min(...valores) < 40, `el valle deberia ser bajo, fue ${Math.min(...valores)}`);
+  } finally {
+    await unlink(ruta).catch(() => {});
+  }
+});
+
+test("un archivo que no es audio no produce onda, y no rompe el envio", async (t) => {
+  if (!(await hasFfmpeg())) {
+    t.skip("ffmpeg no esta instalado en esta maquina");
+    return;
+  }
+
+  // Devuelve null en vez de lanzar: la onda es un adorno util, nunca un motivo para que un mensaje no
+  // se guarde ni para que un audio no se mande.
+  assert.equal(await extractPeaks(Buffer.from("esto no es audio")), null);
 });

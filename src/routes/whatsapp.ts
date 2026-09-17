@@ -72,6 +72,7 @@ import { drainOwnerConfirmationQueue } from "../whatsapp/ownerConfirmation";
 // assumption that a returned wamid meant the customer got it.
 import { recordOwnerMessage } from "../delivery/ownerLog";
 import { extractFrame } from "../media/videoFrame";
+import { extractPeaks } from "../media/voiceNote";
 
 export const whatsappRouter = Router();
 
@@ -906,7 +907,7 @@ whatsappRouter.post("/webhook", async (req, res) => {
     await withConversationLock(conversation.id, async () => {
 
       let text = "";
-      let media: { s3Key: string; type: "IMAGE" | "VIDEO" | "AUDIO" } | undefined;
+      let media: { s3Key: string; type: "IMAGE" | "VIDEO" | "AUDIO"; peaks?: string | null } | undefined;
       let imageAnalysis: string | undefined;
 
       if (listSelection) {
@@ -943,7 +944,9 @@ whatsappRouter.post("/webhook", async (req, res) => {
         try {
           const { buffer, mimeType } = await downloadMedia(credentials, message.audio.id);
           const { key } = await uploadMedia(buffer, mimeType, "audio");
-          media = { s3Key: key, type: "AUDIO" };
+          // La nota que manda el cliente tambien se dibuja en el panel, y por el mismo camino: los picos
+          // se calculan aca una vez en vez de que el navegador se baje el audio para calcularlos.
+          media = { s3Key: key, type: "AUDIO", peaks: await extractPeaks(buffer) };
           const transcript = await transcribeAudio(buffer, mimeType);
           text = transcript || "[El cliente envio una nota de voz, pero no se pudo transcribir. Pedile que la repita por texto.]";
         } catch (error) {

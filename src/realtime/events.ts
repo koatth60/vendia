@@ -12,6 +12,7 @@ export interface MessageEventPayload {
   content: string;
   mediaUrl: string | null;
   mediaFilename?: string | null;
+  mediaPeaks?: string | null;
   mediaType: "IMAGE" | "VIDEO" | "AUDIO" | "DOCUMENT" | null;
   createdAt: Date;
 }

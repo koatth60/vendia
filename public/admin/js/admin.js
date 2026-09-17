@@ -1812,7 +1812,7 @@ function messageBubbleHtml(m) {
   const isVideo = m.mediaUrl && m.mediaType === 'VIDEO';
   const isDocument = m.mediaUrl && m.mediaType === 'DOCUMENT';
   const img = isAudio
-    ? voicePlayerHtml(m.mediaUrl, 0)
+    ? voicePlayerHtml(m.mediaUrl, 0, m.mediaPeaks)
     : isVideo
       ? `<video src="${m.mediaUrl}" controls style="max-width:220px; border-radius:6px; display:block; margin-bottom:4px;"></video>`
       : isDocument
@@ -3203,13 +3203,27 @@ const VOICE_BARS = 44;
 // sin esta cache, cada repintado volveria a descargar y decodificar todas las notas de voz visibles.
 const voicePeaksCache = new Map();
 
-function voicePlayerHtml(src, duracionMs) {
+/**
+ * @param src        url del audio
+ * @param duracionMs conocida de antemano (una grabacion recien hecha), o 0 si hay que leerla del archivo
+ * @param picosCrudos la onda que ya calculo el servidor ("12,45,99,..."), si la hay
+ */
+function voicePlayerHtml(src, duracionMs, picosCrudos) {
   const total = duracionMs > 0 ? formatClock(duracionMs / 1000) : '';
+  // Lo que manda el servidor gana: ya esta calculado sobre el archivo real y no cuesta una descarga.
+  // Ver extractPeaks en src/media/voiceNote.ts.
+  if (picosCrudos && !voicePeaksCache.has(src)) {
+    const parseados = String(picosCrudos)
+      .split(',')
+      .map((n) => Number(n) / 99)
+      .filter((n) => Number.isFinite(n));
+    if (parseados.length > 0) voicePeaksCache.set(src, parseados);
+  }
   const picos = voicePeaksCache.get(src);
   const barras = Array.from({ length: VOICE_BARS }, (_, i) => {
     // Sin picos todavia, todas las barras van a la misma altura media: es una barra de progreso comun,
     // no una onda inventada. La onda aparece cuando existe de verdad.
-    const alto = picos ? Math.max(0.12, picos[i]) : 0.34;
+    const alto = picos ? Math.max(0.12, picos[i % picos.length]) : 0.34;
     return `<span class="voice-bar" style="height:${(alto * 100).toFixed(1)}%"></span>`;
   }).join('');
   return `
@@ -3278,6 +3292,8 @@ function voiceApplyPeaks(player, picos) {
   player.classList.add('has-wave');
 }
 
+// Solo hace falta cuando el servidor NO mando la onda: audios viejos, guardados antes de que el
+// servidor la calculara, y la nota recien grabada que todavia no salio de este navegador.
 async function voiceEnsureWave(player) {
   const src = player.dataset.src;
   if (!src || player.classList.contains('has-wave')) return;

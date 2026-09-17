@@ -910,6 +910,9 @@ model Message {
   // Nombre original del archivo. WhatsApp lo muestra en la burbuja del documento y el panel muestra el
   // mismo: sin esto, "catalogo-2026.pdf" se ve como "documento" en los dos lados.
   mediaFilename     String?
+  // Forma de onda de una nota de voz: 44 valores de 0 a 99 separados por comas, calculados por el
+  // servidor al guardar el mensaje. Ver el comentario de la migracion media_peaks.
+  mediaPeaks        String?
   imageAnalysis     String?
   whatsappMessageId String?      @unique
   relatedProductId  String?

@@ -31,7 +31,7 @@ import {
   type OrderItemInput,
 } from "../../orders/service";
 import { uploadMedia } from "../../media/s3";
-import { toOggOpus } from "../../media/voiceNote";
+import { toOggOpus, extractPeaks } from "../../media/voiceNote";
 import { getServerSaleEvidence } from "../../orders/saleState";
 import {
   getAgreedPrices,
@@ -218,6 +218,9 @@ conversationsRouter.post("/api/conversations/:id/messages", upload.array("files"
         // se guarda y lo que se manda son el mismo archivo que el cliente va a escuchar.
         const bytes = folder === "audio" ? await toOggOpus(file.buffer) : file.buffer;
         const declarado = folder === "audio" ? "audio/ogg" : file.mimetype;
+        // La onda se calcula una vez, aca, y viaja con el mensaje: el panel no tiene que descargarse el
+        // audio de S3 para dibujarla (ver extractPeaks).
+        const picos = folder === "audio" ? await extractPeaks(bytes) : null;
         const { key, url } = await uploadMedia(bytes, declarado, folder);
         const media = await sendToCustomer({
           businessId,
@@ -244,7 +247,7 @@ conversationsRouter.post("/api/conversations/:id/messages", upload.array("files"
           "ASSISTANT",
           caption || placeholderForFolder(folder, filename),
           media.wamid || undefined,
-          { s3Key: key, type, filename: type === "DOCUMENT" ? filename : undefined }
+          { s3Key: key, type, filename: type === "DOCUMENT" ? filename : undefined, peaks: picos }
         );
         enviados += 1;
       } catch (error) {

@@ -24,6 +24,12 @@ const execFileAsync = promisify(execFile);
 
 export class VoiceNoteError extends Error {}
 
+/**
+ * Cuantas barras tiene la onda que dibuja el panel. Tiene que ser el mismo numero que VOICE_BARS en
+ * public/admin/js/admin.js: el panel dibuja una barra por valor, sin interpolar.
+ */
+export const VOICE_PEAKS = 44;
+
 const FFMPEG_TIMEOUT_MS = 30_000;
 
 /** Bitrate de voz. 32 kbps mono es lo que usa WhatsApp para sus propias notas de voz. */
@@ -31,6 +37,59 @@ const OPUS_BITRATE = "32k";
 
 async function correr(args: string[]): Promise<void> {
   await execFileAsync("ffmpeg", args, { timeout: FFMPEG_TIMEOUT_MS });
+}
+
+/**
+ * La forma de onda de un audio: VOICE_PEAKS numeros de 0 a 99, como texto separado por comas.
+ *
+ * POR QUE EN EL SERVIDOR. El panel sabe calcularla solo (Web Audio), pero para eso tiene que
+ * DESCARGARSE el archivo con fetch, y los audios se sirven con una URL firmada de S3: si el bucket no
+ * habilita CORS para este dominio, ese fetch no se puede hacer y la onda no aparece nunca. Aca el
+ * archivo ya esta en memoria y ffmpeg ya esta instalado, asi que se calcula una sola vez, cuando el
+ * mensaje se guarda, y viaja con el mensaje. El panel deja de depender de una configuracion del bucket.
+ *
+ * Devuelve null si no se pudo: la onda es un adorno util, nunca un motivo para que un audio no se mande
+ * ni para que un mensaje no se guarde.
+ */
+export async function extractPeaks(input: Buffer): Promise<string | null> {
+  const id = randomUUID();
+  const inputPath = join(tmpdir(), `${id}-picos`);
+  try {
+    await writeFile(inputPath, input);
+    // PCM crudo, mono, 8 kHz: para dibujar 44 barras no hace falta mas resolucion, y a 8 kHz una nota de
+    // dos minutos son 2 MB en memoria en vez de 20.
+    const { stdout } = await execFileAsync(
+      "ffmpeg",
+      ["-v", "quiet", "-i", inputPath, "-vn", "-ac", "1", "-ar", "8000", "-f", "s16le", "-"],
+      { timeout: FFMPEG_TIMEOUT_MS, maxBuffer: 64 * 1024 * 1024, encoding: "buffer" }
+    );
+    const pcm = stdout as unknown as Buffer;
+    const muestras = Math.floor(pcm.length / 2);
+    if (muestras < VOICE_PEAKS) return null;
+
+    const porBarra = Math.floor(muestras / VOICE_PEAKS);
+    const picos: number[] = [];
+    let maximo = 0;
+    for (let i = 0; i < VOICE_PEAKS; i++) {
+      let pico = 0;
+      const desde = i * porBarra;
+      for (let j = desde; j < desde + porBarra; j++) {
+        const valor = Math.abs(pcm.readInt16LE(j * 2));
+        if (valor > pico) pico = valor;
+      }
+      picos.push(pico);
+      if (pico > maximo) maximo = pico;
+    }
+    if (maximo === 0) return null;
+    // Normalizado a 0-99: una nota grabada bajito se ve igual de alta que una grabada fuerte. Sin esto
+    // la mitad de las notas se dibujan como una linea recta.
+    return picos.map((p) => Math.round((p / maximo) * 99)).join(",");
+  } catch (error) {
+    console.error("No se pudieron calcular los picos del audio:", error);
+    return null;
+  } finally {
+    await unlink(inputPath).catch(() => {});
+  }
 }
 
 /**

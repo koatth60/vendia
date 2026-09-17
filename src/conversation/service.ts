@@ -223,7 +223,7 @@ export async function recordMessage(
   role: "CUSTOMER" | "ASSISTANT" | "SYSTEM",
   content: string,
   whatsappMessageId?: string,
-  media?: { s3Key: string; type: "IMAGE" | "VIDEO" | "AUDIO" | "DOCUMENT"; filename?: string },
+  media?: { s3Key: string; type: "IMAGE" | "VIDEO" | "AUDIO" | "DOCUMENT"; filename?: string; peaks?: string | null },
   imageAnalysis?: string,
   relatedProductId?: string
 ) {
@@ -236,6 +236,7 @@ export async function recordMessage(
       mediaS3Key: media?.s3Key,
       mediaType: media?.type,
       mediaFilename: media?.filename,
+      mediaPeaks: media?.peaks ?? undefined,
       imageAnalysis,
       relatedProductId,
     },
@@ -282,6 +283,7 @@ export async function recordMessage(
       mediaUrl: media ? await getPresignedMediaUrl(media.s3Key) : null,
       mediaType: message.mediaType,
       mediaFilename: message.mediaFilename,
+      mediaPeaks: message.mediaPeaks,
       createdAt: message.createdAt,
     },
     unreadCount
@@ -1088,6 +1090,7 @@ export async function getConversationForBusiness(businessId: string, conversatio
       mediaUrl: m.mediaS3Key ? await getPresignedMediaUrl(m.mediaS3Key) : null,
       mediaType: m.mediaType,
       mediaFilename: m.mediaFilename,
+      mediaPeaks: m.mediaPeaks,
       whatsappMessageId: m.whatsappMessageId,
     }))
   );
@@ -1226,6 +1229,7 @@ export interface ThreadMessage {
   mediaUrl: string | null;
   mediaType: string | null;
   mediaFilename: string | null;
+  mediaPeaks: string | null;
   whatsappMessageId: string | null;
   deliveryFailed: boolean;
   deliveryError: string | null;
@@ -1375,6 +1379,7 @@ export async function getCustomerThreadForBusiness(businessId: string, customerI
           mediaUrl: m.mediaS3Key ? await getPresignedMediaUrl(m.mediaS3Key) : null,
           mediaType: m.mediaType,
           mediaFilename: m.mediaFilename,
+          mediaPeaks: m.mediaPeaks,
           whatsappMessageId: m.whatsappMessageId,
         }))
       )
