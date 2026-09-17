@@ -1390,17 +1390,24 @@ ${CATALOG_BLOCK_MARKER}` : CATALOG_BLOCK_MARKER;
       }
     }
 
-    // Etapa 1 del estado de pedido: se calcula y se registra, NO se usa. Sirve para comparar durante unos
-    // dias lo que el estado dice que falta contra lo que el bot realmente pidio, y corregirlo antes de
-    // que empiece a decidir respuestas. Nunca puede romper el turno: si falla, se loguea y sigue.
-    void buildCheckoutState(conversationId)
+    // Etapa 2 del estado de pedido: ademas de registrarse, el estado ya DECIDE una cosa - si el backstop
+    // de nombres puede correr (ver mas abajo). Arranca exactamente en el mismo punto que en la etapa 1 y
+    // se espera recien donde se usa, asi que no agrega ni una consulta ni adelanta el reloj del turno.
+    // Nunca puede romper el turno: si falla, se loguea, queda en null y el backstop se comporta como
+    // antes de esta etapa.
+    const checkoutStatePromise = buildCheckoutState(conversationId)
       .then((estado) => {
-        if (!estado) return;
-        console.log(
-          `[estado-pedido] conv=${conversationId} completo=${estado.completo} faltan=${JSON.stringify(estado.faltan)}`
-        );
+        if (estado) {
+          console.log(
+            `[estado-pedido] conv=${conversationId} completo=${estado.completo} faltan=${JSON.stringify(estado.faltan)}`
+          );
+        }
+        return estado;
       })
-      .catch((error) => console.error("No se pudo calcular el estado de pedido (no bloqueante):", error));
+      .catch((error) => {
+        console.error("No se pudo calcular el estado de pedido (no bloqueante):", error);
+        return null;
+      });
 
     const resolvedShippingRate =
       cityShippingRateThisTurn ?? (shippingRatesListThisTurn?.length === 1 ? shippingRatesListThisTurn[0] : null);
@@ -1462,7 +1469,29 @@ ${CATALOG_BLOCK_MARKER}` : CATALOG_BLOCK_MARKER;
     // SaleState activo el modelo ve el estado real y llama save_customer_name/save_customer_contact_info
     // el mismo (ver PEDIDO_DATOS_DIRECTIVE_SALESTATE), asi que esta inferencia queda apagada para no
     // pisarle el guardado bien hecho con una lectura de prosa peor. Bandera apagada = cero cambio.
-    if (nameSavedThisTurn === 0 && customerText && !personality?.saleStateEnabled) {
+    // EL NOMBRE QUE EL SERVIDOR YA SABE NO SE VUELVE A DEDUCIR (2026-09-17, etapa 2 del estado de pedido).
+    //
+    // Este backstop se armaba en CADA turno y su unica defensa contra guardar cualquier cosa era una lista
+    // de palabras que no son nombres (NOT_A_NAME, DOMAIN_NOUNS, CHAT_NOISE_PATTERN). Esa lista no converge
+    // - el propio comentario de su definicion lo dice - y por ahi entro "Contraentrega" a la ficha de una
+    // clienta real el 2026-09-16.
+    //
+    // El servidor ya sabe, contra la base, si el campo "nombre" del pedido sigue abierto:
+    // checkoutState.campos, key "nombre", ok = tieneNombreCompleto(Customer.name). Si el cliente ya dio su
+    // nombre y apellido, no hay nada que deducir y el backstop no corre: ninguna lectura de prosa puede
+    // reescribir un dato que el servidor ya tiene.
+    //
+    // ok NO depende de que haya productos en el pedido (ver computeCheckoutState), asi que este gate
+    // tambien vale en el saludo, que es donde vive el caso "hola soy David": sin nombre guardado, el campo
+    // esta abierto y todo sigue funcionando igual que antes.
+    //
+    // Si el estado no se pudo calcular, `nombreAbierto` queda en true a proposito: gatear con un dato que
+    // no se tiene significaria dejar de guardar nombres por un problema de base, que es peor que el
+    // problema que esta etapa viene a arreglar.
+    const estadoPedido = await checkoutStatePromise;
+    const nombreAbierto = estadoPedido ? estadoPedido.campos.find((c) => c.key === "nombre")?.ok === false : true;
+
+    if (nameSavedThisTurn === 0 && customerText && !personality?.saleStateEnabled && nombreAbierto) {
       if (ASK_NAME_PATTERN.test(lastAssistantText(history))) {
         // extractNameFromAnswer handles both a bare "David" AND a greeting-wrapped answer like "Hola con
         // einer mucho gusto" - a strict superset of the old bare looksLikePersonName(customerText) check
@@ -1501,7 +1530,11 @@ ${CATALOG_BLOCK_MARKER}` : CATALOG_BLOCK_MARKER;
         if (found.idNumber || found.deliveryPhone || address) {
           await runCatalogTool(context, "save_customer_contact_info", { ...found, address });
         }
-        if (nameSavedThisTurn === 0) {
+        // Mismo gate que arriba, por la misma razon: este es el otro camino por el que una lectura de
+        // prosa termina en save_customer_name. Con el nombre ya completo en la base, la herramienta lo
+        // rechazaba igual (es el caso "Diana" -> "Sebastian Montealegre", el destinatario del regalo),
+        // asi que esto no cambia el resultado: le ahorra la llamada y deja la garantia entera.
+        if (nameSavedThisTurn === 0 && nombreAbierto) {
           const combinedName = extractNameFromDeliveryAnswer(customerText, negocio.countryCode);
           // save_customer_name ya protege por su cuenta el nombre viejo cuando el nuevo es el del
           // destinatario y no una correccion del cliente (ver ese case en tools.ts).
