@@ -36,7 +36,6 @@ export const SHIPPING_MODALITY_LABELS: Record<string, string> = {
   PREPAID_PRODUCT_COD_SHIPPING: "pagar el producto por adelantado, el envio se paga contraentrega",
   COD_ALL: "pagar todo (producto + envio) contraentrega",
 };
-import { listActiveFaqEntries } from "../catalog/faq";
 import {
   updateConversationStatus,
   setConversationIntent,
@@ -210,18 +209,6 @@ export const catalogTools: OpenAI.Chat.ChatCompletionTool[] = [
   {
     type: "function",
     function: {
-      name: "get_faq",
-      description:
-        "Trae las preguntas frecuentes configuradas por el negocio (envios, garantia, horarios, cambios, etc). Usar cuando el cliente pregunte algo asi que no sea de un producto especifico ni forma de pago, antes de responder de memoria o decir que no sabes.",
-      parameters: {
-        type: "object",
-        properties: {},
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
       name: "get_payment_methods",
       description:
         "Obtiene las formas de pago reales que acepta este negocio (transferencia, tarjeta, efectivo/contraentrega, etc). Usar cuando el cliente pregunte como pagar o este por confirmar una compra.",
@@ -349,7 +336,7 @@ export const catalogTools: OpenAI.Chat.ChatCompletionTool[] = [
     function: {
       name: "ask_owner",
       description:
-        "Usa SOLO cuando el cliente hace una pregunta real que necesita un dato concreto del negocio y no la podes responder con catalogo/get_faq/pagos. Manda la pregunta EXACTA al dueno por WhatsApp; mientras tanto el bot deja de responderle. No la uses para PQR/devolucion/no_recibido/pedido de hablar con un humano (para eso usa flag_conversation_intent), ni para un descuento o precio especial (para eso usa ask_owner_about_price, que ademas guarda el precio que el dueno autorice).",
+        "Usa SOLO cuando el cliente hace una pregunta real que necesita un dato concreto del negocio y no la podes responder con el catalogo, las preguntas frecuentes de arriba en este chat, o las formas de pago. Manda la pregunta EXACTA al dueno por WhatsApp; mientras tanto el bot deja de responderle. No la uses para PQR/devolucion/no_recibido/pedido de hablar con un humano (para eso usa flag_conversation_intent), ni para un descuento o precio especial (para eso usa ask_owner_about_price, que ademas guarda el precio que el dueno autorice).",
       parameters: {
         type: "object",
         properties: {
@@ -1159,16 +1146,6 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
       await recordMediaSent(context.conversationId, variantLabel ? `${product.name} (${variantLabel})` : product.name);
 
       return { sent: true, product: product.name, variant: variantLabel, count: media.length };
-    }
-    case "get_faq": {
-      const results = await listActiveFaqEntries(businessId);
-      if (results.length === 0) {
-        return { results: [], note: "Este negocio no tiene preguntas frecuentes configuradas. No inventes ni niegues nada, usa ask_owner." };
-      }
-      return {
-        results: results.map((r) => ({ question: r.question, answer: r.answer })),
-        note: "Revisa si alguna de estas responde por significado lo que pregunto el cliente, aunque este redactado distinto. Si ninguna lo confirma explicitamente, no inventes ni niegues nada - usa ask_owner.",
-      };
     }
     case "get_payment_methods": {
       // UN METODO QUE COBRA AL RECIBIR NO SE OFRECE DONDE NO SE HACE (2026-09-17).

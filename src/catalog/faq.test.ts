@@ -1,46 +1,51 @@
-import { test, before, after } from "node:test";
+import { test } from "node:test";
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
-import { prisma } from "../db/client";
-import { listActiveFaqEntries, createFaqEntry, updateFaqEntry } from "./faq";
+import { formatFaqForModel, FAQ_BLOCK_MAX_ENTRIES, type FaqFact } from "./faq";
 
-let businessId: string;
-let activeEntryId: string;
+// Las preguntas frecuentes entran al turno como dato. Todo puro: no toca base, no llama a DeepSeek.
+//
+// La entrada de abajo es la real de MAGByLizN, la que el bot NO leyo el 2026-09-17 cuando el cliente
+// pregunto "Donde se ubican" y contesto "esa informacion no esta disponible por el momento".
+const UBICACION: FaqFact = {
+  pregunta: "¿De qué ciudad son ustedes? ¿Tienen tienda física?",
+  respuesta: "Somos una tienda 100% virtual ubicada en Bogotá. Hacemos envíos a todo el país por Interrapidísimo.",
+};
 
-before(async () => {
-  const business = await prisma.business.create({
-    data: { name: `Test ${randomUUID()}`, email: `test-${randomUUID()}@example.com`, passwordHash: "x" },
-  });
-  businessId = business.id;
-
-  const active = await createFaqEntry(businessId, {
-    question: "Cual es la politica de envíos?",
-    answer: "Enviamos a toda Colombia.",
-  });
-  activeEntryId = active.id;
-
-  const inactive = await createFaqEntry(businessId, {
-    question: "Promocion vieja",
-    answer: "Ya no aplica.",
-  });
-  await updateFaqEntry(businessId, inactive.id, { active: false });
+test("la respuesta que el bot no encontro viaja en el bloque", () => {
+  const texto = formatFaqForModel([UBICACION]);
+  assert.ok(texto);
+  assert.match(texto, /PREGUNTAS FRECUENTES DE ESTE NEGOCIO/);
+  assert.match(texto, /tienda 100% virtual ubicada en Bogotá/);
 });
 
-after(async () => {
-  await prisma.faqEntry.deleteMany({ where: { businessId } });
-  await prisma.business.deleteMany({ where: { id: businessId } });
+test("un negocio sin preguntas frecuentes no paga ni un token", () => {
+  assert.equal(formatFaqForModel([]), null);
 });
 
-test("listActiveFaqEntries returns the full active list regardless of how the customer phrases things", async () => {
-  // The agent tool no longer pre-filters by keyword match (that missed paraphrased questions,
-  // and used to mangle accents like "envios" vs stored "envíos") - it hands the whole active
-  // list to the model, which reads it for meaning instead.
-  const results = await listActiveFaqEntries(businessId);
-  assert.equal(results.length, 1);
-  assert.equal(results[0].id, activeEntryId);
+test("el bloque es dato: no lleva ninguna instruccion de que contestar", () => {
+  const texto = formatFaqForModel([UBICACION])!;
+  // Sin verbos de instruccion sobre la conversacion: que decir y como decirlo sigue siendo del agente.
+  assert.doesNotMatch(texto, /\b(nunca|siempre|no inventes|no niegues|usa ask_owner|revisa si)\b/i);
 });
 
-test("listActiveFaqEntries excludes inactive entries", async () => {
-  const results = await listActiveFaqEntries(businessId);
-  assert.ok(!results.some((r) => r.question === "Promocion vieja"));
+test("una FAQ que crecio sin control no puede inflar el prompt sin tope", () => {
+  const muchas: FaqFact[] = Array.from({ length: FAQ_BLOCK_MAX_ENTRIES + 25 }, (_, i) => ({
+    pregunta: `pregunta ${i}`,
+    respuesta: `respuesta ${i}`,
+  }));
+  const texto = formatFaqForModel(muchas)!;
+  assert.match(texto, /"pregunta 0"/);
+  assert.match(texto, new RegExp(`"pregunta ${FAQ_BLOCK_MAX_ENTRIES - 1}"`));
+  assert.doesNotMatch(texto, new RegExp(`"pregunta ${FAQ_BLOCK_MAX_ENTRIES}"`));
+});
+
+test("las 16 entradas reales de MAGByLizN caben holgadas en el turno", () => {
+  // El costo que decidio esta etapa: ~600 tokens, identicos turno a turno, o sea cacheados. Una sola
+  // llamada a la herramienta que se borro costaba una iteracion entera del loop, que es mas.
+  const dieciseis: FaqFact[] = Array.from({ length: 16 }, () => ({
+    pregunta: UBICACION.pregunta,
+    respuesta: UBICACION.respuesta,
+  }));
+  const texto = formatFaqForModel(dieciseis)!;
+  assert.ok(texto.length < 4000, `el bloque de 16 entradas no deberia pasar de 4.000 caracteres, mide ${texto.length}`);
 });

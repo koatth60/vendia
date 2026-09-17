@@ -99,10 +99,8 @@ Solo usa ask_owner si el producto no tiene NINGUNA variante ni color cargado en 
 - Si las instrucciones del negocio SI tienen la respuesta pero dependen de un dato que todavia no sabes
 (por ejemplo la ciudad de envio), pídele ese dato al cliente primero - eso no es "no saber", es que falta
 preguntar.
-- Recien cuando hay una pregunta real y, despues de revisar catalogo, get_faq, formas de pago Y las
-instrucciones especificas de este negocio (mas abajo - muchas veces ahi esta la respuesta: politicas de
-envio, tiempos de entrega, tarifas por zona), no tienes nada que confirme explicitamente lo que pregunto,
-usa ask_owner con la pregunta exacta.
+- Recien cuando hay una pregunta real y nada de lo que tienes delante la responde - catalogo, preguntas
+frecuentes, formas de pago, instrucciones de este negocio - usa ask_owner con la pregunta exacta.
 
 {{FOTOS}}
 
@@ -527,9 +525,8 @@ SIEMPRE salvo que el texto de aca abajo diga explicitamente algo como "pregunta 
 paso liste. Aunque el texto de aca abajo diga
 en prosa "muestra las opciones de pago" o "confirma el precio" sin mencionar ninguna herramienta (el
 negocio lo escribio como guion humano, no como instruccion tecnica), tú igual tienes que llamar
-get_payment_methods, search_products, get_faq, etc, CADA VEZ que el flujo de este negocio te lleve a
-mostrar ese dato - la herramienta no es parte de "las secciones genericas que no sigues", es como conseguís
-la info real para poder seguir este flujo sin inventar nada. Las reglas de arriba sobre precios, stock,
+get_payment_methods, search_products, etc, CADA VEZ que el flujo te lleve a mostrar ese dato - es como
+conseguis la info real para seguir este flujo sin inventar nada. Las reglas de arriba sobre precios, stock,
 metodos de pago y fotos reales siguen aplicando siempre exactamente igual, herramienta incluida. Para todo
 lo demas, si esta definido aca abajo, esto manda:
 ${personality.customInstructions.trim()}`

@@ -45,6 +45,7 @@ import { buildCheckoutState } from "../orders/checkoutStateFromDb";
 import { getCustomerCommerceState } from "../orders/customerCommerceState";
 import { getCustomerFacts, formatCustomerFactsForModel } from "../crm/customerFacts";
 import { resolveShippingRateForCity } from "../catalog/shippingRates";
+import { getFaqFacts, formatFaqForModel } from "../catalog/faq";
 import { computeDispatchPromise, formatDispatchPromiseForModel } from "../shipping/dispatchPromise";
 import { getAgreedPriceFacts } from "../orders/agreedPrices";
 import {
@@ -835,7 +836,7 @@ export function stripMarkdownEmphasis(text: string): string {
 // imita el formato de los tool calls que ve en su propio contexto. MEDIA_TAG_STRIP_PATTERN no lo
 // agarra porque ese patron exige la palabra foto/video adentro del corchete, y aca el corchete lleva
 // el nombre tecnico de la herramienta.
-const TOOL_CALL_LEAK_PATTERN = /\[\s*(?:send_product_media|get_product_details|search_products|find_products_by_attributes|ask_owner(?:_about_photo)?|save_customer_(?:name|contact_info)|get_faq|get_payment_methods|get_shipping_[a-z_]+|show_order_summary|close_sale|update_conversation_status|flag_conversation_intent|cancel_order|list_all_products)\b[^\]]*\]/gi;
+const TOOL_CALL_LEAK_PATTERN = /\[\s*(?:send_product_media|get_product_details|search_products|find_products_by_attributes|ask_owner(?:_about_photo)?|save_customer_(?:name|contact_info)|get_payment_methods|get_shipping_[a-z_]+|show_order_summary|close_sale|update_conversation_status|flag_conversation_intent|cancel_order|list_all_products)\b[^\]]*\]/gi;
 
 // El estado interno del sistema no es asunto del cliente. Real (2026-09-15): a una clienta que acababa
 // de pagar y mandar el comprobante el bot le respondio "tu pedido aún no aparece registrado en el
@@ -1084,6 +1085,12 @@ export async function generateReply(
   // Sin ningun dato guardado no sale ningun mensaje: un cliente nuevo no paga un solo token.
   const customerFacts = await getCustomerFacts(context.businessId, context.customerId);
 
+  // LAS PREGUNTAS FRECUENTES DEL NEGOCIO (2026-09-17, etapa E09b de ONIX-PLAN.md). Entran en todos los
+  // turnos, como dato, igual que el catalogo. El disparador es "este negocio tiene FAQ cargada", que es
+  // un SELECT; sin ninguna no sale ningun mensaje. Ver src/catalog/faq.ts para el defecto que cierra y
+  // para el costo medido.
+  const faqBlock = formatFaqForModel(await getFaqFacts(context.businessId));
+
   // CUANDO SALE Y CUANDO LLEGA (2026-09-17, etapa E05 de ONIX-PLAN.md). El disparador es un SELECT:
   // este cliente tiene una direccion guardada, esa direccion resuelve a una zona de envio, y esa zona
   // tiene plazos cargados. Ninguna de las tres condiciones se lee de prosa. Si falta cualquiera, no se
@@ -1158,6 +1165,9 @@ export async function generateReply(
     // QUIEN ES ESTE CLIENTE. Va antes que sus pedidos a proposito: primero la persona, despues lo que
     // compro. Dato estructurado, sin ninguna instruccion alrededor (ver src/crm/customerFacts.ts).
     ...(customerFacts ? [{ role: "system" as const, content: formatCustomerFactsForModel(customerFacts) }] : []),
+    // Lo que el negocio ya contesto por escrito. Va antes del catalogo: una politica manda sobre una
+    // ficha de producto.
+    ...(faqBlock ? [{ role: "system" as const, content: faqBlock }] : []),
     // CUANDO SALE Y CUANDO LLEGA, ya calculado contra el reloj de este turno. El modelo deja de tener
     // que evaluar "si compra antes de las 11:00" a mano (ver src/shipping/dispatchPromise.ts).
     ...(dispatchPromise && zonaDeEnvio

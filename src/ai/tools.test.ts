@@ -1282,9 +1282,12 @@ test("show_order_summary rejects items given as a non-array instead of silently 
 });
 
 test("a tool with no declared schema is unaffected by the validation gate", async () => {
+  // Usaba get_faq, borrada el 2026-09-17 (etapa E09b): las preguntas frecuentes las pone el servidor en
+  // cada turno y ya no hay herramienta que llamar. get_payment_methods sirve igual: tampoco declara
+  // esquema de entrada, que es lo unico que esta prueba mide.
   const context = await freshContext();
-  const result = await runCatalogTool(context, "get_faq", {});
-  assert.ok(result && typeof result === "object" && "results" in result);
+  const result = await runCatalogTool(context, "get_payment_methods", {});
+  assert.ok(result && typeof result === "object" && "methods" in result);
 });
 
 // ==============================================================================================

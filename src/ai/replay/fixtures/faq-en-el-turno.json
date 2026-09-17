@@ -1,0 +1,27 @@
+{
+  "name": "la FAQ del negocio viaja en el turno (MAGByLizN)",
+  "note": "Incidente real del 2026-09-17, conversación cmtxl4534001d8f2k8kie1cdg. El cliente preguntó 'Dónde se ubican' y el bot contestó 'Esa información no está disponible por el momento. Voy a consultar con el equipo'. Ese turno corrió con una sola iteración y CERO herramientas. La respuesta estaba en la base: 'Tienen punto fisico' -> 'No, somos tienda 100% virtual ubicados en bogota'. Medido sobre 14 días de producción: get_faq se llamó 0 veces en 179 turnos, con 16 entradas activas y 12 de ellas salidas del ciclo de aprendizaje. Etapa E09b: el servidor las pone en todos los turnos y la herramienta se borra.",
+  "seed": { "catalogName": "MAGByLizN" },
+  "turns": [
+    {
+      "customer": "Dónde se ubican",
+      "note": "El turno del defecto, reproducido tal cual: el modelo no llama ninguna herramienta. Lo que se afirma es que el servidor igual le puso la respuesta delante.",
+      "modelResponses": [{ "content": "Somos una tienda virtual, te cuento." }],
+      "expect": {
+        "toolSequence": [],
+        "systemMustContain": [
+          "PREGUNTAS FRECUENTES DE ESTE NEGOCIO",
+          "somos tienda 100% virtual ubicados en bogota"
+        ]
+      }
+    },
+    {
+      "customer": "Y hacen envíos a otras ciudades?",
+      "note": "El bloque no es algo que salga una vez al abrir la conversación: va en cada turno. Sin esto, la segunda pregunta de política del cliente vuelve a quedar sin respuesta.",
+      "modelResponses": [{ "content": "Sí, hacemos envíos a todo el país." }],
+      "expect": {
+        "systemMustContain": ["PREGUNTAS FRECUENTES DE ESTE NEGOCIO", "Hacen Envios Nacionales?"]
+      }
+    }
+  ]
+}
