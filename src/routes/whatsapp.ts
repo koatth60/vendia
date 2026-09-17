@@ -182,7 +182,7 @@ interface OwnerReplyMessage {
   type: string;
   context?: { id?: string };
   text?: { body: string };
-  interactive?: { type: string; button_reply?: { id: string; title: string } };
+  interactive?: { type: string; button_reply?: { id: string; title: string }; list_reply?: { id: string; title: string; description?: string } };
 }
 
 async function deliverOwnerAnswerToCustomer(
@@ -548,6 +548,8 @@ type CustomerRow = Awaited<ReturnType<typeof getOrCreateCustomer>>;
 
 export interface ReplyBurstItem {
   rawText: string;
+  /** Producto elegido tocando una fila de una lista interactiva. Id, no texto: no hay nada que deducir. */
+  selectedProductId?: string;
   customerSentAt: number;
   business: BusinessRow;
   customer: CustomerRow;
@@ -567,17 +569,21 @@ const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve,
 export function combineBurstItems(items: ReplyBurstItem[]): {
   last: ReplyBurstItem;
   combinedRawText: string;
+  selectedProductId: string | undefined;
   customerSentAt: number;
 } {
   return {
     last: items[items.length - 1],
     combinedRawText: items.map((item) => item.rawText).join("\n"),
+    // La ULTIMA eleccion de la rafaga: si el cliente toco dos filas seguidas, vale la que toco al final,
+    // igual que el ultimo mensaje de texto es el que manda.
+    selectedProductId: [...items].reverse().find((item) => item.selectedProductId)?.selectedProductId,
     customerSentAt: items[0].customerSentAt,
   };
 }
 
 async function runGenerateAndSend(conversationId: string, items: ReplyBurstItem[]): Promise<void> {
-  const { last, combinedRawText, customerSentAt } = combineBurstItems(items);
+  const { last, combinedRawText, selectedProductId, customerSentAt } = combineBurstItems(items);
   const { business, customer, credentials, from } = last;
 
   const shippingRatesConfigured = (await prisma.shippingRate.count({ where: { businessId: business.id } })) > 0;
@@ -615,7 +621,8 @@ async function runGenerateAndSend(conversationId: string, items: ReplyBurstItem[
       requiredEffectsEnabled: business.requiredEffectsEnabled,
       paymentExamples,
     },
-    combinedRawText
+    combinedRawText,
+    selectedProductId
   );
 
   // Mismo motivo que antes de la Fase 10: generateReply puede tardar desde segundos hasta minutos,
@@ -642,7 +649,7 @@ async function runGenerateAndSend(conversationId: string, items: ReplyBurstItem[
     const detail = `La respuesta tardo ${Math.round(waitedMinutes)} minutos en generarse (limite ${STALE_REPLY_MINUTES}) y se descarto sin mandarla.`;
     console.error(`${detail} conversation=${conversationId}`);
     await recordAgentIncident(business.id, "STALE_REPLY_DISCARDED", detail, conversationId);
-    await setHumanControl(business.id, conversationId, true);
+    await setHumanControl(business.id, conversationId, true, "STALE_REPLY");
     if (business.contactPhone) {
       const customerLabel = customerDisplayName(customer);
       const staleAlertText = `El bot tardo ${Math.round(waitedMinutes)} minutos en responderle a ${customerLabel} y la respuesta se descarto por vieja. Esa conversacion quedo esperandote en el panel.`;
@@ -675,7 +682,14 @@ async function runGenerateAndSend(conversationId: string, items: ReplyBurstItem[
   // Y despues los mensajes que compuso el servidor: nombres, precios y fotos leidos de la base, en el
   // orden y con el corte que decidio renderCatalog. Nada de esto pasa por el modelo.
   if (catalogBlocks.length > 0) {
-    await sendCatalogBlocks({ businessId: business.id, conversationId, credentials, to: from, blocks: catalogBlocks });
+    await sendCatalogBlocks({
+      businessId: business.id,
+      conversationId,
+      credentials,
+      to: from,
+      blocks: catalogBlocks,
+      interactiveLists: business.interactiveListsEnabled,
+    });
   }
 }
 
@@ -831,7 +845,30 @@ whatsappRouter.post("/webhook", async (req, res) => {
       return;
     }
 
-    if (message.type === "interactive") {
+    // La fila que el cliente toco, cuando la hubo: nombre para el historial, id para resolver el alcance.
+    let listSelection: { productId: string; label: string } | null = null;
+
+    // ELECCION CON EL DEDO. El cliente toco una fila de una lista interactiva y vuelve el id del producto
+    // tal cual lo mando el servidor. No se parsea nada: no hay forma de que esto resuelva a otro producto.
+    // Cae mas arriba que el bloque de botones porque un list_reply no es un boton y, hasta hoy, este
+    // `return` de abajo lo descartaba entero.
+    const listReplyId: string | undefined = message.interactive?.list_reply?.id;
+    if (message.type === "interactive" && listReplyId && !listReplyId.startsWith("csat_")) {
+      const elegido = await prisma.product.findFirst({
+        where: { id: listReplyId, businessId: business.id, active: true },
+        select: { id: true, name: true },
+      });
+      if (elegido) {
+        // El texto que queda en el historial es el nombre del producto, no el id: la conversacion tiene
+        // que leerse como lo que paso ("el cliente eligio X"), en el panel y en el contexto del modelo.
+        // Pero lo que decide el alcance es el id, que va aparte.
+        listSelection = { productId: elegido.id, label: elegido.name };
+      } else {
+        console.error(`list_reply con un producto que no existe o esta inactivo (business=${business.id}):`, listReplyId);
+      }
+    }
+
+    if (message.type === "interactive" && !listSelection) {
       const buttonId: string | undefined = message.interactive?.button_reply?.id;
       if (buttonId?.startsWith("csat_")) {
         const result = await recordCsatReply(business.id, from, buttonId);
@@ -872,7 +909,9 @@ whatsappRouter.post("/webhook", async (req, res) => {
       let media: { s3Key: string; type: "IMAGE" | "VIDEO" | "AUDIO" } | undefined;
       let imageAnalysis: string | undefined;
 
-      if (message.type === "text") {
+      if (listSelection) {
+        text = listSelection.label;
+      } else if (message.type === "text") {
         text = message.text.body;
       } else if (message.type === "image") {
         try {
@@ -1092,6 +1131,7 @@ whatsappRouter.post("/webhook", async (req, res) => {
       // en vez de tenerlo abierto esperando a que se genere una respuesta.
       replyBurstBuffer.add(conversation.id, {
         rawText,
+        selectedProductId: listSelection?.productId,
         customerSentAt,
         business,
         customer,

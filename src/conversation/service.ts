@@ -463,7 +463,31 @@ export async function clearConversationIntent(businessId: string, conversationId
   return conversation;
 }
 
-export async function setHumanControl(businessId: string, conversationId: string, active: boolean) {
+/**
+ * Por que esta conversacion pasa (o vuelve) a manos de una persona. Ver HumanControlReason en el esquema.
+ *
+ * Es obligatorio al TOMAR el control: la pregunta "¿por que se calló el bot solo?" no se puede contestar
+ * con un SELECT si nadie escribio el motivo, y seis de los diez caminos que toman el control no los
+ * dispara ningun clic.
+ */
+export type HumanControlReasonValue =
+  | "PANEL_TOGGLE"
+  | "PANEL_MESSAGE"
+  | "PANEL_TEMPLATE"
+  | "PANEL_QUEUE"
+  | "INTENT_ESCALATION"
+  | "PHOTO_ESCALATION"
+  | "OWNER_QUESTION_TIMEOUT"
+  | "SALE_CONFIRMATION_TIMEOUT"
+  | "STALE_REPLY"
+  | "REQUIRED_EFFECT";
+
+export async function setHumanControl(
+  businessId: string,
+  conversationId: string,
+  active: boolean,
+  reason?: HumanControlReasonValue
+) {
   const existing = await prisma.conversation.findFirst({
     where: { id: conversationId, customer: { businessId } },
   });
@@ -484,6 +508,9 @@ export async function setHumanControl(businessId: string, conversationId: string
     where: { id: conversationId },
     data: {
       humanControl: active,
+      // El motivo se conserva mientras dure la pausa: un mensaje del panel encima de una escalacion del
+      // bot no puede reescribir la historia de quien la empezo. Al devolver el control queda en null.
+      humanControlReason: active ? (existing.humanControl ? existing.humanControlReason : (reason ?? null)) : null,
       humanControlAckSent: keepAck ? existing.humanControlAckSent : false,
       humanControlSince: active ? new Date() : null,
       stalledReminderStage: 0,
@@ -1067,6 +1094,9 @@ export async function getConversationForBusiness(businessId: string, conversatio
     status: conversation.status,
     intent: conversation.intent,
     humanControl: conversation.humanControl,
+    // Para que el panel pueda decir POR QUE quedo en manos de una persona en vez de solo que lo esta.
+    humanControlReason: conversation.humanControlReason,
+    humanControlSince: conversation.humanControlSince,
     updatedAt: conversation.updatedAt,
     unreadCount: conversation.unreadCount,
     windowOpen: windowState.windowOpen,

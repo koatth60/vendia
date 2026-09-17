@@ -81,7 +81,7 @@ export async function runSaleConfirmationChaserJob(): Promise<void> {
       if (!alert.delivered) console.error(`No se pudo avisar del vencimiento de una confirmacion de venta (conversation=${conversation.id}):`, alert.failure?.message);
 
       await clearPendingConfirmation(conversation.id);
-      await setHumanControl(business.id, conversation.id, true);
+      await setHumanControl(business.id, conversation.id, true, "SALE_CONFIRMATION_TIMEOUT");
       await recordAgentIncident(business.id, "SALE_CONFIRMATION_TIMEOUT", text, conversation.id, "sale_confirmation_timeout");
 
       // El cliente pago y lleva horas oyendo "estoy confirmando tu pago". Una sola linea, la misma que ya

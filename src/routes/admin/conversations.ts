@@ -66,7 +66,7 @@ conversationsRouter.get("/api/conversations/:id", async (req, res) => {
 conversationsRouter.put("/api/conversations/:id/handoff", async (req, res) => {
   const active = Boolean(req.body?.active);
   const businessId = businessIdOf(req);
-  const conversation = await setHumanControl(businessId, String(req.params.id), active);
+  const conversation = await setHumanControl(businessId, String(req.params.id), active, "PANEL_TOGGLE");
   if (!conversation) {
     res.status(404).json({ error: "Conversación no encontrada" });
     return;
@@ -124,7 +124,7 @@ conversationsRouter.post("/api/conversations/:id/messages", upload.single("file"
     // justo lo que no paso en el caso de David (2026-09-14).
     if (String(req.body?.queue ?? "") === "true" && text && !file) {
       const queued = await queueOutboundMessage(businessId, String(req.params.id), formatForWhatsapp(text), "PANEL");
-      await setHumanControl(businessId, String(req.params.id), true);
+      await setHumanControl(businessId, String(req.params.id), true, "PANEL_QUEUE");
       await clearAgentRequestFlag(businessId, String(req.params.id));
       res.status(202).json({ ok: true, queued: true, id: queued.id });
       return;
@@ -145,7 +145,7 @@ conversationsRouter.post("/api/conversations/:id/messages", upload.single("file"
   // un mensaje del cliente que entrara justo ahi recibia respuesta del bot encima de la del dueno.
   // Tomar el control primero cierra esa ventana; si el envio falla, la conversacion queda en manos del
   // humano, que es el lado seguro del error.
-  await setHumanControl(businessId, String(req.params.id), true);
+  await setHumanControl(businessId, String(req.params.id), true, "PANEL_MESSAGE");
   await clearAgentRequestFlag(businessId, String(req.params.id));
 
   const formattedText = formatForWhatsapp(text);
@@ -264,7 +264,7 @@ conversationsRouter.post("/api/conversations/:id/send-template", async (req, res
   // Records the template's real wording, not just its name - the thread should read like a normal
   // message the customer actually saw, same as every other outbound bubble.
   await recordMessage(businessId, String(req.params.id), "ASSISTANT", template.bodyText || `[Plantilla: ${templateName}]`, sent.wamid || undefined);
-  await setHumanControl(businessId, String(req.params.id), true);
+  await setHumanControl(businessId, String(req.params.id), true, "PANEL_TEMPLATE");
   await clearAgentRequestFlag(businessId, String(req.params.id));
   await clearPendingOwnerQuestionsForConversation(String(req.params.id));
 

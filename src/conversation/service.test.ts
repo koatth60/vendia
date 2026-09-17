@@ -842,3 +842,33 @@ test("getOrCreateOpenConversation never reopens a LOST conversation - it starts 
   await prisma.conversation.deleteMany({ where: { id: result.id } });
   await prisma.conversation.deleteMany({ where: { id: conversation.id } });
 });
+
+// ==============================================================================================
+// Por que quedo en manos de una persona (2026-09-17)
+// ==============================================================================================
+
+test("tomar el control guarda el motivo, y devolverlo lo borra", async () => {
+  const conversation = await prisma.conversation.create({ data: { customerId } });
+
+  const tomada = await setHumanControl(businessId, conversation.id, true, "STALE_REPLY");
+  assert.equal(tomada?.humanControl, true);
+  assert.equal(tomada?.humanControlReason, "STALE_REPLY");
+
+  const devuelta = await setHumanControl(businessId, conversation.id, false);
+  assert.equal(devuelta?.humanControl, false);
+  assert.equal(devuelta?.humanControlReason, null, "sin control humano no hay motivo que mostrar");
+
+  await prisma.conversation.deleteMany({ where: { id: conversation.id } });
+});
+
+test("un mensaje del panel sobre una escalacion del bot no reescribe quien la empezo", async () => {
+  // La duena contesta desde el panel una conversacion que el bot ya habia escalado: el motivo tiene que
+  // seguir diciendo que la empezo el bot, no el ultimo que escribio.
+  const conversation = await prisma.conversation.create({ data: { customerId } });
+
+  await setHumanControl(businessId, conversation.id, true, "INTENT_ESCALATION");
+  const despues = await setHumanControl(businessId, conversation.id, true, "PANEL_MESSAGE");
+  assert.equal(despues?.humanControlReason, "INTENT_ESCALATION");
+
+  await prisma.conversation.deleteMany({ where: { id: conversation.id } });
+});
