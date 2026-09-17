@@ -1,4 +1,5 @@
 import { prisma } from "../db/client";
+import { localDaysBetween } from "../ai/clock";
 
 // EL PEDIDO QUE EL CLIENTE YA TIENE, leido de la base (2026-09-17).
 //
@@ -44,9 +45,11 @@ export interface PostSaleContext {
   fromAnotherConversation: boolean;
 }
 
-function daysBetween(from: Date, to: Date): number {
-  return Math.floor((to.getTime() - from.getTime()) / (24 * 60 * 60 * 1000));
-}
+// La edad del pedido se cuenta en DIAS CALENDARIO de la zona del negocio, no en bloques de 24 horas
+// (2026-09-17, ver src/ai/clock.ts). Un pedido de las 19:36 del martes en Bogota es 00:36 del
+// miercoles en UTC: a las 10:33 del miercoles la resta en UTC daba 0 y la respuesta correcta es 1.
+// Es justo el borde donde el cliente pregunta "y entonces manana me llega?", asi que era el unico
+// borde donde el numero no podia estar mal.
 
 /**
  * El ultimo pedido de ESTE cliente, sin importar en que conversacion se cerro.
@@ -62,7 +65,8 @@ export async function getPostSaleContext(
   businessId: string,
   customerId: string,
   conversationId: string,
-  now: Date = new Date()
+  now: Date = new Date(),
+  timezone = "UTC"
 ): Promise<PostSaleContext | null> {
   const order = await prisma.order.findFirst({
     where: { businessId, customerId, createdAt: { gte: new Date(now.getTime() - POST_SALE_WINDOW_DAYS * 24 * 60 * 60 * 1000) } },
@@ -75,7 +79,7 @@ export async function getPostSaleContext(
     order: {
       id: order.id,
       createdAt: order.createdAt,
-      ageDays: daysBetween(order.createdAt, now),
+      ageDays: localDaysBetween(order.createdAt, now, timezone),
       fulfillmentStatus: String(order.fulfillmentStatus),
       canceledAt: order.canceledAt,
       summary: order.summary,

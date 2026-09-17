@@ -1,0 +1,27 @@
+{
+  "name": "el turno lleva reloj (Aurora Joyas)",
+  "note": "Incidente real del 2026-09-17, conversacion cmu4wsaqb00blq92k2jgfjsgy de MAGByLizN: la duena escribio 'manana mismo se te despacha' a las 21:28 del 16 de septiembre y a las 10:33 del 17 el bot repitio 'Manana se realiza el despacho', cuando ese mismo dia era el despacho. El turno llamo get_order_status y recibio el estado correcto de la base: no fallo el dato, fallo la fecha, porque el turno no llevaba ninguna marca de tiempo. Este fixture fija la garantia: el instante actual, en la zona horaria del negocio, viaja en el turno SIEMPRE, sin depender de que el modelo pida nada. Los marcadores de dia del historial se prueban aparte en src/ai/clock.test.ts (un replay escribe todos sus mensajes con el reloj de la corrida, asi que no puede cruzar de dia).",
+  "seed": { "catalogName": "Aurora Joyas" },
+  "turns": [
+    {
+      "customer": "Hola, ya hiciste el envio?",
+      "note": "Turno sin ninguna herramienta, que es el caso peor: si el reloj dependiera de que el modelo llamara algo, aca no habria fecha. Tiene que estar igual.",
+      "modelResponses": [{ "content": "Hola! Dejame revisar como va tu pedido." }],
+      "expect": {
+        "toolSequence": [],
+        "systemMustContain": [
+          "AHORA MISMO, en la zona horaria de este negocio",
+          "\"zona\":\"America/Bogota\""
+        ]
+      }
+    },
+    {
+      "customer": "Y para cuando me llegaria?",
+      "note": "Segundo turno: el reloj no es algo que se ponga una vez al abrir la conversacion, va en cada turno. Sin esto una conversacion que cruza la medianoche seguiria creyendo que es el dia anterior.",
+      "modelResponses": [{ "content": "Te confirmo apenas tenga la guia." }],
+      "expect": {
+        "systemMustContain": ["AHORA MISMO, en la zona horaria de este negocio"]
+      }
+    }
+  ]
+}

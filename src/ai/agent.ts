@@ -19,6 +19,7 @@ import {
   type ScopeProduct,
 } from "../catalog/scope";
 import { getPostSaleContext, postSaleFactsForModel } from "../orders/postSale";
+import { buildTurnClock, formatTurnClockForModel, markHistoryByDay } from "./clock";
 import {
   renderCatalog,
   presentedProductIds,
@@ -926,6 +927,12 @@ export async function generateReply(
   const negocio = await getBusinessLocale(context.businessId);
   context = { ...context, locale: negocio.locale };
 
+  // EL TURNO LLEVA RELOJ (2026-09-17, ver src/ai/clock.ts). Un solo instante para todo el turno, para
+  // que el bloque de abajo, los marcadores del historial y la edad del pedido post-venta no puedan
+  // discrepar entre si por haber leido el reloj en tres momentos distintos.
+  const ahora = new Date();
+  const turnClock = buildTurnClock(ahora, negocio.timezone, negocio.locale);
+
   const history = await getRecentHistory(conversationId, 30);
   const contextSummary = await getOrRefreshContextSummary(conversationId, context.businessId);
   const { history: mediaFreeHistory } = extractMediaHistory(history);
@@ -956,7 +963,7 @@ export async function generateReply(
   //
   // El disparador de la supresion no lee prosa: es una fila de Order dentro de la ventana post-venta, o
   // una confirmacion de pago viva en esta conversacion. Un SELECT, no una opinion.
-  const postSale = await getPostSaleContext(context.businessId, context.customerId, conversationId);
+  const postSale = await getPostSaleContext(context.businessId, context.customerId, conversationId, ahora, negocio.timezone);
   const pendingConfirmation = await prisma.conversation.findUnique({
     where: { id: conversationId },
     select: { pendingConfirmationAskedAt: true },
@@ -1104,6 +1111,10 @@ export async function generateReply(
         closedDaysText: personality?.closedDaysText ?? (negocio.businessHours ? closedDays(negocio.businessHours).join(", ") : ""),
       }),
     },
+    // EL RELOJ DEL TURNO. Va antes que cualquier otro bloque porque todo lo que sigue (la edad del
+    // pedido, los marcadores del historial, las reglas de despacho que el negocio escribio en horas)
+    // se lee contra este instante. Dato puro, sin una sola instruccion: ver src/ai/clock.ts.
+    { role: "system" as const, content: formatTurnClockForModel(turnClock) },
     ...(contextSummary
       ? [
           {
@@ -1225,10 +1236,19 @@ Este pedido YA ESTA CERRADO: no es el pedido en curso. Si el cliente pregunta po
           },
         ]
       : []),
-    ...modelFacingHistory.map((m) => ({
-      role: toOpenAiRole(m.role),
-      content: messageText(m),
-    })),
+    // El historial, con un marcador de dia antes del primer mensaje de cada dia calendario. Sin esto
+    // un "manana" dicho ayer se lee como si fuera de hace un minuto - el error medido en produccion
+    // que motivo esta pieza (ver src/ai/clock.ts). El marcador va como mensaje `system` y no pegado
+    // al texto: un corchete dentro de un mensaje de rol ASSISTANT el modelo lo imita (incidente del
+    // 2026-09-13, ver extractMediaHistory arriba). Una conversacion de un solo dia no lleva ninguno.
+    ...markHistoryByDay(modelFacingHistory, {
+      now: ahora,
+      timezone: negocio.timezone,
+      locale: negocio.locale,
+    }).flatMap(({ marker, message }) => [
+      ...(marker ? [{ role: "system" as const, content: marker }] : []),
+      { role: toOpenAiRole(message.role), content: messageText(message) },
+    ]),
   ];
 
   let lastText = "";

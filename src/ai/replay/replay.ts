@@ -52,6 +52,12 @@ export interface FixtureTurnExpectation {
   // deja de devolver lo que corresponde, la lista deja de coincidir y el turno falla.
   catalogFidelityScope?: string[];
   textMustContain?: string[];
+  // Texto que el SERVIDOR tiene que haberle puesto delante al modelo en este turno, en algun mensaje
+  // de rol `system` (comparacion literal, sin regex - misma regla que textMustContain). Es la unica
+  // forma determinista de probar una pieza cuyo efecto es el CONTENIDO del turno y no la respuesta: el
+  // modelo esta mockeado. Lo usa el reloj del turno (2026-09-17) y lo va a usar cualquier fase que
+  // agregue un hecho leido de la base.
+  systemMustContain?: string[];
   // Bloqueador de produccion (2026-09-15, seguimiento de f9b994b): herramientas que generateReply
   // FORZO via tool_choice este turno, en orden. Es lo unico del forzado que un replay determinista puede
   // medir de verdad: las respuestas del modelo estan grabadas, asi que si el fixture programa la llamada
@@ -186,6 +192,9 @@ export interface TurnResult {
   // Cuantas fotos/videos viajan pegados a esos bloques. No pasan por el fetch mockeado porque los manda
   // el caller real (routes/whatsapp.ts), no generateReply - por eso se cuentan aparte y se suman.
   blockMediaCount: number;
+  // Todos los mensajes `system` de la primera llamada al modelo, concatenados. Es lo que el servidor
+  // le puso delante antes de que el modelo decidiera nada. Ver la nota en el stub de abajo.
+  systemContext: string;
   toolSequence: string[];
   forcedTools: string[];
   sends: CapturedSend[];
@@ -241,12 +250,24 @@ export async function runFixture(fixture: ConversationFixture): Promise<ReplayRe
       const queue = [...turn.modelResponses];
       const toolSequence: string[] = [];
       const forcedTools: string[] = [];
+      // Lo que el SERVIDOR le puso delante al modelo en este turno: todos los mensajes de rol `system`
+      // de la PRIMERA llamada, concatenados (2026-09-17). Existe porque desde el reloj del turno hay
+      // piezas cuyo unico efecto observable es el contenido del contexto - el modelo esta mockeado, asi
+      // que ninguna asercion sobre su respuesta puede probar que el dato llego. Con esto un fixture
+      // afirma "este dato estaba en el turno" de forma determinista y gratis.
+      let systemContext = "";
       // @ts-expect-error test stub, narrower shape than the real SDK type - same pattern as
       // agent.loopExhaustion.test.ts.
-      deepseek.chat.completions.create = async (params: { tool_choice?: unknown }) => {
+      deepseek.chat.completions.create = async (params: { tool_choice?: unknown; messages?: unknown }) => {
         const choice = params?.tool_choice;
         if (choice && typeof choice === "object" && "function" in choice) {
           forcedTools.push(String((choice as { function: { name: string } }).function.name));
+        }
+        if (!systemContext && Array.isArray(params?.messages)) {
+          systemContext = (params.messages as { role?: string; content?: unknown }[])
+            .filter((m) => m.role === "system" && typeof m.content === "string")
+            .map((m) => m.content as string)
+            .join("\n");
         }
         const next = queue.shift();
         if (!next) {
@@ -312,6 +333,7 @@ export async function runFixture(fixture: ConversationFixture): Promise<ReplayRe
         reply,
         blocks: blocks.map((b) => b.text),
         blockMediaCount: blocks.reduce((acc, b) => acc + b.media.reduce((n, m) => n + m.items.length, 0), 0),
+        systemContext,
         toolSequence,
         forcedTools,
         sends,
@@ -469,6 +491,12 @@ export function assertTurn(
   }
   for (const required of expect_.textMustContain ?? []) {
     assert.ok(customerFacingText.includes(required), `${label}: la respuesta debia contener "${required}" pero dice: "${customerFacingText}"`);
+  }
+  for (const required of expect_.systemMustContain ?? []) {
+    assert.ok(
+      result.systemContext.includes(required),
+      `${label}: el servidor debia ponerle "${required}" delante al modelo, y no esta en ningun mensaje system del turno`
+    );
   }
   if (expect_.sideEffects?.mediaSent !== undefined) {
     const mediaSent =

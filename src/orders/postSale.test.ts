@@ -108,3 +108,19 @@ test("los hechos que ve el modelo llevan la direccion y la forma de pago, para q
   assert.equal(facts.total, "149000");
   assert.equal(facts.diasDesdeLaCompra, 0);
 });
+
+test("la edad del pedido se cuenta en dias calendario del negocio, no en bloques de 24 horas", async () => {
+  // El borde real: compra 19:36 del martes en Bogota (= 00:36 del miercoles en UTC), consulta a las
+  // 10:33 del miercoles en Bogota. Son 14 horas: la resta en UTC da 0 dias, y la respuesta que el
+  // cliente espera es 1, porque compro AYER. Sin esto el agente contesta como si acabara de comprar.
+  await crearPedido(new Date("2026-09-17T00:36:31.769Z"));
+  const ahora = new Date("2026-09-17T15:33:43.325Z");
+
+  const enBogota = await getPostSaleContext(businessId, customerId, conversationNueva, ahora, "America/Bogota");
+  assert.equal(postSaleFactsForModel(enBogota!).diasDesdeLaCompra, 1);
+
+  // Sin zona (el default UTC) los dos instantes caen el mismo dia calendario y la respuesta es 0.
+  // Queda cubierto a proposito: es el comportamiento de cualquier caller que todavia no pase zona.
+  const sinZona = await getPostSaleContext(businessId, customerId, conversationNueva, ahora);
+  assert.equal(postSaleFactsForModel(sinZona!).diasDesdeLaCompra, 0);
+});
