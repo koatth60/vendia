@@ -90,6 +90,38 @@ export function numericSelection(customerText: string): number[] {
 }
 
 /**
+ * La posicion que senalo el cliente cuando el mensaje NO es solo numeros ("seria el numero 6", "me
+ * gustaria el 2"). numericSelection cubre el caso limpio; esto cubre el mismo gesto dicho con palabras.
+ *
+ * Es mas amplio que numericSelection, asi que se apoya en tres condiciones que se verifican contra
+ * datos, no contra vocabulario:
+ *
+ *   1. Hay una lista REAL presentada por el servidor (lastPresentedProductIds). Sin lista no hay
+ *      posiciones que senalar y esto no corre.
+ *   2. TODOS los numeros del mensaje caen dentro de esa lista. Un telefono, una cedula, un precio o
+ *      "tengo 3 hijos, uno de 12" se caen solos: 3068538 y 12 no son posiciones de una lista de seis.
+ *   3. El mensaje no nombra ningun producto. Si lo nombra, manda el nombre - el cliente esta diciendo
+ *      cual quiere, no en que renglon esta.
+ *
+ * MITIGACION, NO GARANTIA. La garantia es la lista interactiva de WhatsApp (ver
+ * Business.interactiveListsEnabled): ahi el cliente toca una fila y vuelve el id del producto, sin que
+ * nadie tenga que deducir a que se referia. Esto es lo que sostiene el caso mientras esa bandera este
+ * apagada, y su peor falla posible es elegir otro producto DE LA LISTA que el cliente acaba de ver -
+ * nunca uno de otra categoria, como pasaba cuando el dígito podia ganar por el nombre.
+ */
+export function ordinalSelection(customerText: string, listLength: number): number[] {
+  if (listLength <= 0) return [];
+  const numbers: number[] = [];
+  for (const token of tokenize(customerText)) {
+    const value = Number(token);
+    if (!Number.isInteger(value) || String(value) !== token) continue;
+    if (value < 1 || value > listLength) return [];
+    numbers.push(value);
+  }
+  return numbers;
+}
+
+/**
  * La variante que corresponde cuando el cliente nombro un color ("el Serie 11 Mini negro"). Sin color
  * nombrado devuelve null, que es lo que le dice al presentador que mande los medios generales mas los
  * de todas las variantes (el criterio actual de send_product_media, conservado).
@@ -254,7 +286,18 @@ export function resolveProductScopeFrom(
 
   const byId = new Map(products.map((p) => [p.id, p]));
 
-  const numbers = numericSelection(customerText);
+  const tokensParaSeleccion = tokenize(customerText);
+  // ¿El mensaje nombra un producto con una palabra de verdad? Si lo nombra, manda el nombre: el cliente
+  // esta diciendo cual quiere, no en que renglon de la lista esta. Misma regla que namedInText: un
+  // digito no cuenta como nombre.
+  const nombraUnProducto = products.some((product) => {
+    const nameTokens = new Set(tokenize(product.name));
+    return tokensParaSeleccion.some((t) => !isDigitsOnly(t) && nameTokens.has(t));
+  });
+  // "el 3" (el mensaje entero son numeros) o "seria el numero 3" (el mismo gesto dicho con palabras).
+  const estricta = numericSelection(customerText);
+  const numbers =
+    estricta.length > 0 || nombraUnProducto ? estricta : ordinalSelection(customerText, lastPresentedList.length);
   if (numbers.length > 0 && lastPresentedList.length > 0) {
     const chosen: ScopeProduct[] = [];
     for (const n of numbers) {

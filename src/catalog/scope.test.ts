@@ -205,3 +205,62 @@ test("suprimir la vidriera nunca toca un alcance que ya era 'none' ni uno de poc
   assert.equal(suppressBrowsingScope(pocos, "el 1 y el 2", true).kind, "few");
   assert.equal(suppressBrowsingScope({ kind: "none" }, "gracias", true).kind, "none");
 });
+
+// ==============================================================================================
+// "Sería el número 6": la posicion dicha con palabras (2026-09-17)
+// ==============================================================================================
+
+/** Los smartwatches del fixture, en el orden en que el servidor los numera. */
+function listaDeRelojes(): string[] {
+  return [
+    productNamed(magimp, "COMBO SMARTWATCH T2000 ULTRA").id,
+    productNamed(magimp, "Smartwatch V20 Caballero").id,
+    productNamed(magimp, "Smartwatch gen 9").id,
+    productNamed(magimp, "Combo Pareja").id,
+    productNamed(magimp, "Reloj Inteligente Smartwatch Serie 11 Mini (Edición Compacta y Elegante)").id,
+    productNamed(magimp, "Reloj Inteligente Smartwatch Serie 12 Ultra 3 (Edición Deportiva / Robusta)").id,
+  ];
+}
+
+test("un numero dicho con palabras elige la posicion de la lista, no el producto que tiene ese digito", () => {
+  // Turno real de produccion (02:53 UTC): el servidor le habia presentado los 6 smartwatches, la clienta
+  // escribio "Sería el número 6" y le salieron la ficha y las fotos del *Parlante Charge 6*.
+  const presented = listaDeRelojes();
+  const scope = scopeOf("Sería el número 6", presented);
+  assert.equal(scope.kind, "one");
+  if (scope.kind !== "one") return;
+  assert.ok(scope.product.name.includes("Serie 12 Ultra 3"));
+});
+
+test("dos posiciones dichas con palabras eligen las dos", () => {
+  const presented = [
+    productNamed(magimp, "AIRPODS PRO 2").id,
+    productNamed(magimp, "AIRPODS SERIE 4").id,
+  ];
+  const scope = scopeOf("el número 1 y el número 2", presented);
+  assert.equal(scope.kind, "few");
+  if (scope.kind !== "few") return;
+  assert.deepEqual(scope.products.map((p) => p.name), ["AIRPODS PRO 2", "AIRPODS SERIE 4"]);
+});
+
+test("un numero fuera del largo de la lista no es una posicion", () => {
+  // Un telefono, una cedula, una direccion o una edad no eligen nada. Es lo que reemplaza a la vieja
+  // regla de "todos los tokens tienen que ser numeros", sin depender de una lista de palabras.
+  const presented = [productNamed(magimp, "AIRPODS PRO 2").id, productNamed(magimp, "AIRPODS SERIE 4").id];
+  assert.equal(scopeOf("mi celular es 3103325677", presented).kind, "none");
+  assert.equal(scopeOf("tengo 3 hijos y uno de 12 años", presented).kind, "none");
+  assert.equal(scopeOf("Calle 22 #108-62 Fontibón ferrocarril", presented).kind, "none");
+});
+
+test("sin ninguna lista presentada, un numero suelto no elige nada", () => {
+  assert.equal(scopeOf("Sería el número 6", []).kind, "none");
+});
+
+test("si el mensaje nombra un producto, manda el nombre y no la posicion", () => {
+  // "quiero el Charge 6" con una lista de relojes presentada: el cliente esta diciendo CUAL quiere.
+  const presented = listaDeRelojes();
+  const scope = scopeOf("quiero el bombox 4", presented);
+  assert.equal(scope.kind, "one");
+  if (scope.kind !== "one") return;
+  assert.equal(scope.product.name, "Bombox 4");
+});
