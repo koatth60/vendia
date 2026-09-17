@@ -416,7 +416,7 @@ async function notifyOwnerAboutImage(context: ToolContext, evidence: ServerSaleE
   const text = [
     `${greeting}, el cliente ${customerLabel} mando una IMAGEN y el bot no la resolvio. Puede ser un comprobante de pago: hay que revisarla.`,
     datos.length > 0 ? datos.join("\n") : "Todavia no hay datos de pedido registrados en esta conversacion.",
-    "El bot NO registro ningun pedido ni confirmo ningun pago. Abri esa conversacion en el panel y revisala vos.",
+    "El bot NO registro ningun pedido ni confirmo ningun pago. Abre esa conversacion en el panel y revísala tú.",
   ].join("\n\n");
 
   const alerta = await sendAlertToOwner(context.businessId, context.credentials, business.contactPhone, text);
@@ -514,7 +514,7 @@ export function escalationOwnerAlertText(kind: RequiredEffectKind): string {
   if (kind === "SALE_REGISTERED_AND_OWNER_NOTIFIED") {
     return "Atencion: un cliente mando un comprobante con un pedido ya armado y el bot no logro registrarlo (ni el modelo ni el cierre automatico). Esa conversacion quedo esperandote en el panel - revisa el pago a mano.";
   }
-  return "Atencion: un cliente mando una imagen que puede ser un comprobante de pago y el bot no logro avisarte por el camino normal. Esa conversacion quedo esperandote en el panel - revisala a mano.";
+  return "Atencion: un cliente mando una imagen que puede ser un comprobante de pago y el bot no logro avisarte por el camino normal. Esa conversacion quedo esperandote en el panel - revísala a mano.";
 }
 
 // OBSERVABILIDAD. Sin esto no hay forma de saber si el mecanismo sirve, y sobre todo: el contador

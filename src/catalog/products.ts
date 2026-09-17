@@ -45,7 +45,11 @@ export async function listActiveProducts(businessId: string) {
   const products = await prisma.product.findMany({
     where: { businessId, active: true },
     include: PRODUCT_INCLUDE,
-    orderBy: { createdAt: "desc" },
+    // id como desempate, igual que la consulta paginada de mas abajo: createdAt empata en una carga
+    // masiva y, sin un segundo criterio, Postgres puede devolver las filas empatadas en otro orden en
+    // cada consulta. Aca eso no es cosmetico: el bot le muestra listas NUMERADAS al cliente, y si el
+    // orden cambia entre dos mensajes, "la 3" deja de ser el mismo producto.
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
   });
   await withFreshVariantMediaUrls(products);
   return withFreshMediaUrls(products);
@@ -55,7 +59,7 @@ export async function listAllProducts(businessId: string) {
   const products = await prisma.product.findMany({
     where: { businessId },
     include: PRODUCT_INCLUDE,
-    orderBy: { createdAt: "desc" },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
   });
   await withFreshVariantMediaUrls(products);
   return withFreshMediaUrls(products);

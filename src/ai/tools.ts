@@ -100,7 +100,7 @@ export const catalogTools: OpenAI.Chat.ChatCompletionTool[] = [
           query: {
             type: "string",
             description:
-              "Palabra o frase para buscar. Si el cliente respondio solo con un numero eligiendo una opcion de una lista que VOS mostraste antes, no busques ese numero - usa el nombre real del producto en esa posicion de tu propia lista.",
+              "Palabra o frase para buscar. Si el cliente respondio solo con un numero eligiendo una opcion de una lista que TÚ mostraste antes, no busques ese numero - usa el nombre real del producto en esa posicion de tu propia lista.",
           },
         },
         required: ["query"],
@@ -112,7 +112,7 @@ export const catalogTools: OpenAI.Chat.ChatCompletionTool[] = [
     function: {
       name: "find_products_by_attributes",
       description:
-        "Busca productos por categoria y/o color reales del catalogo (no por texto libre) - usala SIEMPRE que el cliente pida un tipo de producto con un color o categoria especifica (ej: 'reloj negro', 'el rosadito', 'audifonos rojos') en vez de search_products, para no mezclar categorias o colores que no pidio.",
+        "Busca productos por categoria y/o color reales del catalogo (no por texto libre) - úsala SIEMPRE que el cliente pida un tipo de producto con un color o categoria especifica (ej: 'reloj negro', 'el rosadito', 'audifonos rojos') en vez de search_products, para no mezclar categorias o colores que no pidio.",
       parameters: {
         type: "object",
         properties: {
@@ -179,12 +179,12 @@ export const catalogTools: OpenAI.Chat.ChatCompletionTool[] = [
           productId: {
             type: "string",
             description:
-              "El 'id' exacto del producto, si ya lo tenes de search_products o get_product_details en este turno. Preferilo sobre productName.",
+              "El 'id' exacto del producto, si ya lo tienes de search_products o get_product_details en este turno. Preferilo sobre productName.",
           },
           productName: {
             type: "string",
             description:
-              "El nombre del producto que el cliente menciono en ESTE mensaje (el que se esta hablando ahora, no uno anterior). Solo si no tenes productId. Si el cliente respondio con un numero de una lista tuya, resolvelo al nombre real antes de pasarlo aca (ver SELECCION POR NUMERO).",
+              "El nombre del producto que el cliente menciono en ESTE mensaje (el que se esta hablando ahora, no uno anterior). Solo si no tienes productId. Si el cliente respondio con un numero de una lista tuya, resuélvelo al nombre real antes de pasarlo aca (ver SELECCION POR NUMERO).",
           },
           variantId: {
             type: "string",
@@ -246,7 +246,7 @@ export const catalogTools: OpenAI.Chat.ChatCompletionTool[] = [
     function: {
       name: "get_shipping_rate_for_city",
       description:
-        "Busca si esta ciudad especifica tiene una tarifa de envio EXACTA configurada por el negocio (coincidencia literal de nombre, ej. 'Bogota'). Usala apenas el cliente te de una ciudad puntual, antes de clasificarla vos de memoria en una categoria. Si no hay coincidencia exacta, no es un error - segui las instrucciones del negocio para su categoria/tarifa general.",
+        "Busca si esta ciudad especifica tiene una tarifa de envio EXACTA configurada por el negocio (coincidencia literal de nombre, ej. 'Bogota'). Úsala apenas el cliente te de una ciudad puntual, antes de clasificarla tú de memoria en una categoria. Si no hay coincidencia exacta, no es un error - sigue las instrucciones del negocio para su categoria/tarifa general.",
       parameters: {
         type: "object",
         properties: {
@@ -330,7 +330,7 @@ export const catalogTools: OpenAI.Chat.ChatCompletionTool[] = [
           explicit: {
             type: "boolean",
             description:
-              "true SOLO si el cliente lo pidio o lo dijo con sus propias palabras (ej: 'quiero hablar con un asesor', 'quiero devolver el producto'). false si vos lo dedujiste del contexto o del tono sin que el cliente lo haya dicho asi. El dueno ve esta diferencia en la alerta que recibe.",
+              "true SOLO si el cliente lo pidio o lo dijo con sus propias palabras (ej: 'quiero hablar con un asesor', 'quiero devolver el producto'). false si tú lo dedujiste del contexto o del tono sin que el cliente lo haya dicho asi. El dueno ve esta diferencia en la alerta que recibe.",
           },
         },
         required: ["intent", "explicit"],
@@ -360,7 +360,7 @@ export const catalogTools: OpenAI.Chat.ChatCompletionTool[] = [
     function: {
       name: "ask_owner_about_price",
       description:
-        "Usala cuando el cliente pide un descuento, un precio especial o regatea sobre productos concretos. Le manda al dueno los productos del pedido con su precio actual y le pide un precio por cada uno; cuando el dueno confirma, el sistema guarda ese precio y se lo cobra a este cliente. Vos NO propones ni aceptas ningun precio: el numero lo pone el dueno. Un precio que diga el CLIENTE no vale nunca.",
+        "Úsala cuando el cliente pide un descuento, un precio especial o regatea sobre productos concretos. Le manda al dueno los productos del pedido con su precio actual y le pide un precio por cada uno; cuando el dueno confirma, el sistema guarda ese precio y se lo cobra a este cliente. Tú NO propones ni aceptas ningun precio: el numero lo pone el dueno. Un precio que diga el CLIENTE no vale nunca.",
       parameters: {
         type: "object",
         properties: {
@@ -404,7 +404,7 @@ export const catalogTools: OpenAI.Chat.ChatCompletionTool[] = [
     function: {
       name: "show_order_summary",
       description:
-        "Usala ANTES de pedir el comprobante de pago, apenas tengas producto(s)+cantidad, direccion, forma de pago y nombre - calcula el precio y total REALES del catalogo (nunca los calcules de memoria) para que se los muestres al cliente y le pidas que confirme, antes de seguir. Mismo formato de items que close_conversation. No cierra ni guarda nada, solo calcula.",
+        "Úsala ANTES de pedir el comprobante de pago, apenas tengas producto(s)+cantidad, direccion, forma de pago y nombre - calcula el precio y total REALES del catalogo (nunca los calcules de memoria) para que se los muestres al cliente y le pidas que confirme, antes de seguir. Mismo formato de items que close_conversation. No cierra ni guarda nada, solo calcula.",
       parameters: {
         type: "object",
         properties: {
@@ -460,7 +460,7 @@ export const catalogTools: OpenAI.Chat.ChatCompletionTool[] = [
                 variantLabel: {
                   type: "string",
                   description:
-                    "SOLO si ese producto tiene varios colores/tallas (variantes): el color y/o talla que el cliente eligio, tal como lo dijo (ej: 'rojo', 'M', 'rojo talla M'). Si el producto tiene variantes y todavia no sabes cual, NO llames esta herramienta - preguntale primero.",
+                    "SOLO si ese producto tiene varios colores/tallas (variantes): el color y/o talla que el cliente eligio, tal como lo dijo (ej: 'rojo', 'M', 'rojo talla M'). Si el producto tiene variantes y todavia no sabes cual, NO llames esta herramienta - pregúntale primero.",
                 },
               },
               required: ["productName", "quantity"],
@@ -478,7 +478,7 @@ export const catalogTools: OpenAI.Chat.ChatCompletionTool[] = [
           paymentMethodLabel: {
             type: "string",
             description:
-              "Solo si no tenes el paymentMethodId: el nombre de la forma de pago elegida (ej: {{METODOS_PAGO}}), exactamente como lo devolvio get_payment_methods.",
+              "Solo si no tienes el paymentMethodId: el nombre de la forma de pago elegida (ej: {{METODOS_PAGO}}), exactamente como lo devolvio get_payment_methods.",
           },
           shippingCost: {
             type: "number",
@@ -497,7 +497,7 @@ export const catalogTools: OpenAI.Chat.ChatCompletionTool[] = [
       description:
         // El pedido reciente (ultimos 30 dias) ya te llega SIEMPRE como dato del sistema, sin llamar nada:
         // ver src/orders/postSale.ts. Esta herramienta quedo para lo que ese dato no cubre.
-        "Consulta el pedido mas reciente del cliente. Solo hace falta si pregunta por una compra vieja que no figure en los datos del pedido que ya tenes.",
+        "Consulta el pedido mas reciente del cliente. Solo hace falta si pregunta por una compra vieja que no figure en los datos del pedido que ya tienes.",
       parameters: {
         type: "object",
         properties: {},
@@ -695,7 +695,7 @@ const REQUESTED_MEDIA_TYPES = new Map<string, "IMAGE" | "VIDEO">([
 // stock. Mismo patron que los otros bloques fijos: la lista la renderiza agent.ts desde estos mismos
 // datos, el modelo solo redacta alrededor. `products` de aca es lo que agent.ts lee para llenar la
 // marca (ver catalogListThisTurn).
-const CATALOG_LIST_NOTE = `No escribas vos los nombres, los precios ni el stock de estos productos: pone la marca ${CATALOG_BLOCK_MARKER} donde quieras que aparezca la lista y el sistema la reemplaza por el catalogo real (numerado) antes de enviar. Redacta solo alrededor.`;
+const CATALOG_LIST_NOTE = `No escribas tú los nombres, los precios ni el stock de estos productos: pon la marca ${CATALOG_BLOCK_MARKER} donde quieras que aparezca la lista y el sistema la reemplaza por el catalogo real (numerado) antes de enviar. Redacta solo alrededor.`;
 // Fase B del plan de catalogo y medios (2026-09-16): la nota terminaba con "Los datos de esta lista
 // igual te sirven para decidir y para responder sobre un producto puntual". Esa frase era la que
 // autorizaba al modelo a contestar sobre un producto SIN llamar get_product_details - y get_product_details
@@ -869,7 +869,7 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
         error: `Este negocio todavia no puede procesar la venta: falta configurar ${gate.missing.join(", ")}. No se ejecuto nada.`,
         blocked: true,
         missing: gate.missing,
-        note: `No inventes datos de pago ni un total - pone la marca ${SALE_BLOCKED_BLOCK_MARKER} donde quieras ofrecerle al cliente dejar el pedido anotado para que el dueno lo confirme directamente, y redacta alrededor.`,
+        note: `No inventes datos de pago ni un total - pon la marca ${SALE_BLOCKED_BLOCK_MARKER} donde quieras ofrecerle al cliente dejar el pedido anotado para que el dueno lo confirme directamente, y redacta alrededor.`,
       };
     }
   }
@@ -884,7 +884,7 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
       if (matches.length === 0) {
         return {
           matches: [],
-          note: "No hay ningun producto activo que cumpla ese color/categoria en el catalogo real. No inventes que si hay - decile al cliente honestamente que no tenes esa combinacion, o usa search_products si crees que puede estar descrito distinto.",
+          note: "No hay ningun producto activo que cumpla ese color/categoria en el catalogo real. No inventes que si hay - dile al cliente honestamente que no tienes esa combinacion, o usa search_products si crees que puede estar descrito distinto.",
         };
       }
 
@@ -915,7 +915,7 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
         })),
         ambiguousAcrossCategories,
         note: ambiguousAcrossCategories
-          ? `Estos resultados son de VARIAS categorias distintas - no asumas cual quiere el cliente ni mandes fotos todavia. Preguntale cual categoria es (usa 'category' de cada uno para nombrarlas) antes de llamar send_product_media.${listNote}`
+          ? `Estos resultados son de VARIAS categorias distintas - no asumas cual quiere el cliente ni mandes fotos todavia. Pregúntale cual categoria es (usa 'category' de cada uno para nombrarlas) antes de llamar send_product_media.${listNote}`
           : `Estos son los productos/variantes reales que cumplen lo que pidio el cliente - no menciones ni mandes fotos de ningun otro color/categoria que no este en esta lista.${listNote}`,
       };
     }
@@ -935,9 +935,9 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
         products: all.map((p) => formatProduct(p, locale, { forList: true })),
         note:
           all.length > 1
-            ? `No hubo coincidencia exacta por palabra clave. Revisa este catalogo completo por significado antes de decir que no tenes el producto. ${CATALOG_LIST_NOTE}`
+            ? `No hubo coincidencia exacta por palabra clave. Revisa este catalogo completo por significado antes de decir que no tienes el producto. ${CATALOG_LIST_NOTE}`
             : all.length === 1
-              ? "No hubo coincidencia exacta por palabra clave. Revisa este catalogo completo por significado antes de decir que no tenes el producto."
+              ? "No hubo coincidencia exacta por palabra clave. Revisa este catalogo completo por significado antes de decir que no tienes el producto."
               : "Este negocio todavia no tiene productos activos en el catalogo.",
       };
     }
@@ -1020,7 +1020,7 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
         const match = await findConfidentProductMatch(businessId, query);
         if (match.ambiguous) {
           return {
-            error: `"${query}" coincide con varios productos por igual: ${match.candidates?.join(", ")}. Pedile al cliente que aclare cual, o usa get_product_details con el ID exacto de uno de search_products.`,
+            error: `"${query}" coincide con varios productos por igual: ${match.candidates?.join(", ")}. Pídele al cliente que aclare cual, o usa get_product_details con el ID exacto de uno de search_products.`,
           };
         }
         if (!match.product) {
@@ -1141,13 +1141,13 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
     case "get_payment_methods": {
       const methods = await listActivePaymentMethods(businessId);
       if (methods.length === 0) {
-        return { methods: [], note: "Este negocio todavia no configuro formas de pago. Decile al cliente que un asesor le va a confirmar como pagar." };
+        return { methods: [], note: "Este negocio todavia no configuro formas de pago. Dile al cliente que un asesor le va a confirmar como pagar." };
       }
       return {
         // `id` agregado en Fase 2 (2026-09-15): lo necesita set_payment_method para guardar cual eligio
         // el cliente sin ambiguedad de label (dos metodos podrian compartir el mismo label).
         methods: methods.map((m) => ({ id: m.id, type: m.type, label: m.label, details: m.details })),
-        note: `No escribas vos el numero/llave/titular: pone la marca ${PAYMENT_BLOCK_MARKER} donde quieras mostrarlos y el sistema la reemplaza por estos datos reales antes de enviar.`,
+        note: `No escribas tú el numero/llave/titular: pon la marca ${PAYMENT_BLOCK_MARKER} donde quieras mostrarlos y el sistema la reemplaza por estos datos reales antes de enviar.`,
       };
     }
     case "get_shipping_rates": {
@@ -1162,7 +1162,7 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
         rates: rates.map((r) => ({ label: r.label, cost: r.cost.toString() })),
         note:
           rates.length === 1
-            ? `Hay una sola tarifa configurada: no escribas vos el numero, pone la marca ${SHIPPING_BLOCK_MARKER} donde quieras mostrarlo.`
+            ? `Hay una sola tarifa configurada: no escribas tú el numero, pon la marca ${SHIPPING_BLOCK_MARKER} donde quieras mostrarlo.`
             : "Hay varias tarifas configuradas - decidi cual categoria/ciudad le corresponde al cliente con las instrucciones del negocio y confirmala con get_shipping_rate_for_city antes de poner la marca de costo.",
       };
     }
@@ -1177,14 +1177,14 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
       if (!resolved) {
         return {
           matched: false,
-          note: "Esta ciudad no tiene una regla exacta configurada. No inventes su categoria: segui las instrucciones propias del negocio para clasificarla, y usa get_shipping_rates para confirmar el monto de la categoria que corresponda.",
+          note: "Esta ciudad no tiene una regla exacta configurada. No inventes su categoria: sigue las instrucciones propias del negocio para clasificarla, y usa get_shipping_rates para confirmar el monto de la categoria que corresponda.",
         };
       }
       return {
         matched: true,
         label: resolved.label,
         cost: resolved.cost.toString(),
-        note: `No escribas vos el numero: pone la marca ${SHIPPING_BLOCK_MARKER} donde quieras mostrarlo y el sistema la reemplaza por este costo real.`,
+        note: `No escribas tú el numero: pon la marca ${SHIPPING_BLOCK_MARKER} donde quieras mostrarlo y el sistema la reemplaza por este costo real.`,
       };
     }
     case "get_shipping_payment_modalities": {
@@ -1264,7 +1264,7 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
         idNumber: validIdNumber,
         deliveryPhone: validDeliveryPhone,
         address,
-        ...(Object.keys(rejected).length > 0 ? { rejected, note: "Alguno de los datos no tenia forma valida y no se guardo - pedile al cliente que lo confirme de nuevo." } : {}),
+        ...(Object.keys(rejected).length > 0 ? { rejected, note: "Alguno de los datos no tenia forma valida y no se guardo - pídele al cliente que lo confirme de nuevo." } : {}),
       };
     }
     case "update_conversation_status": {
@@ -1300,7 +1300,7 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
         // real de una que el bot dedujo mal, y la unica forma de darse cuenta era leer el chat entero.
         const inferredNote =
           explicit === false ? " OJO: el bot lo dedujo del contexto, el cliente no lo pidio con esas palabras - confirma antes de asumir." : "";
-        const intentAlertText = `${greeting}, el cliente ${customerLabel} reporto ${label}.${inferredNote} El bot dejo de responderle, toma el control vos directamente.`;
+        const intentAlertText = `${greeting}, el cliente ${customerLabel} reporto ${label}.${inferredNote} El bot dejo de responderle, toma el control tú directamente.`;
         const intentAlert = await sendAlertToOwner(businessId, context.credentials, business.contactPhone, intentAlertText);
         await recordOwnerMessage(businessId, {
           direction: "OUT",
@@ -1316,7 +1316,7 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
       return {
         flagged: true,
         intent,
-        note: "La conversacion quedo escalada a un humano. No sigas intentando resolverlo vos mismo: decile al cliente que un asesor lo va a atender directamente.",
+        note: "La conversacion quedo escalada a un humano. No sigas intentando resolverlo tú mismo: dile al cliente que un asesor lo va a atender directamente.",
       };
     }
     case "ask_owner": {
@@ -1333,7 +1333,7 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
       if (openForConversation.length > 0) {
         return {
           error: "Ya hay una pregunta esperando respuesta del dueno en esta conversacion.",
-          note: "No llames ask_owner de nuevo hasta que el dueno responda la pregunta anterior. Decile al cliente honestamente que seguis esperando esa respuesta, y segui ayudando con cualquier otra cosa que necesite.",
+          note: "No llames ask_owner de nuevo hasta que el dueno responda la pregunta anterior. Dile al cliente honestamente que seguis esperando esa respuesta, y sigue ayudando con cualquier otra cosa que necesite.",
         };
       }
 
@@ -1341,7 +1341,7 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
       if (!business?.contactPhone) {
         return {
           asked: false,
-          note: "Este negocio no tiene un numero de contacto configurado para escalar preguntas. Decile al cliente que no tenes esa informacion por ahora.",
+          note: "Este negocio no tiene un numero de contacto configurado para escalar preguntas. Dile al cliente que no tienes esa informacion por ahora.",
         };
       }
 
@@ -1364,7 +1364,7 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
       if (!wamid) {
         return {
           asked: false,
-          note: "No se pudo enviar la pregunta al dueno. Decile al cliente que un asesor le va a escribir pronto.",
+          note: "No se pudo enviar la pregunta al dueno. Dile al cliente que un asesor le va a escribir pronto.",
         };
       }
 
@@ -1377,7 +1377,7 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
 
       return {
         asked: true,
-        note: "La pregunta quedo escalada al dueno del negocio - vos segui atendiendo al cliente con normalidad mientras tanto (otras preguntas, catalogo, lo que necesite). No inventes la respuesta a ESTA pregunta puntual ni digas que ya la tenes: decile que estas confirmando esa info con el equipo y le respondes en breve. Si el cliente insiste en la misma pregunta antes de que el dueno responda, no llames ask_owner de nuevo para lo mismo - decile que segues esperando la respuesta.",
+        note: "La pregunta quedo escalada al dueno del negocio - tú sigue atendiendo al cliente con normalidad mientras tanto (otras preguntas, catalogo, lo que necesite). No inventes la respuesta a ESTA pregunta puntual ni digas que ya la tienes: dile que estas confirmando esa info con el equipo y le respondes en breve. Si el cliente insiste en la misma pregunta antes de que el dueno responda, no llames ask_owner de nuevo para lo mismo - dile que segues esperando la respuesta.",
       };
     }
     // EL PRECIO ACORDADO (2026-09-16, seccion 12 del plan). El agente ya preguntaba por el descuento, y eso
@@ -1390,7 +1390,7 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
       if (openForConversation.length > 0) {
         return {
           error: "Ya hay una pregunta esperando respuesta del dueno en esta conversacion.",
-          note: "No vuelvas a preguntar hasta que el dueno responda la anterior. Decile al cliente honestamente que seguis esperando esa respuesta, y segui ayudando con cualquier otra cosa que necesite.",
+          note: "No vuelvas a preguntar hasta que el dueno responda la anterior. Dile al cliente honestamente que seguis esperando esa respuesta, y sigue ayudando con cualquier otra cosa que necesite.",
         };
       }
 
@@ -1398,7 +1398,7 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
       if (!business?.contactPhone) {
         return {
           asked: false,
-          note: "Este negocio no tiene un numero de contacto configurado para consultar precios. Decile al cliente que el precio publicado es el que aplica por ahora.",
+          note: "Este negocio no tiene un numero de contacto configurado para consultar precios. Dile al cliente que el precio publicado es el que aplica por ahora.",
         };
       }
 
@@ -1429,7 +1429,7 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
       if (precioItems.length === 0) {
         return {
           asked: false,
-          note: "No se dio ningun producto valido. Preguntale al cliente sobre que producto quiere el descuento antes de consultar.",
+          note: "No se dio ningun producto valido. Pregúntale al cliente sobre que producto quiere el descuento antes de consultar.",
         };
       }
 
@@ -1463,7 +1463,7 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
       if (!pricewamid) {
         return {
           asked: false,
-          note: "No se pudo enviar la consulta al dueno. Decile al cliente que un asesor le va a escribir pronto.",
+          note: "No se pudo enviar la consulta al dueno. Dile al cliente que un asesor le va a escribir pronto.",
         };
       }
 
@@ -1478,7 +1478,7 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
 
       return {
         asked: true,
-        note: "La consulta de precio quedo escalada al dueno. NO le prometas ningun descuento ni le digas un numero al cliente: decile que estas consultando el precio con el equipo y le confirmas en breve. Cuando el dueno confirme, el sistema guarda el precio y se lo avisa al cliente solo. Mientras tanto segui atendiendo cualquier otra cosa que necesite.",
+        note: "La consulta de precio quedo escalada al dueno. NO le prometas ningun descuento ni le digas un numero al cliente: dile que estas consultando el precio con el equipo y le confirmas en breve. Cuando el dueno confirme, el sistema guarda el precio y se lo avisa al cliente solo. Mientras tanto sigue atendiendo cualquier otra cosa que necesite.",
       };
     }
     case "ask_owner_about_photo": {
@@ -1486,7 +1486,7 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
       if (!business?.contactPhone) {
         return {
           asked: false,
-          note: "Este negocio no tiene un numero de contacto configurado para escalar preguntas. Decile al cliente que no tenes esa informacion por ahora.",
+          note: "Este negocio no tiene un numero de contacto configurado para escalar preguntas. Dile al cliente que no tienes esa informacion por ahora.",
         };
       }
 
@@ -1556,7 +1556,7 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
       if (!wamid) {
         return {
           asked: false,
-          note: "No se pudo contactar al dueno de ninguna forma. Decile al cliente que un asesor le va a escribir pronto.",
+          note: "No se pudo contactar al dueno de ninguna forma. Dile al cliente que un asesor le va a escribir pronto.",
         };
       }
 
@@ -1570,7 +1570,7 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
 
       return {
         asked: true,
-        note: "La foto/video quedo escalada al dueno para identificar el producto. No sigas adivinando: decile al cliente que estas confirmando con el equipo cual es ese producto exactamente y le respondes en breve.",
+        note: "La foto/video quedo escalada al dueno para identificar el producto. No sigas adivinando: dile al cliente que estas confirmando con el equipo cual es ese producto exactamente y le respondes en breve.",
       };
     }
     case "show_order_summary": {
@@ -1595,7 +1595,7 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
           shippingCost: state.shippingCost ?? 0,
           total: state.total,
           currency: state.items[0].currency,
-          note: `No escribas vos los items, el envio ni el TOTAL: pone la marca ${ORDER_SUMMARY_BLOCK_MARKER} donde quieras mostrar el resumen completo (o ${TOTAL_BLOCK_MARKER} si solo necesitas el total suelto) y el sistema la reemplaza por estos numeros reales antes de enviar. Pedile que confirme antes de seguir.`,
+          note: `No escribas tú los items, el envio ni el TOTAL: pon la marca ${ORDER_SUMMARY_BLOCK_MARKER} donde quieras mostrar el resumen completo (o ${TOTAL_BLOCK_MARKER} si solo necesitas el total suelto) y el sistema la reemplaza por estos numeros reales antes de enviar. Pídele que confirme antes de seguir.`,
         };
       }
 
@@ -1664,7 +1664,7 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
         // cifras, y copiar de memoria es lo que fallo en produccion: en el turno de las 23:03 el resumen
         // salio con los precios de lista aunque la duena ya hubiera autorizado otros. Con la marca, que
         // cifra se escribe deja de ser una decision del modelo en los DOS caminos.
-        note: `No escribas vos los items, el envio ni el TOTAL: pone la marca ${ORDER_SUMMARY_BLOCK_MARKER} donde quieras mostrar el resumen completo (o ${TOTAL_BLOCK_MARKER} si solo necesitas el total suelto) y el sistema la reemplaza por estos numeros reales antes de enviar. Pedile que confirme antes de seguir.`,
+        note: `No escribas tú los items, el envio ni el TOTAL: pon la marca ${ORDER_SUMMARY_BLOCK_MARKER} donde quieras mostrar el resumen completo (o ${TOTAL_BLOCK_MARKER} si solo necesitas el total suelto) y el sistema la reemplaza por estos numeros reales antes de enviar. Pídele que confirme antes de seguir.`,
       };
     }
     case "close_conversation": {
@@ -1770,7 +1770,7 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
         if (needsAttribute.length > 0) {
           return {
             closed: false,
-            note: `Antes de cerrar el pedido todavia falta preguntarle al cliente el color/talla de: ${needsAttribute.join(", ")}. Pregunta cual color o talla quiere de cada uno (mostrale las opciones reales que tenga ese producto) y volve a llamar close_conversation recien cuando lo tengas.`,
+            note: `Antes de cerrar el pedido todavia falta preguntarle al cliente el color/talla de: ${needsAttribute.join(", ")}. Pregunta cual color o talla quiere de cada uno (muéstrale las opciones reales que tenga ese producto) y volve a llamar close_conversation recien cuando lo tengas.`,
           };
         }
 
@@ -1806,7 +1806,7 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
         if (existingOrder) {
           return {
             closed: false,
-            note: "Esta conversacion ya tiene un pedido registrado - no se puede cerrar una venta nueva sobre la misma. Si el cliente quiere comprar algo mas, decile que un asesor lo va a confirmar directamente.",
+            note: "Esta conversacion ya tiene un pedido registrado - no se puede cerrar una venta nueva sobre la misma. Si el cliente quiere comprar algo mas, dile que un asesor lo va a confirmar directamente.",
           };
         }
 
@@ -1826,7 +1826,7 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
             closed: false,
             pending: true,
             unresolvedItems: unresolved.length > 0 ? unresolved : undefined,
-            note: "El dueno del negocio tiene que confirmar el pago primero. No le digas al cliente que su compra quedo confirmada todavia - decile que estas verificando el pago con el equipo.",
+            note: "El dueno del negocio tiene que confirmar el pago primero. No le digas al cliente que su compra quedo confirmada todavia - dile que estas verificando el pago con el equipo.",
           };
         }
 
@@ -1914,7 +1914,7 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
         return {
           canceled: false,
           reason: "already_shipped",
-          note: "Este pedido ya fue enviado. No lo canceles vos - decile al cliente que necesitas confirmar con el equipo, y usa ask_owner.",
+          note: "Este pedido ya fue enviado. No lo canceles tú - dile al cliente que necesitas confirmar con el equipo, y usa ask_owner.",
         };
       }
 

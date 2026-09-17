@@ -139,7 +139,7 @@ test("get_payment_methods reports when none are configured", async () => {
   const result = await runCatalogTool(context, "get_payment_methods", {});
   assert.deepEqual(result, {
     methods: [],
-    note: "Este negocio todavia no configuro formas de pago. Decile al cliente que un asesor le va a confirmar como pagar.",
+    note: "Este negocio todavia no configuro formas de pago. Dile al cliente que un asesor le va a confirmar como pagar.",
   });
 });
 

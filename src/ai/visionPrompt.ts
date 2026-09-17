@@ -6,7 +6,7 @@
 // catalog/paymentMethods.ts) - un negocio mexicano ve SPEI y OXXO, no dos billeteras colombianas.
 export function buildVisionPrompt(catalogHint: string, paymentExamples: string): string {
   const catalogSection = catalogHint
-    ? `\n\nCONTEXTO DEL NEGOCIO: este negocio vende: ${catalogHint}. Buscá activamente si alguno de
+    ? `\n\nCONTEXTO DEL NEGOCIO: este negocio vende: ${catalogHint}. Busca activamente si alguno de
 estos productos aparece en la imagen, aunque lo principal que se vea sea una persona (puesto,
 sostenido, de fondo, parcialmente visible) - NO la clasifiques como "OTRO" solo porque hay una
 persona en la foto. Es muy comun que un cliente mande una captura de un live o video mostrando el

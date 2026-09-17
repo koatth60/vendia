@@ -8,9 +8,9 @@ import { getBusinessLocale } from "../config/businessConfig";
 // Fase 11 del plan maestro (2026-09-15): los ejemplos de forma de pago y la palabra "cedula" salian
 // escritos a mano aca. Ahora los pone el caller con los metodos reales del negocio y la etiqueta de
 // documento de su pais - ver catalog/paymentMethods.ts y config/countries.ts.
-const EXTRACT_PROMPT = `Sos un asistente que lee una conversacion de ventas por WhatsApp entre un negocio y un
+const EXTRACT_PROMPT = `Eres un asistente que lee una conversacion de ventas por WhatsApp entre un negocio y un
 cliente, y extrae los datos de un pedido que se cerro (o esta por cerrarse) para que el dueno del negocio
-lo revise y confirme antes de registrarlo - vos solo prellenas un formulario, no cerras nada por tu cuenta.
+lo revise y confirme antes de registrarlo - tú solo prellenas un formulario, no cierras nada por tu cuenta.
 
 Devolve SOLO un JSON con esta forma exacta, sin texto adicional:
 {

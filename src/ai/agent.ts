@@ -272,7 +272,7 @@ const ESCALATION_CLAIM_PATTERN =
 
 // Fallback for the order-closed confirmation when there's no customInstructions to follow, or the
 // one-shot closing generation below fails/returns nothing - dialect doesn't change this particular
-// sentence (no "tenés"/"tienes" style conjugation in it), only tone (formality/emoji) and sign-off vary.
+// sentence (no "tienes"/"tienes" style conjugation in it), only tone (formality/emoji) and sign-off vary.
 export function buildOrderClosedMessage(business: { botTone?: string | null; assistantName?: string | null }): string {
   const formal = business.botTone === "formal" || business.botTone === "profesional";
   const signOff = business.assistantName?.trim() ? ` - ${business.assistantName.trim()}` : "";
@@ -1081,8 +1081,8 @@ export async function generateReply(
               `DATOS DEL PRODUCTO POR EL QUE PREGUNTA EL CLIENTE, leidos del catalogo real de este negocio. ` +
               `Son los unicos nombres, precios y cantidades que existen para el:\n\n` +
               JSON.stringify(catalogFactsForModel) +
-              `\n\nEscribi vos el mensaje entero para el cliente, con tu voz: no hay ningun otro mensaje del ` +
-              `sistema que lo complete ni que lo repita. La descripcion va completa, elegi vos que contarle ` +
+              `\n\nEscribe tú el mensaje entero para el cliente, con tu voz: no hay ningun otro mensaje del ` +
+              `sistema que lo complete ni que lo repita. La descripcion va completa, elige tú que contarle ` +
               `segun lo que pregunto. Los nombres y las cifras que escribas se comparan contra el catalogo ` +
               `antes de enviarse, y lo que no exista ahi no sale.` +
               (catalogMediaProductIds().length > 0
@@ -1097,8 +1097,8 @@ export async function generateReply(
             role: "system" as const,
             content:
               (catalogMarkerOffered
-                ? `TEXTO CON DATOS REALES DEL CATALOGO que pone el sistema (vos no lo escribis ni lo podes cambiar):\n\n`
-                : `MENSAJES QUE YA VAN A SALIR (los manda el sistema con datos reales del catalogo, vos no los escribis ni los podes cambiar):\n\n`) +
+                ? `TEXTO CON DATOS REALES DEL CATALOGO que pone el sistema (tú no lo escribes ni lo puedes cambiar):\n\n`
+                : `MENSAJES QUE YA VAN A SALIR (los manda el sistema con datos reales del catalogo, tú no los escribes ni los puedes cambiar):\n\n`) +
               // modelText, no text: el cliente ve la descripcion recortada, el modelo la ve entera, asi
               // que una pregunta sobre una caracteristica que quedo afuera la contesta con el dato real.
               catalogBlocks.map((b) => b.modelText).join("\n---\n") +
@@ -1109,7 +1109,7 @@ export async function generateReply(
               // vivia aca se borro el 2026-09-17: el servidor se llevo ese trabajo, la directiva sobra.
               `
 
-Escribi UNA sola frase corta de introduccion y nada mas. No repitas la lista, ni nombres, ni precios, ni stock` +
+Escribe UNA sola frase corta de introduccion y nada mas. No repitas la lista, ni nombres, ni precios, ni stock` +
               (catalogMediaProductIds().length > 0
                 ? `, y no ofrezcas ni prometas fotos: ya van.`
                 : `. Si el cliente quiere fotos, el mensaje del sistema ya se las ofrece.`),

@@ -36,6 +36,14 @@
      sistema mientras el resto del panel usa la del diseno. */
   option { font-family: inherit; }
   html, body { max-width: 100%; overflow-x: hidden; }
+  /* En escritorio el panel es una app de alto fijo: .app mide 100vh y lo que
+     scrollea es <main>, nunca el documento. Sin esto, cualquier elemento que se
+     pase por un pixel (un borde, un redondeo del navegador) dibuja la barra de
+     scroll del NAVEGADOR al costado de todo, con sus flechas y su fondo gris.
+     En telefono no aplica: ahi la pagina si scrollea como cualquier sitio. */
+  @media (min-width: 768px) {
+    html, body { height: 100%; overflow-y: hidden; }
+  }
   body.no-scroll { overflow-y: hidden; }
   /* 100dvh no siempre se recalcula a tiempo cuando la barra del navegador del
      celular se esconde/aparece - deja un hueco abajo que ni el fondo de la
