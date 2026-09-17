@@ -1134,9 +1134,19 @@ export async function generateReply(
           {
             role: "system" as const,
             content:
-              `PEDIDO QUE ESTE CLIENTE YA TIENE, leido de la base de este negocio. Es real y es el suyo:\n\n` +
+              `PEDIDO YA CERRADO DE ESTE CLIENTE, leido de la base de este negocio. Es real y es el suyo:
+
+` +
               JSON.stringify(postSaleFactsForModel(postSale)) +
-              `\n\nNo le pidas de nuevo ningun dato que ya figure aca. Si pregunta por su compra, contestale con esto.` +
+              `
+
+Esto sirve para CONTESTAR SOBRE ESA COMPRA: cuando llega, que pidio, cuanto pago, a donde va. ` +
+              `Si pregunta por ella, contestale con esto y no le pidas de nuevo esos datos.
+` +
+              `Si quiere comprar algo MAS, es un pedido NUEVO y arranca de cero: producto, color o talla, direccion y ` +
+              `forma de pago se confirman con el cliente, uno por uno. No des por hecho que quiere lo mismo, ni que va ` +
+              `a la misma direccion, ni que paga igual. Proponerselo se puede ("¿te lo mando a la misma direccion?"); ` +
+              `asumirlo no.` +
               (postSale.fromAnotherConversation
                 ? ` Ese pedido se cerro en una conversacion anterior, asi que arriba no vas a ver el historial: los datos de aca son todo lo que hubo.`
                 : ``),

@@ -70,9 +70,40 @@ export interface RequiredEffect {
   since: Date;
 }
 
-/** Lo unico que se mira del mensaje entrante: su tipo de medio. Nunca su texto. */
+/**
+ * Lo unico que se mira del mensaje entrante: su tipo de medio. Nunca su texto.
+ *
+ * Se conserva por compatibilidad con los llamadores, pero ya no es lo que dispara el efecto: una imagen
+ * sigue sin atender aunque el cliente escriba diez mensajes de texto despues de mandarla. Ver
+ * findUnattendedCustomerImage.
+ */
 export interface IncomingMessageFacts {
   mediaType: string | null;
+}
+
+/**
+ * Cuando llego la ultima imagen del cliente que TODAVIA no fue atendida, o null si no hay ninguna.
+ *
+ * "Atendida" = despues de esa imagen salio un aviso real a la duena por esta conversacion (ver
+ * ownerWasNotifiedSince: PendingOwnerQuestion con wamid, o un OwnerMessageLog exitoso). Es la misma
+ * definicion que usa la verificacion, asi que el efecto no puede exigir algo distinto de lo que despues
+ * comprueba.
+ *
+ * Solo se miran las imagenes recientes: un comprobante de hace una semana no es una tarea pendiente, y
+ * sin este corte una conversacion vieja con una foto sin avisar volveria a disparar el efecto para
+ * siempre.
+ */
+const UNATTENDED_IMAGE_WINDOW_HOURS = 24;
+
+export async function findUnattendedCustomerImage(conversationId: string): Promise<Date | null> {
+  const desde = new Date(Date.now() - UNATTENDED_IMAGE_WINDOW_HOURS * 60 * 60 * 1000);
+  const imagen = await prisma.message.findFirst({
+    where: { conversationId, role: "CUSTOMER", mediaType: "IMAGE", createdAt: { gte: desde } },
+    orderBy: { createdAt: "desc" },
+    select: { createdAt: true },
+  });
+  if (!imagen) return null;
+  return (await ownerWasNotifiedSince(conversationId, imagen.createdAt)) ? null : imagen.createdAt;
 }
 
 interface ConversationFacts {
@@ -166,8 +197,20 @@ export async function computeRequiredEffects(
   conversationId: string,
   incomingMessage: IncomingMessageFacts
 ): Promise<RequiredEffect[]> {
-  // (a) el mensaje entrante trae mediaType IMAGE
-  if (incomingMessage.mediaType !== "IMAGE") return [];
+  // (a) hay una imagen del cliente SIN ATENDER en esta conversacion.
+  //
+  // Antes la condicion era "el mensaje entrante trae mediaType IMAGE", y ese era el agujero F1. Caso real
+  // de produccion (Milena, 2026-09-16 03:20-03:22): mando el comprobante y enseguida escribio "Te envie
+  // lo del envio de paso". Ese texto paso a ser el ultimo mensaje, el efecto no se exigio, y el bot le
+  // dijo "estoy validando tu comprobante y confirmando con el equipo" sin que se abriera nada. La duena
+  // nunca se entero y la clienta quedo esperando. Diez incidentes en catorce dias, todos este mismo caso.
+  //
+  // La imagen no deja de existir porque llegue un mensaje de texto despues. El disparador pasa a ser el
+  // estado de la conversacion - una fila de Message con mediaType IMAGE - y no la posicion de ese mensaje
+  // en la fila. Sigue siendo metadato estructurado, nunca prosa: no se lee que dice la imagen ni que dice
+  // el texto.
+  const imagenSinAtender = await findUnattendedCustomerImage(conversationId);
+  if (!imagenSinAtender) return [];
 
   const conversation = await readConversationFacts(conversationId);
   if (!conversation) return [];
@@ -186,7 +229,10 @@ export async function computeRequiredEffects(
   const evidence = await getServerSaleEvidence(conversationId);
   if (!hasServerSaleEvidence(conversation, evidence)) return [];
 
-  const since = new Date();
+  // El reloj del efecto arranca cuando LLEGO LA IMAGEN, no cuando arranca el turno: lo que hay que
+  // probar es que la duena quedo avisada de ESA imagen. Un aviso posterior a ella ya la atiende, aunque
+  // haya salido en un turno anterior.
+  const since = imagenSinAtender;
 
   // La distincion va explicita, no implicita: el cierre real solo cuando el negocio lleva el pedido en
   // el motor de venta Y ese pedido esta completo. En cualquier otro caso el efecto es el aviso.

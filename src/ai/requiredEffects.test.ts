@@ -187,13 +187,15 @@ test("estado real de Milena (saleStateEnabled=false, solo mediaSent): la duena q
   assert.equal(conversacionAntes.humanControl, false);
   assert.equal(await prisma.order.count({ where: { conversationId } }), 0);
 
+  await customerSendsReceiptPhoto();
+
   // El disparador tiene que ver este estado. Si esto falla, el mecanismo sigue muerto.
+  // Desde el 2026-09-17 el disparador es la FILA de la imagen sin atender, no el tipo del ultimo mensaje,
+  // asi que la foto tiene que existir antes de preguntar - que es tambien el orden real de produccion.
   const exigidos = await computeRequiredEffects(conversationId, { mediaType: "IMAGE" });
   assert.equal(exigidos.length, 1, "con la foto ya enviada, una imagen entrante TIENE que exigir un efecto");
   assert.equal(exigidos[0].kind, "OWNER_NOTIFIED_ABOUT_IMAGE");
   assert.equal(exigidos[0].tool, "ask_owner_about_photo");
-
-  await customerSendsReceiptPhoto();
   // El turno de Milena tal cual: prosa que promete, cero tool_calls, tres veces.
   const model = programModel([
     textOnly("Estoy validando tu comprobante y confirmando con el equipo."),
@@ -336,8 +338,15 @@ test("condiciones del disparador: tipo de medio, control humano y candado de ide
 
   assert.equal((await computeRequiredEffects(conversationId, { mediaType: "IMAGE" })).length, 1);
 
-  // Un mensaje de texto, con la misma evidencia, no exige nada.
-  assert.deepEqual(await computeRequiredEffects(conversationId, { mediaType: null }), []);
+  // F1, 2026-09-17: un mensaje de TEXTO despues de la imagen ya no apaga el efecto. Ese era el agujero -
+  // la clienta mandaba el comprobante, escribia "te envie lo del envio de paso", y como el ultimo mensaje
+  // era texto no se exigia nada: el bot decia "estoy validando con el equipo" sin que se abriera nada.
+  assert.equal((await computeRequiredEffects(conversationId, { mediaType: null })).length, 1);
+
+  // Sin ninguna imagen del cliente no hay nada que atender, cualquiera sea el tipo del ultimo mensaje.
+  await prisma.message.deleteMany({ where: { conversationId, mediaType: "IMAGE" } });
+  assert.deepEqual(await computeRequiredEffects(conversationId, { mediaType: "IMAGE" }), []);
+  await customerSendsReceiptPhoto();
 
   // Bajo control humano tampoco: ahi decide una persona, no el motor.
   await prisma.conversation.update({ where: { id: conversationId }, data: { humanControl: true } });

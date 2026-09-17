@@ -3926,6 +3926,12 @@ function initRealtime() {
       row.dataset.activeConversationId = c.id;
       const badgesEl = row.querySelector('.conv-badges');
       if (badgesEl) badgesEl.innerHTML = statusBadgeHtml({ status: c.status, intent: c.intent, humanControl: c.humanControl, conversationId: c.id });
+      // El contador de no leídos del evento es el de la BASE, así que manda sobre lo que tenga la fila.
+      // Sin esto, cualquier reseteo hecho en el servidor (abrir el hilo desde otro dispositivo, el
+      // sondeo de los 30s, devolverle el control al bot) no llegaba nunca al DOM: la fila se quedaba con
+      // el número viejo y el badge de CRM lo seguía sumando. Ese era el "1 sin leer" sobre una bandeja
+      // que en la base tenía cero (2026-09-17).
+      if (typeof c.unreadCount === 'number') setRowUnreadCount(c.customer.id, c.unreadCount);
     } else {
       loadCustomers();
     }
