@@ -70,6 +70,7 @@ import { getBusinessLocale } from "../config/businessConfig";
 import { formatBusinessHours, closedDays } from "../config/businessHours";
 import { formatPaymentExamples } from "../catalog/paymentMethods";
 import { COUNTRIES, type CountryCode } from "../config/countries";
+import type { ShippingPaymentModality } from "@prisma/client";
 import { CLOSING_MESSAGE_PROMPT } from "./prompts/closingMessage";
 import { fillClosingPlaceholders } from "./prompts/closingPlaceholders";
 import {
@@ -278,13 +279,37 @@ const ESCALATION_CLAIM_PATTERN =
 // Fallback for the order-closed confirmation when there's no customInstructions to follow, or the
 // one-shot closing generation below fails/returns nothing - dialect doesn't change this particular
 // sentence (no "tienes"/"tienes" style conjugation in it), only tone (formality/emoji) and sign-off vary.
-export function buildOrderClosedMessage(business: { botTone?: string | null; assistantName?: string | null }): string {
+export function buildOrderClosedMessage(
+  business: { botTone?: string | null; assistantName?: string | null },
+  /**
+   * Lo que el cliente paga al recibir, si se sabe. Sin esto el mensaje decia SIEMPRE "tu pago quedo
+   * confirmado", incluso en un pedido contraentrega donde el cliente no pago nada todavia - le
+   * confirmabamos un pago inexistente y no le deciamos cuanto le va a cobrar el mensajero.
+   */
+  pago?: { amountOnDelivery: number | null; currency: string; locale: string }
+): string {
   const formal = business.botTone === "formal" || business.botTone === "profesional";
   const signOff = business.assistantName?.trim() ? ` - ${business.assistantName.trim()}` : "";
+
+  if (pago && pago.amountOnDelivery != null && pago.amountOnDelivery > 0) {
+    const monto = `$${formatPrice(pago.amountOnDelivery, pago.currency, pago.locale)}`;
+    return formal
+      ? `Tu pedido quedo cerrado. Al recibirlo pagas ${monto}. Gracias por tu compra.${signOff}`
+      : `¡Listo! Tu pedido quedo cerrado 🎉 Al recibirlo pagas ${monto}. ¡Gracias por tu compra!${signOff}`;
+  }
+
   return formal
     ? `Tu pago quedo confirmado y tu pedido esta cerrado. Gracias por tu compra.${signOff}`
     : `¡Listo! Tu pago quedo confirmado y tu pedido esta cerrado. Gracias por tu compra 🎉${signOff}`;
 }
+
+/** Como se le nombra al agente cada modalidad en el pedido de cierre. Sin dato se dice que no se sabe. */
+const CIERRE_MODALIDAD: Record<string, string> = {
+  PREPAID_ALL: "ya pago TODO por adelantado (producto + envio). Al recibir no se le cobra nada.",
+  PREPAID_PRODUCT_COD_SHIPPING: "pago el producto por adelantado y le paga el ENVIO al mensajero cuando reciba.",
+  COD_ALL: "no pago nada todavia: le paga TODO (producto + envio) al mensajero cuando reciba.",
+  SIN_DATO: "(no quedo registrado - no afirmes cuanto tiene que pagar al recibir)",
+};
 
 export interface ClosingOrderFacts {
   customerName: string | null;
@@ -294,6 +319,15 @@ export interface ClosingOrderFacts {
   shippingCost: number | null;
   totalAmount: number;
   currency: string;
+  /**
+   * Como y cuando se paga este pedido (Order.shippingModality / Order.amountOnDelivery), desde la fase 3.
+   *
+   * El prompt de cierre le pedia al modelo "elegi la variante correcta de la plantilla segun la ciudad y
+   * la modalidad de pago real de este pedido" - y nunca le pasaba la modalidad. Tenia que deducirla de la
+   * forma de pago y del resumen, o sea de prosa. Ahora la recibe resuelta.
+   */
+  shippingModality?: ShippingPaymentModality | null;
+  amountOnDelivery?: number | null;
 }
 
 // One-shot completion (no tools, no agent loop) - deliberately NOT routed through generateReply/the
@@ -305,7 +339,16 @@ export async function generateClosingMessage(
   business: { customInstructions?: string | null; botTone?: string | null; assistantName?: string | null },
   order: ClosingOrderFacts
 ): Promise<string> {
-  if (!business.customInstructions?.trim()) return buildOrderClosedMessage(business);
+  // El cierre generico tambien necesita saber cuanto se paga al recibir: sin eso le confirmaba "tu pago
+  // quedo confirmado" a un cliente que todavia no pago nada.
+  const cierreGenerico = async () =>
+    buildOrderClosedMessage(business, {
+      amountOnDelivery: order.amountOnDelivery ?? null,
+      currency: order.currency,
+      locale: (await getBusinessLocale(businessId)).locale,
+    });
+
+  if (!business.customInstructions?.trim()) return cierreGenerico();
 
   const orderFacts = `Instrucciones especificas de este negocio:
 ${business.customInstructions.trim()}
@@ -316,7 +359,9 @@ Datos reales de este pedido:
 - Direccion de envio: ${order.shippingAddress ?? "(no registrada)"}
 - Forma de pago: ${order.paymentMethodLabel ?? "(no registrada)"}
 - Costo de envio: ${order.shippingCost != null ? order.shippingCost : "(no registrado)"}
-- Total: ${order.totalAmount} ${order.currency}`;
+- Total: ${order.totalAmount} ${order.currency}
+- Cuando paga: ${CIERRE_MODALIDAD[order.shippingModality ?? "SIN_DATO"]}
+- Le queda por pagar al recibir: ${order.amountOnDelivery != null ? `${order.amountOnDelivery} ${order.currency}` : "(no registrado)"}`;
 
   try {
     const response = await createChatCompletion({
@@ -331,13 +376,22 @@ Datos reales de este pedido:
     }, { businessId, conversationId });
     await logAiUsage({ businessId, conversationId, kind: "CHAT", model: response.model || DEEPSEEK_MODEL, usage: response.usage });
     const text = response.choices[0]?.message?.content?.trim();
-    if (!text) return buildOrderClosedMessage(business);
+    if (!text) return cierreGenerico();
 
     // El corchete sin resolver no sale. Al cliente de produccion le llego, tal cual, "en total serian
     // [Precio total (Productos + envio)] pesos": el prompt le pedia al modelo que reemplazara los
     // placeholders de la plantilla del negocio y nadie verificaba que lo hubiera hecho.
     const negocio = await getBusinessLocale(businessId);
-    const relleno = fillClosingPlaceholders(text, { ...order, locale: negocio.locale });
+    const alRecibir = order.amountOnDelivery ?? null;
+    const relleno = fillClosingPlaceholders(text, {
+      ...order,
+      amountOnDelivery: alRecibir,
+      // Las otras dos cifras que una plantilla puede nombrar, derivadas de las que ya trae el pedido:
+      // lo que el cliente ya transfirio, y el precio de los productos sin el envio.
+      amountPrepaid: alRecibir != null ? order.totalAmount - alRecibir : null,
+      itemsTotal: order.totalAmount - (order.shippingCost ?? 0),
+      locale: negocio.locale,
+    });
     if (relleno.unresolved.length > 0) {
       await recordAgentIncident(
         businessId,
@@ -346,12 +400,12 @@ Datos reales de este pedido:
         conversationId,
         "cierre_con_placeholder"
       );
-      return buildOrderClosedMessage(business);
+      return cierreGenerico();
     }
     return relleno.text;
   } catch (error) {
     console.error("No se pudo generar el mensaje de cierre personalizado, usando el generico:", error);
-    return buildOrderClosedMessage(business);
+    return cierreGenerico();
   }
 }
 

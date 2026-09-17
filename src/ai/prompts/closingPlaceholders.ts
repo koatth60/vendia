@@ -28,6 +28,18 @@ export interface ClosingFacts {
   paymentMethodLabel: string | null;
   shippingCost: number | null;
   totalAmount: number;
+  /**
+   * Lo que el cliente paga AL RECIBIR (Order.amountOnDelivery). Null cuando no se resolvio la modalidad.
+   *
+   * Sin este dato, un placeholder que decia "a pagar contra entrega" caia en la regla de "total" y
+   * resolvia al total del pedido. En un pedido donde el cliente ya pago el producto y solo debe el flete,
+   * eso le dice al cliente que le debe al mensajero $154.000 cuando le debe $9.000.
+   */
+  amountOnDelivery: number | null;
+  /** Lo que el cliente YA pago por adelantado: el total menos lo que paga al recibir. */
+  amountPrepaid: number | null;
+  /** El precio de los productos, sin el envio. */
+  itemsTotal: number;
   currency: string;
   locale: string;
 }
@@ -46,11 +58,34 @@ function resolveField(label: string, facts: ClosingFacts): string | null {
   const l = normalizeForMatch(label);
   const has = (...words: string[]) => words.some((w) => l.includes(w));
 
+  // Lo que se paga AL RECIBIR va primero, y por eso: "total a pagar contra entrega" tiene las dos
+  // palabras, y la que manda es la que dice CUANDO. Sin modalidad resuelta devuelve null, o sea que el
+  // placeholder queda sin resolver y el mensaje entero cae al cierre generico - preferible a mandarle al
+  // cliente una cifra que no le corresponde pagar.
+  // De lo mas especifico a lo mas general. Las tres primeras son CIFRAS distintas que en una plantilla se
+  // escriben todas parecido, y confundirlas le dice al cliente que debe una plata que no debe.
+  const esCifra = has("precio", "valor", "monto", "costo");
+
+  if (has("contra entrega", "contraentrega", "al recibir", "al entregar", "contrapago")) {
+    return facts.amountOnDelivery != null ? formatPrice(facts.amountOnDelivery, facts.currency, facts.locale) : null;
+  }
+  // "[Precio del monto cancelado]" - lo que el cliente ya transfirio, que en un pedido con flete
+  // contraentrega NO es el total. Caso textual de la plantilla de un negocio real: sin esta regla el
+  // placeholder no resolvia y el cierre entero caia al mensaje generico.
+  if (has("cancelado", "pagado", "abonado", "transferido", "consignado")) {
+    return facts.amountPrepaid != null ? formatPrice(facts.amountPrepaid, facts.currency, facts.locale) : null;
+  }
   if (has("total", "a pagar", "valor final")) {
     return formatPrice(facts.totalAmount, facts.currency, facts.locale);
   }
   if (has("envio", "flete", "domicilio")) {
     return facts.shippingCost != null ? formatPrice(facts.shippingCost, facts.currency, facts.locale) : null;
+  }
+  // "[Precio del producto]" es una cifra; "[Producto]" a secas es el resumen. Sin esta distincion, al
+  // cliente le llegaba "el valor cancelado del producto fue de 1x Reloj Serie 11 Mini pesos" - otro caso
+  // textual de una plantilla real.
+  if (esCifra && has("producto", "articulo", "mercancia")) {
+    return formatPrice(facts.itemsTotal, facts.currency, facts.locale);
   }
   if (has("forma de pago", "metodo de pago", "medio de pago")) return facts.paymentMethodLabel;
   if (has("direccion", "domicilio de entrega", "entrega")) return facts.shippingAddress;

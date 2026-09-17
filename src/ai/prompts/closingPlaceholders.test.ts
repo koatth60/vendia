@@ -12,6 +12,10 @@ const FACTS: ClosingFacts = {
   paymentMethodLabel: "Contraentrega",
   shippingCost: 9000,
   totalAmount: 149000,
+  // Este pedido es contraentrega total: lo que paga al recibir es el total.
+  amountOnDelivery: 149000,
+  amountPrepaid: 0,
+  itemsTotal: 140000,
   currency: "COP",
   locale: "es-CO",
 };
@@ -64,4 +68,62 @@ test("un mensaje sin ningun placeholder pasa tal cual", () => {
 test("el separador de miles sale del locale del negocio, no siempre el colombiano", () => {
   const mx = fillClosingPlaceholders("[total]", { ...FACTS, currency: "MXN", locale: "es-MX" });
   assert.match(mx.text, /149,000/);
+});
+
+// Fase 4 (2026-09-17). Riesgo de plata, directo al cliente: la plantilla de un negocio dice "en total
+// serian [Precio total] pesos a pagar contra entrega". En un pedido donde el cliente YA pago el producto
+// y solo le debe el flete al mensajero, resolver ese placeholder al total del pedido le dice que debe
+// $154.000 cuando debe $9.000.
+const SOLO_FLETE: ClosingFacts = {
+  customerName: "Milena",
+  summary: "1x Reloj Serie 11 Mini",
+  shippingAddress: "Diagonal 48 sur #55-20",
+  paymentMethodLabel: "Nequi",
+  shippingCost: 9000,
+  totalAmount: 154000,
+  amountOnDelivery: 9000,
+  amountPrepaid: 145000,
+  itemsTotal: 145000,
+  currency: "COP",
+  locale: "es-CO",
+};
+
+// Los cuatro placeholders TEXTUALES de la plantilla de cierre de un negocio real, uno por variante. Dos
+// de ellos estaban rotos: "[Precio del monto cancelado]" no resolvia y tiraba el cierre entero al mensaje
+// generico, y "[Precio del producto]" devolvia el RESUMEN, asi que al cliente le llegaba "el valor
+// cancelado del producto fue de 1x Reloj Serie 11 Mini pesos".
+test("[Precio del monto cancelado] es lo que el cliente ya transfirio, no el total", () => {
+  const r = fillClosingPlaceholders("Listo Milena en total fueron [Precio del monto cancelado] pesos.", SOLO_FLETE);
+  assert.deepEqual(r.unresolved, [], "antes no resolvia y el cierre caia al generico");
+  assert.ok(r.text.includes("145.000"), `salio: "${r.text}"`);
+  assert.ok(!r.text.includes("154.000"), `y no el total del pedido; salio: "${r.text}"`);
+});
+
+test("[Precio del producto] es una cifra, no el resumen del pedido", () => {
+  const r = fillClosingPlaceholders("el valor cancelado del producto fue de [Precio del producto] pesos", SOLO_FLETE);
+  assert.ok(r.text.includes("145.000"), `salio: "${r.text}"`);
+  assert.ok(!r.text.includes("Reloj"), `nunca el nombre del producto; salio: "${r.text}"`);
+});
+
+test("[Producto] a secas sigue siendo el resumen del pedido", () => {
+  const r = fillClosingPlaceholders("Tu pedido: [Producto]", SOLO_FLETE);
+  assert.ok(r.text.includes("Reloj"), `salio: "${r.text}"`);
+});
+
+test("[Precio total (Productos + envio)] sigue siendo el total del pedido", () => {
+  const r = fillClosingPlaceholders("en total serian [Precio total (Productos + envio)] pesos", SOLO_FLETE);
+  assert.ok(r.text.includes("154.000"), `salio: "${r.text}"`);
+});
+
+test("un placeholder que nombra la contraentrega resuelve a lo que se paga AL RECIBIR", () => {
+  const r = fillClosingPlaceholders("son [Total a pagar contra entrega] pesos", SOLO_FLETE);
+  assert.deepEqual(r.unresolved, []);
+  assert.ok(r.text.includes("9.000"), `tiene que decir el flete; salio: "${r.text}"`);
+  assert.ok(!r.text.includes("154.000"), `y nunca el total; salio: "${r.text}"`);
+});
+
+test("sin modalidad resuelta, ese placeholder queda sin resolver y el mensaje no sale", () => {
+  // Preferible el cierre generico a mandarle al cliente una cifra que no le corresponde pagar.
+  const r = fillClosingPlaceholders("son [Total a pagar contra entrega] pesos", { ...SOLO_FLETE, amountOnDelivery: null });
+  assert.equal(r.unresolved.length, 1);
 });

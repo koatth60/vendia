@@ -493,6 +493,10 @@ export async function handleOwnerReply(
       shippingCost: order.shippingCost != null ? Number(order.shippingCost) : null,
       totalAmount: Number(order.totalAmount),
       currency: order.currency,
+      // Fase 4 (2026-09-17): como y cuando se paga, ya resuelto en el pedido. El prompt de cierre pedia
+      // "elegi la variante de la plantilla segun la modalidad real" sin pasarle nunca la modalidad.
+      shippingModality: order.shippingModality,
+      amountOnDelivery: order.amountOnDelivery != null ? Number(order.amountOnDelivery) : null,
     });
     const closing = await sendToCustomer({
       businessId,
