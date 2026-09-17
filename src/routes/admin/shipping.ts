@@ -7,6 +7,8 @@ import {
   deleteShippingRate,
   listShippingCityRulesPage,
   createShippingCityRule,
+  setCityAcceptsFullCod,
+  withFullCodResolved,
   deleteShippingCityRule,
 } from "../../catalog/shippingRates";
 import { requireOwner } from "../../auth/requireOwner";
@@ -85,7 +87,7 @@ shippingRouter.get("/api/shipping-city-rules", async (req, res) => {
     SHIPPING_CITY_RULES_PAGE_SIZE,
     q
   );
-  res.json({ items, total, page, pageSize: SHIPPING_CITY_RULES_PAGE_SIZE });
+  res.json({ items: await withFullCodResolved(businessIdOf(req), items), total, page, pageSize: SHIPPING_CITY_RULES_PAGE_SIZE });
 });
 
 shippingRouter.post("/api/shipping-city-rules", requireOwner, async (req, res) => {
@@ -96,11 +98,22 @@ shippingRouter.post("/api/shipping-city-rules", requireOwner, async (req, res) =
     return;
   }
   try {
-    const rule = await createShippingCityRule(businessIdOf(req), { city, label });
+    const rule = await createShippingCityRule(businessIdOf(req), { city, label, paymentModalities: modalidadesValidas(req.body?.paymentModalities) });
     res.status(201).json(rule);
   } catch (error) {
     // Choque del unique (businessId, normalizedCity) - la misma ciudad no puede apuntar a dos tarifas.
     res.status(400).json({ error: "Esa ciudad ya tiene una regla configurada" });
+  }
+});
+
+// Si EN ESTA CIUDAD se acepta que el cliente pague todo al recibir. De las tres modalidades es la unica
+// que depende del lugar; las otras dos se pagan por transferencia desde donde sea.
+shippingRouter.put("/api/shipping-city-rules/:id/full-cod", requireOwner, async (req, res) => {
+  try {
+    const rule = await setCityAcceptsFullCod(businessIdOf(req), String(req.params.id), Boolean(req.body?.enabled));
+    res.json(rule);
+  } catch (error) {
+    res.status(404).json({ error: error instanceof Error ? error.message : "No se pudo actualizar la regla" });
   }
 });
 

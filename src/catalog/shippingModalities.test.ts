@@ -2,7 +2,7 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { prisma } from "../db/client";
-import { resolveShippingRateForCity, modalidadesDeLaZona } from "./shippingRates";
+import { resolveShippingRateForCity, modalidadesDeLaZona, setCityAcceptsFullCod } from "./shippingRates";
 
 // 2026-09-17. La contraentrega casi nunca es una politica del negocio entero: es por zona. En MAG.IMP
 // vivia como prosa en las instrucciones ("si la ciudad es Bogota o Soacha, ofrece ademas Pago Contra
@@ -57,4 +57,35 @@ test("modalidadesDeLaZona respeta lo de la zona por encima de lo del negocio", a
 
   const heredadas = await modalidadesDeLaZona(businessId, { paymentModalities: [] });
   assert.deepEqual(heredadas, ["PREPAID_ALL", "PREPAID_PRODUCT_COD_SHIPPING"]);
+});
+
+// UNA CIUDAD PUEDE DECIDIR SOLA (2026-09-17). Las tarifas agrupan por costo - "Nacional" junta Medellín
+// con cien ciudades mas - asi que un negocio que acepta pagar todo al recibir en Medellín y Bucaramanga y
+// en ninguna otra ciudad de esa tarifa no tendria como decirlo sin inventarse tarifas duplicadas.
+test("una ciudad puede aceptar pago total al recibir sin que su tarifa cambie para las demas", async () => {
+  const medellin = await prisma.shippingCityRule.create({
+    data: { businessId, city: "Medellín", normalizedCity: "medellin", label: "Nacional" },
+  });
+  try {
+    // Antes de tocar nada hereda de su tarifa, que hereda del negocio: sin pago total al recibir.
+    const antes = await resolveShippingRateForCity(businessId, "Medellín");
+    assert.ok(!antes?.paymentModalities.includes("COD_ALL"));
+
+    await setCityAcceptsFullCod(businessId, medellin.id, true);
+
+    const despues = await resolveShippingRateForCity(businessId, "Medellín");
+    assert.ok(despues?.paymentModalities.includes("COD_ALL"), "en Medellín ahora sí");
+    assert.ok(despues?.paymentModalities.includes("PREPAID_ALL"), "y conserva lo que ya ofrecia");
+
+    // Y a Cali, que comparte la misma tarifa "Nacional", no le cambio nada.
+    const cali = await resolveShippingRateForCity(businessId, "Cali");
+    assert.ok(!cali?.paymentModalities.includes("COD_ALL"), "la ciudad de al lado no se toca");
+
+    // Apagarlo la devuelve a heredar, sin dejar una copia que se desincronice de su tarifa.
+    await setCityAcceptsFullCod(businessId, medellin.id, false);
+    const apagado = await prisma.shippingCityRule.findUniqueOrThrow({ where: { id: medellin.id } });
+    assert.deepEqual(apagado.paymentModalities, [], "vuelve a heredar, no guarda una copia");
+  } finally {
+    await prisma.shippingCityRule.deleteMany({ where: { id: medellin.id } });
+  }
 });

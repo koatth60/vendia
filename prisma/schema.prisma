@@ -281,6 +281,15 @@ model ShippingCityRule {
   city           String
   normalizedCity String
   label          String
+  // Cuando paga el cliente EN ESTA CIUDAD. Vacio = lo que diga su tarifa (ShippingRate.paymentModalities),
+  // y si esa tampoco tiene, lo del negocio.
+  //
+  // Existe porque aceptar que paguen todo al recibir es una decision de LUGAR, no de precio: depende de
+  // si el negocio llega ahi con su propio mensajero. Las tarifas agrupan por costo - "Nacional" junta
+  // Medellin con cien ciudades mas - asi que sin esto un negocio que quiere contraentrega total en
+  // Medellin y Bucaramanga y en ninguna otra ciudad de esa tarifa tendria que inventarse tarifas
+  // duplicadas para separarlas. Aca lo marca ciudad por ciudad y no le toca nada a las demas.
+  paymentModalities ShippingPaymentModality[] @default([])
   createdAt      DateTime @default(now())
 
   @@unique([businessId, normalizedCity])

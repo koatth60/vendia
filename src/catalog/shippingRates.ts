@@ -65,9 +65,80 @@ export async function listShippingCityRulesPage(businessId: string, skip: number
   return { items, total };
 }
 
-export async function createShippingCityRule(businessId: string, data: { city: string; label: string }) {
+export async function createShippingCityRule(
+  businessId: string,
+  data: { city: string; label: string; paymentModalities?: ShippingPaymentModality[] }
+) {
   return prisma.shippingCityRule.create({
-    data: { businessId, city: data.city.trim(), normalizedCity: normalizeForMatch(data.city.trim()), label: data.label },
+    data: {
+      businessId,
+      city: data.city.trim(),
+      normalizedCity: normalizeForMatch(data.city.trim()),
+      label: data.label,
+      paymentModalities: data.paymentModalities ?? [],
+    },
+  });
+}
+
+/**
+ * Prende o apaga, EN UNA CIUDAD, que el cliente pueda pagar todo al recibir.
+ *
+ * De las tres modalidades, esta es la unica que depende del lugar: las otras dos se pagan por
+ * transferencia y se pueden hacer desde cualquier parte. Aceptar que paguen todo al recibir depende de
+ * si el negocio llega ahi con su propio mensajero, y eso cambia ciudad por ciudad.
+ *
+ * La lista se arma en el servidor y no en el panel: se parte de lo que esa ciudad heredaria (su tarifa,
+ * o el negocio) y se le suma o resta COD_ALL. Asi prender el interruptor no puede agregarle al negocio
+ * una modalidad que no ofrece, que es lo que pasaria si el panel mandara la lista entera.
+ */
+export async function setCityAcceptsFullCod(businessId: string, id: string, acepta: boolean) {
+  const rule = await prisma.shippingCityRule.findFirst({ where: { id, businessId } });
+  if (!rule) throw new Error("Regla de ciudad no encontrada");
+
+  const heredadas = await modalidadesHeredadasPorCiudad(businessId, rule.label);
+  const sinCod = heredadas.filter((m) => m !== "COD_ALL");
+  const nuevas = acepta ? [...sinCod, "COD_ALL" as const] : sinCod;
+
+  // Si el resultado coincide con lo que heredaria, se guarda vacio: "aca no hay nada distinto" se
+  // escribe como nada, no como una copia que despues se desincroniza de su tarifa.
+  const igualAHeredado = nuevas.length === heredadas.length && nuevas.every((m) => heredadas.includes(m));
+  return prisma.shippingCityRule.update({
+    where: { id },
+    data: { paymentModalities: { set: igualAHeredado ? [] : nuevas } },
+  });
+}
+
+/** Lo que una ciudad heredaria si no tuviera nada propio: su tarifa, y si esa tampoco tiene, el negocio. */
+async function modalidadesHeredadasPorCiudad(businessId: string, label: string): Promise<ShippingPaymentModality[]> {
+  const rate = await prisma.shippingRate.findFirst({ where: { businessId, label }, orderBy: { sortOrder: "asc" } });
+  if (rate && rate.paymentModalities.length > 0) return rate.paymentModalities;
+  const negocio = await prisma.business.findUnique({
+    where: { id: businessId },
+    select: { shippingPaymentModalities: true },
+  });
+  return negocio?.shippingPaymentModalities ?? [];
+}
+
+/**
+ * Las reglas de ciudad de una pagina, con el dato que el panel necesita pintar: si en esa ciudad se
+ * acepta pagar todo al recibir, ya resuelto (lo propio si tiene, lo heredado si no).
+ */
+export async function withFullCodResolved<T extends { label: string; paymentModalities: ShippingPaymentModality[] }>(
+  businessId: string,
+  rules: T[]
+): Promise<(T & { aceptaPagoTotalAlRecibir: boolean })[]> {
+  if (rules.length === 0) return [];
+  const [rates, negocio] = await Promise.all([
+    prisma.shippingRate.findMany({ where: { businessId }, select: { label: true, paymentModalities: true } }),
+    prisma.business.findUnique({ where: { id: businessId }, select: { shippingPaymentModalities: true } }),
+  ]);
+  const porTarifa = new Map(rates.map((r) => [r.label, r.paymentModalities]));
+  const delNegocio = negocio?.shippingPaymentModalities ?? [];
+  return rules.map((rule) => {
+    const propias = rule.paymentModalities;
+    const deTarifa = porTarifa.get(rule.label) ?? [];
+    const efectivas = propias.length > 0 ? propias : deTarifa.length > 0 ? deTarifa : delNegocio;
+    return { ...rule, aceptaPagoTotalAlRecibir: efectivas.includes("COD_ALL") };
   });
 }
 
@@ -111,7 +182,14 @@ export async function resolveShippingRateForCity(businessId: string, city: strin
   // La modalidad de pago del envio viaja CON la tarifa (2026-09-17). Es el mismo viaje a la base y la
   // misma pregunta del cliente ("¿a donde te lo mando?"), y sin esto la unica forma de saber que en esta
   // zona se puede pagar todo al recibir era una frase escrita en las instrucciones del negocio.
-  return { label: rate.label, cost: rate.cost, paymentModalities: await modalidadesDeLaZona(businessId, rate) };
+  //
+  // La CIUDAD manda sobre la tarifa: aceptar que paguen todo al recibir depende de si el negocio llega
+  // ahi con su mensajero, y las tarifas agrupan por costo ("Nacional" junta Medellin con cien ciudades).
+  return {
+    label: rate.label,
+    cost: rate.cost,
+    paymentModalities: await modalidadesDeLaZona(businessId, rule.paymentModalities.length > 0 ? rule : rate),
+  };
 }
 
 /**

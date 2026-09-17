@@ -6260,7 +6260,11 @@ async function loadShippingCityRules() {
       ? '<div style="font-size:13px; color:var(--muted);">Todavía no agregaste ninguna regla de ciudad.</div>'
       : items.map((r) => `
           <div style="display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:10px; padding:10px 12px; border:1px solid var(--border); border-radius:var(--radius-md);">
-            <div style="font-size:13.5px; flex:1 1 220px; min-width:0;"><strong>${escapeHtml(r.city)}</strong> → ${escapeHtml(r.label)}</div>
+            <div style="font-size:13.5px; flex:1 1 200px; min-width:0;"><strong>${escapeHtml(r.city)}</strong> → ${escapeHtml(r.label)}</div>
+            <label style="display:flex; align-items:center; gap:8px; font-size:12.5px; color:var(--muted); cursor:pointer; flex-shrink:0;">
+              <input type="checkbox" ${r.aceptaPagoTotalAlRecibir ? 'checked' : ''} onchange="setCityFullCod('${r.id}', this.checked)" />
+              Puede pagar todo al recibir
+            </label>
             <button class="btn-danger" style="flex-shrink:0;" onclick="deleteShippingCityRule('${r.id}')">Eliminar</button>
           </div>
         `).join('');
@@ -6274,11 +6278,27 @@ async function loadShippingCityRules() {
   }
 }
 
+// De las tres formas de pago, esta es la unica que depende del LUGAR: las otras dos se pagan por
+// transferencia desde donde sea. Por eso por ciudad hay un solo interruptor y no tres casillas.
+async function setCityFullCod(id, enabled) {
+  try {
+    await apiFetch(`/admin/api/shipping-city-rules/${id}/full-cod`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled }),
+    });
+    setStatus(enabled ? 'Listo: en esa ciudad pueden pagar todo al recibir' : 'Listo: en esa ciudad ya no pueden pagar todo al recibir');
+  } catch (err) {
+    setStatus(`No se pudo guardar: ${err.message}`, true);
+  }
+  loadShippingCityRules();
+}
+
 async function addShippingCityRule() {
   const city = document.getElementById('ship-city-name').value.trim();
   const label = document.getElementById('ship-city-rate').value;
   if (!city || !label) {
-    setStatus('Completá la ciudad y elige una tarifa', true);
+    setStatus('Completa la ciudad y elige una tarifa', true);
     return;
   }
   try {

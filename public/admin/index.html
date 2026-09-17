@@ -270,21 +270,27 @@
             </div>
           </div>
 
-          <div class="section-title">Pago del envío<span class="section-count">cuándo se paga, no con qué</span></div>
-          <p style="font-size:12px; color:var(--muted); margin:0 0 12px;">Lo que ofreces <strong>en todo el país</strong>. Si en alguna zona ofreces algo distinto — por ejemplo, que paguen todo al recibir solo en tu ciudad — no lo marques acá: configúralo zona por zona en <strong>Envíos</strong>, en cada tarifa. Lo de la zona manda sobre esto.</p>
+          <div class="section-title">Cuándo paga el cliente<span class="section-count">cuándo, no con qué</span></div>
+          <p style="font-size:12px; color:var(--muted); margin:0 0 12px;">Marca todas las que ofrezcas: el bot se las presenta al cliente y él elige. Esto es lo que vale <strong>en todo el país</strong>; si en alguna zona ofreces algo distinto, configúralo en <strong>Envíos</strong>, en la tarifa de esa zona — lo de la zona manda sobre esto.</p>
           <label class="toggle-row toggle-row-check">
             <input type="checkbox" id="ship-modality-prepaid-all" />
-            <div class="toggle-title">Producto + envío, todo por adelantado</div>
+            <div>
+              <div class="toggle-title">Paga todo antes de que salga el pedido</div>
+              <div class="toggle-desc">Producto y envío por adelantado. Al entregar no se cobra nada. Con un producto de $100.000 y envío de $10.000, te transfiere $110.000 y el mensajero no cobra.</div>
+            </div>
           </label>
           <label class="toggle-row toggle-row-check">
             <input type="checkbox" id="ship-modality-prepaid-product-cod-shipping" />
-            <div class="toggle-title">Producto por adelantado, envío contraentrega</div>
+            <div>
+              <div class="toggle-title">Paga el producto antes; el envío, al recibir</div>
+              <div class="toggle-desc">Te transfiere el producto para que el pedido salga, y le paga el envío al mensajero. Con un producto de $100.000 y envío de $10.000, te transfiere $100.000 y el mensajero cobra $10.000.</div>
+            </div>
           </label>
           <label class="toggle-row toggle-row-check">
             <input type="checkbox" id="ship-modality-cod-all" />
             <div>
-              <div class="toggle-title">Todo (producto + envío) contraentrega</div>
-              <div class="toggle-desc">Márcalo solo si lo haces en todas partes. Si es solo en algunas zonas, va en la tarifa de esas zonas.</div>
+              <div class="toggle-title">Paga todo al recibir</div>
+              <div class="toggle-desc">No te transfiere nada por adelantado: el mensajero cobra producto y envío juntos. Con un producto de $100.000 y envío de $10.000, el mensajero cobra $110.000. Márcalo acá solo si lo haces en todo el país; si es solo en algunas zonas, va en la tarifa de esas zonas.</div>
             </div>
           </label>
         </div>
@@ -711,20 +717,29 @@
             <input id="ship-rate-cost" type="number" min="0" placeholder="Ej: 12000" />
           </div>
         </div>
-        <div class="section-title">Cómo se paga en esta zona<span class="section-count">déjalo sin marcar para usar lo del negocio</span></div>
+        <div class="section-title">Cuándo paga el cliente en esta zona<span class="section-count">sin marcar: lo mismo que en el resto del país</span></div>
+        <p style="font-size:12px; color:var(--muted); margin:0 0 12px;">Úsalo cuando en esta zona ofrezcas algo distinto de lo que ofreces en general — lo típico es aceptar que paguen todo al recibir solo donde entregas tú mismo. Si marcas alguna, el bot le ofrece <strong>solo esas</strong> a los clientes de esta zona.</p>
         <label class="toggle-row toggle-row-check">
           <input type="checkbox" id="ship-rate-mod-prepaid-all" />
-          <div class="toggle-title">Producto + envío, todo por adelantado</div>
+          <div>
+            <div class="toggle-title">Paga todo antes de que salga el pedido</div>
+            <div class="toggle-desc">Producto y envío por adelantado. Al entregar no se cobra nada.</div>
+          </div>
         </label>
         <label class="toggle-row toggle-row-check">
           <input type="checkbox" id="ship-rate-mod-prepaid-product-cod-shipping" />
-          <div class="toggle-title">Producto por adelantado, envío contraentrega</div>
+          <div>
+            <div class="toggle-title">Paga el producto antes; el envío, al recibir</div>
+            <div class="toggle-desc">Te transfiere el producto para que el pedido salga, y le paga el envío al mensajero.</div>
+          </div>
         </label>
         <label class="toggle-row toggle-row-check">
           <input type="checkbox" id="ship-rate-mod-cod-all" />
-          <div class="toggle-title">Todo (producto + envío) contraentrega</div>
+          <div>
+            <div class="toggle-title">Paga todo al recibir</div>
+            <div class="toggle-desc">No te transfiere nada: el mensajero cobra producto y envío juntos. Marcándolo acá, el bot solo se lo ofrece a los clientes de esta zona.</div>
+          </div>
         </label>
-        <p style="font-size:12px; color:var(--muted); margin:0 0 12px;">Si marcas alguna, el bot solo ofrece esas cuando el cliente es de esta zona. Si no marcas ninguna, ofrece las que configuraste en Agente &gt; Configuración. Con «todo contraentrega» no se pide comprobante: no hay pago que mostrar todavía.</p>
         <div class="actions-row">
           <button class="btn-secondary" id="ship-rate-cancel-btn" style="display:none;" onclick="cancelEditShippingRate()">Cancelar</button>
           <button class="btn-primary" id="ship-rate-submit-btn" onclick="addShippingRate()">+ Agregar tarifa</button>
