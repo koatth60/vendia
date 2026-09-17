@@ -555,6 +555,45 @@ model LearnedFaqCandidate {
 // que acordarse de volver a escribir la respuesta cuando el cliente contestara (caso real 2026-09-14:
 // la respuesta a David nunca se entrego y nadie la reenvio). Se encola aca y el webhook la entrega
 // sola en cuanto el cliente escribe, porque ese mensaje entrante vuelve a abrir la ventana.
+// E08 de ONIX-PLAN.md (2026-09-17): la rafaga de mensajes del cliente deja de vivir en la memoria del
+// proceso. Antes, los mensajes que llegaban juntos esperaban su ventana de silencio (~8 s) en un Map con
+// un setTimeout adentro (createBurstBuffer): el mensaje ya estaba grabado como Message, Meta ya habia
+// recibido el 200 y nadie lo iba a reintentar, asi que un `pm2 restart` en esos 8 segundos -- hubo 103
+// reinicios registrados -- se llevaba la rafaga entera y el cliente se quedaba sin ninguna respuesta.
+//
+// Cada fila es UN mensaje entrante esperando su turno. La rafaga es el conjunto de filas sin reclamar de
+// una misma conversacion, y `flushAt` (el mismo para todas, recalculado en cada mensaje nuevo) es cuando
+// se puede drenar. `claimedAt`/`claimedBy` son el reclamo de fila: el UPDATE condicionado a
+// `claimedAt IS NULL` solo lo puede ganar un proceso, asi que dos drenajes simultaneos no producen dos
+// respuestas.
+//
+// Solo se guarda lo que el cliente mando y a quien hay que contestarle. El negocio, el cliente y las
+// credenciales NO se guardan aca: se leen de la base al drenar. Es la regla que dejo el despliegue del
+// 2026-09-17 -- un hecho que se escribe una vez y se lee muchas es un hecho que va a mentir.
+model PendingBurst {
+  id                String       @id @default(cuid())
+  conversation      Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  conversationId    String
+  businessId        String
+  customerId        String
+  // A que numero se responde. Es el `from` del webhook, que puede no ser identico al telefono guardado
+  // del cliente (prefijos que Meta normaliza distinto), y contestarle a otro numero no es una opcion.
+  customerPhone     String
+  rawText           String
+  // La fila que el cliente toco en una lista interactiva, si toco alguna. Id, no texto.
+  selectedProductId String?
+  // Cuando lo mando el CLIENTE (el timestamp de Meta), no cuando lo procesamos: es desde ahi que esta
+  // esperando, y es lo que decide si la respuesta ya salio vieja.
+  customerSentAt    DateTime
+  flushAt           DateTime
+  claimedAt         DateTime?
+  claimedBy         String?
+  createdAt         DateTime     @default(now())
+
+  @@index([claimedAt, flushAt])
+  @@index([conversationId, claimedAt])
+}
+
 model QueuedOutboundMessage {
   id             String       @id @default(cuid())
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
@@ -919,6 +958,7 @@ model Conversation {
   agreedPrices                 AgreedPrice[]
   messages                     Message[]
   queuedOutbound               QueuedOutboundMessage[]
+  pendingBursts                PendingBurst[]
   createdAt                    DateTime               @default(now())
   updatedAt                    DateTime               @updatedAt
 

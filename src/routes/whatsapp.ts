@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { Prisma } from "@prisma/client";
+import type { PendingBurst as PendingBurstRow } from "@prisma/client";
 import { env } from "../config/env";
 import { toBusinessLocale, getBusinessLocale } from "../config/businessConfig";
 import { getPaymentExamples } from "../catalog/paymentMethods";
@@ -16,7 +17,12 @@ import {
   computeTypingDelayMs,
   type WhatsappCredentials,
 } from "../whatsapp/outbound";
-import { createBurstBuffer } from "../whatsapp/burstBuffer";
+import {
+  enqueuePendingBurst,
+  drainDuePendingBursts,
+  flushPendingBurstsNow,
+  countPendingBursts,
+} from "../conversation/pendingBursts";
 import { uploadMedia } from "../media/s3";
 import { checkWebhookSignature, signatureHeaderOf } from "../whatsapp/webhookSignature";
 import { maskPhone } from "../whatsapp/logging";
@@ -549,10 +555,13 @@ export async function handleOwnerReply(
 // Antes, dos o tres mensajes seguidos del mismo cliente (webhooks separados de Meta, segundos de
 // diferencia) disparaban cada uno su propio generateReply completo - el cliente recibia varias
 // respuestas, a veces contradictorias entre si porque cada llamada partia del mismo historial sin
-// ver lo que la otra iba a contestar. replyBurstBuffer los agrupa por conversation.id con una
-// ventana de silencio de ~8s (createBurstBuffer, generico y probado aparte en
-// src/whatsapp/burstBuffer.test.ts) y recien entonces genera y manda UNA sola respuesta para todo
-// lo que el cliente escribio en ese rato.
+// ver lo que la otra iba a contestar. La rafaga los agrupa por conversation.id con una ventana de
+// silencio de ~8s y recien entonces genera y manda UNA sola respuesta para todo lo que el cliente
+// escribio en ese rato.
+//
+// E08 (2026-09-17): esa espera dejo de vivir en la memoria del proceso. Los mensajes esperan como
+// filas de PendingBurst y los drena un job con reclamo de fila (src/conversation/pendingBursts.ts),
+// asi que un reinicio en mitad de la ventana ya no se lleva la rafaga entera.
 //
 // Corre DELANTE del lock por conversacion: cada mensaje individual sigue pasando por su propio
 // withConversationLock para el trabajo que no puede esperar (grabar el mensaje, el gate de control
@@ -711,22 +720,63 @@ async function runGenerateAndSend(conversationId: string, items: ReplyBurstItem[
   }
 }
 
-const replyBurstBuffer = createBurstBuffer<ReplyBurstItem>(
-  async (conversationId, items) => {
-    await withConversationLock(conversationId, () => runGenerateAndSend(conversationId, items));
-  },
-  { windowMs: Number(process.env.WHATSAPP_BURST_WINDOW_MS ?? "") || 8000 }
-);
-
-// El apagado ordenado (src/shutdown.ts) necesita poder vaciar esto ANTES de esperar los locks: un
-// mensaje esperando su ventana de rafaga ya esta grabado en la base y Meta ya recibio el 200 - si
-// el proceso se reinicia antes de que el timer normal (hasta 8s) dispare, se pierde en silencio.
-export function flushPendingReplyBursts(): Promise<void> {
-  return replyBurstBuffer.flushAll();
+// Reconstruye la rafaga guardada para poder generar el turno. El negocio, el cliente y las
+// credenciales NO viajan en la fila: se leen de la base ACA, en el momento de contestar. Si el
+// negocio se desconecto o se desactivo mientras la rafaga esperaba, no hay nada que mandar - y la
+// fila se borra igual, porque reintentarla mañana seria contestarle a destiempo a alguien que
+// pregunto hoy.
+async function itemsDeLaRafaga(filas: PendingBurstRow[]): Promise<ReplyBurstItem[]> {
+  const business = await prisma.business.findUnique({ where: { id: filas[0].businessId } });
+  if (!business || !business.whatsappAccessToken || !business.whatsappPhoneNumberId || !business.active) {
+    console.error(`Rafaga pendiente de un negocio sin WhatsApp conectado o inactivo, se descarta: ${filas[0].businessId}`);
+    return [];
+  }
+  const customer = await prisma.customer.findUnique({ where: { id: filas[0].customerId } });
+  if (!customer) {
+    console.error(`Rafaga pendiente de un cliente que ya no existe, se descarta: ${filas[0].customerId}`);
+    return [];
+  }
+  const credentials: WhatsappCredentials = {
+    phoneNumberId: business.whatsappPhoneNumberId,
+    accessToken: business.whatsappAccessToken,
+  };
+  return filas.map((fila) => ({
+    rawText: fila.rawText,
+    selectedProductId: fila.selectedProductId ?? undefined,
+    customerSentAt: fila.customerSentAt.getTime(),
+    business,
+    customer,
+    credentials,
+    from: fila.customerPhone,
+  }));
 }
 
-export function getPendingReplyBurstCount(): number {
-  return replyBurstBuffer.pendingCount();
+/**
+ * Una pasada del drenaje de rafagas vencidas. La llama el job de src/jobs/pendingBursts.ts cada
+ * segundo. Devuelve las promesas de los turnos que arranco - no las espera: dos conversaciones
+ * distintas se contestan en paralelo, como cuando cada rafaga tenia su propio timer.
+ */
+export function drainPendingBursts(): Promise<Promise<void>[]> {
+  return drainDuePendingBursts(
+    async (conversationId, filas) => {
+      const items = await itemsDeLaRafaga(filas);
+      if (items.length === 0) return;
+      await withConversationLock(conversationId, () => runGenerateAndSend(conversationId, items));
+    },
+    (conversationId, error) => console.error(`Error generando la respuesta de la rafaga de ${conversationId}:`, error)
+  );
+}
+
+// El apagado ordenado (src/shutdown.ts) ya no tiene que vaciar nada para no perderlo: la rafaga esta
+// en la base y la levanta este proceso al volver, u otro. Lo unico que hace es adelantar el reloj de
+// lo que estaba esperando su ventana, para que al arrancar se drene de una en vez de terminar de
+// esperar una ventana que empezo antes del reinicio.
+export function flushPendingReplyBursts(): Promise<void> {
+  return flushPendingBurstsNow().then(() => undefined);
+}
+
+export function getPendingReplyBurstCount(): Promise<number> {
+  return countPendingBursts();
 }
 
 whatsappRouter.get("/webhook", (req, res) => {
@@ -1199,20 +1249,23 @@ whatsappRouter.post("/webhook", async (req, res) => {
       const customerSentAt = Number.isFinite(metaTimestampMs) && metaTimestampMs > 0 ? metaTimestampMs : webhookReceivedAt;
 
       // Fase 10 del plan maestro: no se llama a generateReply directamente aca. Se agrupa con
-      // cualquier otro mensaje que este mismo cliente mande en los proximos ~8s (replyBurstBuffer,
-      // definido arriba) y recien entonces se genera y manda UNA sola respuesta para toda la
-      // rafaga - ver runGenerateAndSend. Esto libera el lock de este mensaje puntual de inmediato
-      // en vez de tenerlo abierto esperando a que se genere una respuesta.
-      replyBurstBuffer.add(conversation.id, {
+      // cualquier otro mensaje que este mismo cliente mande en los proximos ~8s y recien entonces se
+      // genera y manda UNA sola respuesta para toda la rafaga - ver runGenerateAndSend. Esto libera
+      // el lock de este mensaje puntual de inmediato en vez de tenerlo abierto esperando a que se
+      // genere una respuesta.
+      //
+      // E08: la espera es una fila en la base, no un timer en memoria. Cuando este await vuelve, un
+      // reinicio ya no puede perder este mensaje.
+      await enqueuePendingBurst({
+        conversationId: conversation.id,
+        businessId: business.id,
+        customerId: customer.id,
+        customerPhone: from,
         rawText,
         // La fila tocada de una lista interactiva manda sobre la foto citada: las dos son elecciones
         // con el dedo, pero la fila es de ESTE mensaje y la foto puede ser de un mensaje viejo.
         selectedProductId: listSelection?.productId ?? quotedProductId,
-        customerSentAt,
-        business,
-        customer,
-        credentials,
-        from,
+        customerSentAt: new Date(customerSentAt),
       });
     });
   } catch (error) {
