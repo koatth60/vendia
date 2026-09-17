@@ -200,7 +200,12 @@ test("RESPUESTA_DUPLICADA queda registrada pero ya no le avisa al dueno", async 
   }
 });
 
-test("VENTA_SIN_PEDIDO si le avisa al dueno", async () => {
+test("VENTA_SIN_PEDIDO queda registrada y tampoco le avisa al dueno", async () => {
+  // 2026-09-17: este chequeo dejo de escribirle al dueno. El aviso decia "VENTA_SIN_PEDIDO" - el nombre
+  // interno del detector, sin el cliente, sin el producto y sin nada que el dueno pudiera hacer al
+  // leerlo. Ademas, que una venta quede sin pedido lo verifica ahora el turno mismo contra la base y lo
+  // reintenta antes de responder (requiredEffects, obligatorio desde esta misma fecha): avisar media hora
+  // despues es la version vieja y peor del mismo trabajo.
   const { businessId, conversationId } = await seedHealthBusiness();
   try {
     await prisma.message.create({
@@ -209,18 +214,20 @@ test("VENTA_SIN_PEDIDO si le avisa al dueno", async () => {
 
     const alerts = await runJobCapturingOwnerAlerts();
 
-    assert.ok(alerts.length > 0, "una venta que no quedo registrada tiene que llegarle al dueno");
-    assert.ok(
-      alerts.some((a) => a.includes("VENTA_SIN_PEDIDO")),
-      "y el aviso tiene que decir de que se trata"
-    );
+    const registrado = await prisma.agentIncident.findFirst({
+      where: { businessId, detail: { contains: "VENTA_SIN_PEDIDO" } },
+    });
+    assert.ok(registrado, "el hallazgo se sigue registrando y sigue visible en Bot > Salud");
+    assert.equal(alerts.length, 0, "pero no interrumpe a nadie");
   } finally {
     await prisma.ownerMessageLog.deleteMany({ where: { businessId } });
     await teardownReplayBusiness(businessId);
   }
 });
 
-test("un incidente de escalacion prometida sin herramienta tambien avisa", async () => {
+test("una escalacion prometida sin herramienta queda registrada y tampoco avisa", async () => {
+  // Al cliente que quedo esperando lo rescata el recordatorio de conversacion sin responder, que dice su
+  // nombre y se puede accionar. Esa era la unica consecuencia real que este aviso cubria.
   const { businessId, conversationId } = await seedHealthBusiness();
   try {
     await prisma.message.create({ data: { conversationId, role: "ASSISTANT", content: "Dejame consultarlo con el equipo." } });
@@ -236,12 +243,14 @@ test("un incidente de escalacion prometida sin herramienta tambien avisa", async
 
     const alerts = await runJobCapturingOwnerAlerts();
 
-    assert.ok(
-      alerts.some((a) => a.includes("ESCALACION_PROMETIDA_SIN_HERRAMIENTA")),
-      "el detector F1 dejaba una fila que nadie miraba; ahora avisa"
-    );
+    const registrado = await prisma.agentIncident.findFirst({
+      where: { businessId, detail: { contains: "ESCALACION_PROMETIDA_SIN_HERRAMIENTA" } },
+    });
+    assert.ok(registrado, "el detector F1 sigue dejando su fila");
+    assert.equal(alerts.length, 0, "pero no le llega un WhatsApp al dueno");
   } finally {
     await prisma.ownerMessageLog.deleteMany({ where: { businessId } });
     await teardownReplayBusiness(businessId);
   }
 });
+

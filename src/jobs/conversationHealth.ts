@@ -1,6 +1,4 @@
 import { prisma } from "../db/client";
-import { sendAlertToOwner, type WhatsappCredentials } from "../whatsapp/outbound";
-import { recordOwnerMessage } from "../delivery/ownerLog";
 import { recordAgentIncident } from "../ai/incidents";
 
 // Fase 0 del plan de estabilizacion (2026-09-15). Hasta ahora el unico detector de fallos del bot era
@@ -10,8 +8,18 @@ import { recordAgentIncident } from "../ai/incidents";
 // cerraron sin quedar registradas como pedido.
 //
 // Este job corre esas mismas comprobaciones solas, cada media hora, sobre lo que acaba de pasar. No
-// arregla nada: deja constancia (AgentIncident, visible en el panel) y avisa al dueno solo cuando algo
-// aparece, para que el silencio signifique de verdad que no hay nada.
+// arregla nada y NO le escribe a nadie: deja constancia (AgentIncident, visible en Bot > Salud).
+//
+// Le mandaba un WhatsApp al dueno cuando encontraba algo, y eso se saco el 2026-09-17. El mensaje decia
+// "El chequeo automatico encontro 2 cosas para revisar: VENTA_SIN_PEDIDO, ESCALACION_PROMETIDA_SIN_HERRAMIENTA"
+// - nombres internos del codigo, sin el cliente, sin el producto y sin nada que el dueno pueda hacer al
+// leerlo. Le llegaron seis en dos dias. Un aviso que no se puede accionar no es informacion: es ruido, y
+// el ruido entrena a ignorar tambien los avisos que si importan.
+//
+// Lo que si le llega al dueno sigue igual y es todo accionable: una pregunta de un cliente que el bot no
+// supo responder, un pedido pagado, y el recordatorio de una conversacion que lo esta esperando. Ese
+// ultimo es el que rescata al cliente que quedo colgado, que era la unica consecuencia real que estos
+// avisos cubrian.
 
 // Prefijo en AgentIncident.detail: permite separar lo que encontro este chequeo de las intervenciones
 // que los backstops registran en vivo, sin tener que migrar el enum de la base.
@@ -21,25 +29,6 @@ export const HEALTH_FINDING_PREFIX = "[chequeo]";
 // se pierda entre dos corridas. Repetir un hallazgo es barato (se deduplica abajo); perderlo no.
 const LOOKBACK_MINUTES = 45;
 export const HEALTH_CHECK_INTERVAL_MS = 30 * 60 * 1000;
-
-// Dos veces el mismo tipo de fallo en el dia ya no es un caso aislado sino un patron, y ahi conviene
-// avisar de una en vez de esperar al resumen (item 32 del plan).
-const REPEAT_ALERT_THRESHOLD = 2;
-
-// Que hallazgos le VALEN un WhatsApp al dueno. Todos se siguen registrando como AgentIncident y todos se
-// siguen viendo en Bot > Salud; esto decide unicamente a cuales se le interrumpe el dia.
-//
-// Correccion 2026-09-15, medida en produccion: la noche del incidente de Milena el job le mando a la
-// duena "RESPUESTA_DUPLICADA x3" - un falso positivo conocido, causado por nuestro propio corte de
-// mensajes de la Fase 10 (splitLongMessage manda dos mensajes con segundos de diferencia, que es
-// exactamente la firma que ese detector busca) - y NO le mando VENTA_SIN_PEDIDO, que habia saltado a las
-// 03:01:30 en la conversacion de Milena y era la mitad de las ventas reales de esa noche. El unico aviso
-// que la duena recibio fue el que no significaba nada. Invertido.
-export const ALERTABLE_KINDS = new Set([
-  "VENTA_SIN_PEDIDO",
-  "FOTO_PROMETIDA_SIN_ENVIAR",
-  "ESCALACION_PROMETIDA_SIN_HERRAMIENTA",
-]);
 
 // Guard de agent.ts (detector F1 del diagnostico) que hasta ahora solo dejaba una fila en AgentIncident:
 // el bot prometio consultarle algo al dueno y no existe ninguna PendingOwnerQuestion que respalde la
@@ -120,30 +109,12 @@ export function findHealthIssues(input: {
   return out;
 }
 
-async function alertOwner(
-  businessId: string,
-  credentials: WhatsappCredentials,
-  contactPhone: string,
-  text: string
-): Promise<void> {
-  // Sin saltos de linea: la plantilla onix_owner_alert los rechaza (WhatsApp 132018).
-  const result = await sendAlertToOwner(businessId, credentials, contactPhone, text.replace(/\s*\n\s*/g, " "));
-  await recordOwnerMessage(businessId, {
-    direction: "OUT",
-    body: text,
-    success: result.delivered,
-    errorMessage: result.failure?.message ?? null,
-  });
-  if (!result.delivered) {
-    console.error("No se pudo avisar al dueno del chequeo de conversaciones:", result.failure?.message);
-  }
-}
 
 export async function runConversationHealthJob(): Promise<void> {
   const since = new Date(Date.now() - LOOKBACK_MINUTES * 60 * 1000);
-  const businesses = await prisma.business.findMany({
-    where: { active: true, whatsappPhoneNumberId: { not: null }, whatsappAccessToken: { not: null } },
-  });
+  // Ya no hace falta que el negocio tenga WhatsApp conectado: este chequeo no le manda nada a nadie, solo
+  // deja constancia. Un negocio activo sin conexion tambien puede tener conversaciones que revisar.
+  const businesses = await prisma.business.findMany({ where: { active: true }, select: { id: true } });
 
   for (const business of businesses) {
     const touched = await prisma.message.findMany({
@@ -211,46 +182,11 @@ export async function runConversationHealthJob(): Promise<void> {
     });
     const vistos = new Set(yaRegistrados.map((i) => `${i.conversationId}|${i.detail}`));
 
-    const nuevos: HealthFinding[] = [];
     for (const f of findings) {
       const detail = `${HEALTH_FINDING_PREFIX} ${f.kind}: ${f.detail}`;
       if (vistos.has(`${f.conversationId}|${detail}`)) continue;
       vistos.add(`${f.conversationId}|${detail}`);
-      nuevos.push(f);
       await recordAgentIncident(business.id, "BACKSTOP_INTERVENTION", detail, f.conversationId);
-    }
-    // Todo hallazgo nuevo quedo registrado arriba; de aca en adelante solo se mira lo que amerita un
-    // WhatsApp. RESPUESTA_DUPLICADA cae aca: sigue visible en el panel, deja de despertar a nadie.
-    const avisables = nuevos.filter((f) => ALERTABLE_KINDS.has(f.kind));
-    if (avisables.length === 0 || !business.contactPhone) continue;
-
-    const credentials: WhatsappCredentials = {
-      phoneNumberId: business.whatsappPhoneNumberId!,
-      accessToken: business.whatsappAccessToken!,
-    };
-
-    // Un patron (mismo tipo repetido) se avisa aparte y con nombre propio: es lo que distingue "se cayo
-    // una foto" de "las fotos no estan saliendo".
-    const porTipo = new Map<string, number>();
-    for (const f of avisables) porTipo.set(f.kind, (porTipo.get(f.kind) ?? 0) + 1);
-    const patrones = [...porTipo.entries()].filter(([, n]) => n >= REPEAT_ALERT_THRESHOLD);
-
-    if (patrones.length > 0) {
-      const texto = patrones.map(([kind, n]) => `${kind} x${n}`).join(", ");
-      await alertOwner(
-        business.id,
-        credentials,
-        business.contactPhone,
-        `Atencion: el bot repitio el mismo fallo en la ultima media hora (${texto}). Revisa Bot > Salud en el panel.`
-      );
-    } else {
-      const resumen = avisables.map((f) => f.kind).join(", ");
-      await alertOwner(
-        business.id,
-        credentials,
-        business.contactPhone,
-        `El chequeo automatico encontro ${avisables.length} ${avisables.length === 1 ? "cosa" : "cosas"} para revisar en las conversaciones de la ultima media hora: ${resumen}. Esta el detalle en Bot > Salud.`
-      );
     }
   }
 }
