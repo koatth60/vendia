@@ -1764,3 +1764,73 @@ test("close_conversation SOLD con transferencia sigue esperando la confirmacion 
     await cleanup();
   }
 });
+
+// ==============================================================================================
+// Un pedido nuevo no hereda nada del anterior (2026-09-17)
+// ==============================================================================================
+//
+// La garantia NO vive en el texto que el servidor le inyecta al modelo - ahi solo van los datos del
+// pedido cerrado. Vive aca: un cliente que ya compro no puede terminar con un segundo pedido armado por
+// suposicion, porque cerrar sigue exigiendo lineas reales del catalogo y la variante elegida.
+
+test("un cliente con un pedido anterior no puede cerrar otro sin productos propios", async () => {
+  const { context, cleanup } = await vendibleContext();
+  try {
+    // Pedido anterior, cerrado, con su direccion y su forma de pago.
+    const anterior = await prisma.conversation.create({ data: { customerId: context.customerId, status: "SOLD" } });
+    await prisma.order.create({
+      data: {
+        businessId: context.businessId,
+        customerId: context.customerId,
+        conversationId: anterior.id,
+        summary: "1x Reloj anterior",
+        shippingAddress: "Calle 22 #108-62",
+        paymentMethodLabel: "Contraentrega",
+        totalAmount: 149000,
+        currency: "COP",
+      },
+    });
+
+    // El turno nuevo intenta cerrar sin decir que producto: heredarlo del anterior no es una opcion.
+    const result = (await runCatalogTool(context, "close_conversation", {
+      outcome: "SOLD",
+      summary: "Otro igual al anterior",
+      shippingAddress: "Calle 22 #108-62",
+      items: [],
+    })) as { closed: boolean; note: string };
+
+    assert.equal(result.closed, false);
+    assert.equal(await prisma.order.count({ where: { conversationId: context.conversationId } }), 0);
+  } finally {
+    await prisma.order.deleteMany({ where: { customerId: context.customerId } });
+    await prisma.conversation.deleteMany({ where: { customerId: context.customerId, id: { not: context.conversationId } } });
+    await cleanup();
+  }
+});
+
+test("un pedido nuevo de un producto con variantes no se cierra sin la variante elegida", async () => {
+  const { context, cleanup } = await vendibleContext();
+  try {
+    const producto = await prisma.product.create({
+      data: { businessId: context.businessId, name: "Reloj Con Colores", description: "x", price: 140000, currency: "COP", stock: 5 },
+    });
+    await prisma.productVariant.createMany({
+      data: [
+        { productId: producto.id, color: "negro", stock: 3, active: true },
+        { productId: producto.id, color: "gris", stock: 2, active: true },
+      ],
+    });
+
+    const result = (await runCatalogTool(context, "close_conversation", {
+      outcome: "SOLD",
+      summary: "1x Reloj Con Colores",
+      items: [{ productName: "Reloj Con Colores", quantity: 1 }],
+    })) as { closed: boolean; note: string };
+
+    assert.equal(result.closed, false, "sin color elegido no se cierra: no se asume el del pedido anterior");
+    assert.match(result.note, /color/i);
+    assert.equal(await prisma.order.count({ where: { conversationId: context.conversationId } }), 0);
+  } finally {
+    await cleanup();
+  }
+});

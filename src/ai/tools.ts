@@ -1744,9 +1744,6 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
               context.conversationId
             );
 
-        // Un pedido sin lineas no es un pedido (produccion 2026-09-17, cmu4suduh001sq92ka4r3j35y: quedo
-        // guardada una venta de cero lineas y totalAmount 0). Vale con SaleState prendido o apagado.
-        if (items.length === 0) return { closed: false, note: EMPTY_ORDER_NOTE };
 
         // Real production incident (2026-09-12): a sale closed without ever asking the customer's color.
         // Unlike `unresolved` below (which only warns the owner and still closes), this BLOCKS the close -
@@ -1759,6 +1756,13 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
             note: `Antes de cerrar el pedido todavia falta preguntarle al cliente el color/talla de: ${needsAttribute.join(", ")}. Pregunta cual color o talla quiere de cada uno (mostrale las opciones reales que tenga ese producto) y volve a llamar close_conversation recien cuando lo tengas.`,
           };
         }
+
+        // Va DESPUES del chequeo de color/talla, y no es casual: un producto con variantes y sin color
+        // elegido no entra en `items` (sale por needsAttribute). Con este guard primero, el modelo leeria
+        // que ese producto no existe en el catalogo - y se lo diria al cliente.
+        // Un pedido sin lineas no es un pedido (produccion 2026-09-17, cmu4suduh001sq92ka4r3j35y: quedo
+        // guardada una venta de cero lineas y totalAmount 0). Vale con SaleState prendido o apagado.
+        if (items.length === 0) return { closed: false, note: EMPTY_ORDER_NOTE };
 
         if (unresolved.length > 0) {
           console.warn(

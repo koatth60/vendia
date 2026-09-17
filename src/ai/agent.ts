@@ -1140,15 +1140,10 @@ export async function generateReply(
               JSON.stringify(postSaleFactsForModel(postSale)) +
               `
 
-Esto sirve para CONTESTAR SOBRE ESA COMPRA: cuando llega, que pidio, cuanto pago, a donde va. ` +
-              `Si pregunta por ella, contestale con esto y no le pidas de nuevo esos datos.
-` +
-              `Si quiere comprar algo MAS, es un pedido NUEVO y arranca de cero: producto, color o talla, direccion y ` +
-              `forma de pago se confirman con el cliente, uno por uno. No des por hecho que quiere lo mismo, ni que va ` +
-              `a la misma direccion, ni que paga igual. Proponerselo se puede ("¿te lo mando a la misma direccion?"); ` +
-              `asumirlo no.` +
+Este pedido YA ESTA CERRADO: no es el pedido en curso. Si el cliente pregunta por esta compra, ` +
+              `contestale con estos datos en vez de volver a pedirselos.` +
               (postSale.fromAnotherConversation
-                ? ` Ese pedido se cerro en una conversacion anterior, asi que arriba no vas a ver el historial: los datos de aca son todo lo que hubo.`
+                ? ` Se cerro en una conversacion anterior, asi que arriba no vas a ver ese historial: esto es todo lo que hubo.`
                 : ``),
           },
         ]
