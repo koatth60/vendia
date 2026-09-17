@@ -1,6 +1,9 @@
 # Plan: agrupar conversaciones por cliente + revisión de etiquetas
 
-Fecha: 2026-09-13. Estado: **aprobado, no iniciado**.
+Fecha: 2026-09-13. Estado: **implementado y desplegado** (corregido el 2026-09-17; el encabezado
+decía "aprobado, no iniciado" y quedó sin actualizar). `listCustomerThreadsForBusiness` existe en
+`src/conversation/service.ts` y `ONIX-DIAGNOSTICO-2026-09.md` lo da por implementado. Se conserva
+como registro; el plan vigente es `ONIX-PLAN-INFRAESTRUCTURA.md` (ver `PLANES.md`).
 
 ## Problema
 

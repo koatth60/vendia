@@ -11,7 +11,11 @@ el bot falla al hacer llamados a herramientas, con foco en cuatro flujos concret
 Más un pedido adicional: evaluar si faltan backstops y lógica para que el bot sea robusto en negocios de
 rubros distintos, no solo en el piloto actual.
 
-**Nada de esto está implementado todavía. Este documento es solo el diagnóstico y el plan.**
+**DESACTUALIZADO — corregido el 2026-09-17.** Esta línea decía "nada de esto está implementado
+todavía" y quedó sin tocar: las fases A a G se implementaron el 2026-09-13 y están marcadas DONE más
+abajo (D y E, sin validar contra una conversación real). `ONIX-DIAGNOSTICO-2026-09.md` además lo da
+por superado: lo que quedaba abierto acá "ya no es la respuesta correcta". Este documento se conserva
+como registro; el plan vigente es `ONIX-PLAN-INFRAESTRUCTURA.md` (ver `PLANES.md`).
 
 ## Método
 
