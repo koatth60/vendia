@@ -113,6 +113,9 @@
     padding: 1px 6px; border-radius: 5px; min-width: 18px; text-align: center;
   }
   .tab-btn.active .tab-count { background: var(--onix-accent); color: var(--onix-accent-ink); }
+  /* Mismo choque que .unread-badge: sin esta regla el display de arriba le gana
+     al display:none de [hidden] y el contador en cero se sigue viendo. */
+  .tab-count[hidden] { display: none; }
 
   .sidebar-foot {
     margin-top: auto; display: flex; align-items: center; gap: 8px;
@@ -376,6 +379,11 @@
 
   .unread-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--brand); color: var(--onix-accent-ink); font-size: 11px; font-weight: 700; line-height: 1; }
   .tab-btn .unread-badge { margin-left: 6px; background: var(--danger); }
+  /* display:inline-flex de la regla de arriba le gana al display:none que trae
+     [hidden] por defecto: el contador en cero quedaba pintado en rojo al lado de
+     CRM aunque el JS ya lo hubiera marcado como oculto. Mismo choque que ya paso
+     con .mobile-icon-btn .btn-icon. */
+  .unread-badge[hidden] { display: none; }
 
   .tpl-status { display: inline-flex; align-items: center; gap: 4px; padding: 2px 9px; border-radius: 999px; font-size: 11px; font-weight: 700; }
   .tpl-status-approved { background: var(--brand-light); color: var(--brand-dark); }
@@ -484,6 +492,9 @@
   .conv-info { flex: 1; min-width: 0; }
   .conv-name { font-size: 13.5px; font-weight: 700; }
   .conv-preview { font-size: 12.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+  /* "Borrador:" en la fila de la lista, como WhatsApp: lo que quedo escrito sin
+     mandar se ve sin tener que abrir la conversacion. */
+  .conv-draft { color: var(--onix-accent); font-weight: 600; }
   .conv-meta { text-align: right; flex-shrink: 0; }
   .conv-time { font-size: 11px; color: var(--muted-soft); }
   /* Discreet recurring-customer hint next to the time - decision 2026-09-13: text, not another badge. */
@@ -586,16 +597,15 @@
   }
   .inbox-filter-empty { padding: 24px 16px; }
 
-  /* Subbarra del hilo: etiquetas a la izquierda, estado del bot a la derecha. */
-  .thread-subbar {
-    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
-    padding: 8px 16px;
-    border-bottom: 1px solid var(--onix-border-soft);
-    background: var(--onix-surface);
+  /* Etiquetas y estado del bot viven en la linea de metadatos de la cabecera.
+     Antes eran una franja propia (.thread-subbar) debajo: dos bordes, dos
+     paddings y ~34px de alto robados al hilo para dos datos de una sola linea. */
+  .thread-tags {
+    display: flex; align-items: center; flex-wrap: wrap; gap: 5px; min-width: 0;
   }
-  .thread-auto-hint {
-    margin-left: auto; font-size: 11.5px; color: var(--onix-dim); white-space: nowrap;
-  }
+  /* "Onix responde automaticamente" ya no se escribe: lo dice el boton de
+     tomar control, que se enciende cuando el humano tiene la conversacion. Dos
+     formas de decir lo mismo, y la de texto era la que gastaba ancho. */
 
   /* Clientes como tabla: encabezado y filas comparten la misma rejilla, así
      las columnas quedan alineadas de verdad y no "casi". */
@@ -661,11 +671,36 @@
   .composer-icon-btn:hover { background: var(--onix-surface-2); color: var(--onix-ink); }
   .composer-send-btn { background: var(--onix-accent); color: var(--onix-accent-ink); }
   .composer-send-btn:hover { background: var(--onix-accent-hover); }
-  #modal-composer-input {
-    height: var(--onix-h-field); margin: 0;
-    border-radius: 999px; padding: 0 16px;
+  .composer-row { display: flex; gap: 8px; align-items: flex-end; }
+  /* Una sola pieza: el clip y el texto comparten borde, fondo y foco. El campo es
+     lo unico que crece; Enviar queda afuera, redondo, siempre del mismo tamano. */
+  .composer-field {
+    flex: 1; min-width: 0;
+    display: flex; align-items: flex-end; gap: 2px;
+    padding: 2px 4px 2px 2px;
     background: var(--onix-surface-field);
+    border: 1px solid var(--onix-border);
+    border-radius: 20px;
   }
+  .composer-field:focus-within {
+    border-color: var(--onix-accent-line);
+    box-shadow: 0 0 0 2px var(--onix-accent-ring);
+  }
+  .composer-attach { width: 34px; height: 34px; }
+  /* Crece con el texto (lo calcula autoGrowComposer) y se frena en 6 lineas. El
+     alto va por JS porque no hay forma en CSS de que un textarea se ajuste a su
+     contenido; aca queda el piso, el techo y la forma. El borde y el fondo los
+     pone .composer-field: si los pusiera tambien el textarea se verian dos cajas
+     una adentro de la otra. */
+  #modal-composer-input {
+    flex: 1; min-width: 0;
+    min-height: 34px; max-height: 132px; margin: 0;
+    padding: 8px 8px 8px 2px;
+    border: none; background: transparent; border-radius: 0;
+    line-height: 1.4; resize: none; overflow-y: hidden;
+    font-family: inherit; font-size: 13px; color: var(--onix-ink);
+  }
+  #modal-composer-input:focus { outline: none; box-shadow: none; background: transparent; }
 
   /* Fondo plano, como el diseño. El patrón tipo WhatsApp que había acá traía
      un beige incrustado que no seguía al tema y ensuciaba las burbujas. */
@@ -678,13 +713,56 @@
   /* Envuelve a cualquier ancho. El ancho de esta columna no depende solo del
      dispositivo: cambia según la barra lateral y según si la lista está
      abierta, así que un media query no alcanza. */
+  /* Una sola linea, sin envolver: si algo no entra, cede el bloque del medio
+     (nombre y metadatos), que es el unico que puede recortarse sin perder una
+     accion. Envolver es lo que hacia crecer la cabecera a 3 franjas. */
   .chat-panel-header {
-    display: flex; align-items: center; flex-wrap: wrap;
-    gap: 10px 12px; padding: 14px 18px;
+    display: flex; align-items: center; flex-wrap: nowrap;
+    gap: 4px 10px; padding: 6px 12px;
     border-bottom: 1px solid var(--border);
     background: var(--onix-surface); flex-shrink: 0;
   }
   .chat-panel-header .modal-header-info { flex: 1 1 180px; min-width: 0; }
+  /* El avatar de la cabecera no es el de la lista: aca compite con el alto de
+     la franja, en la lista no. */
+  .chat-panel-header .conv-avatar { width: 32px; height: 32px; font-size: 12.5px; }
+  .chat-panel-header .modal-header-name { font-size: 13.5px; line-height: 1.25; }
+  .chat-panel-header .modal-header-meta {
+    flex-wrap: nowrap; gap: 4px 8px; margin-top: 0; line-height: 1.3;
+    overflow: hidden; font-size: 11.5px;
+  }
+  /* Las etiquetas ceden antes que el telefono y el estado: son lo unico de la
+     linea que se puede editar desde otro lado (la ficha del cliente). */
+  .chat-panel-header .thread-tags { flex: 0 1 auto; overflow: hidden; }
+  /* El telefono y el estado son una linea sola: el badge iba dentro de un span
+     en linea y envolvia igual aunque el contenedor dijera nowrap. */
+  #modal-subtitle {
+    display: inline-flex; align-items: center; gap: 6px; min-width: 0;
+    white-space: nowrap; overflow: hidden;
+  }
+  /* El que cede es el telefono; la etiqueta de estado nunca se recorta. */
+  .thread-phone { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  #modal-subtitle .status-badge { flex: 0 0 auto; }
+  /* El ancho de esta columna no depende del dispositivo: cambia con la barra
+     lateral y con si la lista de conversaciones esta abierta. Por eso la regla
+     mira el ancho del contenedor y no el de la ventana. Debajo de 520px las
+     etiquetas se van: se editan igual desde la ficha del cliente. */
+  .chat-split-thread { container-type: inline-size; }
+  @container (max-width: 520px) {
+    .chat-panel-header .thread-tags { display: none; }
+  }
+  /* Mas angosto todavia: el telefono tambien se va. Esta en la fila de la lista
+     y en la ficha del cliente; el nombre de arriba alcanza para saber con quien
+     se esta hablando, y la etiqueta de estado queda entera. */
+  @container (max-width: 420px) {
+    .thread-phone { display: none; }
+  }
+  /* El campo de etiqueta hereda la altura global de los campos (40px) y era lo
+     unico que estiraba la linea de metadatos a 40px de alto. */
+  #modal-tag-input {
+    height: 18px; padding: 0; margin: 0; font-size: 11.5px;
+    background: transparent; color: var(--onix-ink-2);
+  }
   /* Sin min-width:0 el nombre nunca cede y empuja a los botones fuera de la fila. */
   .modal-header-name {
     display: flex; align-items: center; gap: 6px; min-width: 0;
@@ -713,19 +791,218 @@
 
   /* Los botones viajan juntos: o entran los dos en la fila, o bajan los dos. */
   .chat-panel-actions {
-    display: flex; align-items: center; gap: 8px;
-    flex-shrink: 0; margin-left: auto;
+    display: flex; align-items: center; gap: 4px;
+    flex-shrink: 0; margin-left: auto; padding-left: 8px;
   }
   .chat-panel-actions button { white-space: nowrap; }
   /* "Cerrar venta" / "Tomar control": el icono se esconde salvo a ancho de
      telefono (media query mas abajo), donde reemplaza el texto entero. */
   .mobile-icon-btn .btn-icon { display: none; }
 
-  @media (max-width: 1100px) {
-    /* A partir de acá el nombre se queda con la fila y las acciones toman la
-       suya, a lo ancho. Nunca se pisan. */
-    .chat-panel-actions { margin-left: 0; width: 100%; }
-    .chat-panel-actions button { flex: 1 1 0; justify-content: center; }
+  /* Ya no hay media query que mande las acciones a su propia fila: son tres
+     iconos de 32px, entran al lado del nombre a cualquier ancho. */
+
+  /* Boton de icono de la cabecera del hilo: mismo dibujo que el del composer,
+     mas chico, porque aca el alto de la franja es el recurso escaso. */
+  .thread-icon-btn { width: 32px; height: 32px; }
+  /* El boton de tomar/devolver el control es icono a cualquier ancho: su texto
+     cambia ("Tomar control" / "Devolver a la IA") y con el nombre del cliente
+     al lado no habia ancho para los dos. El texto queda para lectores de
+     pantalla; el estado se lee del boton encendido (regla de abajo). */
+  .handoff-icon-btn .btn-icon:not([hidden]) { display: inline-flex; }
+  .handoff-icon-btn .btn-label {
+    position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+    overflow: hidden; white-space: nowrap; border: 0;
+  }
+
+  /* Menu de tres puntos: todo lo que no se usa en cada mensaje. La lista se
+     ancla al boton, no al hilo, asi que no la recorta el scroll del hilo. */
+  .thread-menu { position: relative; display: inline-flex; }
+  .thread-menu-list {
+    position: absolute; top: calc(100% + 6px); right: 0; z-index: 30;
+    min-width: 186px; padding: 5px;
+    display: flex; flex-direction: column;
+    background: var(--onix-surface);
+    border: 1px solid var(--onix-border);
+    border-radius: var(--onix-radius-card);
+    box-shadow: var(--onix-shadow-md);
+  }
+  .thread-menu-list[hidden] { display: none; }
+  .thread-menu-item {
+    display: flex; align-items: center; gap: 9px;
+    width: 100%; padding: 7px 9px; border: none; background: transparent;
+    border-radius: var(--onix-radius-chip);
+    font: var(--onix-text-row); color: var(--onix-ink-2);
+    text-align: left; cursor: pointer;
+  }
+  .thread-menu-item:hover { background: var(--onix-surface-2); color: var(--onix-ink); }
+  .thread-menu-item[hidden] { display: none; }
+  .thread-menu-item svg { flex-shrink: 0; color: var(--onix-muted); }
+
+  /* Buscador del hilo: franja propia pero solo mientras esta abierto - cerrado
+     no ocupa un pixel, que es la diferencia con la subbarra que reemplaza. */
+  /* Cerrado no ocupa alto, pero sigue en el flujo: se despliega con una
+     transicion en vez de aparecer de golpe. No se usa [hidden] ni display:none
+     porque ninguno de los dos se puede animar. visibility va en la transicion
+     para que, cerrado, el campo tampoco reciba el foco con Tab. */
+  .thread-search {
+    display: flex; align-items: center; gap: 6px;
+    flex-shrink: 0; overflow: hidden;
+    max-height: 0; padding: 0 12px 0 14px; opacity: 0; visibility: hidden;
+    border-bottom: 0 solid var(--onix-border-soft);
+    background: var(--onix-surface);
+    transition: max-height .18s ease, padding .18s ease, opacity .14s ease,
+                border-bottom-width .18s ease, visibility 0s linear .18s;
+  }
+  .thread-search.is-open {
+    max-height: 52px; padding: 6px 12px 6px 14px; opacity: 1; visibility: visible;
+    border-bottom-width: 1px;
+    transition: max-height .18s ease, padding .18s ease, opacity .14s ease .04s,
+                border-bottom-width .18s ease, visibility 0s;
+  }
+  .thread-search-icon { color: var(--onix-muted); flex-shrink: 0; }
+  #thread-search-input {
+    flex: 1; min-width: 0; height: var(--onix-h-btn-sm); margin: 0;
+    border: none; background: transparent; padding: 0;
+    font-size: 13px; color: var(--onix-ink);
+  }
+  #thread-search-input:focus { outline: none; box-shadow: none; }
+  .thread-search-count {
+    font-size: 11.5px; color: var(--onix-dim); white-space: nowrap; flex-shrink: 0;
+  }
+
+  /* Coincidencias. El nivel activo existe porque con un solo resaltado no se
+     sabe cual de las doce esta mirando el ojo. */
+  mark.thread-mark {
+    background: var(--onix-mark); color: var(--onix-mark-ink);
+    border-radius: 3px; padding: 0 1px;
+  }
+  mark.thread-mark.is-active {
+    background: var(--onix-mark-active); color: var(--onix-mark-active-ink);
+  }
+
+  /* Envoltorio del hilo + boton de bajar al final. */
+  .thread-scroll-wrap {
+    position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column;
+  }
+  .thread-jump-btn {
+    position: absolute; right: 18px; bottom: 16px; z-index: 5;
+    display: flex; align-items: center; justify-content: center;
+    width: 38px; height: 38px; padding: 0;
+    border-radius: 999px; cursor: pointer;
+    background: var(--onix-surface); color: var(--onix-ink-2);
+    border: 1px solid var(--onix-border);
+    box-shadow: var(--onix-shadow-md);
+  }
+  .thread-jump-btn[hidden] { display: none; }
+  .thread-jump-btn:hover { background: var(--onix-surface-2); color: var(--onix-ink); }
+  /* Cuantos mensajes llegaron mientras se leia mas arriba. */
+  .thread-jump-count {
+    position: absolute; top: -5px; right: -4px;
+    min-width: 18px; height: 18px; padding: 0 5px;
+    display: flex; align-items: center; justify-content: center;
+    border-radius: 999px; font-size: 10.5px; font-weight: 700;
+    background: var(--onix-accent); color: var(--onix-accent-ink);
+  }
+  .thread-jump-count[hidden] { display: none; }
+
+  /* Cartel de arrastre: tapa el hilo entero mientras hay un archivo encima, para
+     que no haya duda de donde se suelta. pointer-events:none es obligatorio - si
+     el cartel recibiera el mouse, el propio dragleave del hilo se dispararia al
+     aparecer y el cartel parpadearia. */
+  .thread-dropzone {
+    position: absolute; inset: 0; z-index: 6; pointer-events: none;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
+    background: var(--onix-accent-soft); color: var(--onix-accent);
+    border: 2px dashed var(--onix-accent-line); border-radius: var(--onix-radius-panel);
+    font: var(--onix-text-row);
+  }
+  .thread-dropzone[hidden] { display: none; }
+
+  /* Fichas de lo que esta por enviarse. Una por archivo: miniatura real para foto
+     y video, icono para documento, y el peso a la vista porque el tope por tipo
+     es la causa numero uno de que un envio rebote. */
+  .composer-preview {
+    display: flex; flex-wrap: wrap; gap: 8px;
+    padding: 2px 2px 4px;
+  }
+  .composer-preview[hidden] { display: none; }
+  .composer-chip {
+    position: relative; display: flex; align-items: center; gap: 8px;
+    max-width: 230px; padding: 5px 26px 5px 5px;
+    background: var(--onix-surface-2); border: 1px solid var(--onix-border);
+    border-radius: var(--onix-radius-card);
+  }
+  .composer-chip-media {
+    width: 38px; height: 38px; flex-shrink: 0;
+    object-fit: cover; border-radius: var(--onix-radius-chip);
+    background: var(--onix-surface-mute);
+  }
+  .composer-chip-icon {
+    width: 38px; height: 38px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    border-radius: var(--onix-radius-chip);
+    background: var(--onix-surface); color: var(--onix-muted);
+    border: 1px solid var(--onix-border);
+  }
+  .composer-chip-info { display: flex; flex-direction: column; min-width: 0; gap: 1px; }
+  .composer-chip-name {
+    font-size: 12px; color: var(--onix-ink-2);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .composer-chip-size { font-size: 10.5px; color: var(--onix-dim); }
+  .composer-chip-remove {
+    position: absolute; top: 3px; right: 3px;
+    width: 18px; height: 18px; padding: 0; border: none; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    border-radius: 999px; font-size: 10px; line-height: 1;
+    background: transparent; color: var(--onix-muted);
+  }
+  .composer-chip-remove:hover { background: var(--onix-danger-soft); color: var(--onix-danger); }
+
+  /* La ficha de una nota de voz es el reproductor: se revisa escuchandola, no
+     mirando un nombre y un peso. */
+  .composer-chip--audio { padding: 5px 26px 5px 8px; max-width: 100%; }
+  .composer-chip-audio { height: 34px; max-width: 260px; }
+
+  /* Barra de grabacion: ocupa el lugar de la fila de escribir, no se suma abajo,
+     asi el compositor no cambia de alto al empezar a grabar. */
+  .composer-recording {
+    display: flex; align-items: center; gap: 10px;
+    padding: 2px 4px 2px 2px;
+  }
+  .composer-recording[hidden], .composer-row[hidden] { display: none; }
+  .composer-rec-discard { width: 34px; height: 34px; }
+  .composer-rec-discard:hover { background: var(--onix-danger-soft); color: var(--onix-danger); }
+  .composer-rec-dot {
+    width: 9px; height: 9px; border-radius: 999px; flex-shrink: 0;
+    background: var(--onix-danger);
+    animation: onix-rec-pulse 1.4s ease-in-out infinite;
+  }
+  .composer-rec-time { font-size: 13px; color: var(--onix-ink-2); flex-shrink: 0; }
+  .composer-rec-hint {
+    flex: 1; min-width: 0; font-size: 12.5px; color: var(--onix-dim);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  @keyframes onix-rec-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.25; }
+  }
+
+  /* Documento dentro de una burbuja: es un enlace para abrir o guardar, no un
+     medio que se pueda mirar en el hilo. */
+  .bubble-doc {
+    display: flex; align-items: center; gap: 8px;
+    margin-bottom: 4px; padding: 7px 9px; max-width: 240px;
+    border-radius: var(--onix-radius-chip);
+    background: var(--onix-surface); border: 1px solid var(--onix-border);
+    color: var(--onix-ink-2); text-decoration: none;
+  }
+  .bubble-doc:hover { background: var(--onix-surface-2); }
+  .bubble-doc svg { flex-shrink: 0; color: var(--onix-muted); }
+  .bubble-doc-name {
+    font-size: 12.5px; min-width: 0;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
   .conv-row.active { background: var(--bg); }
   .chat-back-btn { display: none; padding: 4px 8px; font-size: 18px; line-height: 1; }
@@ -829,15 +1106,16 @@
     body.chat-fullscreen .modal-title-input { font-size: 12.5px; }
     body.chat-fullscreen .modal-header-meta { font-size: 10px; margin-top: 0; line-height: 1.2; }
     body.chat-fullscreen .chat-back-btn { padding: 2px 4px; }
-    body.chat-fullscreen .chat-panel-actions .mobile-icon-btn {
+    body.chat-fullscreen .chat-panel-actions .mobile-icon-btn,
+    body.chat-fullscreen .chat-panel-actions .thread-icon-btn {
       width: 26px; height: 26px; min-height: 26px;
     }
-    body.chat-fullscreen .chat-panel-actions .mobile-icon-btn .btn-icon:not([hidden]) { width: 14px; height: 14px; }
-    /* Etiquetas + "Onix responde automáticamente": el aviso de si el humano
-       tiene el control ya lo dice el icono de la cabecera (brilla cuando esta
-       activo, ver regla mas abajo) - esta franja completa se quita en el
-       celular para dejarle mas alto al hilo. */
-    body.chat-fullscreen .thread-subbar { display: none; }
+    body.chat-fullscreen .chat-panel-actions .mobile-icon-btn .btn-icon:not([hidden]),
+    body.chat-fullscreen .chat-panel-actions .thread-icon-btn svg { width: 14px; height: 14px; }
+    /* Las etiquetas se quitan en el celular para dejarle mas alto al hilo; el
+       aviso de si el humano tiene el control ya lo dice el icono de la
+       cabecera (brilla cuando esta activo, ver regla mas abajo). */
+    body.chat-fullscreen .thread-tags { display: none; }
   }
 
   .modal-overlay {
@@ -978,8 +1256,10 @@
        el primer hijo, no en la fila de acciones. A lo ancho lo separaba del
        nombre en vez de acompañarlo. */
     .panel-header > div:first-child button { width: auto; }
-    .chat-panel-actions button { min-height: 44px; }
-    .chat-panel-header { padding: 12px 14px; }
+    /* Los iconos de la cabecera del hilo quedan fuera del minimo de 44px: son
+       32px a proposito y ya tienen area de toque redonda. */
+    .chat-panel-actions button:not(.thread-icon-btn) { min-height: 44px; }
+    .chat-panel-header { padding: 7px 12px; }
     .crm-row { padding: 12px 14px; }
     .crm-row-side { width: 100%; text-align: left; }
     .stage-pill { flex-shrink: 0; }

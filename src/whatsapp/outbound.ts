@@ -29,6 +29,8 @@ import {
   sendTemplateMessage,
   sendTextMessage,
   sendVideoMessage,
+  sendDocumentMessage,
+  sendAudioMessage,
   type WhatsappCredentials,
 } from "./client";
 import {
@@ -246,6 +248,12 @@ export type OutboundContent =
   | { kind: "text"; text: string }
   | { kind: "image"; url: string; caption?: string }
   | { kind: "video"; url: string; caption?: string }
+  | { kind: "document"; url: string; filename: string; caption?: string }
+  // El audio viaja como BYTES, no como url ni como id: para que WhatsApp lo muestre como nota de voz
+  // el archivo tiene que estar subido a Meta, y esa subida la hace esta capa justo antes de mandarlo
+  // (ver dispatch). Un reintento vuelve a subir, que para una nota de voz de unos kilobytes cuesta
+  // menos que arrastrar un id con vencimiento por toda la ruta.
+  | { kind: "audio"; buffer: Buffer; contentType: string }
   | { kind: "buttons"; text: string; buttons: { id: string; title: string }[] }
   | { kind: "list"; text: string; buttonText: string; sections: InteractiveListSection[] }
   | { kind: "template"; name: string; language: string; params?: string[] };
@@ -256,6 +264,16 @@ function isFreeForm(content: OutboundContent): boolean {
   return content.kind !== "template";
 }
 
+async function dispatchAudio(
+  credentials: WhatsappCredentials,
+  to: string,
+  buffer: Buffer,
+  contentType: string
+): Promise<string> {
+  const mediaId = await uploadMediaToWhatsapp(credentials, buffer, contentType, "nota-de-voz.ogg");
+  return sendAudioMessage(credentials, to, mediaId);
+}
+
 function dispatch(credentials: WhatsappCredentials, to: string, content: OutboundContent): Promise<string> {
   switch (content.kind) {
     case "text":
@@ -264,6 +282,10 @@ function dispatch(credentials: WhatsappCredentials, to: string, content: Outboun
       return sendImageMessage(credentials, to, content.url, content.caption);
     case "video":
       return sendVideoMessage(credentials, to, content.url, content.caption);
+    case "document":
+      return sendDocumentMessage(credentials, to, content.url, content.filename, content.caption);
+    case "audio":
+      return dispatchAudio(credentials, to, content.buffer, content.contentType);
     case "list":
       return sendInteractiveListMessage(credentials, to, content.text, content.buttonText, content.sections);
     case "buttons":

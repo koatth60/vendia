@@ -852,39 +852,72 @@
           <div class="chat-split-thread">
             <div id="chat-panel-empty" class="chat-panel-empty">Elige una conversación de la lista</div>
             <div id="chat-panel-active" style="display:none; flex-direction:column; height:100%; min-height:0;">
+              <!-- Una sola franja. Antes eran dos (cabecera + .thread-subbar) y cuatro botones con
+                   texto: el alto se comia el hilo y cada accion nueva sumaba un icono mas. Ahora las
+                   acciones secundarias viven en el menu de tres puntos y la franja de etiquetas se
+                   fusiono con la linea de metadatos. -->
               <div class="chat-panel-header">
                 <button class="btn-ghost chat-back-btn" onclick="closeConversation()">‹</button>
                 <div class="conv-avatar" id="modal-avatar"></div>
                 <div class="modal-header-info">
                   <div class="modal-header-name">
                     <span id="modal-title"></span>
-                    <button class="btn-ghost" type="button" id="edit-name-btn" title="Editar nombre" onclick="startEditCustomerName()" style="padding:1px 5px; font-size:11px; line-height:1.4;">✎</button>
                     <input id="modal-title-input" type="text" placeholder="Nombre del cliente" class="modal-title-input" style="display:none;" onkeydown="if(event.key==='Enter') saveCustomerNameEdit(); if(event.key==='Escape') cancelEditCustomerName();" />
                     <button class="btn-ghost" type="button" id="save-name-btn" onclick="saveCustomerNameEdit()" style="display:none; padding:1px 6px; font-size:11px;">✓</button>
                   </div>
-                  <div class="modal-header-meta" id="modal-subtitle"></div>
+                  <div class="modal-header-meta">
+                    <span id="modal-subtitle"></span>
+                    <div id="modal-tags" class="thread-tags"></div>
+                  </div>
                 </div>
                 <div class="chat-panel-actions">
-                  <!-- .btn-icon queda oculto por CSS salvo a ancho de telefono, donde
-                       reemplaza el texto (mismos botones, sin reescribir escritorio). -->
-                  <button class="btn-primary mobile-icon-btn" type="button" id="close-sale-btn" onclick="openCloseSaleForm()" title="Cerrar venta" aria-label="Cerrar venta">
-                    <svg class="btn-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5 9.5 18 20 6"></path></svg>
-                    <span class="btn-label">Cerrar venta</span>
+                  <button class="composer-icon-btn thread-icon-btn" type="button" id="thread-search-btn" onclick="toggleThreadSearch()" title="Buscar en la conversación" aria-label="Buscar en la conversación">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="6.5"></circle><path d="m16 16 4 4"></path></svg>
                   </button>
-                  <button class="btn-ghost mobile-icon-btn" type="button" id="agreed-price-btn" onclick="openAgreedPriceForm()" title="Precio especial" aria-label="Precio especial">
-                    <svg class="btn-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4.5v15"></path><path d="M15.8 8.1c-.6-1.2-2-1.9-3.8-1.9-2.2 0-3.6 1-3.6 2.6 0 1.7 1.4 2.3 3.6 2.8 2.4.5 4 1.2 4 3.1 0 1.8-1.6 2.9-4 2.9-2 0-3.5-.8-4.1-2.2"></path></svg>
-                    <span class="btn-label">Precio especial</span>
-                  </button>
-                  <button class="btn-ghost mobile-icon-btn" id="modal-handoff-btn" onclick="toggleHandoff()">
+                  <!-- Solo icono, a cualquier ancho: el texto ("Tomar control" / "Devolver a la
+                       IA") le comia el ancho al nombre del cliente. Sigue en el DOM para lectores de
+                       pantalla y en el title; el estado se ve porque el boton se enciende. -->
+                  <button class="composer-icon-btn thread-icon-btn handoff-icon-btn" type="button" id="modal-handoff-btn" onclick="toggleHandoff()">
                     <svg class="btn-icon icon-take-control" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8.3" r="3.1"></circle><path d="M5.3 19.3c0-3.5 3-5.8 6.7-5.8s6.7 2.3 6.7 5.8"></path></svg>
                     <svg class="btn-icon icon-return-bot" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" hidden><rect x="4" y="7.5" width="16" height="12" rx="3.5"></rect><path d="M12 7.5V4"></path><path d="M9 13h.01M15 13h.01"></path></svg>
                     <span class="btn-label"></span>
                   </button>
+                  <div class="thread-menu" id="thread-menu">
+                    <button class="composer-icon-btn thread-icon-btn" type="button" id="thread-menu-btn" onclick="toggleThreadMenu(event)" aria-haspopup="menu" aria-expanded="false" title="Más opciones" aria-label="Más opciones">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 6.2h.01M12 12h.01M12 17.8h.01"></path></svg>
+                    </button>
+                    <div class="thread-menu-list" id="thread-menu-list" role="menu" hidden>
+                      <button class="thread-menu-item" type="button" role="menuitem" id="close-sale-btn" onclick="openCloseSaleForm()">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5 9.5 18 20 6"></path></svg>
+                        Crear venta
+                      </button>
+                      <button class="thread-menu-item" type="button" role="menuitem" id="agreed-price-btn" onclick="openAgreedPriceForm()">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4.5v15"></path><path d="M15.8 8.1c-.6-1.2-2-1.9-3.8-1.9-2.2 0-3.6 1-3.6 2.6 0 1.7 1.4 2.3 3.6 2.8 2.4.5 4 1.2 4 3.1 0 1.8-1.6 2.9-4 2.9-2 0-3.5-.8-4.1-2.2"></path></svg>
+                        Precio especial
+                      </button>
+                      <button class="thread-menu-item" type="button" role="menuitem" id="edit-name-btn" onclick="startEditCustomerName()">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4.2l9.4-9.4a2.1 2.1 0 0 0-3-3L5.2 17z"></path><path d="M14.5 5.5 18.5 9.5"></path></svg>
+                        Editar nombre
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
-              <div class="thread-subbar">
-                <div id="modal-tags" style="display:flex; flex-wrap:wrap; gap:6px; align-items:center; min-width:0;"></div>
-                <span class="thread-auto-hint" id="bot-auto-hint">Onix responde automáticamente</span>
+              <!-- Buscador dentro del hilo. Busca sobre los ciclos ya cargados en pantalla; los mas
+                   viejos entran cuando se pulsa "Ver conversación anterior". -->
+              <div class="thread-search" id="thread-search">
+                <svg class="thread-search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="6.5"></circle><path d="m16 16 4 4"></path></svg>
+                <input id="thread-search-input" type="text" placeholder="Buscar en la conversación…" autocomplete="off" oninput="runThreadSearch()" onkeydown="onThreadSearchKeydown(event)" />
+                <span class="thread-search-count onix-num" id="thread-search-count"></span>
+                <button class="composer-icon-btn thread-icon-btn" type="button" onclick="stepThreadSearch(-1)" title="Anterior" aria-label="Coincidencia anterior">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m6 14 6-6 6 6"></path></svg>
+                </button>
+                <button class="composer-icon-btn thread-icon-btn" type="button" onclick="stepThreadSearch(1)" title="Siguiente" aria-label="Coincidencia siguiente">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m6 10 6 6 6-6"></path></svg>
+                </button>
+                <button class="composer-icon-btn thread-icon-btn" type="button" onclick="closeThreadSearch()" title="Cerrar" aria-label="Cerrar buscador">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 6.5 17.5 17.5M17.5 6.5 6.5 17.5"></path></svg>
+                </button>
               </div>
               <!-- El formulario puede crecer mucho (la IA agrega varias filas de producto +
                    notas + mensaje) y #chat-panel-active tiene alto fijo - sin su propio scroll,
@@ -946,7 +979,22 @@
                 <label>Mensaje de confirmación al cliente (opcional)</label>
                 <textarea id="close-sale-message" placeholder="Se usa un mensaje por defecto si lo dejas vacío" style="min-height:56px;"></textarea>
               </div>
-              <div id="modal-thread" class="chat-thread" style="flex:1; max-height:none;"></div>
+              <!-- El hilo va envuelto porque el boton de "bajar al final" se posiciona sobre el, y
+                   #modal-thread se repinta entero con innerHTML: un hijo suyo se borraria en cada
+                   repintado. -->
+              <div class="thread-scroll-wrap">
+                <div id="modal-thread" class="chat-thread" style="flex:1; max-height:none;"></div>
+                <!-- Solo se ve mientras se arrastra un archivo sobre el hilo. Es un cartel, no un
+                     boton: el archivo se suelta en cualquier parte del hilo, no en un recuadro. -->
+                <div class="thread-dropzone" id="thread-dropzone" hidden>
+                  <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4"></path><path d="m7 9 5-5 5 5"></path><path d="M4 16v2.5A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5V16"></path></svg>
+                  <span>Soltá los archivos para enviarlos</span>
+                </div>
+                <button class="thread-jump-btn" id="thread-jump-btn" type="button" onclick="scrollThreadToBottom({ smooth: true })" title="Ir al último mensaje" aria-label="Ir al último mensaje" hidden>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v13"></path><path d="m6 12.5 6 6 6-6"></path></svg>
+                  <span class="thread-jump-count onix-num" id="thread-jump-count" hidden>0</span>
+                </button>
+              </div>
               <div id="modal-queued-strip" style="display:none; flex-direction:column; gap:6px; padding:10px 12px; border-top:1px solid var(--border); background:var(--onix-surface);"></div>
               <div id="modal-window-banner" style="display:none; flex-direction:column; gap:8px; padding:12px; border-top:1px solid var(--border); background:var(--onix-surface);">
                 <div id="modal-window-banner-text" style="font-size:12.5px; color:var(--onix-muted); line-height:1.4;"></div>
@@ -965,15 +1013,40 @@
                 </div>
               </div>
               <div id="modal-composer" style="display:none; flex-direction:column; gap:6px; padding:12px; border-top:1px solid var(--border); background:var(--onix-surface);">
-                <div id="modal-composer-preview" style="display:none; align-items:center; gap:8px; font-size:12px; color:var(--muted);"></div>
-                <div style="display:flex; gap:8px;">
-                  <input id="modal-composer-file" type="file" accept="image/jpeg,image/png,video/*" style="display:none;" onchange="onComposerFileChange(this)" />
-                  <button class="composer-icon-btn" type="button" title="Adjuntar foto o video" aria-label="Adjuntar foto o video" onclick="document.getElementById('modal-composer-file').click()">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11.5 12 19.5a5 5 0 0 1-7-7l8-8a3.5 3.5 0 1 1 5 5l-8 8a2 2 0 0 1-3-3l7.5-7.5"/></svg>
-                  </button>
-                  <input id="modal-composer-input" type="text" placeholder="Escribí para tomar el control de la conversación…" style="flex:1;" onkeydown="if(event.key==='Enter') sendManualMessage();" />
+                <div id="modal-composer-preview" class="composer-preview" hidden></div>
+                <!-- El clip vive DENTRO del campo, no al lado: dos piezas sueltas a la izquierda se
+                     veian desalineadas apenas el campo crecia. Afuera queda solo Enviar.
+                     align-items:flex-end - cuando el campo crece, el clip y Enviar se quedan abajo. -->
+                <div class="composer-row">
+                  <input id="modal-composer-file" type="file" multiple accept="image/jpeg,image/png,image/webp,video/mp4,video/quicktime,video/3gpp,video/webm,application/pdf,.pdf,.docx,.xlsx,.pptx" style="display:none;" onchange="onComposerFileChange(this)" />
+                  <div class="composer-field">
+                    <button class="composer-icon-btn composer-attach" type="button" title="Adjuntar archivos" aria-label="Adjuntar archivos" onclick="document.getElementById('modal-composer-file').click()">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11.5 12 19.5a5 5 0 0 1-7-7l8-8a3.5 3.5 0 1 1 5 5l-8 8a2 2 0 0 1-3-3l7.5-7.5"/></svg>
+                    </button>
+                    <!-- textarea y no input: un mensaje de venta no siempre entra en un renglon. Crece
+                         solo hasta 6 lineas y despues scrollea. Enter manda, Shift+Enter hace salto de
+                         linea, como en WhatsApp Web. -->
+                    <textarea id="modal-composer-input" rows="1" placeholder="Escribí para tomar el control…" oninput="autoGrowComposer(this); queueDraftSave()" onkeydown="onComposerKeydown(event)"></textarea>
+                    <button class="composer-icon-btn composer-attach" type="button" id="composer-mic-btn" title="Grabar nota de voz" aria-label="Grabar nota de voz" onclick="startVoiceRecording()">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"></rect><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0"></path><path d="M12 18v3"></path></svg>
+                    </button>
+                  </div>
                   <button class="composer-send-btn" type="button" title="Enviar" aria-label="Enviar" onclick="sendManualMessage()">
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 12 20 4.5 15.5 20l-4-6.5z"/></svg>
+                  </button>
+                </div>
+                <!-- Reemplaza a la fila de escribir mientras se graba. Dos salidas explicitas: el tacho
+                     descarta y no deja nada, el visto corta y deja la nota lista para escuchar antes de
+                     mandarla. -->
+                <div class="composer-recording" id="composer-recording" hidden>
+                  <button class="composer-icon-btn composer-rec-discard" type="button" title="Descartar" aria-label="Descartar grabación" onclick="cancelVoiceRecording()">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 7h14"></path><path d="M10 7V5.5A1.5 1.5 0 0 1 11.5 4h1A1.5 1.5 0 0 1 14 5.5V7"></path><path d="M6.5 7l.8 11a2 2 0 0 0 2 1.9h5.4a2 2 0 0 0 2-1.9L17.5 7"></path></svg>
+                  </button>
+                  <span class="composer-rec-dot" aria-hidden="true"></span>
+                  <span class="composer-rec-time onix-num" id="composer-rec-time">0:00</span>
+                  <span class="composer-rec-hint">Grabando nota de voz…</span>
+                  <button class="composer-send-btn" type="button" title="Listo" aria-label="Terminar grabación" onclick="stopVoiceRecording()">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5 9.5 18 20 6"></path></svg>
                   </button>
                 </div>
               </div>

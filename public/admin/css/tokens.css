@@ -133,6 +133,14 @@
      tema como todo lo demás. */
   --onix-scrim: rgba(15, 26, 21, 0.45);
   --onix-swatch-ring: rgba(15, 26, 21, 0.14);
+
+  /* Buscador dentro del hilo: coincidencia normal y la que esta seleccionada.
+     Son dos niveles a proposito - con uno solo no se sabe cual de las 12 se
+     esta mirando. */
+  --onix-mark: #FBE9A8;
+  --onix-mark-ink: #3A2E05;
+  --onix-mark-active: #F2B705;
+  --onix-mark-active-ink: #2A2100;
 }
 
 /* =========================================================================
@@ -204,6 +212,11 @@
     --onix-shadow-lg: 0 24px 64px rgba(0, 0, 0, 0.55);
     --onix-scrim: rgba(0, 0, 0, 0.62);
     --onix-swatch-ring: rgba(232, 237, 234, 0.18);
+
+    --onix-mark: rgba(224, 163, 60, 0.28);
+    --onix-mark-ink: #F0DCAE;
+    --onix-mark-active: #E0A33C;
+    --onix-mark-active-ink: #1A1305;
   }
 }
 
@@ -270,6 +283,11 @@
   --onix-shadow-lg: 0 24px 64px rgba(0, 0, 0, 0.55);
   --onix-scrim: rgba(0, 0, 0, 0.62);
   --onix-swatch-ring: rgba(232, 237, 234, 0.18);
+
+  --onix-mark: rgba(224, 163, 60, 0.28);
+  --onix-mark-ink: #F0DCAE;
+  --onix-mark-active: #E0A33C;
+  --onix-mark-active-ink: #1A1305;
 }
 
 /* =========================================================================

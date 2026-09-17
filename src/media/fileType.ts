@@ -7,7 +7,7 @@
 // Los bytes de cabecera de cada formato son fijos y publicos; se comparan a mano para no depender de
 // una libreria mas ni de expresiones regulares.
 
-export type FileKind = "image" | "video" | "audio";
+export type FileKind = "image" | "video" | "audio" | "document";
 
 export interface DetectedFileType {
   mime: string;
@@ -39,6 +39,27 @@ function detectIsoContainer(buffer: Buffer): DetectedFileType | null {
   return { mime: "video/mp4", extension: "mp4", kind: "video" };
 }
 
+// Un .docx, .xlsx y .pptx son el MISMO formato en los bytes: un ZIP cuya primera entrada se llama
+// "[Content_Types].xml". La diferencia esta adentro del ZIP, comprimida. Se reconoce el contenedor
+// aca y cual de los tres es se desempata con el tipo declarado en resolveUploadType - el mismo
+// criterio que ya se usa para mp4 vs m4a, y por la misma razon: los tres son documentos inertes, asi
+// que lo declarado elige entre iguales, nunca decide si el archivo se acepta.
+//
+// Un ZIP cualquiera (o un .zip renombrado a .docx) NO tiene esa primera entrada y queda afuera. Es a
+// proposito: un contenedor generico puede traer cualquier cosa adentro y no hay forma de mirarlo por
+// los bytes de cabecera.
+function detectOfficeZip(buffer: Buffer): DetectedFileType | null {
+  if (!startsWithBytes(buffer, [0x50, 0x4b, 0x03, 0x04])) return null;
+  if (buffer.length < 30) return null;
+  const nameLength = buffer.readUInt16LE(26);
+  if (asciiAt(buffer, 30, nameLength) !== "[Content_Types].xml") return null;
+  return {
+    mime: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    extension: "docx",
+    kind: "document",
+  };
+}
+
 export function detectFileType(buffer: Buffer): DetectedFileType | null {
   if (startsWithBytes(buffer, [0xff, 0xd8, 0xff])) return { mime: "image/jpeg", extension: "jpg", kind: "image" };
   if (startsWithBytes(buffer, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) {
@@ -48,6 +69,10 @@ export function detectFileType(buffer: Buffer): DetectedFileType | null {
   // Se detecta a proposito aunque WhatsApp lo rechace (ver isUnsupportedImageType): un GIF tiene que
   // rebotar como "formato no soportado", no colarse como algo que no es.
   if (gifHeader === "GIF87a" || gifHeader === "GIF89a") return { mime: "image/gif", extension: "gif", kind: "image" };
+
+  if (asciiAt(buffer, 0, 5) === "%PDF-") return { mime: "application/pdf", extension: "pdf", kind: "document" };
+  const officeZip = detectOfficeZip(buffer);
+  if (officeZip) return officeZip;
 
   if (asciiAt(buffer, 0, 4) === "RIFF") {
     const riffKind = asciiAt(buffer, 8, 4);

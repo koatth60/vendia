@@ -35,6 +35,11 @@ export const MAX_BYTES_BY_KIND: Record<FileKind, number> = {
   image: 5 * 1024 * 1024,
   video: 16 * 1024 * 1024,
   audio: 16 * 1024 * 1024,
+  // WhatsApp acepta documentos de hasta 100 MB. El tope de aca es a proposito mucho mas bajo: multer
+  // guarda el archivo entero en memoria antes de validarlo, y el tope mas alto de esta tabla es el que
+  // define cuanta memoria puede pedir CUALQUIER subida (ver el comentario de arriba). 100 MB por
+  // archivo, por varios archivos en un mismo envio, es tumbar el proceso desde el panel.
+  document: 16 * 1024 * 1024,
 };
 
 // Que puede caer en cada carpeta. "receipts" recibe fotos de comprobantes y tambien el cuadro que se
@@ -44,11 +49,12 @@ const ALLOWED_KINDS_BY_FOLDER: Record<MediaFolder, FileKind[]> = {
   receipts: ["image"],
   videos: ["video"],
   audio: ["audio"],
+  documents: ["document"],
 };
 
 export class RejectedMediaError extends Error {}
 
-export type MediaFolder = "images" | "videos" | "audio" | "receipts";
+export type MediaFolder = "images" | "videos" | "audio" | "receipts" | "documents";
 
 // Toda la decision de "este archivo se acepta y con que tipo se guarda", separada de la subida para
 // poder probarla sin tocar S3 - y para que quede en un solo lugar en vez de repartida entre las rutas.
@@ -75,7 +81,9 @@ export function resolveUploadType(
   const resolved: DetectedFileType =
     folder === "audio" && detected.mime === "video/mp4" && declaredContentType.startsWith("audio/")
       ? { mime: "audio/mp4", extension: "m4a", kind: "audio" }
-      : detected;
+      : detected.kind === "document" && detected.extension === "docx"
+        ? resolveOfficeVariant(declaredContentType)
+        : detected;
 
   if (!ALLOWED_KINDS_BY_FOLDER[folder].includes(resolved.kind)) {
     throw new RejectedMediaError(`Un archivo ${resolved.mime} no va en ${folder}`);
@@ -92,6 +100,32 @@ export function resolveUploadType(
   }
 
   return resolved;
+}
+
+// docx, xlsx y pptx comparten los bytes de cabecera (ver detectOfficeZip): el ZIP ya se acepto, esto
+// solo elige con cual de los tres nombres se guarda. Si lo declarado no es ninguno de los tres, queda
+// docx, que es el caso mas comun y es igual de inerte.
+const OFFICE_VARIANTS: Record<string, DetectedFileType> = {
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {
+    mime: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    extension: "xlsx",
+    kind: "document",
+  },
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation": {
+    mime: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    extension: "pptx",
+    kind: "document",
+  },
+};
+
+function resolveOfficeVariant(declaredContentType: string): DetectedFileType {
+  return (
+    OFFICE_VARIANTS[declaredContentType] ?? {
+      mime: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      extension: "docx",
+      kind: "document",
+    }
+  );
 }
 
 export async function uploadMedia(

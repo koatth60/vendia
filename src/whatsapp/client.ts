@@ -478,6 +478,48 @@ export async function downloadMedia(
   return { buffer, mimeType: meta.mime_type };
 }
 
+// Un mensaje de audio NO lleva caption: la API de Meta no tiene ese campo para `audio`, y mandarlo
+// hace que rechace el mensaje entero. Si hay texto para acompanar la nota de voz, va como su propio
+// mensaje (ver la ruta del panel).
+//
+// Se manda SIEMPRE por id, nunca por link: para que WhatsApp lo muestre como nota de voz (la burbuja
+// con la onda) el archivo tiene que estar subido a Meta, y ademas el link ya demostro fallar tarde y
+// en silencio (error 131053, ver uploadMediaToWhatsapp).
+export async function sendAudioMessage(
+  credentials: WhatsappCredentials,
+  to: string,
+  mediaId: string
+): Promise<string> {
+  const result = (await callGraphApi(credentials, {
+    messaging_product: "whatsapp",
+    ...recipientField(to),
+    type: "audio",
+    audio: { id: mediaId },
+  })) as { messages?: { id: string }[] };
+  return result.messages?.[0]?.id ?? "";
+}
+
+// El nombre del archivo viaja aparte del caption: WhatsApp lo muestra como titulo de la burbuja y es
+// lo unico que le dice al cliente que recibio ("cotizacion-lista.pdf" y no "documento"). Sin filename,
+// Meta inventa uno a partir del id del medio.
+export async function sendDocumentMessage(
+  credentials: WhatsappCredentials,
+  to: string,
+  documentUrl: string,
+  filename: string,
+  caption?: string
+): Promise<string> {
+  const result = (await callGraphApi(credentials, {
+    messaging_product: "whatsapp",
+    ...recipientField(to),
+    type: "document",
+    document: isUploadedMediaId(documentUrl)
+      ? { id: documentUrl, caption, filename }
+      : { link: documentUrl, caption, filename },
+  })) as { messages?: { id: string }[] };
+  return result.messages?.[0]?.id ?? "";
+}
+
 export async function sendVideoMessage(
   credentials: WhatsappCredentials,
   to: string,

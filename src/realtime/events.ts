@@ -11,7 +11,8 @@ export interface MessageEventPayload {
   role: "CUSTOMER" | "ASSISTANT" | "SYSTEM";
   content: string;
   mediaUrl: string | null;
-  mediaType: "IMAGE" | "VIDEO" | "AUDIO" | null;
+  mediaFilename?: string | null;
+  mediaType: "IMAGE" | "VIDEO" | "AUDIO" | "DOCUMENT" | null;
   createdAt: Date;
 }
 

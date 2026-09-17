@@ -31,6 +31,7 @@ import {
   type OrderItemInput,
 } from "../../orders/service";
 import { uploadMedia } from "../../media/s3";
+import { toOggOpus } from "../../media/voiceNote";
 import { getServerSaleEvidence } from "../../orders/saleState";
 import {
   getAgreedPrices,
@@ -39,7 +40,7 @@ import {
   agreedUnitPriceOf,
   validateProposedPrices,
 } from "../../orders/agreedPrices";
-import { upload, businessIdOf, isUnsupportedImageType } from "./shared";
+import { upload, businessIdOf, isUnsupportedImageType, MAX_FILES_PER_MESSAGE } from "./shared";
 
 export const conversationsRouter = Router();
 
@@ -87,14 +88,43 @@ conversationsRouter.put("/api/conversations/:id/intent", async (req, res) => {
   res.json({ id: conversation.id, intent: conversation.intent });
 });
 
-conversationsRouter.post("/api/conversations/:id/messages", upload.single("file"), async (req, res) => {
+type UploadFolder = "images" | "videos" | "documents" | "audio";
+
+// A que carpeta de S3 va cada archivo. Lo declarado solo elige la carpeta; lo que decide si el
+// archivo se acepta y con que tipo se guarda son sus bytes, adentro de uploadMedia (y, para el audio,
+// el hecho de que ffmpeg pueda convertirlo).
+function folderForUpload(declaredMimetype: string): UploadFolder {
+  if (declaredMimetype.startsWith("image/")) return "images";
+  if (declaredMimetype.startsWith("video/")) return "videos";
+  if (declaredMimetype.startsWith("audio/")) return "audio";
+  return "documents";
+}
+
+function mediaTypeForFolder(folder: UploadFolder): "IMAGE" | "VIDEO" | "DOCUMENT" | "AUDIO" {
+  if (folder === "images") return "IMAGE";
+  if (folder === "videos") return "VIDEO";
+  if (folder === "audio") return "AUDIO";
+  return "DOCUMENT";
+}
+
+function placeholderForFolder(folder: UploadFolder, filename: string): string {
+  if (folder === "images") return "[Foto]";
+  if (folder === "videos") return "[Video]";
+  if (folder === "audio") return "[Audio]";
+  return `[Documento] ${filename}`;
+}
+
+conversationsRouter.post("/api/conversations/:id/messages", upload.array("files", MAX_FILES_PER_MESSAGE), async (req, res) => {
   const text = String(req.body?.text ?? "").trim();
-  const file = req.file;
-  if (!text && !file) {
+  // El panel manda "files" (varios). El singular "file" queda aceptado porque la ruta es publica para
+  // cualquier cliente que ya la use, y porque un solo archivo es el caso mas comun.
+  const files = (Array.isArray(req.files) ? req.files : []) as Express.Multer.File[];
+  if (!text && files.length === 0) {
     res.status(400).json({ error: "Falta el texto o el archivo" });
     return;
   }
-  if (file && isUnsupportedImageType(file.mimetype)) {
+  const gif = files.find((f) => isUnsupportedImageType(f.mimetype));
+  if (gif) {
     res.status(400).json({ error: "Formato GIF no soportado todavía - usa JPG, PNG o video." });
     return;
   }
@@ -122,7 +152,7 @@ conversationsRouter.post("/api/conversations/:id/messages", upload.single("file"
     // entrega solo en cuanto el cliente conteste (ver QueuedOutboundMessage). Sin eso, la unica salida
     // era mandar una plantilla generica y acordarse de reescribir el mensaje a mano mas tarde - que es
     // justo lo que no paso en el caso de David (2026-09-14).
-    if (String(req.body?.queue ?? "") === "true" && text && !file) {
+    if (String(req.body?.queue ?? "") === "true" && text && files.length === 0) {
       const queued = await queueOutboundMessage(businessId, String(req.params.id), formatForWhatsapp(text), "PANEL");
       await setHumanControl(businessId, String(req.params.id), true, "PANEL_QUEUE");
       await clearAgentRequestFlag(businessId, String(req.params.id));
@@ -149,29 +179,89 @@ conversationsRouter.post("/api/conversations/:id/messages", upload.single("file"
   await clearAgentRequestFlag(businessId, String(req.params.id));
 
   const formattedText = formatForWhatsapp(text);
-  if (file) {
-    const type = file.mimetype.startsWith("video") ? "VIDEO" : "IMAGE";
-    const folder = type === "VIDEO" ? "videos" : "images";
-    const { key, url } = await uploadMedia(file.buffer, file.mimetype, folder);
-    const media = await sendToCustomer({
+  // Un mensaje de audio no admite pie de foto: la API de Meta no tiene ese campo para `audio` y
+  // rechaza el mensaje entero si se manda. Entonces, cuando el primer archivo es un audio, el texto
+  // sale antes como su propio mensaje en vez de perderse.
+  const textoVaSuelto = formattedText.length > 0 && files.length > 0 && folderForUpload(files[0].mimetype) === "audio";
+  if (textoVaSuelto) {
+    const suelto = await sendToCustomer({
       businessId,
       conversationId: String(req.params.id),
       credentials,
       to: conversation.customer.phoneNumber,
-      content:
-        type === "IMAGE"
-          ? { kind: "image", url, caption: formattedText || undefined }
-          : { kind: "video", url, caption: formattedText || undefined },
-      // La ventana ya se verifico arriba y la ruta decidio que hacer si estaba cerrada (409 o cola). Si
-      // se cerro en el medio, se propaga el error como antes en vez de mandar una plantilla que el dueno
-      // no pidio.
+      content: { kind: "text", text: formattedText },
       onWindowClosed: "fail",
+      recordAs: { text: formattedText },
     });
-    if (!media.delivered) throw new Error(media.failure?.message ?? "No se pudo enviar el archivo");
-    await recordMessage(businessId, String(req.params.id), "ASSISTANT", formattedText || (type === "IMAGE" ? "[Foto]" : "[Video]"), media.wamid || undefined, {
-      s3Key: key,
-      type,
-    });
+    if (!suelto.delivered) {
+      res.status(502).json({ error: suelto.failure?.message ?? "No se pudo enviar el mensaje" });
+      return;
+    }
+  }
+  if (files.length > 0) {
+    // Uno por uno y en orden: WhatsApp entrega un mensaje por archivo, y mandarlos en paralelo los
+    // desordena en el telefono del cliente. El texto viaja como pie del PRIMERO, igual que en WhatsApp:
+    // repetirlo en cada archivo seria mandarle el mismo mensaje tres veces.
+    let enviados = 0;
+    for (const [indice, file] of files.entries()) {
+      const folder = folderForUpload(file.mimetype);
+      const type = mediaTypeForFolder(folder);
+      // El texto es pie del PRIMER archivo, salvo que ese primero sea un audio: ahi ya salio solo.
+      const caption = indice === 0 && formattedText && !textoVaSuelto ? formattedText : undefined;
+      // El nombre que puso el sistema operativo del que sube. Se usa tal cual para mostrarlo, nunca
+      // para decidir el tipo ni para armar la ruta en S3 (la clave la genera uploadMedia con un UUID).
+      const filename = String(file.originalname || "archivo").slice(0, 120);
+      try {
+        // El audio no se guarda ni se manda como llego. WhatsApp muestra la burbuja de nota de voz
+        // solo si el archivo es Ogg/Opus, y el navegador no puede grabar eso (graba Opus dentro de
+        // WebM, o AAC dentro de MP4). ffmpeg cambia el envoltorio antes de tocar S3, asi que lo que
+        // se guarda y lo que se manda son el mismo archivo que el cliente va a escuchar.
+        const bytes = folder === "audio" ? await toOggOpus(file.buffer) : file.buffer;
+        const declarado = folder === "audio" ? "audio/ogg" : file.mimetype;
+        const { key, url } = await uploadMedia(bytes, declarado, folder);
+        const media = await sendToCustomer({
+          businessId,
+          conversationId: String(req.params.id),
+          credentials,
+          to: conversation.customer.phoneNumber,
+          content:
+            type === "IMAGE"
+              ? { kind: "image", url, caption }
+              : type === "VIDEO"
+                ? { kind: "video", url, caption }
+                : type === "AUDIO"
+                  ? { kind: "audio", buffer: bytes, contentType: "audio/ogg" }
+                  : { kind: "document", url, filename, caption },
+          // La ventana ya se verifico arriba y la ruta decidio que hacer si estaba cerrada (409 o cola). Si
+          // se cerro en el medio, se propaga el error como antes en vez de mandar una plantilla que el dueno
+          // no pidio.
+          onWindowClosed: "fail",
+        });
+        if (!media.delivered) throw new Error(media.failure?.message ?? "No se pudo enviar el archivo");
+        await recordMessage(
+          businessId,
+          String(req.params.id),
+          "ASSISTANT",
+          caption || placeholderForFolder(folder, filename),
+          media.wamid || undefined,
+          { s3Key: key, type, filename: type === "DOCUMENT" ? filename : undefined }
+        );
+        enviados += 1;
+      } catch (error) {
+        // Los anteriores YA salieron y ya estan en el hilo: decir "no se pudo enviar" a secas seria
+        // mentir sobre lo que recibio el cliente. El mensaje dice cuantos llegaron y cual fallo.
+        const detalle = error instanceof Error ? error.message : String(error);
+        res.status(502).json({
+          error:
+            enviados === 0
+              ? `No se pudo enviar "${filename}": ${detalle}`
+              : `Se enviaron ${enviados} de ${files.length} archivos. "${filename}" fallo: ${detalle}`,
+          sent: enviados,
+          total: files.length,
+        });
+        return;
+      }
+    }
   } else {
     const sent = await sendToCustomer({
       businessId,

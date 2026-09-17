@@ -223,7 +223,7 @@ export async function recordMessage(
   role: "CUSTOMER" | "ASSISTANT" | "SYSTEM",
   content: string,
   whatsappMessageId?: string,
-  media?: { s3Key: string; type: "IMAGE" | "VIDEO" | "AUDIO" },
+  media?: { s3Key: string; type: "IMAGE" | "VIDEO" | "AUDIO" | "DOCUMENT"; filename?: string },
   imageAnalysis?: string,
   relatedProductId?: string
 ) {
@@ -235,6 +235,7 @@ export async function recordMessage(
       whatsappMessageId,
       mediaS3Key: media?.s3Key,
       mediaType: media?.type,
+      mediaFilename: media?.filename,
       imageAnalysis,
       relatedProductId,
     },
@@ -280,6 +281,7 @@ export async function recordMessage(
       content: message.content,
       mediaUrl: media ? await getPresignedMediaUrl(media.s3Key) : null,
       mediaType: message.mediaType,
+      mediaFilename: message.mediaFilename,
       createdAt: message.createdAt,
     },
     unreadCount
@@ -1085,6 +1087,7 @@ export async function getConversationForBusiness(businessId: string, conversatio
       createdAt: m.createdAt,
       mediaUrl: m.mediaS3Key ? await getPresignedMediaUrl(m.mediaS3Key) : null,
       mediaType: m.mediaType,
+      mediaFilename: m.mediaFilename,
       whatsappMessageId: m.whatsappMessageId,
     }))
   );
@@ -1222,6 +1225,7 @@ export interface ThreadMessage {
   createdAt: Date;
   mediaUrl: string | null;
   mediaType: string | null;
+  mediaFilename: string | null;
   whatsappMessageId: string | null;
   deliveryFailed: boolean;
   deliveryError: string | null;
@@ -1370,6 +1374,7 @@ export async function getCustomerThreadForBusiness(businessId: string, customerI
           createdAt: m.createdAt,
           mediaUrl: m.mediaS3Key ? await getPresignedMediaUrl(m.mediaS3Key) : null,
           mediaType: m.mediaType,
+          mediaFilename: m.mediaFilename,
           whatsappMessageId: m.whatsappMessageId,
         }))
       )

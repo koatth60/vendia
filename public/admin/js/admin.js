@@ -632,7 +632,7 @@ async function loadProducts() {
     productsCache = items;
     // El badge de la pestaña Catálogo debe mostrar el total real del negocio, no el tamaño de la
     // página actual - por eso usa `total` (del servidor) en vez de items.length.
-    document.getElementById('tab-count-catalog').textContent = total;
+    setTabCount('tab-count-catalog', total);
     const totalCount = document.getElementById('products-total-count');
     if (totalCount) totalCount.textContent = total;
 
@@ -1640,6 +1640,16 @@ function timeAgo(iso) {
 // with SOLICITA_AGENTE, the same 🙋 emoji twice), see ONIX-CONVERSATIONS-GROUPING-PLAN.md Fase 5.
 // `conversationId` (the row's activeConversationId, or the open thread's own id) powers the ✕ that
 // dismisses a resolved intent - omitted (e.g. a future read-only context) simply hides the ✕.
+// Contador de una pestana de la barra lateral. Un cero no se muestra: no informa nada que no diga ya
+// la seccion vacia, y deja un globo colgado al lado del nombre.
+function setTabCount(id, value) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const n = Number(value) || 0;
+  el.textContent = n > 99 ? '99+' : String(n);
+  el.hidden = n === 0;
+}
+
 function statusBadgeHtml({ status, intent, humanControl, conversationId }) {
   if (intent) {
     const dismiss = conversationId
@@ -1659,9 +1669,13 @@ function statusBadgeHtml({ status, intent, humanControl, conversationId }) {
 function customerRowHtml(c) {
   const displayName = c.customer.displayName || c.customer.phoneNumber;
   const initial = displayName.trim().charAt(0).toUpperCase() || '?';
-  const preview = c.lastMessage
-    ? `${c.lastMessage.role === 'ASSISTANT' ? 'Tú (bot): ' : ''}${escapeHtml(c.lastMessage.content).slice(0, 80)}`
+  const ultimo = c.lastMessage
+    ? `${c.lastMessage.role === 'ASSISTANT' ? 'Tú (bot): ' : ''}${String(c.lastMessage.content).slice(0, 80)}`
     : 'Sin mensajes';
+  const borrador = draftSummary(c.customerId);
+  const preview = borrador
+    ? draftPreviewHtml(borrador)
+    : escapeHtml(ultimo);
   const unread = c.unreadCount || 0;
   // Discreet recurring-customer hint (decision 2026-09-13: text, not another colored badge - the row
   // already carries enough of those).
@@ -1671,7 +1685,7 @@ function customerRowHtml(c) {
       <div class="conv-avatar" style="background:${avatarColor(c.customer.phoneNumber)};">${escapeHtml(initial)}</div>
       <div class="conv-info">
         <div class="conv-name">${escapeHtml(displayName)}</div>
-        <div class="conv-preview">${preview}</div>
+        <div class="conv-preview" data-last-preview="${escapeHtml(ultimo)}">${preview}</div>
       </div>
       <div class="conv-meta">
         <div class="conv-time" data-updated-at="${c.updatedAt}">${timeAgo(c.updatedAt)}</div>
@@ -1706,7 +1720,7 @@ async function loadCustomers() {
   try {
     const res = await apiFetch('/admin/api/customers');
     const customers = await res.json();
-    document.getElementById('tab-count-conversations').textContent = customers.length;
+    setTabCount('tab-count-conversations', customers.length);
 
     if (!Array.isArray(customers) || customers.length === 0) {
       container.innerHTML = '<div class="empty-state"><div class="big">💬</div>Todavía no hay conversaciones.<br/>Van a aparecer acá apenas un cliente le escriba al bot.</div>';
@@ -1796,11 +1810,18 @@ function closeImageLightbox() {
 function messageBubbleHtml(m) {
   const isAudio = m.mediaUrl && m.mediaType === 'AUDIO';
   const isVideo = m.mediaUrl && m.mediaType === 'VIDEO';
+  const isDocument = m.mediaUrl && m.mediaType === 'DOCUMENT';
   const img = isAudio
     ? `<audio src="${m.mediaUrl}" controls style="margin-bottom:4px;"></audio>`
     : isVideo
       ? `<video src="${m.mediaUrl}" controls style="max-width:220px; border-radius:6px; display:block; margin-bottom:4px;"></video>`
-      : m.mediaUrl ? `<img src="${m.mediaUrl}" style="max-width:220px; border-radius:6px; display:block; margin-bottom:4px; cursor:zoom-in;" onclick="openImageLightbox('${m.mediaUrl}')" />` : '';
+      : isDocument
+        // download + el nombre real: un documento se abre o se guarda, no se mira adentro de la burbuja.
+        ? `<a class="bubble-doc" href="${m.mediaUrl}" download="${escapeHtml(m.mediaFilename || 'documento')}" target="_blank" rel="noopener">
+             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"></path><path d="M14 3v5h5"></path></svg>
+             <span class="bubble-doc-name">${escapeHtml(m.mediaFilename || 'Documento')}</span>
+           </a>`
+        : m.mediaUrl ? `<img src="${m.mediaUrl}" style="max-width:220px; border-radius:6px; display:block; margin-bottom:4px; cursor:zoom-in;" onclick="openImageLightbox('${m.mediaUrl}')" />` : '';
   const time = new Date(m.createdAt).toLocaleString('es-CO', { hour: '2-digit', minute: '2-digit' });
   // Un wamid real (WhatsApp lo acepto) no es prueba de entrega - puede fallar minutos u horas despues
   // via el webhook de estado async (ver getWindowState en conversation/service.ts). Sin esto la burbuja
@@ -1818,19 +1839,278 @@ function messageBubbleHtml(m) {
 function renderThreadMessages(thread, messages) {
   const newOnes = messages.filter((m) => !renderedMessageIds.has(m.id));
   if (newOnes.length === 0) return;
-  const nearBottom = thread.scrollHeight - thread.scrollTop - thread.clientHeight < 80;
+  const nearBottom = isThreadNearBottom(thread);
   newOnes.forEach((m) => renderedMessageIds.add(m.id));
   const emptyState = thread.querySelector('.chat-thread-empty');
   if (emptyState) emptyState.remove();
   thread.insertAdjacentHTML('beforeend', newOnes.map(messageBubbleHtml).join(''));
-  if (nearBottom) thread.scrollTop = thread.scrollHeight;
+  // Un mensaje nuevo que entra con el buscador abierto tiene que quedar resaltado igual que el resto:
+  // si no, buscar "envio" deja de encontrar el "envio" que acaba de llegar.
+  if (threadSearchQuery.trim()) applyThreadSearch({ keepIndex: true, silent: true });
+  if (nearBottom) {
+    scrollThreadToBottom();
+  } else {
+    threadUnseenCount += newOnes.length;
+  }
+  pinThreadWhileMediaLoads(thread);
+  updateThreadJumpButton();
 }
 
+// ===========================================================================
+// Hilo: posicion de scroll, boton de bajar al ultimo mensaje y buscador.
+// ===========================================================================
+
+// Si el ojo esta abajo, el hilo sigue a los mensajes nuevos; si subio a leer, no se mueve solo.
+let threadStickToBottom = true;
+let threadUnseenCount = 0;
+let threadScrollBound = false;
+
+function threadEl() {
+  return document.getElementById('modal-thread');
+}
+
+function isThreadNearBottom(el, slack = 80) {
+  if (!el) return true;
+  return el.scrollHeight - el.scrollTop - el.clientHeight < slack;
+}
+
+function clearThreadUnseen() {
+  threadUnseenCount = 0;
+}
+
+function scrollThreadToBottom(opts = {}) {
+  const el = threadEl();
+  if (!el) return;
+  threadStickToBottom = true;
+  clearThreadUnseen();
+  if (opts.smooth) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+  else el.scrollTop = el.scrollHeight;
+  updateThreadJumpButton();
+}
+
+// Las fotos y videos del hilo llegan con URL firmada de S3 y ocupan alto recien cuando cargan: por eso
+// abrir el chat terminaba a mitad del hilo aunque el scroll ya se hubiera puesto al final. Cada medio
+// vuelve a pegar el hilo abajo cuando termina de cargar, mientras el ojo siga abajo.
+function pinThreadWhileMediaLoads(el) {
+  if (!el) return;
+  el.querySelectorAll('img, video').forEach((media) => {
+    if (media.dataset.bottomPinBound === '1') return;
+    media.dataset.bottomPinBound = '1';
+    const repin = () => { if (threadStickToBottom) el.scrollTop = el.scrollHeight; };
+    media.addEventListener('load', repin);
+    media.addEventListener('loadeddata', repin);
+    media.addEventListener('error', repin);
+  });
+}
+
+function updateThreadJumpButton() {
+  const el = threadEl();
+  const btn = document.getElementById('thread-jump-btn');
+  if (!el || !btn) return;
+  btn.hidden = isThreadNearBottom(el, 120);
+  const badge = document.getElementById('thread-jump-count');
+  if (!badge) return;
+  badge.hidden = threadUnseenCount === 0;
+  badge.textContent = threadUnseenCount > 99 ? '99+' : String(threadUnseenCount);
+}
+
+// El listener se cuelga una sola vez: #modal-thread se repinta por dentro (innerHTML) pero el elemento
+// es siempre el mismo, asi que no hace falta volver a colgarlo en cada apertura.
+function bindThreadScroll() {
+  if (threadScrollBound) return;
+  const el = threadEl();
+  if (!el) return;
+  el.addEventListener('scroll', () => {
+    threadStickToBottom = isThreadNearBottom(el);
+    if (threadStickToBottom) clearThreadUnseen();
+    updateThreadJumpButton();
+  }, { passive: true });
+  threadScrollBound = true;
+}
+
+// --- Buscador dentro del hilo ---------------------------------------------
+let threadSearchQuery = '';
+let threadSearchMatches = [];
+let threadSearchIndex = -1;
+let threadSearchTimer = null;
+
+// Buscar "envio" tiene que encontrar "envio" y "envío". Se pliega caracter por caracter a proposito:
+// pasar el texto entero por NFD y borrar los diacriticos cambia la longitud, y con eso los indices de
+// las coincidencias dejan de corresponder al texto original que hay que partir para resaltar.
+function foldForSearch(text) {
+  let out = '';
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    const lower = ch.toLowerCase();
+    const base = lower.length === 1 ? lower.normalize('NFD').replace(/[\u0300-\u036f]/g, '') : ch;
+    out += base.length === 1 ? base : ch;
+  }
+  return out;
+}
+
+function clearThreadMarks() {
+  const el = threadEl();
+  threadSearchMatches = [];
+  threadSearchIndex = -1;
+  if (!el) return;
+  el.querySelectorAll('mark.thread-mark').forEach((mark) => {
+    const parent = mark.parentNode;
+    if (!parent) return;
+    parent.replaceChild(document.createTextNode(mark.textContent), mark);
+    parent.normalize();
+  });
+}
+
+function applyThreadSearch(opts = {}) {
+  const el = threadEl();
+  if (!el) return;
+  const previousIndex = threadSearchIndex;
+  clearThreadMarks();
+  const query = threadSearchQuery.trim();
+  // Con una sola letra casi todo el hilo queda resaltado y no sirve de nada.
+  if (query.length < 2) { updateThreadSearchCount(); return; }
+  const needle = foldForSearch(query);
+  // Solo el texto de las burbujas: la hora, los separadores de ciclo y el boton de "ver conversacion
+  // anterior" no son parte de lo que escribieron el cliente y el negocio.
+  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      if (!node.nodeValue) return NodeFilter.FILTER_REJECT;
+      const parent = node.parentElement;
+      if (!parent || !parent.closest('.bubble-text')) return NodeFilter.FILTER_REJECT;
+      return NodeFilter.FILTER_ACCEPT;
+    },
+  });
+  const nodes = [];
+  while (walker.nextNode()) nodes.push(walker.currentNode);
+  nodes.forEach((node) => {
+    const raw = node.nodeValue;
+    const hay = foldForSearch(raw);
+    let at = hay.indexOf(needle);
+    if (at === -1) return;
+    const frag = document.createDocumentFragment();
+    let cursor = 0;
+    while (at !== -1) {
+      if (at > cursor) frag.appendChild(document.createTextNode(raw.slice(cursor, at)));
+      const mark = document.createElement('mark');
+      mark.className = 'thread-mark';
+      mark.textContent = raw.slice(at, at + needle.length);
+      frag.appendChild(mark);
+      cursor = at + needle.length;
+      at = hay.indexOf(needle, cursor);
+    }
+    if (cursor < raw.length) frag.appendChild(document.createTextNode(raw.slice(cursor)));
+    node.parentNode.replaceChild(frag, node);
+  });
+  threadSearchMatches = Array.from(el.querySelectorAll('mark.thread-mark'));
+  if (threadSearchMatches.length === 0) { updateThreadSearchCount(); return; }
+  // Arranca en la coincidencia de mas abajo, no en la primera: en un chat lo que se busca casi siempre
+  // es lo ultimo que se dijo, igual que en WhatsApp.
+  threadSearchIndex = opts.keepIndex && previousIndex >= 0
+    ? Math.min(previousIndex, threadSearchMatches.length - 1)
+    : threadSearchMatches.length - 1;
+  focusThreadMatch(opts.silent === true);
+}
+
+function focusThreadMatch(noScroll) {
+  threadSearchMatches.forEach((mark, i) => mark.classList.toggle('is-active', i === threadSearchIndex));
+  const active = threadSearchMatches[threadSearchIndex];
+  if (active && !noScroll) {
+    // Saltar a una coincidencia vieja es irse del final: el hilo deja de seguir a los mensajes nuevos
+    // hasta que el usuario vuelva abajo (o toque el boton de bajar).
+    threadStickToBottom = false;
+    active.scrollIntoView({ block: 'center' });
+    updateThreadJumpButton();
+  }
+  updateThreadSearchCount();
+}
+
+function updateThreadSearchCount() {
+  const box = document.getElementById('thread-search-count');
+  if (!box) return;
+  if (threadSearchQuery.trim().length < 2) { box.textContent = ''; return; }
+  box.textContent = threadSearchMatches.length === 0
+    ? 'Sin resultados'
+    : `${threadSearchIndex + 1}/${threadSearchMatches.length}`;
+}
+
+function runThreadSearch() {
+  const input = document.getElementById('thread-search-input');
+  threadSearchQuery = input ? input.value : '';
+  clearTimeout(threadSearchTimer);
+  threadSearchTimer = setTimeout(() => applyThreadSearch(), 120);
+}
+
+function stepThreadSearch(delta) {
+  if (threadSearchMatches.length === 0) return;
+  threadSearchIndex = (threadSearchIndex + delta + threadSearchMatches.length) % threadSearchMatches.length;
+  focusThreadMatch(false);
+}
+
+function onThreadSearchKeydown(event) {
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    stepThreadSearch(event.shiftKey ? -1 : 1);
+  } else if (event.key === 'Escape') {
+    event.preventDefault();
+    closeThreadSearch();
+  }
+}
+
+function toggleThreadSearch() {
+  const bar = document.getElementById('thread-search');
+  if (!bar) return;
+  if (bar.classList.contains('is-open')) { closeThreadSearch(); return; }
+  bar.classList.add('is-open');
+  const input = document.getElementById('thread-search-input');
+  if (input) { input.focus(); input.select(); }
+}
+
+function closeThreadSearch() {
+  const bar = document.getElementById('thread-search');
+  if (bar) bar.classList.remove('is-open');
+  const input = document.getElementById('thread-search-input');
+  if (input) input.value = '';
+  clearTimeout(threadSearchTimer);
+  threadSearchQuery = '';
+  clearThreadMarks();
+  updateThreadSearchCount();
+}
+
+// --- Menu de tres puntos de la cabecera ------------------------------------
+function toggleThreadMenu(event) {
+  if (event) event.stopPropagation();
+  const list = document.getElementById('thread-menu-list');
+  const btn = document.getElementById('thread-menu-btn');
+  if (!list || !btn) return;
+  const opening = list.hidden;
+  list.hidden = !opening;
+  btn.setAttribute('aria-expanded', opening ? 'true' : 'false');
+}
+
+function closeThreadMenu() {
+  const list = document.getElementById('thread-menu-list');
+  const btn = document.getElementById('thread-menu-btn');
+  if (list) list.hidden = true;
+  if (btn) btn.setAttribute('aria-expanded', 'false');
+}
+
+// Un menu que no se cierra solo es peor que no tener menu: cualquier clic afuera, y elegir una opcion,
+// lo cierran. Asi ninguna de las tres acciones necesita acordarse de cerrarlo.
+document.addEventListener('click', (event) => {
+  if (event.target.closest('.thread-menu-item')) { closeThreadMenu(); return; }
+  if (!event.target.closest('#thread-menu')) closeThreadMenu();
+});
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') closeThreadMenu();
+});
+
 function updateCloseSaleButtonVisibility(status) {
-  document.getElementById('close-sale-btn').style.display = status === 'SOLD' ? 'none' : 'inline-flex';
+  // Los dos viven en el menu de tres puntos, que los muestra con display:flex desde el CSS: fijar
+  // display aca (como antes) le ganaba a esa regla y los dejaba en linea, fuera del menu.
+  document.getElementById('close-sale-btn').hidden = status === 'SOLD';
   // Un pedido ya cerrado tiene su precio guardado en OrderItem: cambiar el acordado no lo movería, así
   // que ofrecerlo sería mentir sobre lo que hace el botón.
-  document.getElementById('agreed-price-btn').style.display = status === 'SOLD' ? 'none' : 'inline-flex';
+  document.getElementById('agreed-price-btn').hidden = status === 'SOLD';
 }
 
 async function pollConversation() {
@@ -1870,6 +2150,7 @@ function stopConversationPolling() {
 }
 
 function startEditCustomerName() {
+  closeThreadMenu();
   document.getElementById('modal-title').style.display = 'none';
   document.getElementById('edit-name-btn').style.display = 'none';
   const input = document.getElementById('modal-title-input');
@@ -2009,16 +2290,28 @@ async function loadOlderCycle() {
       ...bloques.map((b) => ({ conversationId: b.conversationId, html: b.messages.map(messageBubbleHtml).join('') }))
     );
     renderMergedThread();
+    // Se esta leyendo hacia arriba: el hilo no debe saltar al final cuando carguen las fotos viejas.
+    threadStickToBottom = false;
     thread.scrollTop = thread.scrollHeight - prevScrollHeight;
+    pinThreadWhileMediaLoads(thread);
+    if (threadSearchQuery.trim()) applyThreadSearch({ keepIndex: true, silent: true });
+    updateThreadJumpButton();
   } catch (err) {
     setStatus(`No se pudo cargar la conversación anterior: ${err.message}`, true);
   }
 }
 
 function renderModalSubtitle({ status, intent, conversationId, customerName, customerPhone }) {
+  // La etapa de la venta (Nuevo/Negociando/Vendido) NO va en la cabecera del hilo: ya esta en la fila
+  // de la lista, que es donde sirve para barrer la bandeja de un vistazo. Adentro del chat solo repetia
+  // un dato y le robaba ancho al nombre.
+  //
+  // La etiqueta de intencion (PQR, devolución, pide asesor) si se queda: no es un estado de la venta,
+  // es un aviso de que esa conversacion necesita a una persona, y su ✕ es la forma de darlo por
+  // resuelto. El telefono se recorta antes que ella.
   document.getElementById('modal-subtitle').innerHTML =
-    (customerName ? `${escapeHtml(customerPhone)} · ` : '') +
-    statusBadgeHtml({ status, intent, humanControl: false, conversationId });
+    (customerName ? `<span class="thread-phone">${escapeHtml(customerPhone)}</span>` : '') +
+    (intent ? statusBadgeHtml({ status, intent, humanControl: false, conversationId }) : '');
 }
 
 // The ✕ on an intent badge (list row or chat header) - lets the owner dismiss a resolved PQR/devolución/
@@ -2033,6 +2326,13 @@ async function dismissIntent(conversationId) {
 
 async function openCustomer(customerId) {
   const thread = document.getElementById('modal-thread');
+  // Cambiar de conversacion no pasa por closeConversation: lo que quedo escrito en la anterior se
+  // guarda aca, antes de que currentCustomerId deje de apuntarle.
+  if (currentCustomerId && currentCustomerId !== customerId) {
+    clearTimeout(draftSaveTimer);
+    saveComposerDraft();
+    stashComposerFiles(currentCustomerId);
+  }
   currentCustomerId = customerId;
   document.getElementById('chat-panel-empty').style.display = 'none';
   document.getElementById('chat-panel-active').style.display = 'flex';
@@ -2067,6 +2367,9 @@ async function openCustomer(customerId) {
     // Despues de currentCustomerName/Phone: el banner de ventana cerrada los usa para decir DE QUIEN
     // pasaron las 24h, y updateComposerVisibility los leia antes de que se actualizaran.
     updateComposerVisibility();
+    // Despues de updateComposerVisibility: el compositor tiene que estar visible para que
+    // autoGrowComposer pueda medir el alto del texto restaurado.
+    restoreComposerDraft(customerId);
     cancelEditCustomerName();
     renderTags();
 
@@ -2098,7 +2401,15 @@ async function openCustomer(customerId) {
     }));
     renderMergedThread();
 
-    thread.scrollTop = thread.scrollHeight;
+    // Abrir el chat muestra lo ultimo que se dijo. Una sola asignacion de scrollTop no alcanzaba: el
+    // navegador todavia no habia hecho el layout de las burbujas recien insertadas, asi que el hilo
+    // quedaba arriba. Se repite despues del layout, y pinThreadWhileMediaLoads sigue corrigiendo a
+    // medida que cargan las fotos.
+    bindThreadScroll();
+    bindThreadDropzone();
+    scrollThreadToBottom();
+    pinThreadWhileMediaLoads(thread);
+    requestAnimationFrame(() => scrollThreadToBottom());
     startConversationPolling();
   } catch (err) {
     thread.innerHTML = `<div style="text-align:center; color:var(--danger); font-size:13px; padding:20px;">No se pudo cargar: ${escapeHtml(err.message)}</div>`;
@@ -2106,6 +2417,10 @@ async function openCustomer(customerId) {
 }
 
 function closeConversation() {
+  // Cerrar el chat con algo escrito lo guarda, no lo tira.
+  clearTimeout(draftSaveTimer);
+  saveComposerDraft();
+  stashComposerFiles(currentCustomerId);
   document.getElementById('chat-panel-active').style.display = 'none';
   document.getElementById('chat-panel-empty').style.display = 'flex';
   document.getElementById('chat-split').classList.remove('chat-split--open');
@@ -2119,11 +2434,19 @@ function closeConversation() {
   threadCyclesMeta = [];
   threadHasMore = false;
   stopConversationPolling();
+  closeThreadSearch();
+  closeThreadMenu();
+  cancelVoiceRecording();
+  showThreadDropzone(false);
+  threadDragDepth = 0;
+  threadStickToBottom = true;
+  clearThreadUnseen();
+  updateThreadJumpButton();
   clearComposerFile();
   closeSaleFormCancel();
 }
 
-// Catálogo cargado para el selector de "Cerrar venta" - se recarga cada vez que se abre el formulario
+// Catálogo cargado para el selector de "Crear venta" - se recarga cada vez que se abre el formulario
 // (no productsCache, que es la vista paginada del tab Catálogo y no trae el catálogo completo). Sin
 // media, sin presign de S3: ver listActiveProductsForOrderPicker.
 let closeSaleCatalog = [];
@@ -2279,7 +2602,7 @@ async function loadAgreedPrices() {
     const data = await res.json();
     agreedPriceRowsCache = data.items || [];
     if (agreedPriceRowsCache.length === 0) {
-      status.textContent = 'Esta conversación todavía no tiene productos en la venta. Onix los anota cuando el cliente elige qué quiere, o podés cerrarla a mano con "Cerrar venta".';
+      status.textContent = 'Esta conversación todavía no tiene productos en la venta. Onix los anota cuando el cliente elige qué quiere, o podés crearla a mano con "Crear venta".';
       return;
     }
     status.textContent = (data.needsAttribute || []).length > 0
@@ -2445,7 +2768,7 @@ async function confirmCloseSale() {
     closeSaleFormCancel();
     openCustomer(currentCustomerId);
   } catch (err) {
-    setStatus(`No se pudo cerrar la venta: ${err.message}`, true);
+    setStatus(`No se pudo crear la venta: ${err.message}`, true);
     status.textContent = `Error: ${err.message}`;
     status.style.color = 'var(--danger)';
   } finally {
@@ -2491,7 +2814,9 @@ function renderHandoffState(humanControl, reason, since) {
   if (input) {
     input.placeholder = humanControl
       ? 'Escribe como el negocio…'
-      : 'Escribí para tomar el control de la conversación…';
+      // Corto a proposito: con el clip y el microfono adentro del campo, el texto largo envolvia a dos
+      // renglones y el compositor arrancaba con el doble de alto.
+      : 'Escribí para tomar el control…';
   }
   const hint = document.getElementById('bot-auto-hint');
   if (hint) hint.hidden = humanControl;
@@ -2659,44 +2984,640 @@ async function toggleHandoff() {
   }
 }
 
-let composerFile = null;
+// Los archivos que estan por enviarse, en el orden en que se van a mandar. El servidor manda uno por
+// uno y en ese mismo orden (ver routes/admin/conversations.ts).
+let composerFiles = [];
+
+// Las mismas reglas que aplica el servidor, repetidas aca solo para poder decir el motivo EN EL ACTO
+// en vez de despues de subir 12 MB. El servidor sigue siendo el que decide: estas listas no son la
+// validacion, son el aviso temprano.
+const COMPOSER_MAX_FILES = 5;
+const COMPOSER_ACCEPTED = {
+  'image/jpeg': { kind: 'image', label: 'JPG' },
+  'image/png': { kind: 'image', label: 'PNG' },
+  'image/webp': { kind: 'image', label: 'WEBP' },
+  'video/mp4': { kind: 'video', label: 'MP4' },
+  'video/quicktime': { kind: 'video', label: 'MOV' },
+  'video/3gpp': { kind: 'video', label: '3GP' },
+  'video/webm': { kind: 'video', label: 'WEBM' },
+  'application/pdf': { kind: 'document', label: 'PDF' },
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': { kind: 'document', label: 'DOCX' },
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': { kind: 'document', label: 'XLSX' },
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation': { kind: 'document', label: 'PPTX' },
+  'audio/webm': { kind: 'audio', label: 'Audio' },
+  'audio/ogg': { kind: 'audio', label: 'Audio' },
+  'audio/mpeg': { kind: 'audio', label: 'MP3' },
+  'audio/mp4': { kind: 'audio', label: 'Audio' },
+  'audio/x-m4a': { kind: 'audio', label: 'M4A' },
+  'audio/aac': { kind: 'audio', label: 'AAC' },
+  'audio/amr': { kind: 'audio', label: 'AMR' },
+  'audio/wav': { kind: 'audio', label: 'WAV' },
+};
+const COMPOSER_MAX_BYTES = {
+  image: 5 * 1024 * 1024,
+  video: 16 * 1024 * 1024,
+  document: 16 * 1024 * 1024,
+  audio: 16 * 1024 * 1024,
+};
+
+function formatFileSize(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function baseMimeType(type) {
+  return String(type || '').split(';')[0].trim().toLowerCase();
+}
+
+function composerFileKind(file) {
+  const accepted = COMPOSER_ACCEPTED[baseMimeType(file.type)];
+  return accepted ? accepted.kind : null;
+}
+
+// El input de archivos y el arrastre entregan FileList; los dos pasan por aca para que el limite, el
+// motivo del rechazo y la previsualizacion sean exactamente los mismos por los dos caminos.
+function addComposerFiles(fileList) {
+  const incoming = Array.from(fileList || []);
+  if (incoming.length === 0) return;
+  const rechazados = [];
+  for (const file of incoming) {
+    if (composerFiles.length >= COMPOSER_MAX_FILES) {
+      rechazados.push(`${file.name}: no entran mas de ${COMPOSER_MAX_FILES} archivos por mensaje`);
+      continue;
+    }
+    const kind = composerFileKind(file);
+    if (!kind) {
+      rechazados.push(`${file.name}: formato no soportado (usa JPG, PNG, WEBP, MP4, PDF, DOCX, XLSX o PPTX)`);
+      continue;
+    }
+    if (file.size > COMPOSER_MAX_BYTES[kind]) {
+      rechazados.push(`${file.name}: pesa ${formatFileSize(file.size)} y el maximo es ${formatFileSize(COMPOSER_MAX_BYTES[kind])}`);
+      continue;
+    }
+    // Arrastrar dos veces lo mismo (o soltar encima de lo ya elegido) no lo manda dos veces.
+    const repetido = composerFiles.some((f) => f.file.name === file.name && f.file.size === file.size);
+    if (repetido) continue;
+    composerFiles.push({
+      file,
+      kind,
+      // Solo para la miniatura. Se libera en clearComposerFile/removeComposerFile: sin eso el blob
+      // queda en memoria hasta recargar la pagina.
+      previewUrl: kind === 'document' ? null : URL.createObjectURL(file),
+    });
+  }
+  renderComposerPreview();
+  persistComposerFiles(currentCustomerId);
+  if (rechazados.length > 0) setStatus(rechazados.join(' · '), true);
+}
+
+function composerFileIconSvg(kind) {
+  if (kind === 'video') {
+    return '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="13" height="12" rx="2.5"></rect><path d="m16 11 5-3v8l-5-3z"></path></svg>';
+  }
+  return '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"></path><path d="M14 3v5h5"></path></svg>';
+}
+
+function renderComposerPreview() {
+  const preview = document.getElementById('modal-composer-preview');
+  if (!preview) return;
+  if (composerFiles.length === 0) {
+    preview.hidden = true;
+    preview.innerHTML = '';
+    return;
+  }
+  preview.hidden = false;
+  preview.innerHTML = composerFiles
+    .map((entry, i) => {
+      if (entry.kind === 'audio') {
+        return `
+          <div class="composer-chip composer-chip--audio" title="${escapeHtml(entry.file.name)}">
+            <audio src="${entry.previewUrl}" controls class="composer-chip-audio"></audio>
+            <button type="button" class="composer-chip-remove" title="Quitar" aria-label="Quitar la nota de voz" onclick="removeComposerFile(${i})">✕</button>
+          </div>`;
+      }
+      const cuerpo = entry.previewUrl
+        ? entry.kind === 'video'
+          ? `<video src="${entry.previewUrl}" muted class="composer-chip-media"></video>`
+          : `<img src="${entry.previewUrl}" alt="" class="composer-chip-media" />`
+        : `<span class="composer-chip-icon">${composerFileIconSvg(entry.kind)}</span>`;
+      return `
+        <div class="composer-chip" title="${escapeHtml(entry.file.name)}">
+          ${cuerpo}
+          <div class="composer-chip-info">
+            <span class="composer-chip-name">${escapeHtml(entry.file.name)}</span>
+            <span class="composer-chip-size onix-num">${formatFileSize(entry.file.size)}</span>
+          </div>
+          <button type="button" class="composer-chip-remove" title="Quitar" aria-label="Quitar ${escapeHtml(entry.file.name)}" onclick="removeComposerFile(${i})">✕</button>
+        </div>`;
+    })
+    .join('');
+}
+
+function removeComposerFile(index) {
+  const entry = composerFiles[index];
+  if (!entry) return;
+  if (entry.previewUrl) URL.revokeObjectURL(entry.previewUrl);
+  composerFiles.splice(index, 1);
+  renderComposerPreview();
+  persistComposerFiles(currentCustomerId);
+}
 
 function onComposerFileChange(input) {
-  composerFile = input.files[0] || null;
-  const preview = document.getElementById('modal-composer-preview');
-  if (composerFile) {
-    preview.style.display = 'flex';
-    preview.innerHTML = `📎 ${escapeHtml(composerFile.name)} <span style="cursor:pointer; color:var(--danger);" onclick="clearComposerFile()">✕</span>`;
-  } else {
-    preview.style.display = 'none';
-    preview.innerHTML = '';
-  }
+  addComposerFiles(input.files);
+  // Se vacia siempre: si no, elegir DOS VECES el mismo archivo no dispara 'change' la segunda vez.
+  input.value = '';
 }
 
 function clearComposerFile() {
-  composerFile = null;
-  document.getElementById('modal-composer-file').value = '';
-  const preview = document.getElementById('modal-composer-preview');
-  preview.style.display = 'none';
-  preview.innerHTML = '';
+  composerFiles.forEach((entry) => { if (entry.previewUrl) URL.revokeObjectURL(entry.previewUrl); });
+  composerFiles = [];
+  const input = document.getElementById('modal-composer-file');
+  if (input) input.value = '';
+  renderComposerPreview();
+}
+
+// --- Borradores ------------------------------------------------------------
+//
+// Lo que quedo escrito sin mandar no se pierde por cambiar de conversacion, cerrar el chat, recargar o
+// cerrar la pestana. Es la misma regla de WhatsApp y el mismo motivo: nadie vuelve a escribir de memoria
+// un mensaje de venta que ya habia armado.
+//
+// El TEXTO vive en localStorage. Los ADJUNTOS viven en IndexedDB, que es el unico almacenamiento del
+// navegador que guarda un Blob entero (localStorage solo guarda texto).
+//
+// Por que los adjuntos tambien se guardan de verdad, y no solo en memoria: un archivo que se pierde se
+// vuelve a elegir del disco, pero una NOTA DE VOZ que se pierde no existe mas en ningun lado. Si el
+// audio grabado no sobrevive a una recarga, se perdio para siempre. Se guarda todo por el mismo camino
+// en vez de tratar al audio aparte, porque el caso especial seria mas codigo, no menos.
+let currentBusinessId = '';
+// Espejo en memoria, para no depender de una lectura asincrona al cambiar de conversacion. IndexedDB
+// es el respaldo que aguanta la recarga.
+let composerDraftFiles = new Map();
+let draftSaveTimer = null;
+
+const DRAFT_DB = 'onix-borradores';
+const DRAFT_STORE = 'adjuntos';
+let draftDbPromise = null;
+
+// Todo el modulo degrada en silencio si IndexedDB no esta disponible (modo privado, almacenamiento
+// bloqueado): se pierde el respaldo de los adjuntos, no el compositor.
+function openDraftDb() {
+  if (draftDbPromise) return draftDbPromise;
+  draftDbPromise = new Promise((resolve) => {
+    try {
+      const request = indexedDB.open(DRAFT_DB, 1);
+      request.onupgradeneeded = () => {
+        if (!request.result.objectStoreNames.contains(DRAFT_STORE)) request.result.createObjectStore(DRAFT_STORE);
+      };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => resolve(null);
+    } catch {
+      resolve(null);
+    }
+  });
+  return draftDbPromise;
+}
+
+async function draftDbPut(clave, valor) {
+  const db = await openDraftDb();
+  if (!db) return;
+  await new Promise((resolve) => {
+    try {
+      const tx = db.transaction(DRAFT_STORE, 'readwrite');
+      tx.objectStore(DRAFT_STORE).put(valor, clave);
+      tx.oncomplete = resolve;
+      tx.onerror = resolve;
+      tx.onabort = resolve;
+    } catch { resolve(); }
+  });
+}
+
+async function draftDbGet(clave) {
+  const db = await openDraftDb();
+  if (!db) return null;
+  return new Promise((resolve) => {
+    try {
+      const tx = db.transaction(DRAFT_STORE, 'readonly');
+      const pedido = tx.objectStore(DRAFT_STORE).get(clave);
+      pedido.onsuccess = () => resolve(pedido.result || null);
+      pedido.onerror = () => resolve(null);
+    } catch { resolve(null); }
+  });
+}
+
+async function draftDbDelete(clave) {
+  const db = await openDraftDb();
+  if (!db) return;
+  try {
+    const tx = db.transaction(DRAFT_STORE, 'readwrite');
+    tx.objectStore(DRAFT_STORE).delete(clave);
+  } catch {}
+}
+
+// Cuantos adjuntos tiene pendientes cada conversacion. Va en localStorage (no en IndexedDB) porque la
+// fila de la lista se pinta de forma sincrona y no puede esperar una lectura asincrona para saber si
+// tiene que decir "Borrador:".
+function draftFilesKey(customerId) {
+  return `${draftKey(customerId)}:archivos`;
+}
+
+function readDraftFileCount(customerId) {
+  if (!customerId) return 0;
+  try { return Number(localStorage.getItem(draftFilesKey(customerId))) || 0; } catch { return 0; }
+}
+
+function writeDraftFileCount(customerId, cantidad) {
+  if (!customerId) return;
+  try {
+    if (cantidad > 0) localStorage.setItem(draftFilesKey(customerId), String(cantidad));
+    else localStorage.removeItem(draftFilesKey(customerId));
+  } catch {}
+}
+
+// Guarda los adjuntos de esta conversacion tal como estan ahora. Se llama cada vez que la lista cambia
+// (se agrega, se quita, se graba una nota), no al mandar: al mandar se borra.
+async function persistComposerFiles(customerId) {
+  if (!customerId) return;
+  writeDraftFileCount(customerId, composerFiles.length);
+  refreshDraftMarker(customerId);
+  if (composerFiles.length === 0) {
+    await draftDbDelete(draftKey(customerId));
+    return;
+  }
+  // Un File ES un Blob, asi que IndexedDB lo guarda entero. Se guarda el nombre y el tipo aparte para
+  // poder reconstruir el File igual que estaba al volver.
+  const guardables = composerFiles.map((entry) => ({
+    blob: entry.file,
+    name: entry.file.name,
+    type: entry.file.type,
+    kind: entry.kind,
+  }));
+  await draftDbPut(draftKey(customerId), guardables);
+}
+
+async function loadPersistedComposerFiles(customerId) {
+  const guardados = await draftDbGet(draftKey(customerId));
+  if (!Array.isArray(guardados) || guardados.length === 0) return [];
+  return guardados.map((item) => {
+    const archivo = new File([item.blob], item.name, { type: item.type });
+    return {
+      file: archivo,
+      kind: item.kind,
+      previewUrl: item.kind === 'document' ? null : URL.createObjectURL(archivo),
+    };
+  });
+}
+
+function draftKey(customerId) {
+  return `onix:draft:${currentBusinessId || 'sin-negocio'}:${customerId}`;
+}
+
+// localStorage tira excepcion en modo privado y cuando el disco esta lleno. Un borrador que no se pudo
+// guardar es una molestia; una excepcion sin atrapar acá deja el compositor entero sin funcionar.
+function readDraft(customerId) {
+  if (!customerId) return '';
+  try { return localStorage.getItem(draftKey(customerId)) || ''; } catch { return ''; }
+}
+
+function writeDraft(customerId, text) {
+  if (!customerId) return;
+  try {
+    if (text) localStorage.setItem(draftKey(customerId), text);
+    else localStorage.removeItem(draftKey(customerId));
+  } catch {}
+}
+
+function saveComposerDraft() {
+  if (!currentCustomerId) return;
+  const input = document.getElementById('modal-composer-input');
+  const texto = input ? input.value.trim() : '';
+  writeDraft(currentCustomerId, texto);
+  refreshDraftMarker(currentCustomerId);
+}
+
+// Escribir dispara este evento en cada tecla; guardar en cada tecla es escribir en disco 60 veces por
+// frase. Se junta en una sola escritura.
+function queueDraftSave() {
+  clearTimeout(draftSaveTimer);
+  draftSaveTimer = setTimeout(saveComposerDraft, 300);
+}
+
+// Se lleva los adjuntos SIN liberar sus URLs de previsualizacion: siguen vivos para cuando se vuelva a
+// esta conversacion. Quien los recibe pasa a ser el duenno de liberarlos.
+function stashComposerFiles(customerId) {
+  if (!customerId) return;
+  if (composerFiles.length === 0) { composerDraftFiles.delete(customerId); return; }
+  composerDraftFiles.set(customerId, composerFiles);
+  composerFiles = [];
+  renderComposerPreview();
+}
+
+async function restoreComposerDraft(customerId) {
+  const input = document.getElementById('modal-composer-input');
+  if (input) {
+    input.value = readDraft(customerId);
+    autoGrowComposer(input);
+  }
+  const enMemoria = composerDraftFiles.get(customerId);
+  composerDraftFiles.delete(customerId);
+  if (enMemoria) {
+    composerFiles = enMemoria;
+    renderComposerPreview();
+    return;
+  }
+  composerFiles = [];
+  renderComposerPreview();
+  // Recien recargada la pagina no hay nada en memoria: los adjuntos vuelven de IndexedDB. La lectura es
+  // asincrona, asi que se comprueba que el usuario siga en la misma conversacion antes de pintarlos.
+  const recuperados = await loadPersistedComposerFiles(customerId);
+  if (recuperados.length === 0 || currentCustomerId !== customerId) {
+    recuperados.forEach((entry) => { if (entry.previewUrl) URL.revokeObjectURL(entry.previewUrl); });
+    return;
+  }
+  composerFiles = recuperados;
+  renderComposerPreview();
+}
+
+function clearComposerDraft(customerId) {
+  if (!customerId) return;
+  writeDraft(customerId, '');
+  const guardados = composerDraftFiles.get(customerId);
+  if (guardados) {
+    guardados.forEach((entry) => { if (entry.previewUrl) URL.revokeObjectURL(entry.previewUrl); });
+    composerDraftFiles.delete(customerId);
+  }
+  writeDraftFileCount(customerId, 0);
+  draftDbDelete(draftKey(customerId));
+  refreshDraftMarker(customerId);
+}
+
+// La fila de la lista dice "Borrador:" en vez del ultimo mensaje, como WhatsApp. Sin esto el borrador
+// es invisible hasta volver a abrir esa conversacion, que es justo cuando ya no hace falta el recordatorio.
+function draftPreviewHtml(texto) {
+  return `<span class="conv-draft">Borrador:</span> ${escapeHtml(String(texto).slice(0, 80))}`;
+}
+
+// Que dice la fila cuando hay algo sin mandar. Una nota de voz grabada y sin texto tambien es un
+// borrador: sin esto, lo unico que no se puede volver a conseguir es justo lo que no se avisaba.
+function draftSummary(customerId) {
+  const texto = readDraft(customerId);
+  if (texto) return texto;
+  const archivos = readDraftFileCount(customerId);
+  if (archivos > 0) return archivos === 1 ? '1 archivo' : `${archivos} archivos`;
+  return '';
+}
+
+function refreshDraftMarker(customerId) {
+  const row = document.querySelector(`.conv-row[data-customer-id="${customerId}"]`);
+  if (!row) return;
+  const previewEl = row.querySelector('.conv-preview');
+  if (!previewEl) return;
+  const borrador = draftSummary(customerId);
+  if (borrador) {
+    previewEl.innerHTML = draftPreviewHtml(borrador);
+    return;
+  }
+  // Se vuelve a lo ultimo que se dijo de verdad, guardado en crudo en el mismo elemento (el navegador
+  // decodifica las entidades al leer el atributo, asi que vuelve el texto original).
+  previewEl.textContent = previewEl.dataset.lastPreview || '';
+}
+
+// Un solo lugar escribe el texto de la fila. Antes lo hacian tres por su cuenta (render inicial, mensaje
+// nuevo por socket, conversacion actualizada) y cualquiera de las tres pisaba el "Borrador:".
+function setRowPreview(row, text, isAssistant) {
+  if (!row) return;
+  const previewEl = row.querySelector('.conv-preview');
+  if (!previewEl) return;
+  const plano = `${isAssistant ? 'Tú (bot): ' : ''}${String(text ?? '').slice(0, 80)}`;
+  previewEl.dataset.lastPreview = plano;
+  const borrador = draftSummary(row.dataset.customerId);
+  if (borrador) {
+    previewEl.innerHTML = draftPreviewHtml(borrador);
+    return;
+  }
+  previewEl.textContent = plano;
+}
+
+// Cerrar la pestana o recargar no pasa por closeConversation: hay que guardar aca tambien, y sin
+// debounce, porque la pagina no llega a esperar los 300 ms.
+window.addEventListener('beforeunload', () => {
+  clearTimeout(draftSaveTimer);
+  saveComposerDraft();
+});
+
+// --- Nota de voz -----------------------------------------------------------
+//
+// El navegador no puede grabar lo que WhatsApp necesita (Ogg/Opus): Chrome y Firefox graban Opus pero
+// adentro de un WebM, Safari graba AAC adentro de un MP4. Se manda lo que el navegador sepa grabar y el
+// servidor cambia el envoltorio con ffmpeg antes de subirlo (ver src/media/voiceNote.ts). Aca no se
+// intenta adivinar ni convertir nada.
+let voiceRecorder = null;
+let voiceChunks = [];
+let voiceStream = null;
+let voiceTimer = null;
+let voiceStartedAt = 0;
+let voiceDiscarded = false;
+
+// Cinco minutos. Una nota de voz de venta no dura mas, y sin tope un micrófono abierto por olvido
+// termina en un archivo que no pasa el limite de subida.
+const VOICE_MAX_MS = 5 * 60 * 1000;
+
+function pickVoiceMimeType() {
+  const candidatos = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus'];
+  if (typeof MediaRecorder === 'undefined' || !MediaRecorder.isTypeSupported) return '';
+  return candidatos.find((tipo) => MediaRecorder.isTypeSupported(tipo)) || '';
+}
+
+function showVoiceRecordingBar(visible) {
+  const barra = document.getElementById('composer-recording');
+  const fila = document.querySelector('#modal-composer .composer-row');
+  if (barra) barra.hidden = !visible;
+  if (fila) fila.hidden = visible;
+}
+
+function updateVoiceTimer() {
+  const el = document.getElementById('composer-rec-time');
+  if (!el) return;
+  const segundos = Math.floor((Date.now() - voiceStartedAt) / 1000);
+  el.textContent = `${Math.floor(segundos / 60)}:${String(segundos % 60).padStart(2, '0')}`;
+  if (Date.now() - voiceStartedAt >= VOICE_MAX_MS) stopVoiceRecording();
+}
+
+async function startVoiceRecording() {
+  if (!currentConversationId || voiceRecorder) return;
+  if (composerFiles.length >= COMPOSER_MAX_FILES) {
+    setStatus(`No entran mas de ${COMPOSER_MAX_FILES} archivos por mensaje`, true);
+    return;
+  }
+  if (typeof MediaRecorder === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+    setStatus('Este navegador no puede grabar audio. Podés adjuntar un archivo de audio con el clip.', true);
+    return;
+  }
+  try {
+    voiceStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (err) {
+    // Permiso denegado es lo mas comun, y el mensaje del navegador no dice donde se arregla.
+    setStatus(`No se pudo usar el micrófono: ${err.message}. Revisá el permiso del micrófono en el navegador.`, true);
+    return;
+  }
+  const mimeType = pickVoiceMimeType();
+  voiceChunks = [];
+  voiceDiscarded = false;
+  voiceRecorder = new MediaRecorder(voiceStream, mimeType ? { mimeType } : undefined);
+  voiceRecorder.addEventListener('dataavailable', (event) => {
+    if (event.data && event.data.size > 0) voiceChunks.push(event.data);
+  });
+  voiceRecorder.addEventListener('stop', onVoiceRecorderStop);
+  voiceRecorder.start();
+  voiceStartedAt = Date.now();
+  showVoiceRecordingBar(true);
+  updateVoiceTimer();
+  voiceTimer = setInterval(updateVoiceTimer, 250);
+}
+
+function releaseVoiceStream() {
+  if (voiceTimer) { clearInterval(voiceTimer); voiceTimer = null; }
+  // Sin esto el navegador deja el indicador de "micrófono en uso" encendido para siempre.
+  if (voiceStream) { voiceStream.getTracks().forEach((track) => track.stop()); voiceStream = null; }
+  voiceRecorder = null;
+  showVoiceRecordingBar(false);
+}
+
+function onVoiceRecorderStop() {
+  const chunks = voiceChunks;
+  const tipoGrabado = voiceRecorder && voiceRecorder.mimeType ? voiceRecorder.mimeType : 'audio/webm';
+  const descartada = voiceDiscarded;
+  voiceChunks = [];
+  releaseVoiceStream();
+  if (descartada || chunks.length === 0) return;
+  // El tipo se manda SIN parametros: "audio/webm;codecs=opus" no coincide con ninguna lista blanca, ni
+  // la del panel ni la del servidor, y el envio rebotaba con "tipo de archivo no permitido".
+  const tipo = baseMimeType(tipoGrabado) || 'audio/webm';
+  const extension = tipo.includes('mp4') ? 'm4a' : tipo.includes('ogg') ? 'ogg' : 'webm';
+  const sello = new Date().toISOString().slice(11, 19).replace(/:/g, '-');
+  const archivo = new File(chunks, `nota-de-voz-${sello}.${extension}`, { type: tipo });
+  addComposerFiles([archivo]);
+}
+
+function stopVoiceRecording() {
+  if (!voiceRecorder) return;
+  voiceDiscarded = false;
+  voiceRecorder.stop();
+}
+
+function cancelVoiceRecording() {
+  if (!voiceRecorder) return;
+  voiceDiscarded = true;
+  voiceRecorder.stop();
+}
+
+// --- Arrastrar archivos al hilo -------------------------------------------
+// El contador existe porque 'dragleave' tambien se dispara al pasar de un hijo a otro dentro de la
+// misma zona: sin contar entradas y salidas, el cartel parpadea mientras se mueve el mouse encima.
+let threadDragDepth = 0;
+
+function threadDragHasFiles(event) {
+  const types = event.dataTransfer ? Array.from(event.dataTransfer.types || []) : [];
+  return types.includes('Files');
+}
+
+function showThreadDropzone(visible) {
+  const zone = document.getElementById('thread-dropzone');
+  if (zone) zone.hidden = !visible;
+}
+
+function bindThreadDropzone() {
+  const zona = document.querySelector('.chat-split-thread');
+  if (!zona || zona.dataset.dropBound === '1') return;
+  zona.dataset.dropBound = '1';
+  zona.addEventListener('dragenter', (event) => {
+    if (!threadDragHasFiles(event) || !currentConversationId) return;
+    event.preventDefault();
+    threadDragDepth += 1;
+    showThreadDropzone(true);
+  });
+  zona.addEventListener('dragover', (event) => {
+    if (!threadDragHasFiles(event) || !currentConversationId) return;
+    // Sin esto el navegador ABRE el archivo en la pestaña en vez de dejarlo soltar.
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+  });
+  zona.addEventListener('dragleave', () => {
+    threadDragDepth = Math.max(0, threadDragDepth - 1);
+    if (threadDragDepth === 0) showThreadDropzone(false);
+  });
+  zona.addEventListener('drop', (event) => {
+    if (!threadDragHasFiles(event)) return;
+    event.preventDefault();
+    threadDragDepth = 0;
+    showThreadDropzone(false);
+    if (!currentConversationId) return;
+    addComposerFiles(event.dataTransfer.files);
+  });
+}
+
+// Soltar un archivo FUERA del hilo no puede terminar con el navegador abriendolo y perdiendo lo que
+// estaba escrito en el compositor.
+document.addEventListener('dragover', (event) => { if (threadDragHasFiles(event)) event.preventDefault(); });
+document.addEventListener('drop', (event) => {
+  if (!threadDragHasFiles(event)) return;
+  if (!event.target.closest('.chat-split-thread')) event.preventDefault();
+});
+
+// Pegar una captura de pantalla es el camino mas corto para mandar una foto y no requiere guardarla
+// antes en el disco.
+document.addEventListener('paste', (event) => {
+  if (!currentConversationId) return;
+  const activo = document.activeElement;
+  if (!activo || activo.id !== 'modal-composer-input') return;
+  const archivos = event.clipboardData ? event.clipboardData.files : null;
+  if (!archivos || archivos.length === 0) return;
+  event.preventDefault();
+  addComposerFiles(archivos);
+});
+
+// El alto de un textarea no se puede atar a su contenido desde CSS. Se pone en 'auto' primero para que
+// scrollHeight vuelva a medir el contenido real: sin ese paso el campo crece pero nunca se achica al
+// borrar texto. El techo lo pone el max-height del CSS, y ahi el textarea scrollea solo.
+function autoGrowComposer(el) {
+  if (!el) return;
+  el.style.height = 'auto';
+  const tope = parseFloat(getComputedStyle(el).maxHeight) || Infinity;
+  // La barra de scroll aparece SOLO al llegar al techo. Con overflow-y:auto fijo se veia una barra en
+  // un campo de un renglon: scrollHeight incluye el padding y queda un pixel por encima del alto.
+  el.style.overflowY = el.scrollHeight > tope ? 'auto' : 'hidden';
+  el.style.height = `${Math.min(el.scrollHeight, tope)}px`;
+}
+
+function onComposerKeydown(event) {
+  // Shift+Enter escribe un salto de linea; Enter solo manda. Es lo que hace WhatsApp Web y lo que ya
+  // tienen en los dedos las personas que atienden.
+  if (event.key !== 'Enter' || event.shiftKey) return;
+  event.preventDefault();
+  sendManualMessage();
 }
 
 async function sendManualMessage() {
   if (!currentConversationId) return;
   const input = document.getElementById('modal-composer-input');
   const text = input.value.trim();
-  if (!text && !composerFile) return;
+  if (!text && composerFiles.length === 0) return;
   input.disabled = true;
   try {
     const formData = new FormData();
     formData.append('text', text);
-    if (composerFile) formData.append('file', composerFile);
+    composerFiles.forEach((entry) => formData.append('files', entry.file));
     await apiFetch(`/admin/api/conversations/${currentConversationId}/messages`, {
       method: 'POST',
       body: formData,
     });
     input.value = '';
+    autoGrowComposer(input);
     clearComposerFile();
+    // El mensaje salio: el borrador ya no representa nada pendiente. Va antes de openCustomer, que
+    // vuelve a leerlo para restaurarlo.
+    clearComposerDraft(currentCustomerId);
     renderHandoffState(true);
     await openCustomer(currentCustomerId);
   } catch (err) {
@@ -3738,6 +4659,7 @@ async function loadRole() {
     if (res.ok) {
       const me = await res.json();
       isOwner = me.role !== 'EMPLOYEE';
+      currentBusinessId = me.id || '';
       const badge = document.getElementById('session-badge');
       if (badge) {
         const roleIcon = isOwner
@@ -3766,8 +4688,7 @@ async function loadRole() {
 function bumpCustomerRow(customerId, previewText, isAssistant, updatedAtIso) {
   const row = document.querySelector(`.conv-row[data-customer-id="${customerId}"]`);
   if (!row) return false;
-  const previewEl = row.querySelector('.conv-preview');
-  if (previewEl) previewEl.textContent = `${isAssistant ? 'Tú (bot): ' : ''}${String(previewText ?? '').slice(0, 80)}`;
+  setRowPreview(row, previewText, isAssistant);
   const timeEl = row.querySelector('.conv-time');
   if (timeEl) {
     timeEl.dataset.updatedAt = updatedAtIso;
@@ -3920,8 +4841,7 @@ function initRealtime() {
     const emptyState = list.querySelector('.empty-state');
     if (emptyState) list.innerHTML = '';
     list.insertAdjacentHTML('afterbegin', customerRowHtml(customerRowFromConversationEvent(c)));
-    const countEl = document.getElementById('tab-count-conversations');
-    if (countEl) countEl.textContent = String(document.querySelectorAll('.conv-row').length);
+    setTabCount('tab-count-conversations', document.querySelectorAll('.conv-row').length);
     updateTotalUnreadBadge();
   });
 
@@ -3937,8 +4857,7 @@ function initRealtime() {
       const avatarEl = row.querySelector('.conv-avatar');
       if (avatarEl) { avatarEl.textContent = displayName.trim().charAt(0).toUpperCase() || '?'; avatarEl.style.background = avatarColor(c.customer.phoneNumber); }
       if (c.lastMessage) {
-        const previewEl = row.querySelector('.conv-preview');
-        if (previewEl) previewEl.textContent = `${c.lastMessage.role === 'ASSISTANT' ? 'Tú (bot): ' : ''}${String(c.lastMessage.content).slice(0, 80)}`;
+        setRowPreview(row, c.lastMessage.content, c.lastMessage.role === 'ASSISTANT');
       }
       row.dataset.activeConversationId = c.id;
       const badgesEl = row.querySelector('.conv-badges');

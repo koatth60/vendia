@@ -643,6 +643,7 @@ enum MediaType {
   IMAGE
   VIDEO
   AUDIO
+  DOCUMENT
 }
 
 // Por que canal entro este cliente/conversacion. Hoy todo es WHATSAPP (unico canal implementado) y ese
@@ -906,6 +907,9 @@ model Message {
   content           String
   mediaS3Key        String?
   mediaType         MediaType?
+  // Nombre original del archivo. WhatsApp lo muestra en la burbuja del documento y el panel muestra el
+  // mismo: sin esto, "catalogo-2026.pdf" se ve como "documento" en los dos lados.
+  mediaFilename     String?
   imageAnalysis     String?
   whatsappMessageId String?      @unique
   relatedProductId  String?
