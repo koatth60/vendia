@@ -1719,8 +1719,17 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
               context.conversationId
             );
 
-        if (saleStateOn && items.length === 0) {
-          return { closed: false, note: "Todavia no hay ningun producto en el pedido en curso - usa set_order_item primero." };
+        // Un pedido sin lineas no es un pedido, con SaleState prendido o apagado. Este guard estaba dentro
+        // de `saleStateOn`; con SaleState apagado el modelo cerro con direccion y sin items y quedo un
+        // pedido de cero lineas y totalAmount 0 (produccion 2026-09-17, cmu4suduh001sq92ka4r3j35y). Es una
+        // red, no el piso: el piso es SaleState, donde las lineas las escribe set_order_item.
+        if (items.length === 0) {
+          return {
+            closed: false,
+            note: saleStateOn
+              ? "Todavia no hay ningun producto en el pedido en curso - usa set_order_item primero."
+              : "No se cerro nada y no se creo ningun pedido: no pasaste ningun producto en `items`, o ninguno de los que pasaste existe en el catalogo. Volve a llamar close_conversation con los productos reales que el cliente esta comprando.",
+          };
         }
 
         // Real production incident (2026-09-12): a sale closed without ever asking the customer's color.

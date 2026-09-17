@@ -104,6 +104,12 @@ before(async () => {
     data: { businessId, type: "TRANSFERENCIA", label: "Nequi", details: "300", active: true },
   });
   await prisma.shippingRate.create({ data: { businessId, label: "Estandar", cost: 9000 } });
+  // close_conversation SOLD ya no acepta un pedido sin lineas (ver el guard en src/ai/tools.ts): las
+  // pruebas de este archivo son sobre la CONFIRMACION, no sobre el armado del pedido, asi que necesitan
+  // un producto real que resolver.
+  await prisma.product.create({
+    data: { businessId, name: "Reloj Serie 11 Mini", description: "x", price: 145000, currency: "COP", stock: 10 },
+  });
   const customer = await prisma.customer.create({
     data: { businessId, phoneNumber: `573007${String(Date.now()).slice(-6)}`, name: "Milena" },
   });
@@ -119,6 +125,7 @@ after(async () => {
   await prisma.conversation.deleteMany({ where: { customerId } });
   await prisma.paymentMethod.deleteMany({ where: { businessId } });
   await prisma.shippingRate.deleteMany({ where: { businessId } });
+  await prisma.product.deleteMany({ where: { businessId } });
   await prisma.customer.deleteMany({ where: { id: customerId } });
   await prisma.business.deleteMany({ where: { id: businessId } });
 });
@@ -419,6 +426,7 @@ test("diez intentos seguidos de cerrar la misma venta: una sola pregunta al duen
       const result = (await runCatalogTool(context, "close_conversation", {
         outcome: "SOLD",
         summary: "1x Reloj Serie 11 Mini - $154.000",
+        items: [{ productName: "Reloj Serie 11 Mini", quantity: 1 }],
       })) as { closed: boolean; pending?: boolean };
       assert.equal(result.closed, false, `intento ${i + 1}: la venta no se cierra sin la confirmacion del dueno`);
       assert.equal(result.pending, true);

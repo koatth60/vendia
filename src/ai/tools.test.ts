@@ -757,6 +757,11 @@ test("close_conversation SOLD with a payment-confirmation gate: falls back to pl
   await seedSaleGateRequirements(business2.id);
   const customer2 = await prisma.customer.create({ data: { businessId: business2.id, phoneNumber: `573005${Date.now()}` } });
   const conversation2 = await prisma.conversation.create({ data: { customerId: customer2.id } });
+  // Un pedido sin lineas ya no llega a la escalera de confirmacion (se bloquea antes), asi que esta
+  // prueba - que es sobre la ESCALERA, no sobre el pedido - necesita un item real del catalogo.
+  await prisma.product.create({
+    data: { businessId: business2.id, name: "Producto Escalera", description: "x", price: 25000, currency: "COP", stock: 10 },
+  });
 
   const originalFetch2 = globalThis.fetch;
   let textSent = false;
@@ -785,6 +790,7 @@ test("close_conversation SOLD with a payment-confirmation gate: falls back to pl
     const result = (await runCatalogTool(context, "close_conversation", {
       outcome: "SOLD",
       summary: "Compra con fallback de confirmacion",
+      items: [{ productName: "Producto Escalera", quantity: 1 }],
     })) as { closed: boolean; pending: boolean };
 
     assert.equal(result.closed, false);
@@ -802,6 +808,7 @@ test("close_conversation SOLD with a payment-confirmation gate: falls back to pl
     await prisma.conversation.deleteMany({ where: { id: conversation2.id } });
     await prisma.paymentMethod.deleteMany({ where: { businessId: business2.id } });
     await prisma.shippingRate.deleteMany({ where: { businessId: business2.id } });
+    await prisma.product.deleteMany({ where: { businessId: business2.id } });
     await prisma.customer.deleteMany({ where: { id: customer2.id } });
     await prisma.business.deleteMany({ where: { id: business2.id } });
   }
@@ -1080,22 +1087,38 @@ test("cancel_order refuses an already-canceled order", async () => {
 
 test("close_conversation SOLD with unresolvable items notifies the owner about them", async () => {
   stubWhatsappFetch();
+  // El nombre real no puede compartir palabras con el inventado: resolveOrderItems busca por relevancia,
+  // y con "Producto ..." de los dos lados el item inventado cae en la MISMA linea del real y nunca llega a
+  // `unresolved`, que es justo lo que este test mide.
+  const realProductName = `Reloj Aviso ${randomUUID()}`;
+  await prisma.product.create({
+    data: { businessId, name: realProductName, description: "x", price: 30000, currency: "COP", stock: 10 },
+  });
   try {
     const context = await freshContext();
     // context.businessId (the shared fixture) has a contactPhone configured, so this sale also requires
     // owner confirmation (pending:true, not closed:true) - the unresolved-items alert fires regardless.
+    //
+    // El pedido es PARCIAL a proposito: una linea que resuelve y otra que no. Ese es el caso que este
+    // aviso existe para cubrir - el pedido se guarda igual y la duena tiene que saber que le falta algo.
+    // Un cierre donde NO resuelve NINGUNA linea ya no llega hasta aca: se bloquea antes, sin pedido y sin
+    // aviso, porque no hay ningun pedido parcial del que avisar (ver el test del guard mas abajo).
     await runCatalogTool(context, "close_conversation", {
       outcome: "SOLD",
       summary: "Pedido con un item que no existe en el catalogo",
-      items: [{ productName: "Producto que no existe en absoluto", quantity: 1 }],
+      items: [
+        { productName: realProductName, quantity: 1 },
+        { productName: "Zapatilla inexistente absoluta", quantity: 1 },
+      ],
     });
 
     assert.equal(sentMessages.length, 1, "owner must be alerted about the unresolved item");
-    assert.match(sentMessages[0].body, /Producto que no existe en absoluto/);
+    assert.match(sentMessages[0].body, /Zapatilla inexistente absoluta/);
 
     await prisma.order.deleteMany({ where: { conversationId: context.conversationId } });
   } finally {
     restoreFetch();
+    await prisma.product.deleteMany({ where: { businessId, name: realProductName } });
   }
 });
 
@@ -1570,5 +1593,90 @@ test("send_product_media no reenvia lo que el presentador ya tiene armado para e
     assert.equal(sentMedia.length, 1, "el reenvio explicito de un turno posterior si sale");
   } finally {
     restoreFetch();
+  }
+});
+
+// ==============================================================================================
+// Un pedido sin lineas no es un pedido (2026-09-17)
+// ==============================================================================================
+//
+// Defecto real de produccion, pedido cmu4suduh001sq92ka4r3j35y: el guard de "no hay items" vivia dentro
+// de `if (saleStateOn && ...)`, el negocio tiene saleStateEnabled en false, y quedo guardada una venta
+// con cero lineas, totalAmount 0 y sin forma de saber que se vendio. Con SaleState apagado el modelo
+// sigue dictando los items, asi que el guard tiene que valer en los dos modos.
+
+// El negocio va aparte del compartido a proposito: con la compuerta de venta satisfecha (metodo de pago,
+// tarifa de envio y telefono de contacto reales) lo unico que puede bloquear el cierre es el guard de
+// items, que es lo que se esta probando. Si la compuerta bloqueara antes, la prueba pasaria por el motivo
+// equivocado.
+async function vendibleContext(): Promise<{ context: ToolContext; cleanup: () => Promise<void> }> {
+  const business2 = await prisma.business.create({
+    data: {
+      name: `Test ${randomUUID()}`,
+      email: `test-${randomUUID()}@example.com`,
+      passwordHash: "x",
+      contactPhone: "573005551111",
+      contactName: "Owner",
+    },
+  });
+  await seedSaleGateRequirements(business2.id);
+  const customer2 = await prisma.customer.create({ data: { businessId: business2.id, phoneNumber: `573008${Date.now()}` } });
+  const conversation2 = await prisma.conversation.create({ data: { customerId: customer2.id } });
+  await prisma.message.create({ data: { conversationId: conversation2.id, role: "CUSTOMER", content: "Hola" } });
+  return {
+    context: {
+      businessId: business2.id,
+      conversationId: conversation2.id,
+      customerId: customer2.id,
+      credentials: { phoneNumberId: "test-id", accessToken: "test-token" },
+      recipientPhone: "573009998877",
+    },
+    cleanup: async () => {
+      await prisma.order.deleteMany({ where: { conversationId: conversation2.id } });
+      await prisma.message.deleteMany({ where: { conversationId: conversation2.id } });
+      await prisma.conversation.deleteMany({ where: { id: conversation2.id } });
+      await prisma.paymentMethod.deleteMany({ where: { businessId: business2.id } });
+      await prisma.shippingRate.deleteMany({ where: { businessId: business2.id } });
+      await prisma.product.deleteMany({ where: { businessId: business2.id } });
+      await prisma.customer.deleteMany({ where: { id: customer2.id } });
+      await prisma.business.deleteMany({ where: { id: business2.id } });
+    },
+  };
+}
+
+test("close_conversation SOLD sin ningun item no cierra nada ni crea un pedido vacio", async () => {
+  const { context, cleanup } = await vendibleContext();
+  try {
+    const result = (await runCatalogTool(context, "close_conversation", {
+      outcome: "SOLD",
+      summary: "Venta de 1x Smartwatch, pago contra entrega.",
+      shippingAddress: "Calle 22 #108-62",
+      items: [],
+    })) as { closed: boolean; note: string };
+
+    assert.equal(result.closed, false);
+    assert.match(result.note, /no se creo ningun pedido/i);
+    assert.equal(await prisma.order.count({ where: { conversationId: context.conversationId } }), 0);
+    const conversation = await prisma.conversation.findUnique({ where: { id: context.conversationId } });
+    assert.notEqual(conversation?.status, "SOLD", "no se puede marcar vendida una conversacion sin pedido");
+  } finally {
+    await cleanup();
+  }
+});
+
+test("close_conversation SOLD cuando NINGUN item resuelve contra el catalogo tampoco crea el pedido", async () => {
+  const { context, cleanup } = await vendibleContext();
+  try {
+    const result = (await runCatalogTool(context, "close_conversation", {
+      outcome: "SOLD",
+      summary: "Venta de 1x producto que no existe",
+      items: [{ productName: "Producto que no existe en ningun catalogo", quantity: 1 }],
+    })) as { closed: boolean; note: string };
+
+    assert.equal(result.closed, false);
+    assert.match(result.note, /no se creo ningun pedido/i);
+    assert.equal(await prisma.order.count({ where: { conversationId: context.conversationId } }), 0);
+  } finally {
+    await cleanup();
   }
 });
