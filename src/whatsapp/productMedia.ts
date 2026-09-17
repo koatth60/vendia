@@ -25,12 +25,20 @@ export async function sendMediaWithSpacing(
   conversationId: string,
   productId: string,
   productName: string,
-  media: { type: string; url: string; s3Key: string }[]
+  media: { type: string; url: string; s3Key: string }[],
+  /**
+   * Pie que WhatsApp muestra debajo del PRIMER archivo. Lo usa la vitrina de categoria, donde salen
+   * seguidas las fotos de productos distintos y sin pie no se sabe cual es cual; una ficha de un solo
+   * producto no lo manda, porque el mensaje de arriba ya dice de que es. Va solo en el primero para que
+   * un producto con cinco fotos no repita el mismo pie cinco veces.
+   */
+  caption?: string
 ): Promise<void> {
   for (let i = 0; i < media.length; i++) {
     if (i > 0) await sleep(1200);
     const item = media[i];
     const mediaType = item.type === "IMAGE" ? "IMAGE" : "VIDEO";
+    const itemCaption = i === 0 ? caption : undefined;
     // El archivo se le SUBE a Meta y viaja un id; solo si esa subida falla se cae al link de S3, que es
     // el camino que producia el 131053 (ver src/whatsapp/mediaUpload.ts).
     const enviable = await resolveSendableMedia(credentials, item);
@@ -39,7 +47,10 @@ export async function sendMediaWithSpacing(
       conversationId,
       credentials,
       to: recipientPhone,
-      content: mediaType === "IMAGE" ? { kind: "image", url: enviable } : { kind: "video", url: enviable },
+      content:
+        mediaType === "IMAGE"
+          ? { kind: "image", url: enviable, caption: itemCaption }
+          : { kind: "video", url: enviable, caption: itemCaption },
     });
     // Un id que Meta ya no reconoce (vencido, o borrado de su lado) se cura solo: se olvida el cacheado y
     // se reintenta una vez subiendo el archivo de nuevo. Sin esto, un id muerto dejaria ese producto sin
@@ -52,7 +63,10 @@ export async function sendMediaWithSpacing(
         conversationId,
         credentials,
         to: recipientPhone,
-        content: mediaType === "IMAGE" ? { kind: "image", url: reintento } : { kind: "video", url: reintento },
+        content:
+        mediaType === "IMAGE"
+          ? { kind: "image", url: reintento, caption: itemCaption }
+          : { kind: "video", url: reintento, caption: itemCaption },
       });
     }
     // Se propaga como antes: quien llama a esto necesita saber que la foto NO salio, porque si no el

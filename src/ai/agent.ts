@@ -27,7 +27,12 @@ import {
   productFacts,
   type CatalogBlock,
 } from "../catalog/presenter";
-import { getLastPresentedProductIds, setLastPresentedProductIds, getMediaSentProductIds } from "../catalog/presentedList";
+import {
+  getLastPresentedProductIds,
+  setLastPresentedProductIds,
+  getMediaSentProductIds,
+  getBrowsePhotoProductIds,
+} from "../catalog/presentedList";
 import { recordAgentTurn } from "./agentTurns";
 import { findShadowCatalogFindings, verifyAgainstCatalog, serializeFinding } from "../catalog/outputValidation";
 import { listActivePaymentMethods, resolveConfiguredPaymentMethod, matchesConfiguredPaymentMethod } from "../catalog/paymentMethods";
@@ -884,6 +889,9 @@ export async function generateReply(
   // Hasta el 2026-09-16 solo lo consultaba el auto-envio de get_product_details; el presentador de la Fase B
   // adjuntaba los medios siempre, y un cliente que volvia a un producto recibia las mismas fotos de nuevo.
   const alreadyPresentedProductIds = await getMediaSentProductIds(conversationId);
+  // Y las fotos de vitrina que ya salieron, que es un registro APARTE (ver getBrowsePhotoProductIds):
+  // una foto de vitrina vista no marca al producto como ya presentado, solo evita repetir ESA foto.
+  const browsePhotoSentProductIds = await getBrowsePhotoProductIds(conversationId);
   // EL CLIENTE QUE YA COMPRO NO ESTA NAVEGANDO EL CATALOGO (2026-09-17).
   //
   // resolveProductScope es funcion pura del ULTIMO mensaje: no sabe en que punto de la relacion esta el
@@ -908,7 +916,15 @@ export async function generateReply(
     context.businessId,
     suppressBrowsingScope(scopeDelMensaje, customerText ?? "", enCierreOPostVenta)
   );
-  const renderOptions = { currency: negocio.currency, locale: negocio.locale, alreadyPresentedProductIds };
+  const renderOptions = {
+    currency: negocio.currency,
+    locale: negocio.locale,
+    alreadyPresentedProductIds,
+    browsePhotoSentProductIds,
+    // Hasta donde llegan las fotos lo decide el dueno en el panel, nunca el modelo ni una lectura del
+    // mensaje. Sin valor configurado es "PRODUCT": exactamente lo que el sistema hacia antes de esto.
+    photoScope: personality?.catalogPhotoScope ?? "PRODUCT",
+  };
   // Mutable porque hay un segundo momento en el que el servidor puede resolver el alcance: ver
   // promoteScopeFromIdentifiedPhoto mas abajo.
   let catalogBlocks = renderCatalog(resolvedScope, renderOptions);
@@ -1102,7 +1118,11 @@ export async function generateReply(
               // modelText, no text: el cliente ve la descripcion recortada, el modelo la ve entera, asi
               // que una pregunta sobre una caracteristica que quedo afuera la contesta con el dato real.
               catalogBlocks.map((b) => b.modelText).join("\n---\n") +
-              (catalogMediaProductIds().length > 0 ? `\n\nLas fotos de ese producto tambien salen solas, en este mismo turno.` : "") +
+              (catalogMediaProductIds().length > 0
+                ? `
+
+Las fotos de esos productos tambien salen solas, en este mismo turno, cada una con su nombre y su numero debajo.`
+                : "") +
               // Lo que se le pide es lo mismo en los dos casos: una frase de introduccion. Donde va el
               // bloque dejo de ser asunto suyo - con un solo bloque el servidor lo pega adentro de su
               // mensaje (ver finalizeTurn), y con varios salen aparte. La instruccion de la marca que

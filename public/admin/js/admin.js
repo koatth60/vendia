@@ -187,6 +187,7 @@ async function loadBusiness() {
     document.getElementById('bot-category').value = business.businessCategory || '';
     document.getElementById('bot-required-effects').checked = Boolean(business.requiredEffectsEnabled);
     document.getElementById('bot-interactive-lists').checked = Boolean(business.interactiveListsEnabled);
+    setCatalogPhotoScope(business.catalogPhotoScope || 'PRODUCT');
     document.getElementById('bot-gendered-address').checked = Boolean(business.genderedAddressEnabled);
     document.getElementById('bot-female-term').value = business.femaleAddressTerm || '';
     document.getElementById('bot-male-term').value = business.maleAddressTerm || '';
@@ -542,6 +543,7 @@ async function saveBusiness() {
   const cartRecoveryTemplateLanguage = document.getElementById('business-cart-recovery-language').value.trim() || 'es';
   const requiredEffectsEnabled = document.getElementById('bot-required-effects').checked;
   const interactiveListsEnabled = document.getElementById('bot-interactive-lists').checked;
+  const catalogPhotoScope = readCatalogPhotoScope();
   const genderedAddressEnabled = document.getElementById('bot-gendered-address').checked;
   const femaleAddressTerm = document.getElementById('bot-female-term').value.trim();
   const maleAddressTerm = document.getElementById('bot-male-term').value.trim();
@@ -566,7 +568,7 @@ async function saveBusiness() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         name, description, customInstructions, assistantName, botTone, botDialect, botGreeting, botNeverSay,
-        autoSendPhotoOnQuote, offerPhotosBeforeSending, requirePaymentProof, requiredEffectsEnabled, interactiveListsEnabled, businessCategory, contactName, contactPhone,
+        autoSendPhotoOnQuote, offerPhotosBeforeSending, requirePaymentProof, requiredEffectsEnabled, interactiveListsEnabled, catalogPhotoScope, businessCategory, contactName, contactPhone,
         ownerReminderMinutes, ownerQuestionTimeoutHours, intentEscalationTimeoutHours,
         followUpTemplateName, followUpTemplateLanguage, followUpDelayHours,
         abandonedAfterHours, cartRecoveryTemplateName, cartRecoveryTemplateLanguage,
@@ -670,6 +672,24 @@ function updateTallaFieldVisibility() {
 function toggleGenderedAddressFields() {
   const fields = document.getElementById('gendered-address-fields');
   if (fields) fields.hidden = !document.getElementById('bot-gendered-address').checked;
+}
+
+// Hasta donde manda fotos el bot (Business.catalogPhotoScope). Son tres niveles que se contienen, no
+// tres interruptores: elegir uno apaga los otros dos solo, sin que nadie tenga que sincronizarlos.
+const CATALOG_PHOTO_SCOPES = ['PRODUCT', 'CATEGORY', 'CATALOG'];
+
+function setCatalogPhotoScope(value) {
+  const scope = CATALOG_PHOTO_SCOPES.includes(value) ? value : 'PRODUCT';
+  document.querySelectorAll('input[name="catalog-photo-scope"]').forEach((input) => {
+    input.checked = input.value === scope;
+  });
+}
+
+function readCatalogPhotoScope() {
+  const marcado = document.querySelector('input[name="catalog-photo-scope"]:checked');
+  // Sin ninguno marcado se guarda el nivel mas conservador, que es el comportamiento historico: nunca
+  // se le enciende a un negocio un envio de fotos mas amplio por un formulario a medias.
+  return marcado && CATALOG_PHOTO_SCOPES.includes(marcado.value) ? marcado.value : 'PRODUCT';
 }
 
 // ---------------------------------------------------------------------------

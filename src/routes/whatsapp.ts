@@ -33,6 +33,7 @@ import {
   setHumanControl,
   updateConversationStatus,
   getRelatedProductNameForMessage,
+  getRelatedProductIdForMessage,
   customerDisplayName,
   saveCustomerContactInfo,
   recordMessageDeliveryStatus,
@@ -620,6 +621,7 @@ async function runGenerateAndSend(conversationId: string, items: ReplyBurstItem[
       shippingRatesConfigured,
       saleStateEnabled: business.saleStateEnabled,
       requiredEffectsEnabled: business.requiredEffectsEnabled,
+      catalogPhotoScope: business.catalogPhotoScope,
       paymentExamples,
     },
     combinedRawText,
@@ -848,6 +850,9 @@ whatsappRouter.post("/webhook", async (req, res) => {
 
     // La fila que el cliente toco, cuando la hubo: nombre para el historial, id para resolver el alcance.
     let listSelection: { productId: string; label: string } | null = null;
+    // El producto de la foto que el cliente cito con "Responder", si cito alguna (se resuelve mas abajo,
+    // cuando ya se sabe si el mensaje trae un mensaje citado).
+    let quotedProductId: string | undefined;
 
     // ELECCION CON EL DEDO. El cliente toco una fila de una lista interactiva y vuelve el id del producto
     // tal cual lo mando el servidor. No se parsea nada: no hay forma de que esto resuelva a otro producto.
@@ -1007,6 +1012,12 @@ whatsappRouter.post("/webhook", async (req, res) => {
         if (relatedProductName) {
           text = `[El cliente esta respondiendo a la foto/video de: ${relatedProductName}] ${text}`;
         }
+        // Y el ID, que es lo que DECIDE el alcance del turno. Hasta hoy solo viajaba el nombre, metido
+        // adentro del texto, y ese texto ni siquiera llegaba a resolveProductScope (se manda rawText,
+        // sin la marca): tocar "Responder" sobre una foto no cambiaba nada en el servidor. Con la
+        // vitrina de categoria ese gesto es justo la forma en que el cliente elige un producto entre
+        // varias fotos, asi que resuelve por id, igual que tocar una fila de una lista interactiva.
+        quotedProductId = (await getRelatedProductIdForMessage(business.id, quotedMessageId)) ?? undefined;
       }
 
       try {
@@ -1134,7 +1145,9 @@ whatsappRouter.post("/webhook", async (req, res) => {
       // en vez de tenerlo abierto esperando a que se genere una respuesta.
       replyBurstBuffer.add(conversation.id, {
         rawText,
-        selectedProductId: listSelection?.productId,
+        // La fila tocada de una lista interactiva manda sobre la foto citada: las dos son elecciones
+        // con el dedo, pero la fila es de ESTE mensaje y la foto puede ser de un mensaje viejo.
+        selectedProductId: listSelection?.productId ?? quotedProductId,
         customerSentAt,
         business,
         customer,

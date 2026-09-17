@@ -342,6 +342,32 @@ export async function recordMessageDeliveryStatus(whatsappMessageId: string, sta
   });
 }
 
+/**
+ * El producto de la foto que el cliente CITO, como id y ya verificado contra el catalogo activo de este
+ * negocio.
+ *
+ * Es la version sin prosa de getRelatedProductNameForMessage. El nombre sirve para que la conversacion
+ * se lea ("el cliente esta respondiendo a la foto de X"); para DECIDIR de que producto habla el turno
+ * hace falta el id, porque un nombre metido en el texto vuelve a pasar por el mismo match por palabras
+ * que la vitrina de categoria vino a hacer innecesario. Tocar "Responder" sobre una foto es un gesto tan
+ * inequivoco como tocar una fila de una lista interactiva, y resuelve igual: por id, sin adivinar.
+ */
+export async function getRelatedProductIdForMessage(
+  businessId: string,
+  whatsappMessageId: string
+): Promise<string | null> {
+  const message = await prisma.message.findUnique({
+    where: { whatsappMessageId },
+    select: { relatedProductId: true },
+  });
+  if (!message?.relatedProductId) return null;
+  const product = await prisma.product.findFirst({
+    where: { id: message.relatedProductId, businessId, active: true },
+    select: { id: true },
+  });
+  return product?.id ?? null;
+}
+
 export async function getRelatedProductNameForMessage(whatsappMessageId: string): Promise<string | null> {
   const message = await prisma.message.findUnique({
     where: { whatsappMessageId },

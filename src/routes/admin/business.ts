@@ -18,6 +18,10 @@ import { upload, businessIdOf } from "./shared";
 import { COUNTRIES, COUNTRY_CODES, isCountryCode } from "../../config/countries";
 import { parseBusinessHours } from "../../config/businessHours";
 
+// Los tres valores validos de Business.catalogPhotoScope. Vive aca y no en el panel: el servidor no
+// puede confiar en que el formulario mande uno de ellos.
+const CATALOG_PHOTO_SCOPES = ["PRODUCT", "CATEGORY", "CATALOG"];
+
 export const businessRouter = Router();
 
 businessRouter.get("/api/business", async (req, res) => {
@@ -45,6 +49,7 @@ businessRouter.put("/api/business", requireOwner, async (req, res) => {
     requirePaymentProof,
     requiredEffectsEnabled,
     interactiveListsEnabled,
+    catalogPhotoScope,
     businessCategory,
     contactPhone,
     contactName,
@@ -94,6 +99,10 @@ businessRouter.put("/api/business", requireOwner, async (req, res) => {
       // genderedAddressEnabled abajo, no el Boolean() directo de los tres de arriba.
       requiredEffectsEnabled: requiredEffectsEnabled !== undefined ? Boolean(requiredEffectsEnabled) : undefined,
       interactiveListsEnabled: interactiveListsEnabled !== undefined ? Boolean(interactiveListsEnabled) : undefined,
+      // Hasta donde llegan las fotos (2026-09-17). Un valor que no sea uno de los tres se ignora en vez
+      // de guardarse: la columna es un enum, y un PUT viejo o un formulario a medias no puede dejar el
+      // negocio con un alcance que el codigo no sabe leer.
+      catalogPhotoScope: CATALOG_PHOTO_SCOPES.includes(catalogPhotoScope) ? catalogPhotoScope : undefined,
       businessCategory: businessCategory || null,
       contactPhone,
       contactName,

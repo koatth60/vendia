@@ -2105,6 +2105,30 @@
     transform: rotate(45deg);
   }
 
+  /* Tres niveles que se contienen (producto, categoría, catálogo): no son tres
+     interruptores sueltos, así que se marcan como opciones excluyentes. La caja
+     es la misma de .toggle-row; lo que cambia es el control. */
+  .radio-group { margin: 0 0 6px; }
+  .toggle-row-radio { align-items: flex-start; }
+  .toggle-row-radio input[type="radio"] {
+    appearance: none; -webkit-appearance: none;
+    position: relative; flex-shrink: 0; margin: 1px 0 0;
+    width: 18px; height: 18px; padding: 0;
+    border: 1.5px solid var(--onix-border-strong); border-radius: 999px;
+    background: var(--onix-surface); cursor: pointer;
+  }
+  .toggle-row-radio input[type="radio"]:checked {
+    background: var(--onix-accent); border-color: var(--onix-accent);
+  }
+  .toggle-row-radio input[type="radio"]:checked::after {
+    content: ""; position: absolute; left: 4.5px; top: 4.5px;
+    width: 7px; height: 7px; border-radius: 999px;
+    background: var(--onix-accent-ink);
+  }
+  .toggle-row-radio input[type="radio"]:focus-visible {
+    outline: 2px solid var(--onix-accent); outline-offset: 2px;
+  }
+
   /* Aviso de cambios sin guardar, al lado del botón. */
   .panel-header-actions { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
   .dirty-flag { font-size: 12.5px; font-weight: 550; color: var(--onix-warn); }

@@ -115,6 +115,26 @@ export async function getProductById(businessId: string, id: string) {
   return withMedia;
 }
 
+/**
+ * Lo mismo que getProductById pero para varios ids, en UNA consulta.
+ *
+ * Existe por la vitrina de categoria (2026-09-17): una categoria de siete productos necesita las URLs
+ * firmadas de los siete, y siete llamadas a getProductById son siete viajes a la base por turno. El
+ * orden de salida es el de `ids`, no el de la base: quien llama ya decidio en que orden se le muestran
+ * al cliente, y ese orden es el que despues numera la lista.
+ */
+export async function getProductsByIds(businessId: string, ids: string[]) {
+  if (ids.length === 0) return [];
+  const products = await prisma.product.findMany({
+    where: { id: { in: ids }, businessId },
+    include: PRODUCT_INCLUDE,
+  });
+  await withFreshVariantMediaUrls(products);
+  const fresh = await withFreshMediaUrls(products);
+  const byId = new Map(fresh.map((p) => [p.id, p]));
+  return ids.map((id) => byId.get(id)).filter((p): p is (typeof fresh)[number] => Boolean(p));
+}
+
 // This business's own category-word synonyms (e.g. "reloj"="smartwatch", "guineo"="banano") - see
 // CategoryAlias in schema.prisma and attributeTaxonomy.ts. Shared by every caller that scores products
 // against a category word, so search_products/findConfidentProductMatch see the same synonyms

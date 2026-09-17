@@ -1,7 +1,7 @@
 import { prisma } from "../db/client";
 import { tokenize, normalizeForMatch } from "../search/text";
 import { canonicalColors, canonicalizeCategoryWord } from "./attributeTaxonomy";
-import { MIN_CONFIDENT_SCORE, relevanceScore, loadCategoryAliasMap, getProductById } from "./products";
+import { MIN_CONFIDENT_SCORE, relevanceScore, loadCategoryAliasMap, getProductById, getProductsByIds } from "./products";
 
 // Fase B del plan de catalogo y medios (ONIX-PLAN-CATALOGO-Y-MEDIOS.md, pieza 1).
 //
@@ -409,9 +409,13 @@ export async function resolveProductScope(
 }
 
 /**
- * Vuelve a leer con getProductById (que SI firma las URLs de S3) unicamente los productos cuyo alcance
- * manda fotos - uno o dos. Un alcance de grupo/catalogo completo no manda medios, asi que no paga nada
- * de esto.
+ * Vuelve a leer con URLs de S3 firmadas unicamente los productos cuyo alcance PUEDE mandar fotos.
+ *
+ * Hasta el 2026-09-17 eran solo "one" y "few", porque una lista de categoria o de catalogo nunca
+ * mandaba medios. Con la vitrina (Business.catalogPhotoScope) tambien pueden mandarlos "group" y "all",
+ * asi que sus productos tambien necesitan la firma - en UNA consulta, no una por producto. Que salga o
+ * no una foto lo sigue decidiendo renderCatalog: firmar una URL es trabajo local y barato, y no
+ * duplicar aca la regla de cuando hay vitrina vale mas que ahorrarselo.
  */
 export async function withSignedMedia(businessId: string, scope: ProductScope): Promise<ProductScope> {
   if (scope.kind === "one") {
@@ -422,9 +426,18 @@ export async function withSignedMedia(businessId: string, scope: ProductScope): 
     return { kind: "one", product, variant };
   }
   if (scope.kind === "few") {
-    const fresh = await Promise.all(scope.products.map((p) => getProductById(businessId, p.id)));
-    const products = fresh.filter((p): p is NonNullable<typeof p> => Boolean(p)) as unknown as ScopeProduct[];
+    const fresh = await getProductsByIds(businessId, scope.products.map((p) => p.id));
+    const products = fresh as unknown as ScopeProduct[];
     return products.length > 0 ? { kind: "few", products } : scope;
+  }
+  if (scope.kind === "group" || scope.kind === "all") {
+    const fresh = await getProductsByIds(businessId, scope.products.map((p) => p.id));
+    const products = fresh as unknown as ScopeProduct[];
+    // Una lectura que vuelve vacia (o incompleta) no puede recortarle productos a la lista: el cliente
+    // veria una categoria a la que le faltan renglones. Ante cualquier diferencia se conserva el alcance
+    // original, que ya tiene todos los productos - solo se pierde la firma fresca de las fotos.
+    if (products.length !== scope.products.length) return scope;
+    return scope.kind === "group" ? { kind: "group", category: scope.category, products } : { kind: "all", products };
   }
   return scope;
 }

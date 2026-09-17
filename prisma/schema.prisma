@@ -116,6 +116,18 @@ model Business {
   // Off por defecto y con su interruptor en el panel: cambia la FORMA de un mensaje que ve el cliente, y
   // eso no se puede validar sin una conversacion real. Apagada, sale el texto numerado de siempre.
   interactiveListsEnabled   Boolean                   @default(false)
+  // HASTA DONDE LLEGAN LAS FOTOS (2026-09-17). Lo elige el dueno en el panel, y es la unica cosa que lo
+  // decide: ni el modelo ni una lectura del mensaje del cliente.
+  //
+  //   PRODUCT  - fotos solo en la ficha de UN producto. Es lo que hacia el sistema hasta hoy, y por eso
+  //              es el default: ningun negocio existente cambia de conducta al agregarse este campo.
+  //   CATEGORY - ademas, pedir una categoria manda la lista numerada y una foto de cada producto de esa
+  //              categoria, con el pie que dice cual es cual.
+  //   CATALOG  - ademas, lo mismo para el catalogo completo: un mensaje por categoria con sus fotos.
+  //
+  // Un solo campo con tres valores en vez de tres booleanos: los niveles se contienen, y dos
+  // interruptores independientes admitirian estados sin significado ("catalogo si, categoria no").
+  catalogPhotoScope         CatalogPhotoScope         @default(PRODUCT)
   // Fase 11 del plan maestro (2026-09-15), causa raiz C5: el pais del negocio deja de estar cableado en
   // el codigo. Elige la entrada de src/config/countries.ts que decide el formato de precio, que forma
   // tiene un telefono y un documento, como se reconoce una direccion despachable y como se le pide cada
@@ -153,6 +165,14 @@ model Business {
   teamMembers               TeamMember[]
   createdAt                 DateTime                  @default(now())
   updatedAt                 DateTime                  @updatedAt
+}
+
+// Ver Business.catalogPhotoScope. Los tres valores son niveles que se contienen: CATALOG incluye lo de
+// CATEGORY, y CATEGORY incluye lo de PRODUCT.
+enum CatalogPhotoScope {
+  PRODUCT
+  CATEGORY
+  CATALOG
 }
 
 enum PaymentMethodType {
@@ -812,6 +832,12 @@ model Conversation {
   contextSummary               String?
   contextSummarizedUpTo        Int?
   mediaSentProductIds          String[]               @default([])
+  // Vitrina de categoria (2026-09-17): los productos cuya FOTO DE VITRINA (una sola, ver vitrinaPhoto)
+  // ya salio en esta conversacion. Deliberadamente separado de mediaSentProductIds, que significa "este
+  // cliente ya vio la ficha entera con todos sus medios": si fueran el mismo campo, ver la vitrina de
+  // una categoria dejaria siete productos marcados como ya vistos y la ficha del que el cliente eligiera
+  // saldria corta y sin una sola foto mas.
+  browsePhotoProductIds        String[]               @default([])
   // Fase B del plan de catalogo y medios (2026-09-16), pieza 4: los ids de producto que el servidor
   // REALMENTE le presento al cliente en el ultimo bloque de catalogo, en el mismo orden en que salieron
   // numerados. Es contra esto que se resuelve "el 3" del turno siguiente - antes eso dependia de que el

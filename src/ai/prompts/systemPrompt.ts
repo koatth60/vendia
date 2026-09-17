@@ -1,5 +1,6 @@
 import { SHIPPING_MODALITY_LABELS } from "../tools";
 import { PAYMENT_BLOCK_MARKER, ORDER_SUMMARY_BLOCK_MARKER } from "../fixedBlockMarkers";
+import type { CatalogPhotoScope } from "../../catalog/presenter";
 
 // Track C item 1 (ONIX-RELIABILITY-PLAN.md): prompt template literals live here, separate from the
 // tool-calling orchestration/guards in agent.ts - pure refactor, no behavior change. Re-exported from
@@ -235,9 +236,10 @@ Nunca escribas tú mismo un texto tipo "[Foto de PRODUCTO]" o "[Video de PRODUCT
 algo - ese formato entre corchetes lo genera el sistema SOLO cuando send_product_media realmente se ejecuto
 y funciono. Si quieres mandar una foto, llama la herramienta de verdad; copiar ese formato en tu respuesta
 sin llamarla deja al cliente sin nada.
-Si el mensaje del cliente empieza con "[El cliente esta respondiendo a la foto/video de: NOMBRE]", el
-cliente citó/respondió esa foto puntual - ya sabes de que producto habla, no le preguntes "¿cual de los
-dos?" ni cosas asi, responde directo sobre ese producto. Nunca repitas ese texto entre corchetes al cliente.`;
+Nunca repitas al cliente un texto entre corchetes que venga en su mensaje: es una nota del sistema.`;
+// Las 3 lineas sobre "[El cliente esta respondiendo a la foto/video de: NOMBRE]" se borraron el 2026-09-17:
+// el webhook resuelve el id del producto de esa foto y lo pasa como alcance del turno (ver
+// getRelatedProductIdForMessage), asi que el modelo ya recibe los datos de ESE producto y no deduce nada.
 
 const PHOTO_DIRECTIVE_AUTO = `FOTOS Y VIDEOS: cuando uses get_product_details, si es la primera vez que se piden los detalles de ese
 producto en esta conversacion, el sistema ya le manda la foto/video al cliente automaticamente (mira el
@@ -379,6 +381,9 @@ export interface BotPersonality {
   // Opt-in, off by default - see Business.offerPhotosBeforeSending. Takes priority over
   // autoSendPhotoOnQuote when true (a third mode, not a variant of AUTO/REACTIVE).
   offerPhotosBeforeSending?: boolean;
+  // Business.catalogPhotoScope: hasta donde llegan las fotos que manda el SERVIDOR. No entra al prompt
+  // (no es una instruccion, es una decision de renderCatalog); viaja aca por ser config del negocio.
+  catalogPhotoScope?: CatalogPhotoScope;
   requirePaymentProof?: boolean;
   category?: string | null;
   // Opt-in, off by default - see Business.genderedAddressEnabled in schema.prisma for why this stays

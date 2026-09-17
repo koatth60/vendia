@@ -51,7 +51,12 @@ function listableRows(block: CatalogBlock): NonNullable<CatalogBlock["rows"]> | 
  */
 export async function sendCatalogBlocks(args: SendCatalogBlocksArgs): Promise<void> {
   const { businessId, conversationId, credentials, to, blocks } = args;
+  // Dos registros, no uno, porque son dos hechos distintos (ver CatalogBlock.kind): "este cliente ya vio
+  // la ficha entera de este producto con todos sus medios" y "este cliente ya vio la foto de vitrina de
+  // este producto". Mezclarlos dejaria a una categoria de siete productos marcada como enteramente
+  // vista despues de siete fotos sueltas.
   const sentProductIds: string[] = [];
+  const vitrinaProductIds: string[] = [];
 
   for (let i = 0; i < blocks.length; i++) {
     if (i > 0) await sleep(BLOCK_GAP_MS);
@@ -95,8 +100,18 @@ export async function sendCatalogBlocks(args: SendCatalogBlocksArgs): Promise<vo
       // Un fallo de envio de medios no puede dejar al cliente sin el resto de los bloques: la ficha de
       // texto ya salio y es lo que sostiene la conversacion. Se registra y se sigue.
       try {
-        await sendMediaWithSpacing(businessId, credentials, to, conversationId, media.productId, media.productName, media.items);
-        sentProductIds.push(media.productId);
+        await sendMediaWithSpacing(
+          businessId,
+          credentials,
+          to,
+          conversationId,
+          media.productId,
+          media.productName,
+          media.items,
+          media.caption
+        );
+        if (block.kind === "lista") vitrinaProductIds.push(media.productId);
+        else sentProductIds.push(media.productId);
         await recordMediaSent(conversationId, media.productName);
       } catch (error) {
         console.error(`No se pudieron enviar los medios de "${media.productName}" (no bloqueante):`, error);
@@ -104,17 +119,22 @@ export async function sendCatalogBlocks(args: SendCatalogBlocksArgs): Promise<vo
     }
   }
 
-  if (sentProductIds.length === 0) return;
+  if (sentProductIds.length === 0 && vitrinaProductIds.length === 0) return;
   try {
     const conversation = await prisma.conversation.findUnique({
       where: { id: conversationId },
-      select: { mediaSentProductIds: true },
+      select: { mediaSentProductIds: true, browsePhotoProductIds: true },
     });
-    const updated = new Set(conversation?.mediaSentProductIds ?? []);
-    for (const id of sentProductIds) updated.add(id);
+    const fichas = new Set(conversation?.mediaSentProductIds ?? []);
+    for (const id of sentProductIds) fichas.add(id);
+    const vitrinas = new Set(conversation?.browsePhotoProductIds ?? []);
+    for (const id of vitrinaProductIds) vitrinas.add(id);
     await prisma.conversation.update({
       where: { id: conversationId },
-      data: { mediaSentProductIds: { set: [...updated] } },
+      data: {
+        mediaSentProductIds: { set: [...fichas] },
+        browsePhotoProductIds: { set: [...vitrinas] },
+      },
     });
   } catch (error) {
     console.error("No se pudo registrar el dedup de medios enviados (no bloqueante):", error);

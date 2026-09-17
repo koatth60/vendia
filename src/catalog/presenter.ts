@@ -15,6 +15,16 @@ export interface CatalogBlockMedia {
   /** Etiqueta con la que se graba cada envio (`[Foto de X]`), variante incluida cuando la hay. */
   productName: string;
   items: ScopeMedia[];
+  /**
+   * Texto que WhatsApp muestra debajo de la foto. Lo escribe ESTE archivo con los mismos datos de la
+   * base que la linea numerada de la lista, nunca el modelo.
+   *
+   * Existe por la vitrina de categoria (2026-09-17): varias fotos de productos distintos salen seguidas
+   * y, sin pie, el cliente no puede saber cual es cual. El pie repite la misma linea que ya vio
+   * numerada, asi que "el 3" y la foto con pie "3." son el mismo producto sin que nadie tenga que
+   * deducirlo. Una ficha de un solo producto no lo necesita: el mensaje de arriba ya dice de que es.
+   */
+  caption?: string;
 }
 
 /** Un bloque = un mensaje de WhatsApp. Sale literal: nadie lo reescribe despues. */
@@ -30,6 +40,18 @@ export interface CatalogBlock {
   media: CatalogBlockMedia[];
   /** Ids de producto que este bloque nombra, en el orden en que aparecen numerados. */
   productIds: string[];
+  /**
+   * Que clase de mensaje es. No es decorativo: decide DONDE se registra lo que salio (ver
+   * sendCatalogBlocks).
+   *
+   *   "ficha"   -> un producto entero, con su descripcion y todos sus medios. Se registra en
+   *                Conversation.mediaSentProductIds, que es lo que marca un producto como "ya visto
+   *                completo".
+   *   "lista"   -> una lista numerada. Sus medios, cuando los lleva, son la foto de vitrina de cada
+   *                producto (una sola) y se registran aparte, en Conversation.browsePhotoProductIds:
+   *                haber visto la foto de vitrina NO es haber visto la ficha.
+   */
+  kind: "ficha" | "lista";
   /**
    * Las mismas opciones de este bloque, listas para una lista interactiva de WhatsApp: el cliente toca una
    * fila y vuelve el id del producto, sin que nadie tenga que leer "el 5" de su prosa. Solo las llevan los
@@ -64,6 +86,17 @@ export interface RenderCatalogOptions {
    * por aca.
    */
   alreadyPresentedProductIds?: string[];
+  /**
+   * Los productos cuya FOTO DE VITRINA ya salio en esta conversacion (Conversation.browsePhotoProductIds).
+   *
+   * Es una lista distinta de `alreadyPresentedProductIds` a proposito: la otra significa "ya vio la ficha
+   * entera", esta significa "ya vio UNA foto". La diferencia decide dos cosas opuestas sobre el mismo
+   * producto - su ficha sale ENTERA, porque el cliente nunca leyo la descripcion, y sale SIN fotos,
+   * porque ya las vio y eligio por ellas.
+   */
+  browsePhotoSentProductIds?: string[];
+  /** Business.catalogPhotoScope. Sin valor se asume "PRODUCT", el comportamiento de siempre. */
+  photoScope?: CatalogPhotoScope;
 }
 
 /**
@@ -93,6 +126,29 @@ const MAX_LINES_PER_BLOCK = 12;
 // categoria donde este proyecto no fuerza nada.
 
 const PHOTO_OFFER_LINE = "¿De cuál te gustaría ver fotos?";
+
+/**
+ * La misma pregunta cuando las fotos YA salen en este turno. La de arriba ofrecia algo que todavia no
+ * habia salido; esta le dice al cliente que hacer con lo que ya tiene delante.
+ */
+const VITRINA_OFFER_LINE = "Te paso las fotos. Responde a la del que te guste (o dime el número) y te cuento todo de ese.";
+
+/**
+ * HASTA DONDE LLEGAN LAS FOTOS (2026-09-17). Lo elige el dueno del negocio en el panel
+ * (Business.catalogPhotoScope), nunca el modelo y nunca una heuristica sobre el mensaje.
+ *
+ *   "PRODUCT"  - solo la ficha de un producto puntual lleva fotos. Es el comportamiento historico y el
+ *                valor por defecto: un negocio existente no cambia de conducta por este campo.
+ *   "CATEGORY" - ademas, cuando el cliente pide una CATEGORIA, sale la lista numerada y una foto de
+ *                cada producto de esa categoria.
+ *   "CATALOG"  - ademas, lo mismo cuando pide el catalogo completo: un mensaje por categoria y las
+ *                fotos de cada uno.
+ *
+ * Es un solo campo con tres valores y no tres interruptores sueltos: los niveles se contienen, asi que
+ * dos interruptores admitirian estados que no significan nada ("catalogo si, categoria no") y alguien
+ * tendria que decidir despues que hacer con ellos.
+ */
+export type CatalogPhotoScope = "PRODUCT" | "CATEGORY" | "CATALOG";
 
 const DEFAULT_UNCATEGORIZED_LABEL = "Otros productos";
 
@@ -125,6 +181,23 @@ export function mediaForProduct(product: ScopeProduct, variant: ScopeVariant | n
     return [...product.media, ...product.variants.flatMap((v) => v.media)];
   }
   return product.media;
+}
+
+/**
+ * La foto con la que un producto entra a la vitrina de su categoria: la PRIMERA imagen que tenga, sea
+ * general o de una variante activa.
+ *
+ * Solo imagenes, nunca video: la vitrina son fotos - es lo que se pidio - y un video pesa, tarda en
+ * subirse y no se mira de un vistazo como una foto entre otras nueve. Un producto que solo tiene video
+ * sigue en la lista numerada con su nombre, su precio y su stock; lo que no tiene es foto de vitrina, y
+ * el cliente puede pedirlo por su numero como cualquier otro.
+ *
+ * Es una funcion DETERMINISTA del producto, y de eso depende el descuento de abajo: la ficha completa
+ * sabe cual fue la foto que ya salio sin que nadie tenga que haberla guardado.
+ */
+export function vitrinaPhoto(product: ScopeProduct): ScopeMedia | null {
+  const todas = [...product.media, ...product.variants.filter((v) => v.active).flatMap((v) => v.media)];
+  return todas.find((m) => m.type === "IMAGE") ?? null;
 }
 
 function mediaBlockFor(product: ScopeProduct, variant: ScopeVariant | null): CatalogBlockMedia[] {
@@ -178,7 +251,8 @@ function renderSingle(
   product: ScopeProduct,
   variant: ScopeVariant | null,
   opts: RenderCatalogOptions,
-  alreadyPresented: boolean
+  alreadyPresented: boolean,
+  vitrinaYaEnviada = false
 ): CatalogBlock {
   const label = variant ? variantLabel(variant) : null;
   const title = label ? `*${product.name}* (${label})` : `*${product.name}*`;
@@ -197,6 +271,7 @@ function renderSingle(
       modelText: [...head, ...description].join("\n"),
       media: [],
       productIds: [product.id],
+      kind: "ficha",
     };
   }
 
@@ -204,8 +279,14 @@ function renderSingle(
   return {
     text: [...head, ...description].join("\n"),
     modelText: [...head, ...description].join("\n"),
-    media: mediaBlockFor(product, variant),
+    // ELEGIR UNA FOTO NO ES PEDIR MAS FOTOS (2026-09-17). Si el cliente ya recibio la foto de vitrina de
+    // este producto, eligio POR esa foto: la tiene arriba en el chat, la acaba de mirar. Lo que falta es
+    // la informacion, no mas imagenes del mismo aparato. La ficha sale entera - descripcion incluida - y
+    // sin un solo medio. Un pedido explicito de mas fotos sigue saliendo por send_product_media, que no
+    // pasa por aca y nunca se frena.
+    media: vitrinaYaEnviada ? [] : mediaBlockFor(product, variant),
     productIds: [product.id],
+    kind: "ficha",
   };
 }
 
@@ -239,24 +320,48 @@ function groupByCategory(products: ScopeProduct[], opts: RenderCatalogOptions): 
  * prompt depende de que el ultimo mensaje del bot sea una lista numerada, y si cada categoria
  * reiniciara en 1, "el 3" dejaria de resolver a un producto real.
  */
+/**
+ * La linea numerada de un producto dentro de una lista. Vive aparte porque la escriben DOS lugares: el
+ * cuerpo de la lista y el pie de su foto de vitrina. Es la misma linea a proposito - asi "el 3" de la
+ * lista y la foto que dice "3." son, sin ninguna duda posible, el mismo producto.
+ */
+function numberedLine(product: ScopeProduct, numero: number, opts: RenderCatalogOptions): string {
+  return `${numero}. *${product.name}* — ${priceLine(product, opts)}${stockSuffix(totalStock(product))}`;
+}
+
 function renderNumberedGroup(
   heading: string | null,
   products: ScopeProduct[],
   startNumber: number,
-  opts: RenderCatalogOptions
+  opts: RenderCatalogOptions,
+  /** Los productos de esta lista que van con foto de vitrina. Vacio = lista de texto, como siempre. */
+  vitrina: ReadonlySet<string> = new Set()
 ): CatalogBlock[] {
   const blocks: CatalogBlock[] = [];
   for (let offset = 0; offset < products.length; offset += MAX_LINES_PER_BLOCK) {
     const chunk = products.slice(offset, offset + MAX_LINES_PER_BLOCK);
-    const lines = chunk.map(
-      (product, i) => `${startNumber + offset + i}. *${product.name}* — ${priceLine(product, opts)}${stockSuffix(totalStock(product))}`
-    );
+    const lines = chunk.map((product, i) => numberedLine(product, startNumber + offset + i, opts));
     const text = heading && offset === 0 ? `*${heading}*\n${lines.join("\n")}` : lines.join("\n");
     blocks.push({
       text,
       modelText: text,
-      media: [],
+      // Las fotos de este trozo salen DESPUES de su propio mensaje, no todas juntas al final: una lista
+      // partida en dos mensajes deja cada foto al lado de los numeros que le corresponden.
+      media: chunk.flatMap((product, i) => {
+        if (!vitrina.has(product.id)) return [];
+        const foto = vitrinaPhoto(product);
+        if (!foto) return [];
+        return [
+          {
+            productId: product.id,
+            productName: product.name,
+            items: [foto],
+            caption: numberedLine(product, startNumber + offset + i, opts),
+          },
+        ];
+      }),
       productIds: chunk.map((p) => p.id),
+      kind: "lista" as const,
       // El titulo de fila lo recorta el cliente de WhatsApp (24 caracteres, limite de Meta); el precio y
       // el stock van en la descripcion, que admite 72.
       rows: chunk.map((product) => ({
@@ -283,14 +388,28 @@ export function renderCatalog(scope: ProductScope, opts: RenderCatalogOptions): 
   // medios o la version corta sin medios. Una lista numerada nunca manda medios, asi que no la toca.
   const alreadyPresented = new Set(opts.alreadyPresentedProductIds ?? []);
 
+  // La foto de vitrina que ya salio antes en esta conversacion: se descuenta de la ficha completa para
+  // que el cliente reciba las que le FALTAN, no las mismas otra vez.
+  const vitrinaYaEnviada = new Set(opts.browsePhotoSentProductIds ?? []);
+
   if (scope.kind === "one") {
-    return [renderSingle(scope.product, scope.variant ?? null, opts, alreadyPresented.has(scope.product.id))];
+    return [
+      renderSingle(
+        scope.product,
+        scope.variant ?? null,
+        opts,
+        alreadyPresented.has(scope.product.id),
+        vitrinaYaEnviada.has(scope.product.id)
+      ),
+    ];
   }
 
   if (scope.kind === "few") {
     // Hasta FEW_PRODUCTS_MAX productos: una ficha por producto, cada una con sus fotos. No se numeran
     // ni se ofrece elegir - ya los tiene todos delante.
-    return scope.products.map((product) => renderSingle(product, null, opts, alreadyPresented.has(product.id)));
+    return scope.products.map((product) =>
+      renderSingle(product, null, opts, alreadyPresented.has(product.id), vitrinaYaEnviada.has(product.id))
+    );
   }
 
   const groups =
@@ -298,21 +417,41 @@ export function renderCatalog(scope: ProductScope, opts: RenderCatalogOptions): 
       ? [{ category: scope.category, products: scope.products }]
       : groupByCategory(scope.products, opts);
 
+  // Hasta donde llegan las fotos lo decide el dueno, no este archivo (ver CatalogPhotoScope). Un
+  // producto que ya recibio su foto de vitrina, o cuya ficha entera ya salio, no la repite.
+  const photoScope = opts.photoScope ?? "PRODUCT";
+  const vitrinaHabilitada =
+    (scope.kind === "group" && (photoScope === "CATEGORY" || photoScope === "CATALOG")) ||
+    (scope.kind === "all" && photoScope === "CATALOG");
+  const vitrina = new Set<string>();
+  if (vitrinaHabilitada) {
+    for (const group of groups) {
+      for (const product of group.products) {
+        if (alreadyPresented.has(product.id) || vitrinaYaEnviada.has(product.id)) continue;
+        if (!vitrinaPhoto(product)) continue;
+        vitrina.add(product.id);
+      }
+    }
+  }
+
   const blocks: CatalogBlock[] = [];
   let next = 1;
   for (const group of groups) {
     // Con una sola categoria el encabezado repetiria lo que el cliente acaba de preguntar; con varias
     // es lo que separa un mensaje del siguiente.
     const heading = groups.length > 1 ? group.category ?? (opts.uncategorizedLabel ?? DEFAULT_UNCATEGORIZED_LABEL) : null;
-    const rendered = renderNumberedGroup(heading, group.products, next, opts);
+    const rendered = renderNumberedGroup(heading, group.products, next, opts, vitrina);
     next += group.products.length;
     blocks.push(...rendered);
   }
 
   if (blocks.length > 0) {
     // El ofrecimiento va UNA vez, pegado al ultimo mensaje: es la pregunta con la que termina el turno.
+    // Cual de los dos depende de si en este turno sale alguna foto de verdad, no de la configuracion:
+    // con la vitrina encendida pero todas las fotos ya enviadas antes, ofrecerlas de nuevo seria mentir.
+    const hayFotos = blocks.some((b) => b.media.length > 0);
     const last = blocks[blocks.length - 1];
-    const withOffer = `${last.text}\n\n${PHOTO_OFFER_LINE}`;
+    const withOffer = `${last.text}\n\n${hayFotos ? VITRINA_OFFER_LINE : PHOTO_OFFER_LINE}`;
     blocks[blocks.length - 1] = { ...last, text: withOffer, modelText: withOffer };
   }
 

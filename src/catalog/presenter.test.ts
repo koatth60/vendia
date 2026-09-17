@@ -484,3 +484,97 @@ test("sin ningun titulo, la descripcion entera va a presentacion y no se inventa
   assert.deepEqual(facts.descripcion.presentacion, ["Una sola linea de descripcion, sin titulos."]);
   assert.deepEqual(facts.descripcion.caracteristicas, []);
 });
+
+// ---------------------------------------------------------------------------
+// VITRINA DE CATEGORIA (2026-09-17). Business.catalogPhotoScope.
+// ---------------------------------------------------------------------------
+
+const CATEGORIA = { ...OPTS, photoScope: "CATEGORY" as const };
+const CATALOGO = { ...OPTS, photoScope: "CATALOG" as const };
+
+function scopeDe(text: string) {
+  return resolveProductScopeFrom(magimp, NO_ALIASES, text, []);
+}
+
+test("con el nivel en producto, una categoria sigue sin mandar una sola foto", () => {
+  // El default no cambia el comportamiento de ningun negocio existente: es la razon de que exista.
+  const blocks = renderCatalog(scopeDe("que relojes tienen"), OPTS);
+  assert.ok(blocks.every((b) => b.media.length === 0));
+  assert.ok(allText(blocks).includes("¿De cuál te gustaría ver fotos?"));
+});
+
+test("con el nivel en categoria, cada producto de la categoria sale con UNA foto y su pie", () => {
+  const scope = scopeDe("que relojes tienen");
+  assert.equal(scope.kind, "group");
+  if (scope.kind !== "group") return;
+
+  const blocks = renderCatalog(scope, CATEGORIA);
+  const media = blocks.flatMap((b) => b.media);
+  const conFoto = scope.products.filter((p) => p.media.some((m) => m.type === "IMAGE") || p.variants.some((v) => v.active && v.media.some((m) => m.type === "IMAGE")));
+
+  assert.equal(media.length, conFoto.length, "una entrada de medios por producto que tenga foto");
+  assert.ok(media.length > 1, "la categoria del fixture tiene varios productos con foto");
+  for (const m of media) {
+    assert.equal(m.items.length, 1, "UNA foto por producto, no todo su carrete");
+    assert.equal(m.items[0].type, "IMAGE", "la vitrina son fotos, nunca video");
+    assert.ok(m.caption, "cada foto lleva pie, o el cliente no sabe cual es cual");
+  }
+  assert.ok(allText(blocks).includes("Responde a la del que te guste"));
+  assert.ok(!allText(blocks).includes("¿De cuál te gustaría ver fotos?"), "ya no se ofrece lo que ya salio");
+});
+
+test("el pie de cada foto es EXACTAMENTE la linea numerada que el cliente ya vio", () => {
+  // Es lo que hace que "el 3" y la foto que dice "3." no puedan referirse a productos distintos.
+  const blocks = renderCatalog(scopeDe("que relojes tienen"), CATEGORIA);
+  const lineas = allText(blocks).split("\n");
+  for (const m of blocks.flatMap((b) => b.media)) {
+    assert.ok(lineas.includes(m.caption ?? ""), `el pie "${m.caption}" no es ninguna linea de la lista`);
+  }
+});
+
+test("el nivel categoria NO manda fotos del catalogo completo", () => {
+  // Pedido explicito del dueno: subir el alcance hasta categoria, no hasta el catalogo entero.
+  const scope = scopeDe("que productos tienen");
+  assert.equal(scope.kind, "all");
+  const blocks = renderCatalog(scope, CATEGORIA);
+  assert.ok(blocks.every((b) => b.media.length === 0));
+});
+
+test("el nivel catalogo si manda las fotos del catalogo completo", () => {
+  const blocks = renderCatalog(scopeDe("que productos tienen"), CATALOGO);
+  assert.ok(blocks.flatMap((b) => b.media).length > 0);
+});
+
+test("una foto de vitrina no se repite en la misma conversacion", () => {
+  const scope = scopeDe("que relojes tienen");
+  if (scope.kind !== "group") return assert.fail("se esperaba un grupo");
+  const yaVistos = scope.products.map((p) => p.id);
+  const blocks = renderCatalog(scope, { ...CATEGORIA, browsePhotoSentProductIds: yaVistos });
+  assert.ok(blocks.every((b) => b.media.length === 0), "ninguna foto se manda dos veces");
+  assert.ok(allText(blocks).includes("¿De cuál te gustaría ver fotos?"), "sin fotos, vuelve el ofrecimiento");
+});
+
+test("elegir un producto de la vitrina da INFORMACION, no mas fotos", () => {
+  // Las dos mitades de la misma decision, y por eso van en la misma prueba:
+  //  - la ficha sale ENTERA (el cliente nunca leyo la descripcion, solo vio una foto), asi que la
+  //    vitrina no puede marcar el producto como "ya presentado";
+  //  - y sale SIN un solo medio: eligio POR esa foto, la tiene arriba en el chat, y lo que le falta es
+  //    el dato, no otra imagen del mismo aparato.
+  const uno = productNamed(magimp, "Combo k11 Mini");
+  const blocks = renderCatalog({ kind: "one", product: uno, variant: null }, { ...CATEGORIA, browsePhotoSentProductIds: [uno.id] });
+
+  assert.ok(blocks[0].text.includes("El combo tecnologico mini incluye"), "la descripcion sale entera igual");
+  assert.deepEqual(blocks[0].media, [], "no se reenvia ninguna foto del producto que acaba de elegir");
+});
+
+test("sin vitrina previa, la ficha de ese mismo producto sigue mandando todas sus fotos", () => {
+  // El contraste que prueba que lo de arriba es la vitrina y no un apagado general de medios.
+  const uno = productNamed(magimp, "Combo k11 Mini");
+  const blocks = renderCatalog({ kind: "one", product: uno, variant: null }, CATEGORIA);
+  assert.equal(blocks[0].media[0].items.length, 3);
+});
+
+test("los bloques dicen que clase de mensaje son: de ahi sale donde se registra lo enviado", () => {
+  assert.equal(renderCatalog(scopeDe("K11 mini"), CATEGORIA)[0].kind, "ficha");
+  assert.ok(renderCatalog(scopeDe("que relojes tienen"), CATEGORIA).every((b) => b.kind === "lista"));
+});

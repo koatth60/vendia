@@ -56,3 +56,26 @@ export async function getMediaSentProductIds(conversationId: string): Promise<st
     return [];
   }
 }
+
+/**
+ * Los productos cuya FOTO DE VITRINA ya salio en esta conversacion (ver Business.catalogPhotoScope).
+ *
+ * Es un registro distinto del de arriba, y la diferencia es el punto: haber visto una foto suelta en la
+ * vitrina de una categoria NO es haber visto la ficha del producto. Con un solo registro, un cliente que
+ * mira una categoria de siete quedaria con los siete marcados como vistos, y el que despues eligiera
+ * recibiria una ficha corta sin una sola foto mas.
+ */
+export async function getBrowsePhotoProductIds(conversationId: string): Promise<string[]> {
+  try {
+    const row = await prisma.conversation.findUnique({
+      where: { id: conversationId },
+      select: { browsePhotoProductIds: true },
+    });
+    return row?.browsePhotoProductIds ?? [];
+  } catch (error) {
+    // No bloqueante como los otros dos: sin el registro la vitrina se manda igual, a lo sumo repitiendo
+    // una foto que el cliente ya habia visto.
+    console.error("No se pudo leer el registro de fotos de vitrina (no bloqueante):", error);
+    return [];
+  }
+}

@@ -196,6 +196,30 @@
             <option value="reactive">Solo mandar fotos si el cliente las pide</option>
             <option value="offer">Listar el catálogo y ofrecer fotos antes de mandarlas</option>
           </select>
+          <label>Hasta dónde manda fotos el bot</label>
+          <div class="radio-group" role="radiogroup" aria-label="Hasta dónde manda fotos el bot">
+            <label class="toggle-row toggle-row-radio">
+              <input type="radio" name="catalog-photo-scope" value="PRODUCT" checked />
+              <div>
+                <div class="toggle-title">Solo el producto que pide el cliente</div>
+                <div class="toggle-desc">El cliente nombra o elige un producto y le llegan las fotos de ese producto. Si pregunta por una categoría («¿qué audífonos tienen?»), le llega la lista con el nombre, el precio y la disponibilidad de cada uno, y el bot le ofrece mandarle las fotos del que quiera.</div>
+              </div>
+            </label>
+            <label class="toggle-row toggle-row-radio">
+              <input type="radio" name="catalog-photo-scope" value="CATEGORY" />
+              <div>
+                <div class="toggle-title">Categoría completa</div>
+                <div class="toggle-desc">El cliente pregunta por una categoría y le llega la lista más una foto de cada producto de esa categoría, con el número, el nombre y el precio debajo de cada foto. Va una sola foto por producto. Cuando responde a la foto que le gustó, el bot le amplía la información de ese producto, sin volver a mandarle fotos. Incluye lo de la primera opción.</div>
+              </div>
+            </label>
+            <label class="toggle-row toggle-row-radio">
+              <input type="radio" name="catalog-photo-scope" value="CATALOG" />
+              <div>
+                <div class="toggle-title">Catálogo entero</div>
+                <div class="toggle-desc">El cliente pide todo el catálogo y le llega un mensaje por categoría con las fotos de todos los productos. Incluye lo de las dos opciones de arriba. Ten en cuenta que cada foto es un mensaje de WhatsApp: con un catálogo grande son muchos mensajes seguidos.</div>
+              </div>
+            </label>
+          </div>
           <label>Estilo de español</label>
           <select id="bot-dialect">
             <option value="neutro">Neutro latinoamericano</option>
