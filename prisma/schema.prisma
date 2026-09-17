@@ -105,9 +105,17 @@ model Business {
   saleStateEnabled         Boolean                   @default(false)
   // Efectos requeridos (2026-09-15): antes de enviar la respuesta, el motor verifica contra la base que
   // el turno haya producido el efecto que su propio texto dice haber producido, y si falta lo reintenta,
-  // lo ejecuta desde el codigo o escala. Off por defecto - encendido en un negocio a la vez. Ver
-  // src/ai/requiredEffects.ts.
-  requiredEffectsEnabled    Boolean                   @default(false)
+  // lo ejecuta desde el codigo o escala. Ver src/ai/requiredEffects.ts.
+  //
+  // Nacio off, para encenderlo en un negocio a la vez. 2026-09-17: dejo de ser una opcion del panel y paso a default true. Que el bot compruebe contra la
+  // base que el pedido quedo registrado y que el dueno se entero no es una preferencia de negocio - es
+  // parte de estar bien hecho, y nadie que compra un bot de ventas quiere la version que no verifica.
+  // Medido en MAGByLizN sobre 7 dias con la bandera encendida: cero escalaciones a control humano por
+  // este mecanismo y cero incidentes con su guard.
+  //
+  // La columna sobrevive, pero como freno de OPERACION y no como casilla: si alguna vez hay que apagarlo
+  // en un negocio para diagnosticar, se hace por SQL, a mano y a sabiendas.
+  requiredEffectsEnabled    Boolean                   @default(true)
   // Listas interactivas de WhatsApp (2026-09-17): cuando el servidor presenta una categoria, la manda
   // como lista tocable en vez de texto numerado, y la eleccion vuelve como el id del producto. Elegir
   // deja de pasar por la prosa - es lo unico que hace imposible que "el numero 6" resuelva a un producto

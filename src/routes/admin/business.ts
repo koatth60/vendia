@@ -47,7 +47,6 @@ businessRouter.put("/api/business", requireOwner, async (req, res) => {
     autoSendPhotoOnQuote,
     offerPhotosBeforeSending,
     requirePaymentProof,
-    requiredEffectsEnabled,
     interactiveListsEnabled,
     catalogPhotoScope,
     businessCategory,
@@ -94,10 +93,9 @@ businessRouter.put("/api/business", requireOwner, async (req, res) => {
       autoSendPhotoOnQuote: Boolean(autoSendPhotoOnQuote),
       offerPhotosBeforeSending: Boolean(offerPhotosBeforeSending),
       requirePaymentProof: Boolean(requirePaymentProof),
-      // Efectos requeridos (2026-09-15): `undefined` cuando el cliente no manda el campo, para que un
-      // PUT viejo (o un formulario parcial) no apague la bandera sin querer - mismo patron que
-      // genderedAddressEnabled abajo, no el Boolean() directo de los tres de arriba.
-      requiredEffectsEnabled: requiredEffectsEnabled !== undefined ? Boolean(requiredEffectsEnabled) : undefined,
+      // requiredEffectsEnabled NO se lee del body (2026-09-17). Que el bot verifique contra la base lo que
+      // su propia respuesta dice haber hecho dejo de ser una opcion del panel, asi que tampoco puede
+      // apagarse por esta ruta: un PUT con el campo en false no lo toca. Se cambia por SQL, a sabiendas.
       interactiveListsEnabled: interactiveListsEnabled !== undefined ? Boolean(interactiveListsEnabled) : undefined,
       // Hasta donde llegan las fotos (2026-09-17). Un valor que no sea uno de los tres se ignora en vez
       // de guardarse: la columna es un enum, y un PUT viejo o un formulario a medias no puede dejar el

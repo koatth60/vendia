@@ -185,7 +185,6 @@ async function loadBusiness() {
       : (business.autoSendPhotoOnQuote !== false ? 'auto' : 'reactive');
     document.getElementById('bot-require-proof').checked = business.requirePaymentProof !== false;
     document.getElementById('bot-category').value = business.businessCategory || '';
-    document.getElementById('bot-required-effects').checked = Boolean(business.requiredEffectsEnabled);
     document.getElementById('bot-interactive-lists').checked = Boolean(business.interactiveListsEnabled);
     setCatalogPhotoScope(business.catalogPhotoScope || 'PRODUCT');
     document.getElementById('bot-gendered-address').checked = Boolean(business.genderedAddressEnabled);
@@ -541,7 +540,6 @@ async function saveBusiness() {
   const abandonedAfterHours = Number(document.getElementById('business-abandoned-after-hours').value) || 72;
   const cartRecoveryTemplateName = document.getElementById('business-cart-recovery-template').value.trim();
   const cartRecoveryTemplateLanguage = document.getElementById('business-cart-recovery-language').value.trim() || 'es';
-  const requiredEffectsEnabled = document.getElementById('bot-required-effects').checked;
   const interactiveListsEnabled = document.getElementById('bot-interactive-lists').checked;
   const catalogPhotoScope = readCatalogPhotoScope();
   const genderedAddressEnabled = document.getElementById('bot-gendered-address').checked;
@@ -568,7 +566,7 @@ async function saveBusiness() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         name, description, customInstructions, assistantName, botTone, botDialect, botGreeting, botNeverSay,
-        autoSendPhotoOnQuote, offerPhotosBeforeSending, requirePaymentProof, requiredEffectsEnabled, interactiveListsEnabled, catalogPhotoScope, businessCategory, contactName, contactPhone,
+        autoSendPhotoOnQuote, offerPhotosBeforeSending, requirePaymentProof, interactiveListsEnabled, catalogPhotoScope, businessCategory, contactName, contactPhone,
         ownerReminderMinutes, ownerQuestionTimeoutHours, intentEscalationTimeoutHours,
         followUpTemplateName, followUpTemplateLanguage, followUpDelayHours,
         abandonedAfterHours, cartRecoveryTemplateName, cartRecoveryTemplateLanguage,
