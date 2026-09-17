@@ -1691,8 +1691,25 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
         // conversacion en curso en el medio de un despliegue: el id gana cuando viene.
         let paymentMethodId = input.paymentMethodId ? String(input.paymentMethodId).trim() : "";
         let paymentMethodLabel: string | null = null;
-        if (saleStateOn) {
-          paymentMethodLabel = saleState?.paymentMethodLabel ?? null;
+        // SaleState manda cuando TIENE forma de pago. Cuando no la tiene, se resuelve igual que con la
+        // bandera apagada, en vez de quedar en null.
+        //
+        // Defecto real de produccion (2026-09-17, conversacion cmu4e3q9l001ozi2ka2x1t1b1): con SaleState
+        // prendido, el modelo llamo get_payment_methods y set_shipping_modality pero nunca
+        // set_payment_method. La forma de pago quedo en null, requiresPaymentConfirmation no tuvo nada que
+        // mirar y devolvio "hay que confirmar" - su respuesta segura - asi que una venta CONTRAENTREGA le
+        // pidio confirmacion de pago a la duena a las 5 de la manana, por plata que se cobra al entregar.
+        // El aviso hasta decia "Pago Contra Entrega Total" y preguntaba "¿Te llego el pago?" abajo: esa
+        // frase salia del texto del modelo, no de una forma de pago resuelta, y por eso la compuerta no la
+        // veia.
+        //
+        // Es la misma dependencia de ORDEN que se saco para los items y quedo viva para el pago. La
+        // garantia no se afloja: el id o la etiqueta se resuelven igual contra las formas de pago
+        // configuradas del negocio.
+        const pagoDeSaleState = saleStateOn ? saleState?.paymentMethodLabel ?? null : null;
+        if (pagoDeSaleState) {
+          paymentMethodLabel = pagoDeSaleState;
+          if (saleState?.paymentMethodId) paymentMethodId = saleState.paymentMethodId;
         } else if (paymentMethodId) {
           // Sin filtro `active`, igual que saleState.ts: si el dueno desactivo el metodo despues de que
           // el cliente lo eligio, la etiqueta sigue siendo real y la venta no tiene por que caerse.

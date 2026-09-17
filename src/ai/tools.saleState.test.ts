@@ -234,3 +234,48 @@ test("close_conversation SOLD con SaleState vacio Y sin items sigue bloqueado", 
   assert.match(result.note, /no se creo ningun pedido/i);
   assert.equal(await prisma.order.count({ where: { conversationId: context.conversationId } }), 0);
 });
+
+test("con SaleState prendido y sin set_payment_method, contraentrega NO le pide confirmacion al dueno", async () => {
+  // Defecto real de produccion (2026-09-17, 05:11 UTC): el modelo llamo get_payment_methods y
+  // set_shipping_modality pero nunca set_payment_method. La forma de pago quedo en null, la compuerta no
+  // tuvo nada que mirar, y una venta CONTRAENTREGA desperto a la duena a las 5 de la manana preguntandole
+  // si le habia llegado un pago que se cobra al entregar.
+  const contraentrega = await prisma.paymentMethod.create({
+    data: { businessId, type: "EFECTIVO", label: "Contraentrega", details: "Paga al recibir", settlement: "ON_DELIVERY" },
+  });
+  const producto = await prisma.product.create({
+    data: { businessId, name: "Reloj Sin SetPayment", description: "x", price: 140000, currency: "COP", stock: 3 },
+  });
+  const context = await freshContext();
+  const originalFetch = globalThis.fetch;
+  let avisosAlDueno = 0;
+  globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body ?? "{}"));
+    if (body.type === "interactive" || body.type === "template") avisosAlDueno++;
+    return { ok: true, json: async () => ({ messages: [{ id: `wamid.${randomUUID()}` }] }) } as Response;
+  }) as typeof fetch;
+
+  try {
+    const result = (await runCatalogTool(context, "close_conversation", {
+      outcome: "SOLD",
+      summary: "1x Reloj Sin SetPayment. Pago Contra Entrega Total.",
+      paymentMethodLabel: "Pago Contra Entrega Total",
+      shippingAddress: "Transversal 42 #5A-28",
+      items: [{ productName: "Reloj Sin SetPayment", quantity: 1 }],
+    })) as { closed: boolean; pending?: boolean };
+
+    assert.equal(result.pending, undefined, "contraentrega no tiene pago que verificar");
+    assert.equal(result.closed, true, "el pedido se cierra solo, sin despertar a nadie");
+    assert.equal(avisosAlDueno, 0, "cero avisos al dueno");
+    assert.equal(await prisma.order.count({ where: { conversationId: context.conversationId } }), 1);
+
+    const conversacion = await prisma.conversation.findUniqueOrThrow({ where: { id: context.conversationId } });
+    assert.equal(conversacion.pendingConfirmationAskedAt, null, "no puede quedar ninguna confirmacion viva");
+  } finally {
+    globalThis.fetch = originalFetch;
+    await prisma.orderItem.deleteMany({ where: { order: { conversationId: context.conversationId } } });
+    await prisma.order.deleteMany({ where: { conversationId: context.conversationId } });
+    await prisma.paymentMethod.deleteMany({ where: { id: contraentrega.id } });
+    await prisma.product.deleteMany({ where: { id: producto.id } });
+  }
+});
