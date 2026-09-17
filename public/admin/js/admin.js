@@ -1812,7 +1812,7 @@ function messageBubbleHtml(m) {
   const isVideo = m.mediaUrl && m.mediaType === 'VIDEO';
   const isDocument = m.mediaUrl && m.mediaType === 'DOCUMENT';
   const img = isAudio
-    ? `<audio src="${m.mediaUrl}" controls style="margin-bottom:4px;"></audio>`
+    ? voicePlayerHtml(m.mediaUrl, 0)
     : isVideo
       ? `<video src="${m.mediaUrl}" controls style="max-width:220px; border-radius:6px; display:block; margin-bottom:4px;"></video>`
       : isDocument
@@ -2805,10 +2805,9 @@ function renderHandoffState(humanControl, reason, since) {
   btn.querySelector('.btn-label').textContent = label;
   btn.title = humanControl ? humanControlExplanation(reason, since) : label;
   btn.setAttribute('aria-label', label);
-  // A ancho de telefono el texto se esconde y solo queda el icono - cambia
-  // según el estado para no dejar el mismo dibujo diciendo dos cosas distintas.
-  btn.querySelector('.icon-take-control').hidden = humanControl;
-  btn.querySelector('.icon-return-bot').hidden = !humanControl;
+  // El icono cambia según el estado para no dejar el mismo dibujo diciendo dos cosas distintas. Lo
+  // decide data-active desde el CSS: poner .hidden en un svg no hace nada (no es un HTMLElement), asi
+  // que la version anterior dejaba los dos iconos visibles a la vez.
   btn.dataset.active = humanControl ? 'true' : 'false';
   const input = document.getElementById('modal-composer-input');
   if (input) {
@@ -3037,7 +3036,7 @@ function composerFileKind(file) {
 
 // El input de archivos y el arrastre entregan FileList; los dos pasan por aca para que el limite, el
 // motivo del rechazo y la previsualizacion sean exactamente los mismos por los dos caminos.
-function addComposerFiles(fileList) {
+function addComposerFiles(fileList, extra = {}) {
   const incoming = Array.from(fileList || []);
   if (incoming.length === 0) return;
   const rechazados = [];
@@ -3061,6 +3060,8 @@ function addComposerFiles(fileList) {
     composerFiles.push({
       file,
       kind,
+      // Solo la traen las grabaciones hechas aca; un audio subido del disco la lee el reproductor.
+      durationMs: extra.durationMs || 0,
       // Solo para la miniatura. Se libera en clearComposerFile/removeComposerFile: sin eso el blob
       // queda en memoria hasta recargar la pagina.
       previewUrl: kind === 'document' ? null : URL.createObjectURL(file),
@@ -3092,7 +3093,7 @@ function renderComposerPreview() {
       if (entry.kind === 'audio') {
         return `
           <div class="composer-chip composer-chip--audio" title="${escapeHtml(entry.file.name)}">
-            <audio src="${entry.previewUrl}" controls class="composer-chip-audio"></audio>
+            ${voicePlayerHtml(entry.previewUrl, entry.durationMs || 0)}
             <button type="button" class="composer-chip-remove" title="Quitar" aria-label="Quitar la nota de voz" onclick="removeComposerFile(${i})">✕</button>
           </div>`;
       }
@@ -3136,6 +3137,146 @@ function clearComposerFile() {
   if (input) input.value = '';
   renderComposerPreview();
 }
+
+// --- Reproductor de notas de voz -------------------------------------------
+//
+// El <audio controls> del navegador trae su propia barra gris, su propio menu de tres puntos y su
+// propia tipografia: no sigue ningun token, no cambia con el tema y se ve distinto en cada navegador.
+// Este es el mismo reproductor en los dos lados (la ficha del compositor y la burbuja del hilo).
+//
+// Un SOLO elemento Audio para toda la pagina, no uno por burbuja: en un hilo de 200 mensajes eso serian
+// 200 descargas de S3 apenas se abre. Ademas resuelve gratis que no suenen dos notas a la vez.
+let voiceAudio = null;
+let voicePlayerActivo = null;
+
+function formatClock(segundos) {
+  if (!Number.isFinite(segundos) || segundos < 0) segundos = 0;
+  const enteros = Math.floor(segundos);
+  return `${Math.floor(enteros / 60)}:${String(enteros % 60).padStart(2, '0')}`;
+}
+
+/**
+ * @param src        url del audio
+ * @param duracionMs conocida de antemano (una grabacion recien hecha), o 0 si hay que leerla del archivo
+ */
+function voicePlayerHtml(src, duracionMs) {
+  const total = duracionMs > 0 ? formatClock(duracionMs / 1000) : '';
+  return `
+    <div class="voice-player" data-src="${escapeHtml(src)}" data-duration-ms="${duracionMs || 0}">
+      <button type="button" class="voice-play" aria-label="Reproducir nota de voz">
+        <svg class="voice-icon-play" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.5v13l11-6.5z"></path></svg>
+        <svg class="voice-icon-pause" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7.5 5h3.2v14H7.5zM13.3 5h3.2v14h-3.2z"></path></svg>
+      </button>
+      <div class="voice-track" role="slider" aria-label="Posición de la nota de voz" tabindex="0">
+        <div class="voice-fill"></div>
+        <div class="voice-knob"></div>
+      </div>
+      <span class="voice-time onix-num">${total}</span>
+    </div>`;
+}
+
+// Una sola clase decide que icono se ve; el CSS hace el resto. No se toca el atributo hidden de los
+// svg porque en un SVG no esconde nada (ver la regla de .voice-play en admin.css).
+function voicePlayerSetIcon(player, sonando) {
+  player.classList.toggle('is-playing', sonando);
+}
+
+function voicePlayerReset(player) {
+  if (!player) return;
+  voicePlayerSetIcon(player, false);
+  const fill = player.querySelector('.voice-fill');
+  if (fill) fill.style.width = '0%';
+  const knob = player.querySelector('.voice-knob');
+  if (knob) knob.style.left = '0%';
+  const tiempo = player.querySelector('.voice-time');
+  const declarada = Number(player.dataset.durationMs) || 0;
+  // Sin duracion declarada se deja vacio en vez de "0:00": una nota que dura 12 segundos anunciando
+  // que dura cero es peor que no anunciar nada. Se llena sola apenas el archivo informa cuanto dura.
+  if (tiempo) tiempo.textContent = declarada > 0 ? formatClock(declarada / 1000) : (Number.isFinite(voiceAudio?.duration) && voicePlayerActivo === player ? formatClock(voiceAudio.duration) : '');
+}
+
+function voicePlayerProgreso() {
+  if (!voiceAudio || !voicePlayerActivo) return;
+  // Un WebM recien grabado por el navegador informa duration = Infinity hasta que termina de sonar. Por
+  // eso se prefiere la duracion que ya conocemos (la grabacion se cronometro) y el archivo es el
+  // respaldo, no al reves.
+  const declarada = Number(voicePlayerActivo.dataset.durationMs) || 0;
+  const total = declarada > 0 ? declarada / 1000 : (Number.isFinite(voiceAudio.duration) ? voiceAudio.duration : 0);
+  const ratio = total > 0 ? Math.min(1, voiceAudio.currentTime / total) : 0;
+  const fill = voicePlayerActivo.querySelector('.voice-fill');
+  if (fill) fill.style.width = `${ratio * 100}%`;
+  const knob = voicePlayerActivo.querySelector('.voice-knob');
+  if (knob) knob.style.left = `${ratio * 100}%`;
+  const tiempo = voicePlayerActivo.querySelector('.voice-time');
+  // Mientras suena se muestra lo que va corriendo; detenido, cuanto dura.
+  if (tiempo) tiempo.textContent = formatClock(voiceAudio.currentTime);
+}
+
+function ensureVoiceAudio() {
+  if (voiceAudio) return voiceAudio;
+  voiceAudio = new Audio();
+  voiceAudio.preload = 'metadata';
+  voiceAudio.addEventListener('timeupdate', voicePlayerProgreso);
+  voiceAudio.addEventListener('ended', () => {
+    voicePlayerReset(voicePlayerActivo);
+    voicePlayerActivo = null;
+  });
+  voiceAudio.addEventListener('error', () => {
+    if (voicePlayerActivo) voicePlayerReset(voicePlayerActivo);
+    voicePlayerActivo = null;
+    setStatus('No se pudo reproducir la nota de voz', true);
+  });
+  return voiceAudio;
+}
+
+function toggleVoicePlayer(player) {
+  const audio = ensureVoiceAudio();
+  if (voicePlayerActivo === player) {
+    if (audio.paused) { audio.play().catch(() => {}); voicePlayerSetIcon(player, true); }
+    else { audio.pause(); voicePlayerSetIcon(player, false); }
+    return;
+  }
+  // Otra nota estaba sonando: se detiene y se deja como estaba antes de empezar.
+  if (voicePlayerActivo) voicePlayerReset(voicePlayerActivo);
+  voicePlayerActivo = player;
+  audio.src = player.dataset.src;
+  audio.currentTime = 0;
+  audio.play().catch(() => {});
+  voicePlayerSetIcon(player, true);
+}
+
+function seekVoicePlayer(player, event) {
+  const track = player.querySelector('.voice-track');
+  if (!track) return;
+  const caja = track.getBoundingClientRect();
+  const ratio = Math.min(1, Math.max(0, (event.clientX - caja.left) / caja.width));
+  const audio = ensureVoiceAudio();
+  if (voicePlayerActivo !== player) {
+    // Tocar la barra de una nota que no esta sonando la arranca en ese punto, que es lo que espera
+    // cualquiera que quiera volver a escuchar el final.
+    toggleVoicePlayer(player);
+  }
+  const declarada = Number(player.dataset.durationMs) || 0;
+  const total = declarada > 0 ? declarada / 1000 : (Number.isFinite(audio.duration) ? audio.duration : 0);
+  if (total > 0) audio.currentTime = ratio * total;
+  voicePlayerProgreso();
+}
+
+// Delegado: el hilo se repinta entero con innerHTML y los reproductores se crean y destruyen todo el
+// tiempo. Con listeners por elemento habria que volver a colgarlos en cada repintado.
+document.addEventListener('click', (event) => {
+  const boton = event.target.closest('.voice-play');
+  if (boton) {
+    const player = boton.closest('.voice-player');
+    if (player) toggleVoicePlayer(player);
+    return;
+  }
+  const track = event.target.closest('.voice-track');
+  if (track) {
+    const player = track.closest('.voice-player');
+    if (player) seekVoicePlayer(player, event);
+  }
+});
 
 // --- Borradores ------------------------------------------------------------
 //
@@ -3252,6 +3393,7 @@ async function persistComposerFiles(customerId) {
     name: entry.file.name,
     type: entry.file.type,
     kind: entry.kind,
+    durationMs: entry.durationMs || 0,
   }));
   await draftDbPut(draftKey(customerId), guardables);
 }
@@ -3264,6 +3406,7 @@ async function loadPersistedComposerFiles(customerId) {
     return {
       file: archivo,
       kind: item.kind,
+      durationMs: item.durationMs || 0,
       previewUrl: item.kind === 'document' ? null : URL.createObjectURL(archivo),
     };
   });
@@ -3485,6 +3628,7 @@ function releaseVoiceStream() {
 }
 
 function onVoiceRecorderStop() {
+  const duracionMs = voiceStartedAt ? Date.now() - voiceStartedAt : 0;
   const chunks = voiceChunks;
   const tipoGrabado = voiceRecorder && voiceRecorder.mimeType ? voiceRecorder.mimeType : 'audio/webm';
   const descartada = voiceDiscarded;
@@ -3497,7 +3641,9 @@ function onVoiceRecorderStop() {
   const extension = tipo.includes('mp4') ? 'm4a' : tipo.includes('ogg') ? 'ogg' : 'webm';
   const sello = new Date().toISOString().slice(11, 19).replace(/:/g, '-');
   const archivo = new File(chunks, `nota-de-voz-${sello}.${extension}`, { type: tipo });
-  addComposerFiles([archivo]);
+  // Cuanto duro, medido con el reloj de la grabacion. Se pasa aparte porque un WebM recien grabado
+  // informa duration = Infinity hasta que termina de reproducirse una vez.
+  addComposerFiles([archivo], { durationMs: duracionMs });
 }
 
 function stopVoiceRecording() {
