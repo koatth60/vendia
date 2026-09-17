@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { resolveProductScopeFrom, numericSelection, type ScopeProduct } from "./scope";
+import { resolveProductScopeFrom, numericSelection, suppressBrowsingScope, type ScopeProduct } from "./scope";
 import { loadFixtureCatalog, productNamed } from "./fixtureCatalog";
 
 // Fase B del plan de catalogo y medios (ONIX-PLAN-CATALOGO-Y-MEDIOS.md, pieza 1). Funciones puras: el
@@ -162,4 +162,46 @@ test("la seleccion por posicion sigue saliendo de la ultima lista presentada, no
   assert.equal(scope.kind, "one");
   if (scope.kind !== "one") return;
   assert.equal(scope.product.name, "AIRPODS MAX", "gana la posicion de la lista, no el digito del nombre");
+});
+
+// ==============================================================================================
+// El cliente que ya compro no esta navegando el catalogo (2026-09-17)
+// ==============================================================================================
+
+test("con el cliente en post-venta, una categoria nombrada al pasar no dispara la vidriera", () => {
+  // El turno exacto de produccion (00:59:11): Andres ya tenia su reloj comprado y cerrado, escribio
+  // "Oye confirmado lo del reloj, mañana a que horas llegaria", y el servidor le mando los 6 smartwatches
+  // con precios y stock preguntandole de cual queria ver fotos.
+  const texto = "Oye confirmado lo del reloj, mañana a qué horas más o menos llegaría";
+  const navegando = scopeOf(texto);
+  assert.equal(navegando.kind, "group", "sin post-venta el alcance de categoria sigue igual que hoy");
+
+  assert.equal(suppressBrowsingScope(navegando, texto, true).kind, "none");
+  assert.equal(suppressBrowsingScope(navegando, texto, false).kind, "group", "sin post-venta no se suprime nada");
+});
+
+test("en post-venta, un pedido explicito de catalogo SI se responde", () => {
+  // El error opuesto seria negarle la vidriera a quien la pide con todas las letras.
+  const texto = "muéstrame todo el catálogo completo con precios";
+  const scope = scopeOf(texto);
+  assert.equal(scope.kind, "all");
+  assert.equal(suppressBrowsingScope(scope, texto, true).kind, "all");
+});
+
+test("en post-venta, nombrar un producto concreto sigue resolviendo a ese producto", () => {
+  // Un cliente que ya compro y pregunta por OTRA cosa tiene que poder verla.
+  const texto = "y el Smartwatch V20 cuanto sale?";
+  const scope = scopeOf(texto);
+  assert.equal(scope.kind, "one");
+  assert.equal(suppressBrowsingScope(scope, texto, true).kind, "one");
+});
+
+test("suprimir la vidriera nunca toca un alcance que ya era 'none' ni uno de pocos productos", () => {
+  const pocos = scopeOf("el 1 y el 2", [
+    productNamed(magimp, "AIRPODS PRO 2").id,
+    productNamed(magimp, "PARLANTE TIPO ALEXA").id,
+  ]);
+  assert.equal(pocos.kind, "few");
+  assert.equal(suppressBrowsingScope(pocos, "el 1 y el 2", true).kind, "few");
+  assert.equal(suppressBrowsingScope({ kind: "none" }, "gracias", true).kind, "none");
 });

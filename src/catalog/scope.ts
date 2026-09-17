@@ -293,6 +293,38 @@ export function resolveProductScopeFrom(
   return { kind: "none" };
 }
 
+/**
+ * Apaga los alcances de NAVEGACION cuando el cliente ya no esta navegando.
+ *
+ * Defecto real de produccion (2026-09-17, turno 00:59:11). Andres ya habia comprado su reloj y la venta
+ * estaba cerrada. Escribio "Oye confirmado lo del reloj, mañana a que horas mas o menos llegaria": la
+ * palabra "reloj" matcheo la categoria configurada del negocio y el servidor le mando la lista completa
+ * de los 6 smartwatches con precios y stock, preguntandole de cual queria ver fotos. A la duena le toco
+ * entrar a mano.
+ *
+ * Que se apaga y que no:
+ *   - `group` y `all` SI: son alcances de vidriera, y a alguien que ya compro no se le pone la vidriera
+ *     adelante porque nombro de pasada lo que compro.
+ *   - `one` y `few` NO: nombrar un producto concreto es una intencion concreta, antes y despues de
+ *     comprar. Un cliente que ya compro y pregunta por OTRO producto tiene que poder verlo.
+ *   - Un pedido explicito de catalogo ("el catalogo", "que mas tienen") NO: ahi el cliente esta pidiendo
+ *     la vidriera con todas las letras, y negarsela seria el error opuesto.
+ *
+ * `enCierreOPostVenta` NUNCA sale de interpretar el mensaje: lo calcula el llamador desde la base (una
+ * fila de Order dentro de la ventana post-venta, o una confirmacion de pago viva). Ver
+ * src/orders/postSale.ts.
+ */
+export function suppressBrowsingScope(
+  scope: ProductScope,
+  customerText: string,
+  enCierreOPostVenta: boolean
+): ProductScope {
+  if (!enCierreOPostVenta) return scope;
+  if (scope.kind !== "group" && scope.kind !== "all") return scope;
+  if (looksLikeCatalogRequest(customerText)) return scope;
+  return { kind: "none" };
+}
+
 const SCOPE_PRODUCT_SELECT = {
   id: true,
   name: true,

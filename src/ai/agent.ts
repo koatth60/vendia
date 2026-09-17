@@ -14,9 +14,11 @@ import {
   withSignedMedia,
   describeScope,
   looksLikeCatalogRequest,
+  suppressBrowsingScope,
   type ProductScope,
   type ScopeProduct,
 } from "../catalog/scope";
+import { getPostSaleContext, postSaleFactsForModel } from "../orders/postSale";
 import {
   renderCatalog,
   presentedProductIds,
@@ -60,6 +62,7 @@ import { formatBusinessHours, closedDays } from "../config/businessHours";
 import { formatPaymentExamples } from "../catalog/paymentMethods";
 import { COUNTRIES, type CountryCode } from "../config/countries";
 import { CLOSING_MESSAGE_PROMPT } from "./prompts/closingMessage";
+import { fillClosingPlaceholders } from "./prompts/closingPlaceholders";
 import {
   PAYMENT_BLOCK_MARKER,
   SHIPPING_BLOCK_MARKER,
@@ -319,7 +322,24 @@ Datos reales de este pedido:
     }, { businessId, conversationId });
     await logAiUsage({ businessId, conversationId, kind: "CHAT", model: response.model || DEEPSEEK_MODEL, usage: response.usage });
     const text = response.choices[0]?.message?.content?.trim();
-    return text || buildOrderClosedMessage(business);
+    if (!text) return buildOrderClosedMessage(business);
+
+    // El corchete sin resolver no sale. Al cliente de produccion le llego, tal cual, "en total serian
+    // [Precio total (Productos + envio)] pesos": el prompt le pedia al modelo que reemplazara los
+    // placeholders de la plantilla del negocio y nadie verificaba que lo hubiera hecho.
+    const negocio = await getBusinessLocale(businessId);
+    const relleno = fillClosingPlaceholders(text, { ...order, locale: negocio.locale });
+    if (relleno.unresolved.length > 0) {
+      await recordAgentIncident(
+        businessId,
+        "DEGRADED_REPLY",
+        `El mensaje de cierre quedo con placeholders sin resolver (${relleno.unresolved.join(", ")}); se mando el cierre generico.`,
+        conversationId,
+        "cierre_con_placeholder"
+      );
+      return buildOrderClosedMessage(business);
+    }
+    return relleno.text;
   } catch (error) {
     console.error("No se pudo generar el mensaje de cierre personalizado, usando el generico:", error);
     return buildOrderClosedMessage(business);
@@ -820,11 +840,26 @@ export interface AgentReply {
   blocks: CatalogBlock[];
 }
 
+/**
+ * El alcance de una eleccion hecha con el dedo: el cliente toco una fila y vino el id del producto.
+ *
+ * No hay puntaje, ni umbral, ni desempate - o el id existe en el catalogo activo de este negocio, o no
+ * se resuelve nada. Es la version sin adivinanza de lo que hoy hace confidentMatch sobre la prosa.
+ */
+async function scopeFromSelectedProduct(businessId: string, productId: string): Promise<ProductScope> {
+  const product = await getProductById(businessId, productId);
+  return product ? { kind: "one", product: product as unknown as ScopeProduct, variant: null } : { kind: "none" };
+}
+
 export async function generateReply(
   conversationId: string,
   context: ToolContext,
   personality?: BotPersonality | null,
-  customerText?: string
+  customerText?: string,
+  // El producto que el cliente ELIGIO tocando una fila de una lista interactiva de WhatsApp. Viene como
+  // id, no como texto: no hay nada que interpretar, y por eso le gana a cualquier resolucion por prosa.
+  // Ver src/whatsapp/client.ts (sendInteractiveListMessage) y el manejo de list_reply en el webhook.
+  selectedProductId?: string
 ): Promise<AgentReply> {
   // Fetch a bigger window than the model actually sees: extractMediaHistory removes several rows (one
   // per photo/video sent) entirely, so 30 raw rows reliably leaves ~20 meaningful entries after that.
@@ -855,9 +890,29 @@ export async function generateReply(
   // Hasta el 2026-09-16 solo lo consultaba el auto-envio de get_product_details; el presentador de la Fase B
   // adjuntaba los medios siempre, y un cliente que volvia a un producto recibia las mismas fotos de nuevo.
   const alreadyPresentedProductIds = await getMediaSentProductIds(conversationId);
+  // EL CLIENTE QUE YA COMPRO NO ESTA NAVEGANDO EL CATALOGO (2026-09-17).
+  //
+  // resolveProductScope es funcion pura del ULTIMO mensaje: no sabe en que punto de la relacion esta el
+  // cliente. Medido en produccion, turno 00:59:11: Andres, con su reloj ya comprado y cerrado, escribio
+  // "Oye confirmado lo del reloj, mañana a que horas mas o menos llegaria". La palabra "reloj" matcheo la
+  // categoria configurada y el servidor le mando, sin que el modelo llamara una sola herramienta, la
+  // lista completa de los 6 smartwatches con precios y stock, preguntandole de cual queria ver fotos.
+  //
+  // El disparador de la supresion no lee prosa: es una fila de Order dentro de la ventana post-venta, o
+  // una confirmacion de pago viva en esta conversacion. Un SELECT, no una opinion.
+  const postSale = await getPostSaleContext(context.businessId, context.customerId, conversationId);
+  const pendingConfirmation = await prisma.conversation.findUnique({
+    where: { id: conversationId },
+    select: { pendingConfirmationAskedAt: true },
+  });
+  const enCierreOPostVenta = Boolean(postSale) || Boolean(pendingConfirmation?.pendingConfirmationAskedAt);
+
+  const scopeDelMensaje = selectedProductId
+    ? await scopeFromSelectedProduct(context.businessId, selectedProductId)
+    : await resolveProductScope(context.businessId, customerText ?? "", lastPresentedList);
   const resolvedScope: ProductScope = await withSignedMedia(
     context.businessId,
-    await resolveProductScope(context.businessId, customerText ?? "", lastPresentedList)
+    suppressBrowsingScope(scopeDelMensaje, customerText ?? "", enCierreOPostVenta)
   );
   const renderOptions = { currency: negocio.currency, locale: negocio.locale, alreadyPresentedProductIds };
   // Mutable porque hay un segundo momento en el que el servidor puede resolver el alcance: ver
@@ -1072,6 +1127,25 @@ export async function generateReply(
           {
             role: "system" as const,
             content: `PREGUNTA PENDIENTE CON EL DUEÑO: ya le preguntaste ${pendingOwnerQuestionsAtTurnStart.map((p) => `"${p.question}"`).join(", ")}, sigue sin responder. No vuelvas a prometer que vas a consultar eso; sí puedes seguir ayudando con todo lo demás.`,
+          },
+        ]
+      : []),
+    // EL PEDIDO QUE ESTE CLIENTE YA TIENE. Lo pone el servidor leyendo la base, no una herramienta que el
+    // modelo tenga que acordarse de llamar: el turno 00:59:11 del 2026-09-17 no llamo ninguna, y por eso
+    // Andres recibio el catalogo entero y le volvieron a pedir los datos de una compra ya cerrada.
+    //
+    // Va como DATO, sin decirle que contestar. La conversacion sigue siendo suya.
+    ...(postSale
+      ? [
+          {
+            role: "system" as const,
+            content:
+              `PEDIDO QUE ESTE CLIENTE YA TIENE, leido de la base de este negocio. Es real y es el suyo:\n\n` +
+              JSON.stringify(postSaleFactsForModel(postSale)) +
+              `\n\nNo le pidas de nuevo ningun dato que ya figure aca. Si pregunta por su compra, contestale con esto.` +
+              (postSale.fromAnotherConversation
+                ? ` Ese pedido se cerro en una conversacion anterior, asi que arriba no vas a ver el historial: los datos de aca son todo lo que hubo.`
+                : ``),
           },
         ]
       : []),
@@ -1725,7 +1799,7 @@ export async function generateReply(
     if (missing.length > 0) {
       escalated = true;
       text = ESCALATION_TEXT;
-      await setHumanControl(context.businessId, conversationId, true);
+      await setHumanControl(context.businessId, conversationId, true, "REQUIRED_EFFECT");
       markEscalatedTurn(conversationId);
       await alertOwner(context, escalationOwnerAlertText(missing[0].kind));
       await recordAgentIncident(
