@@ -1,5 +1,6 @@
 import { Router } from "express";
-import { getAiUsageSummary, getPlanUsage } from "../../ai/usage";
+import { getAiUsageSummary } from "../../ai/usage";
+import { getChatUsage } from "../../billing/chats";
 import { getAgentIncidentSummary, getHealthFindings } from "../../ai/incidents";
 import { getConfigHealth } from "../../ai/configHealth";
 import { getShadowValidationSummary } from "../../ai/agentTurns";
@@ -10,7 +11,7 @@ export const insightsRouter = Router();
 
 insightsRouter.get("/api/ai-usage", async (req, res) => {
   const businessId = businessIdOf(req);
-  const [summary, planUsage] = await Promise.all([getAiUsageSummary(businessId), getPlanUsage(businessId)]);
+  const [summary, planUsage] = await Promise.all([getAiUsageSummary(businessId), getChatUsage(businessId)]);
   res.json({ ...summary, planUsage });
 });
 

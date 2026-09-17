@@ -2,7 +2,7 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { prisma } from "../db/client";
-import { checkPlanCap, getAiUsageSummary } from "./usage";
+import { getAiUsageSummary } from "./usage";
 
 let businessId: string;
 let customerId: string;
@@ -14,7 +14,7 @@ before(async () => {
       name: `Test Business ${randomUUID()}`,
       email: `test-${randomUUID()}@example.com`,
       passwordHash: "x",
-      planTier: "BASICO", // cap = 2000, see PLAN_MESSAGE_CAPS in ./usage.ts
+      planTier: "BASICO",
     },
   });
   businessId = business.id;
@@ -33,28 +33,6 @@ after(async () => {
   await prisma.conversation.deleteMany({ where: { id: conversationId } });
   await prisma.customer.deleteMany({ where: { id: customerId } });
   await prisma.business.deleteMany({ where: { id: businessId } });
-});
-
-test("checkPlanCap is not capped right at the plan limit", async () => {
-  await prisma.message.createMany({
-    data: Array.from({ length: 2000 }, () => ({ conversationId, role: "CUSTOMER" as const, content: "hola" })),
-  });
-
-  const status = await checkPlanCap(businessId);
-  assert.equal(status.capped, false);
-  assert.equal(status.messageCap, 2000);
-});
-
-test("checkPlanCap trips once the limit is exceeded, and only notifies once per period", async () => {
-  await prisma.message.create({ data: { conversationId, role: "CUSTOMER", content: "uno mas" } });
-
-  const first = await checkPlanCap(businessId);
-  assert.equal(first.capped, true);
-  assert.equal(first.justCrossed, true);
-
-  const second = await checkPlanCap(businessId);
-  assert.equal(second.capped, true);
-  assert.equal(second.justCrossed, false, "should not re-notify the owner every single message");
 });
 
 test("getAiUsageSummary computes cacheHitRatio from real AiUsageLog rows", async () => {

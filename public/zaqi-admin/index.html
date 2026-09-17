@@ -97,6 +97,7 @@
           <th>Plan</th>
           <th>Cuenta</th>
           <th>WhatsApp</th>
+          <th>Gasto IA (mes)</th>
           <th></th>
         </tr>
       </thead>
@@ -110,9 +111,9 @@
         <div>
           <label style="display:block; font-size:12px; font-weight:600; margin-bottom:6px;">Plan</label>
           <select id="new-key-plan" style="padding:9px 11px; border:1px solid var(--border); border-radius:8px; font-size:14px;">
-            <option value="BASICO">Básico</option>
-            <option value="EMPRENDEDOR">Emprendedor</option>
-            <option value="NEGOCIO">Negocio</option>
+            <option value="BASICO">Starter</option>
+            <option value="EMPRENDEDOR">Crecimiento</option>
+            <option value="NEGOCIO">Escala</option>
           </select>
         </div>
         <button id="generate-key-btn">+ Generar clave nueva</button>
@@ -155,6 +156,29 @@
         <div class="error" id="modal-error"></div>
         <div class="modal-actions">
           <button type="button" class="btn-secondary" id="cancel-btn">Cancelar</button>
+          <button type="submit" class="btn-primary">Guardar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="overlay" id="ceiling-overlay">
+    <div class="modal">
+      <h2>Techo de gasto de IA</h2>
+      <p class="sub" id="ceiling-sub"></p>
+      <form id="ceiling-form">
+        <p style="font-size:12px;color:var(--muted);margin:0 0 10px;">
+          Cortacircuitos, no tope comercial: si el costo de IA del mes pasa este número, el bot deja de
+          responder solo y los clientes reciben un mensaje pidiéndoles que esperen a una persona.
+          Subirlo lo reactiva de inmediato.
+        </p>
+        <div id="ceiling-current" style="font-size:13px;margin:0 0 12px;"></div>
+        <label>Techo en USD por mes</label>
+        <input type="number" id="ceilingUsd" step="0.01" min="0.01" autocomplete="off" placeholder="Vacío = usar el del plan" />
+        <p style="font-size:12px;color:var(--muted);margin:6px 0 0;">Déjalo vacío para volver al techo que sale del plan.</p>
+        <div class="error" id="ceiling-error"></div>
+        <div class="modal-actions">
+          <button type="button" class="btn-secondary" id="ceiling-cancel-btn">Cancelar</button>
           <button type="submit" class="btn-primary">Guardar</button>
         </div>
       </form>
@@ -219,19 +243,36 @@ function renderBusinesses(businesses) {
         ${connectionBadge(b)}
         ${b.whatsappPhoneNumber ? `<br><span style="color:var(--muted);font-size:12px;">${escapeHtml(b.whatsappPhoneNumber)}</span>` : ''}
       </td>
+      <td>${spendCell(b)}</td>
       <td>
         <button class="edit-btn" data-id="${b.id}" data-name="${escapeHtml(b.name)}" data-phone-id="${escapeHtml(b.whatsappPhoneNumberId ?? '')}" data-phone="${escapeHtml(b.whatsappPhoneNumber ?? '')}" data-waba-id="${escapeHtml(b.whatsappBusinessAccountId ?? '')}">${b.whatsappPhoneNumberId ? 'Editar' : 'Conectar'}</button>
         <button class="edit-btn log-btn" data-id="${b.id}" data-name="${escapeHtml(b.name)}" ${b.contactPhone ? '' : 'disabled title="Este negocio no tiene contactPhone configurado"'}>Conversación dueño</button>
+        <button class="edit-btn ceiling-btn" data-id="${b.id}" data-name="${escapeHtml(b.name)}" data-ceiling="${b.aiSpendCeilingUsd ?? ''}" data-effective="${b.effectiveCeilingUsd}" data-spent="${b.spentUsd}" data-default="${b.ceilingIsDefault}">Techo</button>
       </td>
     </tr>
   `).join('');
 
-  document.querySelectorAll('.edit-btn:not(.log-btn)').forEach((btn) => {
+  document.querySelectorAll('.edit-btn:not(.log-btn):not(.ceiling-btn)').forEach((btn) => {
     btn.addEventListener('click', () => openModal(btn.dataset.id, btn.dataset.name, btn.dataset.phoneId, btn.dataset.phone, btn.dataset.wabaId));
   });
   document.querySelectorAll('.log-btn').forEach((btn) => {
     btn.addEventListener('click', () => openLogModal(btn.dataset.id, btn.dataset.name));
   });
+  document.querySelectorAll('.ceiling-btn').forEach((btn) => {
+    btn.addEventListener('click', () => openCeilingModal(btn.dataset));
+  });
+}
+
+// Gasto de IA del mes contra el techo vigente. El porcentaje es lo que decide si hay que mirar: el
+// monto solo dice cuanto, no dice si es mucho para ESTE negocio.
+function spendCell(b) {
+  const pct = b.effectiveCeilingUsd > 0 ? Math.round((b.spentUsd / b.effectiveCeilingUsd) * 1000) / 10 : 0;
+  const color = pct >= 100 ? 'var(--danger)' : pct >= 70 ? 'var(--warn)' : 'var(--muted)';
+  return `
+    <span style="font-size:13px;">US$ ${b.spentUsd.toFixed(4)}</span>
+    <br><span style="color:${color}; font-size:12px;">${pct}% de US$ ${b.effectiveCeilingUsd.toFixed(2)}${b.ceilingIsDefault ? ' (plan)' : ''}</span>
+    ${pct >= 100 ? '<br><span style="color:var(--danger); font-size:12px; font-weight:600;">Bot en pausa</span>' : ''}
+  `;
 }
 
 function escapeHtml(str) {
@@ -255,6 +296,54 @@ function closeModal() {
   document.getElementById('overlay').style.display = 'none';
   currentBusinessId = null;
 }
+
+let ceilingBusinessId = null;
+
+function openCeilingModal(data) {
+  ceilingBusinessId = data.id;
+  const spent = Number(data.spent);
+  const effective = Number(data.effective);
+  const pct = effective > 0 ? Math.round((spent / effective) * 1000) / 10 : 0;
+
+  document.getElementById('ceiling-sub').textContent = data.name;
+  document.getElementById('ceiling-current').innerHTML =
+    `Este mes lleva <strong>US$ ${spent.toFixed(4)}</strong> de US$ ${effective.toFixed(2)} (${pct}%)` +
+    (data.default === 'true' ? ' — techo heredado del plan.' : ' — techo propio.') +
+    (pct >= 100 ? ' <strong style="color:var(--danger);">El bot está en pausa.</strong>' : '');
+  document.getElementById('ceilingUsd').value = data.ceiling || '';
+  document.getElementById('ceiling-error').style.display = 'none';
+  document.getElementById('ceiling-overlay').style.display = 'flex';
+}
+
+function closeCeilingModal() {
+  document.getElementById('ceiling-overlay').style.display = 'none';
+  ceilingBusinessId = null;
+}
+
+document.getElementById('ceiling-cancel-btn').addEventListener('click', closeCeilingModal);
+
+document.getElementById('ceiling-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const errorEl = document.getElementById('ceiling-error');
+  errorEl.style.display = 'none';
+
+  const raw = document.getElementById('ceilingUsd').value.trim();
+  const res = await fetch(`/zaqi-admin/api/businesses/${ceilingBusinessId}/spend-ceiling`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ aiSpendCeilingUsd: raw === '' ? null : Number(raw) }),
+  });
+
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    errorEl.textContent = data.error || 'No se pudo guardar';
+    errorEl.style.display = 'block';
+    return;
+  }
+
+  closeCeilingModal();
+  loadBusinesses();
+});
 
 async function loadBusinesses() {
   const res = await fetch('/zaqi-admin/api/businesses');

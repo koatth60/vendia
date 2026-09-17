@@ -1,42 +1,9 @@
 import { prisma } from "../db/client";
 
-// Message caps per plan tier — enforced by checkPlanCap below (gates the bot's auto-reply once
-// exceeded), and also shown to the owner as a usage percentage in the admin panel. NEGOCIO is
-// deliberately null (unlimited), not Infinity — Infinity doesn't survive JSON.stringify (becomes null
-// on the wire anyway), so we make that explicit and treat null as "no cap" everywhere it's read.
-const PLAN_MESSAGE_CAPS: Record<string, number | null> = {
-  BASICO: 2000,
-  EMPRENDEDOR: 5000,
-  NEGOCIO: null,
-};
-
-function getMessageCap(planTier: string): number | null {
-  return planTier in PLAN_MESSAGE_CAPS ? PLAN_MESSAGE_CAPS[planTier] : PLAN_MESSAGE_CAPS.BASICO;
-}
-
-export async function getPlanUsage(businessId: string) {
-  const business = await prisma.business.findUnique({ where: { id: businessId }, select: { planTier: true } });
-  const planTier = business?.planTier ?? "BASICO";
-  const messageCap = getMessageCap(planTier);
-
-  const now = new Date();
-  const periodStart = new Date(now.getFullYear(), now.getMonth(), 1);
-
-  const messagesUsed = await prisma.message.count({
-    where: {
-      conversation: { customer: { businessId } },
-      createdAt: { gte: periodStart },
-    },
-  });
-
-  return {
-    planTier,
-    messageCap,
-    messagesUsed,
-    usagePercent: messageCap === null ? 0 : Math.round((messagesUsed / messageCap) * 1000) / 10,
-    periodStart,
-  };
-}
+// EL CONSUMO DEL PLAN YA NO VIVE ACA (2026-09-17). Este archivo mide lo que nos cuesta la IA en tokens;
+// lo que se le VENDE al negocio se mide en chats y vive en src/billing/chats.ts. Aca estaban
+// PLAN_MESSAGE_CAPS, getPlanUsage y checkPlanCap, que contaban filas de Message - una unidad que ya no
+// es la que se factura.
 
 // Precios oficiales DeepSeek por 1M tokens (USD), vigentes desde el repricing del 2026-09-10.
 // Fuente: https://api-docs.deepseek.com/quick_start/pricing
@@ -108,25 +75,6 @@ export async function logAiUsage(params: {
   } catch (error) {
     console.error("No se pudo registrar el uso de IA:", error);
   }
-}
-
-// Gates the bot's auto-reply, not the DB write of the incoming message itself - the customer message
-// is always recorded, only the AI call (and the cost/message-volume it represents) is what gets capped.
-export async function checkPlanCap(
-  businessId: string
-): Promise<{ capped: boolean; justCrossed: boolean; messageCap: number | null; planTier: string }> {
-  const usage = await getPlanUsage(businessId);
-  if (usage.messageCap === null || usage.messagesUsed <= usage.messageCap) {
-    return { capped: false, justCrossed: false, messageCap: usage.messageCap, planTier: usage.planTier };
-  }
-
-  const business = await prisma.business.findUnique({ where: { id: businessId }, select: { capNotifiedAt: true } });
-  const justCrossed = !business?.capNotifiedAt || business.capNotifiedAt < usage.periodStart;
-  if (justCrossed) {
-    await prisma.business.update({ where: { id: businessId }, data: { capNotifiedAt: new Date() } });
-  }
-
-  return { capped: true, justCrossed, messageCap: usage.messageCap, planTier: usage.planTier };
 }
 
 export async function getAiUsageSummary(businessId: string, days = 14) {

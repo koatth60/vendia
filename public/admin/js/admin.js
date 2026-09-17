@@ -4841,28 +4841,29 @@ async function loadAiUsage() {
       </tr>
     `).join('');
 
+    // El consumo del plan se mide en CHATS (una interaccion completa con un cliente, cerrada a las 48h
+    // sin actividad), no en mensajes - ver src/billing/chats.ts. Pasar el tope ya no apaga el bot: los
+    // chats de mas se facturan, y eso es lo que tiene que quedar dicho aca.
     const pu = s.planUsage;
-    const planLabel = { BASICO: 'Básico', EMPRENDEDOR: 'Emprendedor', NEGOCIO: 'Negocio' }[pu.planTier] || pu.planTier;
+    const planLabel = { BASICO: 'Starter', EMPRENDEDOR: 'Crecimiento', NEGOCIO: 'Escala' }[pu.planTier] || pu.planTier;
     const barColor = pu.usagePercent >= 100 ? 'var(--danger)' : pu.usagePercent >= 70 ? 'var(--onix-warn)' : 'var(--brand)';
     const monthLabel = new Date(pu.periodStart).toLocaleDateString('es-CO', { month: 'long', year: 'numeric' });
-    const unlimited = pu.messageCap === null;
 
     container.innerHTML = `
       <div class="card" style="margin-bottom:16px;">
         <div style="display:flex; justify-content:space-between; align-items:baseline;">
           <div style="font-size:12px; color:var(--muted);">Consumo del plan ${escapeHtml(planLabel)} · ${monthLabel}</div>
-          <div style="font-size:12px; color:var(--muted);">${unlimited ? `${pu.messagesUsed.toLocaleString('es-CO')} mensajes · ilimitado` : `${pu.messagesUsed.toLocaleString('es-CO')} / ${pu.messageCap.toLocaleString('es-CO')} mensajes`}</div>
+          <div style="font-size:12px; color:var(--muted);" class="onix-num">${pu.chatsUsed.toLocaleString('es-CO')} / ${pu.chatCap.toLocaleString('es-CO')} chats</div>
         </div>
-        ${unlimited ? '' : `
         <div style="background:var(--border-soft); border-radius:999px; height:10px; margin-top:8px; overflow:hidden;">
           <div style="width:${Math.min(pu.usagePercent, 100)}%; background:${barColor}; height:100%; border-radius:999px;"></div>
         </div>
-        <div style="font-size:20px; font-weight:700; margin-top:8px; color:${barColor};">${pu.usagePercent}%</div>
-        ${pu.usagePercent >= 100
-          ? '<div style="font-size:12px; color:var(--danger); margin-top:4px;">Superaste el límite estimado de tu plan este mes.</div>'
+        <div style="font-size:20px; font-weight:700; margin-top:8px; color:${barColor};" class="onix-num">${pu.usagePercent}%</div>
+        ${pu.extraChats > 0
+          ? `<div style="font-size:12px; color:var(--onix-warn); margin-top:4px;">${pu.extraChats.toLocaleString('es-CO')} ${pu.extraChats === 1 ? 'chat adicional' : 'chats adicionales'} este mes · <strong class="onix-num">$${pu.extraChargeCop.toLocaleString('es-CO')} COP</strong> a facturar (a $${pu.extraChatPriceCop} COP cada uno). El bot sigue atendiendo.</div>`
           : pu.usagePercent >= 70
-            ? '<div style="font-size:12px; color:var(--onix-warn); margin-top:4px;">Te estás acercando al límite de tu plan.</div>'
-            : ''}`}
+            ? `<div style="font-size:12px; color:var(--onix-warn); margin-top:4px;">Te estás acercando al límite de tu plan. Pasarlo no apaga el bot: cada chat adicional se factura a $${pu.extraChatPriceCop} COP.</div>`
+            : ''}
       </div>
       <div class="grid-3" style="margin-bottom:16px;">
         <div class="card">

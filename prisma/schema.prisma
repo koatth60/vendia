@@ -45,6 +45,18 @@ model Business {
   passwordResetCode         String?
   passwordResetExpiresAt    DateTime?
   capNotifiedAt             DateTime?
+  // EL FRENO DE GASTO (2026-09-17). Desde que pasar el tope de chats factura en vez de apagar el bot
+  // (ver BillableChat), nada limitaba cuanto podia gastar un negocio en IA: un pico raro o un bucle
+  // llamaba al modelo sin techo y lo pagabamos nosotros.
+  //
+  // Es el costo de IA en USD del mes corriente, sumado de AiUsageLog. NO es un tope comercial - el
+  // cliente compro sus chats y se los damos. Es un cortacircuitos para un gasto anomalo, y por eso el
+  // numero lo pone Zaqi desde el panel de plataforma y no el dueno del negocio desde el suyo.
+  //
+  // null = usar el default que sale del plan (ver defaultCeilingUsd en src/billing/spendCeiling.ts).
+  // Asi ningun negocio queda sin freno por olvido, que es justo como se llego hasta aca.
+  aiSpendCeilingUsd         Float?
+  spendCeilingNotifiedAt    DateTime?
   whatsappPhoneNumberId     String?                   @unique
   whatsappBusinessAccountId String?
   whatsappPhoneNumber       String?
@@ -161,6 +173,7 @@ model Business {
   shippingCityRules         ShippingCityRule[]
   categoryAliases           CategoryAlias[]
   aiUsageLogs               AiUsageLog[]
+  billableChats             BillableChat[]
   faqEntries                FaqEntry[]
   learnedFaqCandidates      LearnedFaqCandidate[]
   deliveryFailures          DeliveryFailure[]
@@ -778,6 +791,7 @@ model Customer {
   notes         CustomerNote[]
   conversations Conversation[]
   orders        Order[]
+  billableChats BillableChat[]
   createdAt     DateTime       @default(now())
 
   @@unique([businessId, phoneNumber])
@@ -1024,6 +1038,41 @@ enum AiUsageKind {
   CHAT
   VISION
   VISION_ESCALATION
+}
+
+// LA UNIDAD QUE SE FACTURA (2026-09-17). Los planes dejaron de venderse por mensajes y pasaron a
+// venderse por CHATS: una interaccion completa con un cliente, termine en compra o quede a medias.
+//
+// Una fila = un chat. Se abre cuando entra un mensaje de un cliente que no tiene ningun chat abierto,
+// y se cierra sola a las CHAT_WINDOW_HOURS (48) sin que ese cliente escriba ni le escriban. No hay job
+// que la cierre: "cerrada" es que lastMessageAt quedo fuera de la ventana, que es una comparacion de
+// fechas contra la base y no un estado que haya que mantener al dia.
+//
+// La ventana se lleva por CLIENTE, no por Conversation, a proposito: getOrCreateOpenConversation abre
+// una conversacion NUEVA en cuanto la anterior queda en SOLD o LOST, asi que un cliente que compra y
+// vuelve a preguntar por el envio media hora despues tendria dos conversaciones - y, con la ventana
+// atada a la conversacion, se le facturarian dos chats por una sola interaccion.
+//
+// periodStart es el mes en que el chat ABRIO, y no se recalcula: un chat que empieza el 31 y sigue el
+// 1ro se cuenta una sola vez, en el mes en que empezo. Sin ese campo habria que decidir a que mes
+// pertenece en cada consulta, y las dos consultas que lo decidieran distinto facturarian distinto.
+model BillableChat {
+  id             String       @id @default(cuid())
+  business       Business     @relation(fields: [businessId], references: [id])
+  businessId     String
+  customer       Customer     @relation(fields: [customerId], references: [id])
+  customerId     String
+  // La conversacion que lo abrio. Es trazabilidad para el panel, no la llave de la ventana (ver arriba):
+  // el mismo chat puede seguir en otra conversacion si la primera se cerro por venta.
+  conversationId String?
+  startedAt      DateTime     @default(now())
+  lastMessageAt  DateTime     @default(now())
+  messageCount   Int          @default(1)
+  periodStart    DateTime
+  createdAt      DateTime     @default(now())
+
+  @@index([businessId, periodStart])
+  @@index([customerId, lastMessageAt])
 }
 
 model AiUsageLog {

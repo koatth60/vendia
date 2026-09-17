@@ -5,6 +5,8 @@ import { requirePlatformAdmin } from "../auth/requirePlatformAdmin";
 import { generateActivationCode } from "../auth/service";
 import { listOwnerMessages } from "../delivery/ownerLog";
 import { listDeliveryFailuresForBusiness, resolveDeliveryFailure } from "../delivery/failures";
+import { periodStartOf } from "../billing/chats";
+import { defaultCeilingUsd } from "../billing/spendCeiling";
 
 export const platformAdminRouter = Router();
 
@@ -55,10 +57,56 @@ platformAdminRouter.get("/businesses", async (_req, res) => {
       whatsappBusinessAccountId: true,
       whatsappTokenExpiresAt: true,
       whatsappConnectionBrokenAt: true,
+      aiSpendCeilingUsd: true,
       createdAt: true,
     },
   });
-  res.json(businesses);
+
+  // Cuanto lleva gastado cada uno este mes, para que el techo no sea un numero a ciegas: subirlo o
+  // bajarlo sin ver contra que se compara es adivinar. Una sola consulta agrupada, no una por negocio.
+  const periodStart = periodStartOf(new Date());
+  const spendByBusiness = await prisma.aiUsageLog.groupBy({
+    by: ["businessId"],
+    where: { createdAt: { gte: periodStart } },
+    _sum: { costUsd: true },
+  });
+  const spent = new Map(spendByBusiness.map((row) => [row.businessId, row._sum.costUsd ?? 0]));
+
+  res.json(
+    businesses.map((b) => ({
+      ...b,
+      spentUsd: spent.get(b.id) ?? 0,
+      effectiveCeilingUsd: b.aiSpendCeilingUsd ?? defaultCeilingUsd(b.planTier),
+      ceilingIsDefault: b.aiSpendCeilingUsd == null,
+    }))
+  );
+});
+
+// El techo de gasto de IA de un negocio (ver src/billing/spendCeiling.ts). Vive en el panel de
+// PLATAFORMA y no en el del negocio a proposito: es plata nuestra, no del cliente.
+platformAdminRouter.patch("/businesses/:id/spend-ceiling", async (req, res) => {
+  const raw = req.body?.aiSpendCeilingUsd;
+  // null/"" = volver al default del plan. Es una opcion real, no un campo sin llenar.
+  const ceiling = raw === null || raw === "" || raw === undefined ? null : Number(raw);
+  if (ceiling !== null && (!Number.isFinite(ceiling) || ceiling <= 0)) {
+    res.status(400).json({ error: "El techo tiene que ser un número mayor que 0, o vacío para usar el del plan" });
+    return;
+  }
+
+  const business = await prisma.business.findUnique({ where: { id: req.params.id }, select: { id: true } });
+  if (!business) {
+    res.status(404).json({ error: "Negocio no encontrado" });
+    return;
+  }
+
+  await prisma.business.update({
+    where: { id: business.id },
+    // Subir el techo tiene que DESPAUSAR el bot en el acto. spendCeilingNotifiedAt es lo unico que
+    // recuerda que ya se aviso en este periodo; sin limpiarlo, el proximo cruce del mes pasaria mudo.
+    data: { aiSpendCeilingUsd: ceiling, spendCeilingNotifiedAt: null },
+  });
+
+  res.json({ ok: true });
 });
 
 platformAdminRouter.patch("/businesses/:id/whatsapp", async (req, res) => {

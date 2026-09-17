@@ -43,7 +43,8 @@ import { generateReply, generateClosingMessage, extractDeliveryDataFromAnswer, e
 import { sendCatalogBlocks } from "../whatsapp/catalogBlocks";
 import { analyzeCustomerImage } from "../ai/vision";
 import { transcribeAudio } from "../ai/transcription";
-import { checkPlanCap } from "../ai/usage";
+import { recordBillableChat, checkChatOverage, EXTRA_CHAT_PRICE_COP } from "../billing/chats";
+import { checkSpendCeiling } from "../billing/spendCeiling";
 import { createOrder, askForCsat, recordCsatReply, type ResolvedOrderItem } from "../orders/service";
 import {
   setAgreedPrices,
@@ -915,6 +916,21 @@ whatsappRouter.post("/webhook", async (req, res) => {
     }
 
     await withConversationLock(conversation.id, async () => {
+      // LA UNIDAD QUE SE FACTURA. Un mensaje real de un cliente abre un chat, o cae dentro del que ese
+      // cliente ya tenia abierto (ver src/billing/chats.ts). Va aca arriba, antes de decidir nada sobre
+      // la respuesta, porque un chat se cuenta por la interaccion del cliente y no por lo que el bot
+      // haya alcanzado a hacer con ella: una conversacion en control humano, una que termina escalada o
+      // una que se cae a mitad de camino son la misma interaccion vendida.
+      //
+      // Adentro del lock a proposito: el lock es por conversacion y la conversacion es por cliente, asi
+      // que dos mensajes simultaneos del mismo cliente no pueden abrir dos chats para la misma ventana.
+      const metaSentMs = Number(message.timestamp) * 1000;
+      await recordBillableChat({
+        businessId: business.id,
+        customerId: customer.id,
+        conversationId: conversation.id,
+        at: new Date(Number.isFinite(metaSentMs) && metaSentMs > 0 ? metaSentMs : webhookReceivedAt),
+      });
 
       let text = "";
       let media: { s3Key: string; type: "IMAGE" | "VIDEO" | "AUDIO"; peaks?: string | null } | undefined;
@@ -1109,32 +1125,62 @@ whatsappRouter.post("/webhook", async (req, res) => {
         return;
       }
 
-      // An image/video message is very likely a payment receipt (or product photo mid-close) for a
-      // purchase already in progress - cutting the customer off here mid-close is worse than letting
-      // one extra message through, so the cap only gates plain text/audio turns.
-      const capStatus =
-        message.type === "image" || message.type === "video"
-          ? { capped: false as const, justCrossed: false, messageCap: null, planTier: business.planTier }
-          : await checkPlanCap(business.id);
-      if (capStatus.capped) {
-        const capText =
-          "Por ahora alcanzamos el límite de mensajes de este mes para este negocio. Un asesor te va a contactar en breve para ayudarte manualmente. ¡Gracias por tu paciencia! 🙏";
+      // PASAR EL TOPE DEL PLAN YA NO APAGA NADA (2026-09-17). Aca vivia checkPlanCap: al pasar el tope
+      // de MENSAJES del mes, el bot le contestaba al cliente "alcanzamos el limite" y se callaba hasta
+      // el mes siguiente. Desde que los chats extra se facturan a EXTRA_CHAT_PRICE_COP, cortar el
+      // servicio seria dejar de prestar lo que se esta cobrando. El unico efecto de cruzar el tope es
+      // el aviso al dueno, una sola vez por periodo.
+      // EL FRENO DE GASTO (ver src/billing/spendCeiling.ts). Esto no es el tope comercial: es el
+      // cortacircuitos que salta cuando el costo de IA del mes se va por encima del techo de este
+      // negocio. Si salta, algo anda mal, y lo barato es que atienda una persona.
+      //
+      // El chat ya quedo contado mas arriba, a proposito: el cliente escribio, y el negocio lo va a
+      // atender a mano. Que el bot no haya sido el que contesto no borra la interaccion.
+      const spend = await checkSpendCeiling(business.id);
+      if (spend.exceeded) {
+        const pausedText =
+          "En este momento no puedo responderte automáticamente. Ya avisé al equipo y una persona te va a escribir en breve. ¡Gracias por la paciencia! 🙏";
         await sendToCustomer({
           businessId: business.id,
           conversationId: conversation.id,
           credentials,
           to: from,
-          content: { kind: "text", text: capText },
+          content: { kind: "text", text: pausedText },
           onWindowClosed: "fail",
-          recordAs: { text: capText },
+          recordAs: { text: pausedText },
         });
 
-        if (capStatus.justCrossed && business.contactPhone) {
-          const greeting = business.contactName ? `Hola ${business.contactName}` : "Hola";
-          const capAlertText = `${greeting}, tu negocio alcanzó el límite de ${capStatus.messageCap} mensajes de tu plan ${capStatus.planTier} este mes. El bot dejó de responder automáticamente hasta el próximo mes - escríbeme si quieres subir de plan.`;
-          await alertOwnerTracked(business.id, credentials, business.contactPhone!, capAlertText);
+        if (spend.justCrossed) {
+          // Sin ambiguedad para grep en `pm2 logs`: si esto salta, lo tenemos que ver nosotros ANTES
+          // que el dueno, porque el numero lo pusimos nosotros y el gasto lo pagamos nosotros.
+          console.error(
+            `ZAQI ALERT: "${business.name}" (${business.id}) cruzo su techo de gasto de IA: ` +
+              `US$ ${spend.spentUsd.toFixed(4)} de US$ ${spend.ceilingUsd.toFixed(2)} ` +
+              `(${spend.ceilingIsDefault ? "default del plan" : "techo propio"}). El bot quedo en pausa.`
+          );
+
+          if (business.contactPhone) {
+            const greeting = business.contactName ? `Hola ${business.contactName}` : "Hola";
+            await alertOwnerTracked(
+              business.id,
+              credentials,
+              business.contactPhone,
+              `${greeting}, pausé las respuestas automáticas de tu bot por una revisión técnica de nuestro lado. ` +
+                `Tus clientes están recibiendo un mensaje pidiéndoles que esperen a una persona. Ya estamos encima; te escribo apenas quede resuelto.`
+            );
+          }
         }
         return;
+      }
+
+      const chatOverage = await checkChatOverage(business.id);
+      if (chatOverage.justCrossed && business.contactPhone) {
+        const greeting = business.contactName ? `Hola ${business.contactName}` : "Hola";
+        const overageText =
+          `${greeting}, tu negocio pasó los ${chatOverage.chatCap} chats de tu plan ${chatOverage.planTier} este mes. ` +
+          `El bot sigue atendiendo normalmente: cada chat adicional se factura a $${EXTRA_CHAT_PRICE_COP} COP. ` +
+          `Escríbeme si quieres subir de plan.`;
+        await alertOwnerTracked(business.id, credentials, business.contactPhone!, overageText);
       }
 
       // Cuando el CLIENTE mando el mensaje, no cuando nosotros terminamos de procesarlo: la descarga del
