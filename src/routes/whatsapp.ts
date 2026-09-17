@@ -622,6 +622,7 @@ async function runGenerateAndSend(conversationId: string, items: ReplyBurstItem[
       saleStateEnabled: business.saleStateEnabled,
       requiredEffectsEnabled: business.requiredEffectsEnabled,
       catalogPhotoScope: business.catalogPhotoScope,
+      interactiveListsEnabled: business.interactiveListsEnabled,
       paymentExamples,
     },
     combinedRawText,

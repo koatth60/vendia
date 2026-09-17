@@ -924,6 +924,9 @@ export async function generateReply(
     // Hasta donde llegan las fotos lo decide el dueno en el panel, nunca el modelo ni una lectura del
     // mensaje. Sin valor configurado es "PRODUCT": exactamente lo que el sistema hacia antes de esto.
     photoScope: personality?.catalogPhotoScope ?? "PRODUCT",
+    // Solo cambia la ULTIMA linea que escribe el presentador: con la lista tocable se le pide al cliente
+    // que toque el boton, sin ella que responda una foto o diga el numero.
+    interactiveLists: personality?.interactiveListsEnabled ?? false,
   };
   // Mutable porque hay un segundo momento en el que el servidor puede resolver el alcance: ver
   // promoteScopeFromIdentifiedPhoto mas abajo.

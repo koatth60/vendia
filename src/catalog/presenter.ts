@@ -53,6 +53,12 @@ export interface CatalogBlock {
    */
   kind: "ficha" | "lista";
   /**
+   * Titulo de la seccion cuando este bloque sale como lista tocable de WhatsApp: el nombre de la
+   * categoria que agrupa sus filas. Sin categoria (o con una sola, donde el encabezado repetiria lo que
+   * el cliente acaba de preguntar) queda sin definir y el llamador pone el suyo.
+   */
+  sectionTitle?: string;
+  /**
    * Las mismas opciones de este bloque, listas para una lista interactiva de WhatsApp: el cliente toca una
    * fila y vuelve el id del producto, sin que nadie tenga que leer "el 5" de su prosa. Solo las llevan los
    * bloques de LISTA (group/all); una ficha de producto no es una eleccion.
@@ -97,6 +103,13 @@ export interface RenderCatalogOptions {
   browsePhotoSentProductIds?: string[];
   /** Business.catalogPhotoScope. Sin valor se asume "PRODUCT", el comportamiento de siempre. */
   photoScope?: CatalogPhotoScope;
+  /**
+   * Business.interactiveListsEnabled. El presentador lo necesita porque la ULTIMA linea que escribe le
+   * dice al cliente que hacer, y lo que tiene que hacer cambia: con la lista tocable se toca un boton,
+   * sin ella se responde una foto o se dice un numero. Pedirle que "responda el numero" debajo de una
+   * lista que se toca es mandarlo por el camino largo.
+   */
+  interactiveLists?: boolean;
 }
 
 /**
@@ -110,8 +123,24 @@ export const FEW_PRODUCTS_MAX = 2;
  * un mensaje por categoria y no partido a los 700 caracteres), pero una categoria con decenas de
  * productos igual necesita un corte: se parte en mensajes de continuacion CONSERVANDO la numeracion,
  * nunca reiniciandola.
+ *
+ * Valia 12 hasta el 2026-09-17, y ese 12 dejaba sin lista TOCABLE a toda categoria de 11 o 12 productos:
+ * Meta admite 10 filas por mensaje, asi que un bloque de 12 no podia salir como lista y caia al texto
+ * numerado, en silencio y justo en las categorias mas largas - las que mas necesitan que elegir sea un
+ * toque y no escribir un numero. Con 10, TODA lista que este presentador produce es elegible con el
+ * dedo. La igualdad con LIST_MAX_ROWS no es casual y no puede desincronizarse: la verifica
+ * src/whatsapp/catalogBlocks.listables.test.ts.
  */
-const MAX_LINES_PER_BLOCK = 12;
+export const MAX_LINES_PER_BLOCK = 10;
+
+/**
+ * Los limites de Meta que este presentador tiene que respetar al COMPONER, no al enviar. El recorte de
+ * titulos y descripciones de fila vive en src/whatsapp/client.ts, que es quien arma la llamada; estos
+ * dos estan aca porque cambian lo que se escribe, no solo como se manda.
+ */
+const LIST_MAX_ROWS = 10;
+const LIST_BODY_MAX = 1024;
+const LIST_FALLBACK_BODY = "Estas son las opciones:";
 
 // MAX_DESCRIPTION_LINES (5) y MORE_DESCRIPTION_LINE se ELIMINARON el 2026-09-16, con el camino de un
 // solo autor. Cortaban CINCO LINEAS, no cinco caracteristicas, y no hay forma de calibrar ese numero:
@@ -130,8 +159,14 @@ const PHOTO_OFFER_LINE = "¿De cuál te gustaría ver fotos?";
 /**
  * La misma pregunta cuando las fotos YA salen en este turno. La de arriba ofrecia algo que todavia no
  * habia salido; esta le dice al cliente que hacer con lo que ya tiene delante.
+ *
+ * Hay dos versiones porque hay dos gestos, y ofrecerle el gesto largo a alguien que tiene un boton
+ * delante es el error que esta linea existe para evitar. Cual sale lo decide si ESE bloque va a salir
+ * como lista tocable (ver rowsAreListable), nunca una suposicion.
  */
 const VITRINA_OFFER_LINE = "Te paso las fotos. Responde a la del que te guste (o dime el número) y te cuento todo de ese.";
+const VITRINA_OFFER_LINE_TOCABLE = "Te paso las fotos. Toca *Ver opciones* y elige el que te guste para que te cuente todo de ese.";
+const PHOTO_OFFER_LINE_TOCABLE = "Toca *Ver opciones* y elige de cuál te gustaría ver fotos.";
 
 /**
  * HASTA DONDE LLEGAN LAS FOTOS (2026-09-17). Lo elige el dueno del negocio en el panel
@@ -335,7 +370,14 @@ function renderNumberedGroup(
   startNumber: number,
   opts: RenderCatalogOptions,
   /** Los productos de esta lista que van con foto de vitrina. Vacio = lista de texto, como siempre. */
-  vitrina: ReadonlySet<string> = new Set()
+  vitrina: ReadonlySet<string> = new Set(),
+  /**
+   * La categoria que agrupa estas filas, para el titulo de la seccion tocable. Es un dato APARTE de
+   * `heading`: el encabezado se omite cuando hay una sola categoria (repetiria lo que el cliente acaba de
+   * preguntar), pero el titulo de la seccion vive dentro del selector, no en el mensaje, y ahi nombrar la
+   * categoria siempre ayuda.
+   */
+  sectionTitle: string | null = null
 ): CatalogBlock[] {
   const blocks: CatalogBlock[] = [];
   for (let offset = 0; offset < products.length; offset += MAX_LINES_PER_BLOCK) {
@@ -362,6 +404,7 @@ function renderNumberedGroup(
       }),
       productIds: chunk.map((p) => p.id),
       kind: "lista" as const,
+      ...(sectionTitle ? { sectionTitle } : {}),
       // El titulo de fila lo recorta el cliente de WhatsApp (24 caracteres, limite de Meta); el precio y
       // el stock van en la descripcion, que admite 72.
       rows: chunk.map((product) => ({
@@ -440,7 +483,7 @@ export function renderCatalog(scope: ProductScope, opts: RenderCatalogOptions): 
     // Con una sola categoria el encabezado repetiria lo que el cliente acaba de preguntar; con varias
     // es lo que separa un mensaje del siguiente.
     const heading = groups.length > 1 ? group.category ?? (opts.uncategorizedLabel ?? DEFAULT_UNCATEGORIZED_LABEL) : null;
-    const rendered = renderNumberedGroup(heading, group.products, next, opts, vitrina);
+    const rendered = renderNumberedGroup(heading, group.products, next, opts, vitrina, group.category ?? null);
     next += group.products.length;
     blocks.push(...rendered);
   }
@@ -451,7 +494,19 @@ export function renderCatalog(scope: ProductScope, opts: RenderCatalogOptions): 
     // con la vitrina encendida pero todas las fotos ya enviadas antes, ofrecerlas de nuevo seria mentir.
     const hayFotos = blocks.some((b) => b.media.length > 0);
     const last = blocks[blocks.length - 1];
-    const withOffer = `${last.text}\n\n${hayFotos ? VITRINA_OFFER_LINE : PHOTO_OFFER_LINE}`;
+    // Que gesto se le pide depende de si ESE bloque va a salir tocable, que es exactamente lo mismo que
+    // mira sendCatalogBlocks antes de elegir la forma del mensaje (misma funcion, una sola regla).
+    const tocable = Boolean(opts.interactiveLists) && rowsAreListable(last.rows);
+    const offer = hayFotos
+      ? tocable
+        ? VITRINA_OFFER_LINE_TOCABLE
+        : VITRINA_OFFER_LINE
+      : tocable
+        ? PHOTO_OFFER_LINE_TOCABLE
+        : PHOTO_OFFER_LINE;
+    const withOffer = `${last.text}
+
+${offer}`;
     blocks[blocks.length - 1] = { ...last, text: withOffer, modelText: withOffer };
   }
 
@@ -554,6 +609,40 @@ export function stripPresentationDecorations(name: string): string {
     if (open > 0) out = out.slice(0, open).trim();
   }
   return out;
+}
+
+/**
+ * Cuando las filas de un bloque pueden salir como lista TOCABLE de WhatsApp.
+ *
+ * Vive aca, al lado de donde se construyen las filas, y no en el modulo que las manda: es la misma regla
+ * que decide el texto de cierre de renderCatalog y la que decide la forma del mensaje en
+ * sendCatalogBlocks, y dos copias de una regla son dos copias que se desincronizan. Con una sola fila no
+ * hay nada que elegir; arriba de LIST_MAX_ROWS Meta rechaza el mensaje, y partir la eleccion en dos
+ * listas seria peor que la lista numerada que ya funciona.
+ */
+export function rowsAreListable(rows: CatalogBlock["rows"]): boolean {
+  const n = rows?.length ?? 0;
+  return n >= 2 && n <= LIST_MAX_ROWS;
+}
+
+/**
+ * El CUERPO del mensaje cuando el bloque sale como lista tocable: lo mismo que `text` pero sin las
+ * lineas numeradas.
+ *
+ * Dos razones, y las dos son defectos que esto cierra. La primera es que las filas ya dicen el nombre, el
+ * precio y el stock de cada producto, asi que repetirlos arriba es la misma informacion dos veces en el
+ * mismo mensaje. La segunda es dura: Meta limita el cuerpo de un mensaje interactivo a 1024 caracteres y
+ * rechaza el mensaje entero si se pasa. Diez productos con nombres largos ("Reloj Inteligente Smartwatch
+ * Serie 12 Ultra 3 (Edicion Deportiva / Robusta)" son 74 caracteres por linea) superan ese tope, y el
+ * rechazo caia al texto numerado justo en las categorias mas largas.
+ *
+ * El texto COMPLETO se sigue grabando en el historial y es el que ve el panel y el modelo: lo que cambia
+ * es lo que viaja en el cuerpo, no lo que queda registrado.
+ */
+export function listBodyText(block: CatalogBlock): string {
+  const sinNumeros = stripNumberedLines(block.text).trim();
+  const cuerpo = sinNumeros || LIST_FALLBACK_BODY;
+  return cuerpo.length <= LIST_BODY_MAX ? cuerpo : `${cuerpo.slice(0, LIST_BODY_MAX - 1).trimEnd()}…`;
 }
 
 export function startsAsNumberedItem(line: string): boolean {

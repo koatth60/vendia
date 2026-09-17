@@ -384,6 +384,9 @@ export interface BotPersonality {
   // Business.catalogPhotoScope: hasta donde llegan las fotos que manda el SERVIDOR. No entra al prompt
   // (no es una instruccion, es una decision de renderCatalog); viaja aca por ser config del negocio.
   catalogPhotoScope?: CatalogPhotoScope;
+  // Business.interactiveListsEnabled. Tampoco entra al prompt: decide la FORMA del mensaje del servidor
+  // y la linea de cierre que escribe renderCatalog.
+  interactiveListsEnabled?: boolean;
   requirePaymentProof?: boolean;
   category?: string | null;
   // Opt-in, off by default - see Business.genderedAddressEnabled in schema.prisma for why this stays

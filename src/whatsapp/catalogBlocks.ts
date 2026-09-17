@@ -1,8 +1,8 @@
-import { sendToCustomer, LIST_MAX_ROWS, type WhatsappCredentials } from "./outbound";
+import { sendToCustomer, type WhatsappCredentials } from "./outbound";
 import { sendMediaWithSpacing } from "./productMedia";
 import { recordMediaSent } from "../orders/saleState";
 import { prisma } from "../db/client";
-import type { CatalogBlock } from "../catalog/presenter";
+import { rowsAreListable, listBodyText, type CatalogBlock } from "../catalog/presenter";
 
 // Fase B del plan de catalogo y medios (ONIX-PLAN-CATALOGO-Y-MEDIOS.md, piezas 2 y 3).
 //
@@ -28,16 +28,16 @@ export interface SendCatalogBlocksArgs {
   interactiveLists?: boolean;
 }
 
-// Cuando un bloque de lista puede salir como lista TOCABLE de WhatsApp. Meta admite 10 filas en total,
-// asi que una categoria mas larga que eso sigue saliendo como texto numerado: partir la eleccion en dos
-// listas seria peor que la lista numerada que ya funciona.
+// Cuando un bloque de lista puede salir como lista TOCABLE de WhatsApp. La regla vive en el presentador
+// (rowsAreListable), que es quien construye las filas y quien escribe la linea de cierre que le dice al
+// cliente que gesto hacer: una sola definicion, para que el texto y la forma del mensaje no puedan
+// contradecirse.
 //
-// El texto del bloque igual se manda: es lo que queda en el historial y lo que ve quien abre la
-// conversacion en el panel. La lista es la forma de ELEGIR, no un reemplazo del contenido.
+// El texto NUMERADO del bloque se sigue grabando en el historial aunque el cuerpo que viaja sea el corto:
+// es lo que ve quien abre la conversacion en el panel, y lo que ve el modelo. La lista es la forma de
+// ELEGIR, no un reemplazo del contenido.
 function listableRows(block: CatalogBlock): NonNullable<CatalogBlock["rows"]> | null {
-  const rows = block.rows ?? [];
-  if (rows.length < 2 || rows.length > LIST_MAX_ROWS) return null;
-  return rows;
+  return rowsAreListable(block.rows) ? block.rows! : null;
 }
 
 /**
@@ -58,47 +58,13 @@ export async function sendCatalogBlocks(args: SendCatalogBlocksArgs): Promise<vo
   const sentProductIds: string[] = [];
   const vitrinaProductIds: string[] = [];
 
-  for (let i = 0; i < blocks.length; i++) {
-    if (i > 0) await sleep(BLOCK_GAP_MS);
-    const block = blocks[i];
-    const rows = args.interactiveLists ? listableRows(block) : null;
-    if (block.text.trim() && !rows) {
-      await sendToCustomer({
-        businessId,
-        conversationId,
-        credentials,
-        to,
-        content: { kind: "text", text: block.text },
-        recordAs: { text: block.text },
-      });
-    } else if (rows) {
-      // El cuerpo de la lista NO repite los productos: eso ya son las filas. Si Meta rechaza la lista
-      // (formato, version del cliente), se cae al texto numerado - el cliente nunca se queda sin la
-      // informacion por un problema de formato.
-      const sent = await sendToCustomer({
-        businessId,
-        conversationId,
-        credentials,
-        to,
-        content: { kind: "list", text: block.text, buttonText: "Ver opciones", sections: [{ title: "Opciones", rows }] },
-        recordAs: { text: block.text },
-      });
-      if (!sent.delivered) {
-        console.error("La lista interactiva no salio, se manda el texto numerado:", sent.failure?.message);
-        await sendToCustomer({
-          businessId,
-          conversationId,
-          credentials,
-          to,
-          content: { kind: "text", text: block.text },
-          recordAs: { text: block.text },
-        });
-      }
-    }
-
+  // Manda los medios de un bloque. Devuelve si mando alguno, para saber si hace falta una pausa antes
+  // del mensaje que sigue.
+  async function enviarMedios(block: CatalogBlock): Promise<boolean> {
+    let alguno = false;
     for (const media of block.media) {
-      // Un fallo de envio de medios no puede dejar al cliente sin el resto de los bloques: la ficha de
-      // texto ya salio y es lo que sostiene la conversacion. Se registra y se sigue.
+      // Un fallo de envio de medios no puede dejar al cliente sin el resto de los bloques: el texto ya
+      // salio (o esta por salir) y es lo que sostiene la conversacion. Se registra y se sigue.
       try {
         await sendMediaWithSpacing(
           businessId,
@@ -110,12 +76,70 @@ export async function sendCatalogBlocks(args: SendCatalogBlocksArgs): Promise<vo
           media.items,
           media.caption
         );
+        alguno = true;
         if (block.kind === "lista") vitrinaProductIds.push(media.productId);
         else sentProductIds.push(media.productId);
         await recordMediaSent(conversationId, media.productName);
       } catch (error) {
         console.error(`No se pudieron enviar los medios de "${media.productName}" (no bloqueante):`, error);
       }
+    }
+    return alguno;
+  }
+
+  async function enviarTexto(block: CatalogBlock): Promise<void> {
+    if (!block.text.trim()) return;
+    await sendToCustomer({
+      businessId,
+      conversationId,
+      credentials,
+      to,
+      content: { kind: "text", text: block.text },
+      recordAs: { text: block.text },
+    });
+  }
+
+  for (let i = 0; i < blocks.length; i++) {
+    if (i > 0) await sleep(BLOCK_GAP_MS);
+    const block = blocks[i];
+    const rows = args.interactiveLists ? listableRows(block) : null;
+
+    if (!rows) {
+      // Camino de siempre: el texto numerado y despues sus fotos.
+      await enviarTexto(block);
+      await enviarMedios(block);
+      continue;
+    }
+
+    // EL BOTON VA ULTIMO (2026-09-17). Con lista tocable las fotos salen ANTES que el mensaje de la
+    // lista, al reves que en el camino de texto. El motivo es lo que ve el cliente: en WhatsApp lo
+    // ultimo que llega es lo que queda abajo, al alcance del pulgar. Mandando la lista primero, las
+    // siete fotos de la vitrina empujan "Ver opciones" siete mensajes hacia arriba y el cliente termina
+    // escribiendo un numero, que es justo el camino que la lista tocable vino a eliminar. Cada foto
+    // lleva su pie con el numero y el precio, asi que no llegan sin contexto.
+    const huboMedios = await enviarMedios(block);
+    if (huboMedios) await sleep(BLOCK_GAP_MS);
+
+    // El cuerpo NO repite los productos: eso ya son las filas, y ademas Meta rechaza un cuerpo de mas de
+    // 1024 caracteres (ver listBodyText). El titulo de la seccion es el nombre real de la categoria
+    // cuando el bloque lo trae. Si Meta rechaza la lista (formato, version del cliente), se cae al texto
+    // numerado completo - el cliente nunca se queda sin la informacion por un problema de formato.
+    const sent = await sendToCustomer({
+      businessId,
+      conversationId,
+      credentials,
+      to,
+      content: {
+        kind: "list",
+        text: listBodyText(block),
+        buttonText: "Ver opciones",
+        sections: [{ title: block.sectionTitle ?? "Opciones", rows }],
+      },
+      recordAs: { text: block.text },
+    });
+    if (!sent.delivered) {
+      console.error("La lista interactiva no salio, se manda el texto numerado:", sent.failure?.message);
+      await enviarTexto(block);
     }
   }
 
