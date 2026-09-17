@@ -1206,6 +1206,27 @@ export async function listCustomerThreadsForBusiness(businessId: string): Promis
 // · <fecha> · <resumen>" separators between them. Deliberately doesn't load every cycle's messages up
 // front - getConversationForBusiness already showed that firing a fresh presigned S3 URL for every
 // piece of media adds up, and a customer with several closed sales would multiply that on every open.
+/**
+ * Cuantos mensajes se ven al abrir un hilo, como minimo, sin tener que pedir mas.
+ *
+ * Decision del dueno (2026-09-17): "se debe poder ver los 30 ultimos mensajes al menos, antes de tener
+ * que darle click a cargar mas. No importa si es una conversacion vieja o nueva, cerrada o lo que sea."
+ */
+const MIN_THREAD_MESSAGES = 30;
+
+/** Un mensaje tal como lo consume el panel: con su media firmada y su estado de entrega. */
+export interface ThreadMessage {
+  id: string;
+  role: string;
+  content: string;
+  createdAt: Date;
+  mediaUrl: string | null;
+  mediaType: string | null;
+  whatsappMessageId: string | null;
+  deliveryFailed: boolean;
+  deliveryError: string | null;
+}
+
 export async function getCustomerThreadForBusiness(businessId: string, customerId: string, before?: string) {
   const customer = await prisma.customer.findFirst({ where: { id: customerId, businessId } });
   if (!customer) return null;
@@ -1300,31 +1321,64 @@ export async function getCustomerThreadForBusiness(businessId: string, customerI
       humanControl: false,
       hasMore: false,
       cycles,
+      blocks: [] as { conversationId: string; messages: ThreadMessage[] }[],
       windowOpen: windowState.windowOpen,
       hoursSinceLastCustomerMessage: windowState.hoursSinceLastCustomerMessage,
       queuedOutbound: [],
-      messages: [],
+      messages: [] as ThreadMessage[],
     };
   }
 
   const target = conversations[targetIndex];
-  const hasMore = targetIndex + 1 < conversations.length;
 
-  const messages = await prisma.message.findMany({
-    where: { conversationId: target.id },
-    orderBy: { createdAt: "asc" },
-  });
+  // ABRIR UN HILO MUESTRA CONVERSACION, NO UN CICLO (2026-09-17).
+  //
+  // Hasta hoy se cargaba UN ciclo: el de la actividad mas nueva. Cuando una venta cerraba y el cliente
+  // escribia de nuevo, ese ciclo tenia un solo mensaje - y el dueno abria el chat, veia una linea suelta
+  // y tenia que apretar "Ver conversacion anterior" para entender de que se estaba hablando. Con dos o
+  // tres ventas seguidas, dos o tres clics.
+  //
+  // Ahora se siguen cargando ciclos hacia atras hasta juntar MIN_THREAD_MESSAGES. El corte por ciclo no
+  // desaparece - los separadores de "Venta cerrada" siguen ahi y el boton sigue existiendo para lo mas
+  // viejo - pero deja de decidir CUANTO se ve. Si la conversacion de arriba ya trae 30 mensajes, esto no
+  // cambia nada y se carga un solo ciclo, igual que antes.
+  const cargados: { conversationId: string; status: string; messages: Awaited<ReturnType<typeof prisma.message.findMany>> }[] = [];
+  let ultimoIndice = targetIndex;
+  let total = 0;
+  for (let i = targetIndex; i < conversations.length; i++) {
+    const ciclo = conversations[i];
+    const filas = await prisma.message.findMany({ where: { conversationId: ciclo.id }, orderBy: { createdAt: "asc" } });
+    // Un ciclo vacio no cuenta como "ya mostre algo": se salta y se sigue buscando hacia atras.
+    if (filas.length === 0 && i !== targetIndex) continue;
+    cargados.unshift({ conversationId: ciclo.id, status: ciclo.status, messages: filas });
+    ultimoIndice = i;
+    total += filas.length;
+    if (total >= MIN_THREAD_MESSAGES) break;
+  }
 
-  const messagesWithMedia = await Promise.all(
-    messages.map(async (m) => ({
-      id: m.id,
-      role: m.role,
-      content: m.content,
-      createdAt: m.createdAt,
-      mediaUrl: m.mediaS3Key ? await getPresignedMediaUrl(m.mediaS3Key) : null,
-      mediaType: m.mediaType,
-      whatsappMessageId: m.whatsappMessageId,
-    }))
+  const hasMore = ultimoIndice + 1 < conversations.length;
+  const messages = cargados[cargados.length - 1]?.messages ?? [];
+
+  const conMedios = async (filas: typeof messages) =>
+    attachDeliveryFailures(
+      businessId,
+      await Promise.all(
+        filas.map(async (m) => ({
+          id: m.id,
+          role: m.role,
+          content: m.content,
+          createdAt: m.createdAt,
+          mediaUrl: m.mediaS3Key ? await getPresignedMediaUrl(m.mediaS3Key) : null,
+          mediaType: m.mediaType,
+          whatsappMessageId: m.whatsappMessageId,
+        }))
+      )
+    );
+
+  // Un bloque por ciclo cargado, del mas viejo al mas nuevo. El panel los pinta con su separador de
+  // "Venta cerrada" entre medio, igual que cuando se cargaban de a uno con el boton.
+  const bloques = await Promise.all(
+    cargados.map(async (b) => ({ conversationId: b.conversationId, messages: await conMedios(b.messages) }))
   );
 
   return {
@@ -1337,9 +1391,12 @@ export async function getCustomerThreadForBusiness(businessId: string, customerI
     humanControl: target.humanControl,
     hasMore,
     cycles,
+    blocks: bloques,
     windowOpen: windowState.windowOpen,
     hoursSinceLastCustomerMessage: windowState.hoursSinceLastCustomerMessage,
     queuedOutbound: await listQueuedOutbound(businessId, activeConversationId),
-    messages: await attachDeliveryFailures(businessId, messagesWithMedia),
+    // `messages` sigue siendo el ciclo mas nuevo, como siempre: lo usan el cargado incremental del boton
+    // y cualquier cliente que no lea `blocks`.
+    messages: bloques[bloques.length - 1]?.messages ?? [],
   };
 }

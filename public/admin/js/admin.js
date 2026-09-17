@@ -1999,8 +1999,15 @@ async function loadOlderCycle() {
       renderMergedThread();
       return;
     }
-    data.messages.forEach((m) => renderedMessageIds.add(m.id));
-    threadCycleBlocks.unshift({ conversationId: data.conversationId, html: data.messages.map(messageBubbleHtml).join('') });
+    // Mismo contrato que al abrir: el servidor puede devolver varios ciclos si son cortos, y se anteponen
+    // todos, del mas viejo al mas nuevo.
+    const bloques = Array.isArray(data.blocks) && data.blocks.length > 0
+      ? data.blocks
+      : [{ conversationId: data.conversationId, messages: data.messages }];
+    bloques.forEach((b) => b.messages.forEach((m) => renderedMessageIds.add(m.id)));
+    threadCycleBlocks.unshift(
+      ...bloques.map((b) => ({ conversationId: b.conversationId, html: b.messages.map(messageBubbleHtml).join('') }))
+    );
     renderMergedThread();
     thread.scrollTop = thread.scrollHeight - prevScrollHeight;
   } catch (err) {
@@ -2077,8 +2084,18 @@ async function openCustomer(customerId) {
       customerPhone: data.customer.phoneNumber,
     });
 
-    renderedMessageIds = new Set(data.messages.map((m) => m.id));
-    threadCycleBlocks = [{ conversationId: data.conversationId, html: data.messages.map(messageBubbleHtml).join('') }];
+    // El servidor manda un bloque por ciclo cargado, del mas viejo al mas nuevo: abrir un hilo muestra
+    // al menos los ultimos 30 mensajes aunque la venta se haya cerrado hace dos mensajes. `blocks`
+    // reemplaza al viejo "un solo ciclo"; el fallback a data.messages queda por si llega una respuesta
+    // sin ese campo.
+    const bloques = Array.isArray(data.blocks) && data.blocks.length > 0
+      ? data.blocks
+      : [{ conversationId: data.conversationId, messages: data.messages }];
+    renderedMessageIds = new Set(bloques.flatMap((b) => b.messages.map((m) => m.id)));
+    threadCycleBlocks = bloques.map((b) => ({
+      conversationId: b.conversationId,
+      html: b.messages.map(messageBubbleHtml).join(''),
+    }));
     renderMergedThread();
 
     thread.scrollTop = thread.scrollHeight;

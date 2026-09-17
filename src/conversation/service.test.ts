@@ -262,7 +262,7 @@ test("listCustomerThreadsForBusiness picks the most recently updated conversatio
   }
 });
 
-test("getCustomerThreadForBusiness returns only the active cycle's messages, and `before` walks older cycles one at a time", async () => {
+test("getCustomerThreadForBusiness trae ciclos hacia atras hasta juntar 30 mensajes, y `before` sigue caminando hacia lo mas viejo", async () => {
   const customer = await prisma.customer.create({ data: { businessId, phoneNumber: `573022${Date.now()}` } });
   const now = Date.now();
   try {
@@ -281,25 +281,36 @@ test("getCustomerThreadForBusiness returns only the active cycle's messages, and
     });
     await prisma.message.create({ data: { conversationId: active.id, role: "CUSTOMER", content: "mensaje actual" } });
 
+    // Desde el 2026-09-17 abrir el hilo trae ciclos hacia atras hasta juntar 30 mensajes: con tres
+    // ciclos de un mensaje cada uno, vienen los tres. `messages` sigue siendo el del ciclo mas nuevo.
     const first = await getCustomerThreadForBusiness(businessId, customer.id);
     assert.ok(first);
     assert.equal(first.conversationId, active.id);
     assert.equal(first.activeConversationId, active.id);
     assert.deepEqual(first.messages.map((m) => m.content), ["mensaje actual"]);
-    assert.equal(first.hasMore, true);
+    assert.deepEqual(
+      first.blocks.flatMap((b) => b.messages.map((m) => m.content)),
+      ["mensaje viejo", "mensaje del medio", "mensaje actual"]
+    );
+    assert.equal(first.hasMore, false, "ya no queda nada mas viejo por cargar");
     assert.equal(first.cycles.length, 3);
 
+    // Con los tres ciclos ya cargados de entrada no queda nada por pedir, pero el camino `before` sigue
+    // existiendo y sigue caminando hacia atras (lo usa un panel abierto desde antes del cambio).
     const second = await getCustomerThreadForBusiness(businessId, customer.id, active.id);
     assert.ok(second);
     assert.equal(second.conversationId, middle.id);
-    assert.deepEqual(second.messages.map((m) => m.content), ["mensaje del medio"]);
-    assert.equal(second.hasMore, true);
+    assert.deepEqual(
+      second.blocks.flatMap((b) => b.messages.map((m) => m.content)),
+      ["mensaje viejo", "mensaje del medio"]
+    );
 
     const third = await getCustomerThreadForBusiness(businessId, customer.id, middle.id);
     assert.ok(third);
     assert.equal(third.conversationId, oldest.id);
     assert.deepEqual(third.messages.map((m) => m.content), ["mensaje viejo"]);
     assert.equal(third.hasMore, false);
+    assert.equal(second.hasMore, false, "ya se habia cargado todo");
 
     const exhausted = await getCustomerThreadForBusiness(businessId, customer.id, oldest.id);
     assert.ok(exhausted);
@@ -348,7 +359,13 @@ test("getCustomerThreadForBusiness muestra por defecto el ciclo con el mensaje m
     assert.equal(result.conversationId, sold.id, "se muestra el ciclo con el mensaje mas reciente");
     assert.deepEqual(result.messages.map((m) => m.content), ["¡Listo! Tu pedido va en camino.", "Tu pedido fue cancelado. Cualquier duda me escribes."]);
     assert.equal(result.activeConversationId, active.id, "el composer sigue apuntando al ciclo NEW, no al SOLD que se esta mostrando");
-    assert.equal(result.hasMore, true, "el ciclo NEW con historia real sigue alcanzable con 'Ver conversación anterior'");
+    // Antes esto era `hasMore: true` y el ciclo NEW quedaba detras del boton. Desde el 2026-09-17 el
+    // hilo carga hacia atras hasta juntar 30 mensajes, asi que llega solo: lo que importa sigue siendo
+    // que ESTE, con lo mas nuevo, es el ciclo "actual".
+    assert.ok(
+      result.blocks.flatMap((b) => b.messages.map((m) => m.content)).includes("Quiero pedir otra cosa"),
+      "el ciclo NEW con historia real llega sin apretar nada"
+    );
 
     const older = await getCustomerThreadForBusiness(businessId, customer.id, sold.id);
     assert.ok(older);
@@ -384,10 +401,17 @@ test("getCustomerThreadForBusiness sigue mostrando hasMore=true aunque el ciclo 
     // Toca el ciclo SOLD DESPUÉS de que el ciclo activo ya existe - esto es lo que le pasó a Milena.
     await prisma.conversation.update({ where: { id: sold.id }, data: { updatedAt: new Date(now + 60000) } });
 
+    // Lo que esta prueba cuida es el ORDEN: que un toque administrativo al ciclo SOLD no lo vuelva "el
+    // mas reciente" ni haga desaparecer la historia vieja. Desde el 2026-09-17 esa historia ya no vive
+    // detras del boton - llega con el hilo - asi que se comprueba que este, y no que hasMore sea true.
     const result = await getCustomerThreadForBusiness(businessId, customer.id);
     assert.ok(result);
     assert.equal(result.activeConversationId, active.id);
-    assert.equal(result.hasMore, true);
+    assert.equal(result.conversationId, active.id, "el mensaje mas nuevo es el del ciclo activo, no el toque al SOLD");
+    assert.deepEqual(
+      result.blocks.flatMap((b) => b.messages.map((m) => m.content)),
+      ["mensaje viejo", "mensaje actual"]
+    );
   } finally {
     await prisma.message.deleteMany({ where: { conversation: { customerId: customer.id } } });
     await prisma.conversation.deleteMany({ where: { customerId: customer.id } });
@@ -871,4 +895,64 @@ test("un mensaje del panel sobre una escalacion del bot no reescribe quien la em
   assert.equal(despues?.humanControlReason, "INTENT_ESCALATION");
 
   await prisma.conversation.deleteMany({ where: { id: conversation.id } });
+});
+
+// ==============================================================================================
+// Abrir un hilo muestra conversacion, no un ciclo (2026-09-17)
+// ==============================================================================================
+//
+// Hasta hoy se cargaba UN ciclo. Cuando una venta cerraba y el cliente escribia de nuevo, ese ciclo
+// tenia un solo mensaje: el dueno abria el chat, veia una linea suelta y tenia que apretar "Ver
+// conversacion anterior" para entender de que se estaba hablando.
+
+test("una conversacion nueva despues de una venta abre con el historial anterior, sin tener que pedirlo", async () => {
+  const cliente = await prisma.customer.create({ data: { businessId, phoneNumber: `573027${Date.now()}` } });
+  const customerId = cliente.id;
+  const vieja = await prisma.conversation.create({ data: { customerId, status: "SOLD" } });
+  for (let i = 0; i < 12; i++) {
+    await prisma.message.create({
+      data: { conversationId: vieja.id, role: i % 2 === 0 ? "CUSTOMER" : "ASSISTANT", content: `viejo ${i}` },
+    });
+  }
+  const nueva = await prisma.conversation.create({ data: { customerId } });
+  await prisma.message.create({ data: { conversationId: nueva.id, role: "CUSTOMER", content: "confirmado lo del reloj" } });
+
+  try {
+    const hilo = await getCustomerThreadForBusiness(businessId, customerId, undefined);
+    assert.ok(hilo);
+
+    const total = hilo.blocks.reduce((n, b) => n + b.messages.length, 0);
+    assert.equal(total, 13, "los 12 del ciclo cerrado mas el nuevo, sin apretar nada");
+    assert.equal(hilo.blocks.length, 2, "siguen siendo dos ciclos: el separador de venta cerrada no se pierde");
+    assert.equal(hilo.blocks[0].conversationId, vieja.id, "del mas viejo al mas nuevo");
+    assert.equal(hilo.blocks[1].conversationId, nueva.id);
+    assert.equal(hilo.conversationId, nueva.id, "el ciclo 'actual' sigue siendo el mas nuevo");
+  } finally {
+    await prisma.message.deleteMany({ where: { conversationId: { in: [vieja.id, nueva.id] } } });
+    await prisma.conversation.deleteMany({ where: { id: { in: [vieja.id, nueva.id] } } });
+    await prisma.customer.deleteMany({ where: { id: customerId } });
+  }
+});
+
+test("un ciclo que ya trae 30 mensajes no arrastra los anteriores", async () => {
+  const cliente = await prisma.customer.create({ data: { businessId, phoneNumber: `573028${Date.now()}` } });
+  const customerId = cliente.id;
+  const vieja = await prisma.conversation.create({ data: { customerId, status: "SOLD" } });
+  await prisma.message.create({ data: { conversationId: vieja.id, role: "CUSTOMER", content: "compra anterior" } });
+  const actual = await prisma.conversation.create({ data: { customerId } });
+  for (let i = 0; i < 30; i++) {
+    await prisma.message.create({ data: { conversationId: actual.id, role: "CUSTOMER", content: `actual ${i}` } });
+  }
+
+  try {
+    const hilo = await getCustomerThreadForBusiness(businessId, customerId, undefined);
+    assert.ok(hilo);
+    assert.equal(hilo.blocks.length, 1, "con 30 ya alcanza: no se lee historia que nadie pidio");
+    assert.equal(hilo.blocks[0].conversationId, actual.id);
+    assert.equal(hilo.hasMore, true, "y el boton sigue estando para lo mas viejo");
+  } finally {
+    await prisma.message.deleteMany({ where: { conversationId: { in: [vieja.id, actual.id] } } });
+    await prisma.conversation.deleteMany({ where: { id: { in: [vieja.id, actual.id] } } });
+    await prisma.customer.deleteMany({ where: { id: customerId } });
+  }
 });
