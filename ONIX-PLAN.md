@@ -403,6 +403,23 @@ una directiva.
 Las instrucciones de MAGByLizN: **84 → 67 líneas**, 7.110 → 6.366 bytes. Copia de seguridad en
 `/root/customInstructions.backup.1789672430047.txt`.
 
+### Lo que el despliegue encontró (2026-09-17, commit `82a980d`)
+
+`E03` hizo que el resumen sembrado llegara al modelo. Al verificar contra producción, ese resumen
+**estaba mintiendo**: de las siete conversaciones que lo tenían, **cuatro** decían *"ese pedido todavía
+no ha sido despachado"* sobre pedidos ya en `SHIPPED`, y una decía *"un total de 0 COP"* para un pedido
+de 149.000.
+
+`summarizePreviousPurchase` escribía esa frase **una vez**, al crear la conversación, y no se volvía a
+tocar. El pedido sí cambia. Se borró entera, y no se reemplazó por una versión que se refresque: lo que
+decía ya viaja en cada turno, leído de la base en el momento, en el bloque del pedido cerrado. Las siete
+filas viejas se limpiaron.
+
+**La regla que deja, y aplica a todas las etapas que faltan:** un hecho que se escribe una vez y se lee
+muchas es un hecho que va a mentir. O se lee de la base en el turno, o no entra. **Y un segundo autor
+del mismo hecho solo puede aportar una contradicción** — antes de agregar un bloque, hay que mirar si
+otro ya lo dice.
+
 **El prompt del negocio también cuenta.** La medida de la Parte VI mira `systemPrompt.ts`, que es el
 texto que comparten todos los negocios. Pero `customInstructions` viaja en cada llamada igual que él, y
 en MAGByLizN pesaba más: 84 líneas contra 541. Toda etapa que se lleve un hecho tiene que mirar los dos.
