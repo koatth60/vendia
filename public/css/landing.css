@@ -290,3 +290,49 @@ header.zs-stuck {
   .zs-chip { font-size: 12.5px; padding: 8px 14px; }
   .faq-item { padding: 20px 14px 20px 16px; }
 }
+
+/* --- 12. Texto: dos familias y un cuerpo que se lee ----------------------- */
+/* Los titulares pasan a --onix-font-display (Space Grotesk) desde la variable
+   --display de index.html, asi que aqui solo queda el cuerpo.
+
+   El cuerpo estaba en --onix-muted, que en el sistema es el nivel de los
+   metadatos, y a 13.5px, que es el tamano de una fila del panel. Un parrafo que
+   el cliente lee para decidir una compra no es un metadato: va en --onix-ink-3.
+   Las notas al pie y los datos sueltos se quedan en --onix-muted, que es para
+   lo que existe. */
+.service-card p,
+.step p,
+.feature p,
+.faq-item p,
+.sub-head p {
+  font-size: 15px;
+  line-height: 1.62;
+  color: var(--onix-ink-3);
+}
+.stat p { font-size: 14px; line-height: 1.6; color: var(--onix-ink-3); }
+.plan-list li { font-size: 13.4px; line-height: 1.5; }
+
+/* Cifras: monoespaciadas y de ancho fijo, para que los tres planes alineen
+   coma con coma y un precio se lea como precio y no como palabra. */
+.plan-price {
+  font-family: var(--onix-font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 27px;
+  letter-spacing: -0.015em;
+}
+.plan-price span { font-family: var(--onix-font-sans); letter-spacing: 0; }
+.stat-value { font-family: var(--onix-font-mono); font-variant-numeric: tabular-nums; letter-spacing: -0.015em; }
+.plan-vol,
+.plan-setup,
+.plan-msgs,
+table.grid td,
+table.grid th { font-variant-numeric: tabular-nums; }
+
+@media (max-width: 560px) {
+  .service-card p,
+  .step p,
+  .feature p,
+  .faq-item p,
+  .sub-head p { font-size: 14.5px; }
+  .plan-price { font-size: 25px; }
+}

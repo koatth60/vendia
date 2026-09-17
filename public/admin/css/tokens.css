@@ -16,6 +16,9 @@
 :root {
   /* --- Tipografía --------------------------------------------------------- */
   --onix-font-sans: 'Instrument Sans', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  /* Familia de titulares. El panel no la usa: nace para la landing, donde una
+     sola familia dejaba a un h2 sin mas diferencia que el tamano. */
+  --onix-font-display: 'Space Grotesk', 'Instrument Sans', 'Segoe UI', system-ui, sans-serif;
   --onix-font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
 
   /* Escala tipográfica: tamaño / peso / tracking */
