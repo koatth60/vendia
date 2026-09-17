@@ -129,3 +129,37 @@ test("un producto nombrado le gana a la categoria cuando el cliente uso una pala
   if (scope.kind !== "one") return;
   assert.equal(scope.product.name, "Smartwatch V20 Caballero");
 });
+
+test("un numero suelto en una frase no elige el producto que lo tiene en el nombre", () => {
+  // Defecto real de produccion (2026-09-16, turno 19:02:06): el servidor habia presentado una lista
+  // numerada de 7 audifonos y el cliente contesto "El número 5 y el número 6". numericSelection no lo
+  // toma (la palabra "numero" rompe la condicion de "todo el mensaje es numero"), asi que bajaba al
+  // match por texto y el "6" coincidia con el nombre de *Parlante Charge 6*: al cliente le salieron la
+  // ficha y las fotos de un parlante mientras el agente le comparaba los dos audifonos.
+  //
+  // En este catalogo el equivalente es "9", que solo aparece en el nombre de "Smartwatch gen 9".
+  assert.equal(scopeOf("El número 9").kind, "none", "un digito no identifica un producto por nombre");
+  assert.equal(scopeOf("el número 5 y el número 6").kind, "none");
+});
+
+test("sacarle el digito al match por nombre no rompe los nombres que lo llevan", () => {
+  // La palabra de verdad del nombre sigue mandando: lo que se ignora es el numero de modelo suelto.
+  const bombox = scopeOf("tienen el bombox 4?");
+  assert.equal(bombox.kind, "one");
+  if (bombox.kind !== "one") return;
+  assert.equal(bombox.product.name, "Bombox 4");
+
+  const gen9 = scopeOf("me interesa el smartwatch gen 9");
+  assert.equal(gen9.kind, "one");
+  if (gen9.kind !== "one") return;
+  assert.equal(gen9.product.name, "Smartwatch gen 9");
+});
+
+test("la seleccion por posicion sigue saliendo de la ultima lista presentada, no del nombre", () => {
+  // El camino correcto para un numero suelto: ids reales de lo que se presento, nunca el nombre.
+  const presented = [productNamed(magimp, "AIRPODS MAX").id, productNamed(magimp, "Smartwatch gen 9").id];
+  const scope = scopeOf("el 1", presented);
+  assert.equal(scope.kind, "one");
+  if (scope.kind !== "one") return;
+  assert.equal(scope.product.name, "AIRPODS MAX", "gana la posicion de la lista, no el digito del nombre");
+});

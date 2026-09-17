@@ -157,7 +157,31 @@ function namedInText(
   categoryWords: ReadonlySet<string>
 ): boolean {
   const nameTokens = new Set(tokenize(product.name));
-  return tokens.some((t) => nameTokens.has(t) && !categoryWords.has(canonicalizeCategoryWord(t, aliasMap)));
+  return tokens.some(
+    (t) => !isDigitsOnly(t) && nameTokens.has(t) && !categoryWords.has(canonicalizeCategoryWord(t, aliasMap))
+  );
+}
+
+/**
+ * Un numero suelto NUNCA identifica un producto por nombre.
+ *
+ * Defecto real de produccion (2026-09-16, turno 19:02:06). El servidor le habia presentado al cliente una
+ * lista numerada de 7 audifonos y el cliente contesto "El número 5 y el número 6". Como el mensaje trae
+ * la palabra "numero", numericSelection no lo toma (exige que TODOS los tokens sean numeros), asi que
+ * bajo al match por texto - y ahi el token "6" coincidio con el nombre del producto *Parlante Charge 6*.
+ * El alcance quedo en `one:Parlante Charge 6` y al cliente le salieron la ficha y las fotos de un
+ * parlante mientras el agente le escribia, en el mismo turno, la comparacion de los dos audifonos.
+ *
+ * La exclusion es estructural y vale para cualquier catalogo, no para uno: los digitos de un nombre
+ * ("Charge 6", "Serie 12", "Gen 9", "V20") son numero de modelo, y el cliente que escribe un numero
+ * suelto casi siempre esta senalando una posicion de la ultima lista que vio - que es lo que resuelve
+ * lastPresentedList, con ids reales, sin adivinar. Sacarle el digito a esta funcion no le quita nada:
+ * para que un producto gane por nombre tiene que quedar una palabra de verdad ("serie", "charge",
+ * "bombox"), que es lo que de veras lo distingue de los otros.
+ */
+function isDigitsOnly(token: string): boolean {
+  const value = Number(token);
+  return Number.isInteger(value) && String(value) === token;
 }
 
 /** Todas las palabras de categoria REALES de este negocio, canonizadas con sus propios alias. */
