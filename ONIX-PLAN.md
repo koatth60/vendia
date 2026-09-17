@@ -12,9 +12,8 @@ Escrito el 2026-09-17, con los números de producción de ese día delante.
 
 ## Cómo se usa
 
-El trabajo está partido en **etapas numeradas `E01` a `E75`**, en el orden recomendado. Las cinco
-primeras están **cerradas** (2026-09-17) y aparecen agrupadas al principio; `E05b` y `E05c` salieron de
-ellas y esperan tu visto bueno.
+El trabajo está partido en **etapas numeradas `E01` a `E75`**, en el orden recomendado. Las siete
+primeras (`E01`–`E05c`) están **cerradas** (2026-09-17) y aparecen agrupadas al principio.
 
 **Cada etapa entra sola a producción y deja el sistema funcionando.** Esa es la regla que ordenó
 todo lo demás: si un trabajo no cabía en una etapa que se pueda desplegar sola, se partió hasta que
@@ -385,43 +384,28 @@ Es la lección que vale para el resto del plan: antes de culpar al modelo, hay q
 el servidor delante.
 
 **Lo que quedó fuera de `E04`, y por qué.** La deducción del plan era que había 20 líneas de prompt
-para borrar. No las hay: lo que `E02` y `E03` vuelven borrable no está en `systemPrompt.ts` sino en
-dos lugares que necesitan tu visto bueno, porque uno es texto tuyo. Quedan como `E05b` y `E05c`.
+para borrar. No las hay: lo que `E02` y `E03` vuelven borrable no estaba en `systemPrompt.ts` sino en
+la herramienta `get_previous_conversation` y en las instrucciones del negocio. Salieron como `E05b` y
+`E05c`, cerradas el mismo día.
 
 ---
 
-### E05b · Se borra la herramienta `get_previous_conversation`
+### E05b y E05c · **CERRADAS el 2026-09-17** (commit `2468150`)
 
-**Quita:** al modelo, decidir si va a buscar la conversación anterior del cliente.
-**Porque:** su respuesta (el resumen de la compra anterior) ya viaja en el turno, siempre, en tres
-bloques que el servidor pone solo: el resumen sembrado (`E03`), el pedido cerrado (`postSale`) y los
-pedidos del cliente (`customerCommerceState`). La herramienta se llamó **4 veces en 14 días**, y cada
-llamada gasta una iteración completa del modelo para traer algo que ya estaba delante. Su esquema,
-además, viaja en **cada** petición.
-**Se hace:** se borran la definición y el handler en `src/ai/tools.ts`, sus tres pruebas, y la
-mención en el fixture `ps2evr`. **Y en la misma etapa** sale el paso 3 de `customInstructions` de
-MAGByLizN, que hoy dice textualmente: *"Usa la herramienta get_previous_conversation ANTES de decir
-nada sobre conversaciones anteriores…"*. Si no salen juntos, queda una instrucción apuntando a una
-herramienta que no existe.
-**Tamaño:** S. **Depende de:** tu visto bueno para tocar `customInstructions`.
-**Vuelta atrás:** revertir el commit y restaurar el párrafo desde la copia de seguridad del servidor.
+La contrapartida que `E02` y `E03` habían dejado pendiente: cada hecho que el servidor se lleva borra
+una directiva.
 
----
+| | Qué salió |
+|---|---|
+| **E05b** | La herramienta `get_previous_conversation`, con su handler, `getPreviousClosedConversation`, sus tres pruebas y la entrada en `TOOL_CALL_LEAK_PATTERN`. Devolvía el resumen de la compra anterior, que ya viaja en cada turno en tres bloques del servidor. Se llamaba 4 veces cada 14 días y cada llamada gastaba una iteración completa del modelo; su esquema viajaba en **cada** petición. |
+| **E05c** | El punto 6 de la Etapa 2 de `customInstructions` de MAGByLizN: **17 líneas** que enumeraban a mano los datos de entrega por zona. `computeCheckoutState` ya los calcula. |
 
-### E05c · La lista de datos de entrega sale de las instrucciones del negocio
+Las instrucciones de MAGByLizN: **84 → 67 líneas**, 7.110 → 6.366 bytes. Copia de seguridad en
+`/root/customInstructions.backup.1789672430047.txt`.
 
-**Quita:** al negocio, mantener a mano una lista que el servidor ya calcula.
-**Porque:** el punto 6 de la Etapa 2 de `customInstructions` de MAGByLizN enumera, por zona, los
-datos de entrega a pedir (Nombre y Apellido, Celular, Ciudad, Barrio, Dirección, Casa o Apartamento y
-piso; y el Número de Identificación fuera de Bogotá). **16 líneas.** `computeCheckoutState` ya calcula
-exactamente eso, por país y por zona, y lo devuelve en "Falta". Son dos autores para el mismo dato, y
-cuando se desincronicen va a ganar el equivocado.
-**Se hace:** salen esas 16 líneas. La regla de documento por zona ya vive en
-`Business.requiresIdDocument` + `idDocumentExemptZones`; hay que verificar que estén cargadas antes
-de borrar.
-**Se prueba:** una conversación real de cierre en las 48 h siguientes.
-**Tamaño:** S. **Depende de:** tu visto bueno. **Es texto tuyo, no del código.**
-**Vuelta atrás:** restaurar desde la copia de seguridad del servidor.
+**El prompt del negocio también cuenta.** La medida de la Parte VI mira `systemPrompt.ts`, que es el
+texto que comparten todos los negocios. Pero `customInstructions` viaja en cada llamada igual que él, y
+en MAGByLizN pesaba más: 84 líneas contra 541. Toda etapa que se lleve un hecho tiene que mirar los dos.
 
 ---
 
@@ -1516,7 +1500,7 @@ hasta que la etapa que lo arregla lo ponga en verde de verdad.
 
 | Tema | Etapas |
 |---|---|
-| **Lo que más duele hoy** | `E01`–`E05` hechas, falta desplegarlas; después `E06` |
+| **Lo que más duele hoy** | `E01`–`E05c` hechas, falta desplegarlas; después `E06` |
 | **El bot dice cosas falsas** | `E09`, `E10`, `E11`, `E12`, `E13` |
 | **Respuestas duplicadas** | `E06`, `E07`, `E08` |
 | **Fechas y tiempos de entrega** | `E01` y `E05` hechas; queda `E35` |
@@ -1531,8 +1515,8 @@ hasta que la etapa que lo arregla lo ponga en verde de verdad.
 | **Observabilidad** | `E24`, `E25`, `E62`, `E63`, `E65` |
 | **Vender más** | `E68`, `E69`, `E70`, `E71`, `E72`, `E73` |
 
-**Lo siguiente:** desplegar `E01`–`E05`, mirar 48 horas contra la línea base, y recién ahí seguir con
-`E06`. `E05b` y `E05c` salen el mismo día si das el visto bueno.
+**Lo siguiente:** desplegar `E01`–`E05c`, mirar 48 horas contra la línea base, y recién ahí seguir con
+`E06` — el diagnóstico de `RESPUESTA_DUPLICADA`, que es 41 de los 95 incidentes de la semana.
 
 **La más barata con más retorno:** `E56`. Una tarde, y deja de destruirse el dato que alimenta el
 único diferenciador que ningún competidor tiene.
