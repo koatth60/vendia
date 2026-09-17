@@ -578,3 +578,28 @@ test("los bloques dicen que clase de mensaje son: de ahi sale donde se registra 
   assert.equal(renderCatalog(scopeDe("K11 mini"), CATEGORIA)[0].kind, "ficha");
   assert.ok(renderCatalog(scopeDe("que relojes tienen"), CATEGORIA).every((b) => b.kind === "lista"));
 });
+
+test("la vitrina no se saltea un producto porque el cliente haya visto su ficha antes", () => {
+  // Caso real de produccion, conversacion cmu4e3q9l001ozi2ka2x1t1b1, turno 16:45:54: el cliente pidio
+  // los parlantes, el servidor numero 5 y mando 4 fotos. Falto la del numero 2 - tenia dos fotos
+  // cargadas y el envio no fallo: el dia anterior habia recibido su ficha completa, quedo anotado en
+  // mediaSentProductIds, y la vitrina lo salteo. El cliente veia 1, 3, 4 y 5.
+  const scope = scopeDe("que relojes tienen");
+  if (scope.kind !== "group") return assert.fail("se esperaba un grupo");
+  const segundo = scope.products[1];
+
+  const blocks = renderCatalog(scope, { ...CATEGORIA, alreadyPresentedProductIds: [segundo.id] });
+  const conFoto = new Set(blocks.flatMap((b) => b.media).map((m) => m.productId));
+  assert.ok(conFoto.has(segundo.id), "la fila de fotos no puede salir con un hueco mudo en el medio");
+});
+
+test("pero la MISMA foto de vitrina sigue sin repetirse en la misma conversacion", () => {
+  // El contraste: lo que frena una foto es haberla mandado ya, no haber cotizado el producto.
+  const scope = scopeDe("que relojes tienen");
+  if (scope.kind !== "group") return assert.fail("se esperaba un grupo");
+  const segundo = scope.products[1];
+
+  const blocks = renderCatalog(scope, { ...CATEGORIA, browsePhotoSentProductIds: [segundo.id] });
+  const conFoto = new Set(blocks.flatMap((b) => b.media).map((m) => m.productId));
+  assert.ok(!conFoto.has(segundo.id));
+});

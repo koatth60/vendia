@@ -470,7 +470,24 @@ export function renderCatalog(scope: ProductScope, opts: RenderCatalogOptions): 
   if (vitrinaHabilitada) {
     for (const group of groups) {
       for (const product of group.products) {
-        if (alreadyPresented.has(product.id) || vitrinaYaEnviada.has(product.id)) continue;
+        // UNA VITRINA ES UNA FILA, NO CINCO ENVIOS SUELTOS (2026-09-17).
+        //
+        // Aca NO se mira `alreadyPresented`, y es a proposito. Caso real, conversacion
+        // cmu4e3q9l001ozi2ka2x1t1b1, turno 16:45:54: el cliente pidio los parlantes, el servidor le
+        // numero los 5 y le mando 4 fotos. La que falto fue la del numero 2, Parlante Charge 6- no por
+        // un fallo de envio ni por no tener foto (tiene dos), sino porque el dia anterior, a las
+        // 20:50:21, habia recibido su ficha completa y quedo anotado en mediaSentProductIds.
+        //
+        // El ahorro es de UNA foto; el costo es que la fila sale con un hueco mudo. El cliente cuenta
+        // 1, 3, 4, 5 y lo unico que puede concluir es que al 2 le pasa algo. Ese producto ademas queda
+        // en desventaja frente a los otros cuatro, que si se ven. Haber leido la ficha de un producto
+        // ayer no es haber visto la vitrina de su categoria hoy.
+        //
+        // Lo que si se respeta es `vitrinaYaEnviada`: esa misma foto, en esta misma conversacion, ya
+        // salio. Es la distincion que ya sostiene el resto del mecanismo - mediaSentProductIds significa
+        // "ya vio la ficha entera" y browsePhotoProductIds significa "ya vio esta foto" - aplicada al
+        // unico lugar donde todavia estaban mezcladas.
+        if (vitrinaYaEnviada.has(product.id)) continue;
         if (!vitrinaPhoto(product)) continue;
         vitrina.add(product.id);
       }
