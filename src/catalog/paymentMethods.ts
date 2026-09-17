@@ -163,3 +163,18 @@ export function resolveConfiguredPaymentMethod<T extends { label: string }>(labe
 export function matchesConfiguredPaymentMethod(label: string, realMethods: { label: string }[]): boolean {
   return resolveConfiguredPaymentMethod(label, realMethods) !== null;
 }
+
+/**
+ * ¿Este texto es EXACTAMENTE una de las formas de pago que cargo el negocio?
+ *
+ * Deliberadamente mas estricto que resolveConfiguredPaymentMethod, que ademas acepta que una contenga a
+ * la otra. Esta pregunta se usa para RECHAZAR un dato (ver save_customer_name en src/ai/tools.ts), y con
+ * la regla de contencion un negocio con "Bancolombia" cargado haria que un cliente apellidado Colombia
+ * no pudiera guardar su nombre nunca. Igualdad exacta: solo rechaza lo que es, palabra por palabra, una
+ * forma de pago de ESTE negocio.
+ */
+export function isExactConfiguredPaymentMethod(text: string, realMethods: { label: string }[]): boolean {
+  const escrito = squash(text);
+  if (!escrito) return false;
+  return realMethods.some((m) => squash(m.label) === escrito);
+}

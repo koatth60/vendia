@@ -16,7 +16,13 @@ import {
   SALE_BLOCKED_BLOCK_MARKER,
   CATALOG_BLOCK_MARKER,
 } from "./fixedBlockMarkers";
-import { listActivePaymentMethods, requiresPaymentConfirmation, resolveConfiguredPaymentMethod } from "../catalog/paymentMethods";
+import {
+  listActivePaymentMethods,
+  listPaymentMethods,
+  isExactConfiguredPaymentMethod,
+  requiresPaymentConfirmation,
+  resolveConfiguredPaymentMethod,
+} from "../catalog/paymentMethods";
 import { faltaComprobanteDePago, FALTA_COMPROBANTE_NOTE } from "../orders/paymentProof";
 import { resolverModalidadDelPedido, filtrarMetodosPorZona } from "../orders/paymentTiming";
 import { listShippingRates, resolveShippingRateForCity } from "../catalog/shippingRates";
@@ -1241,6 +1247,31 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
     case "save_customer_name": {
       const name = String(input.name ?? "").trim();
       if (!name) return { error: "Falta el nombre" };
+
+      // UNA FORMA DE PAGO NO ES UN NOMBRE (2026-09-17).
+      //
+      // Defecto real de produccion: una clienta quedo guardada como "Contraentrega" - la ficha del CRM y
+      // la lista de pedidos la mostraban asi, porque las dos leen Customer.name. El bot habia pedido los
+      // datos de entrega juntos ("...tu nombre completo, celular, direccion y como prefieres pagar"), la
+      // clienta contesto solo "Contraentrega", y el backstop de nombres de agent.ts vio una palabra
+      // alfabetica corta despues de un mensaje que decia "nombre completo" y la guardo. Reproducido:
+      // extractNameFromAnswer devuelve "Contraentrega", "Nequi" y "Transferencia" como nombres validos.
+      //
+      // No es una palabra que le falte a una lista: es la clase entera de los valores que pertenecen a
+      // OTRO campo del pedido. Por eso la comprobacion no es una lista escrita a mano sino los datos del
+      // propio negocio, y por eso vive aca, en la escritura, y no en cada backstop: asi tambien tapa el
+      // caso en que el modelo llama la herramienta con el mismo error.
+      //
+      // Solo formas de pago. Las ciudades quedan afuera a proposito: "Santander", "Bolivar", "Cordoba" y
+      // "Narino" son departamentos Y apellidos colombianos reales, asi que rechazarlas romperia nombres
+      // legitimos - justo lo contrario de lo que esta etapa viene a arreglar.
+      const formasDePago = await listPaymentMethods(businessId);
+      if (isExactConfiguredPaymentMethod(name, formasDePago)) {
+        return {
+          saved: false,
+          note: `"${name}" es una de las formas de pago de este negocio, no el nombre de una persona, asi que no se guardo nada. Registra la forma de pago donde va y volve a pedirle el nombre al cliente.`,
+        };
+      }
 
       // Real production incident (2026-09-15): una clienta se presento como "Diana" al saludar, y al
       // final del pedido dio "Sebastián Montealegre Sotelo" como nombre del DESTINATARIO del regalo. Esto
