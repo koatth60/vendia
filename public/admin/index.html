@@ -740,6 +740,41 @@
             <div class="toggle-desc">No te transfiere nada: el mensajero cobra producto y envío juntos. Marcándolo acá, el bot solo se lo ofrece a los clientes de esta zona.</div>
           </div>
         </label>
+        <div class="section-title">Cuándo sale y cuándo llega en esta zona<span class="section-count">sin llenar: el bot no promete fechas</span></div>
+        <p style="font-size:12px; color:var(--muted); margin:0 0 12px;">Con esto cargado, el bot calcula la fecha real de despacho y de entrega en el momento en que el cliente pregunta, en vez de deducirla. Déjalo vacío si prefieres que no prometa ninguna fecha.</p>
+        <div class="grid-2">
+          <div>
+            <label>Hora de corte</label>
+            <input id="ship-rate-cutoff" type="time" />
+            <div style="font-size:12px; color:var(--muted); margin-top:4px;">Hasta esta hora, el pedido alcanza el despacho del día. Vacío = no hay corte por hora.</div>
+          </div>
+          <div>
+            <label>Días hábiles de entrega, después del despacho</label>
+            <div style="display:flex; align-items:center; gap:8px;">
+              <input id="ship-rate-days-min" type="number" min="0" max="60" placeholder="mín" style="flex:1;" />
+              <span style="font-size:13px; color:var(--muted);">a</span>
+              <input id="ship-rate-days-max" type="number" min="0" max="60" placeholder="máx" style="flex:1;" />
+            </div>
+            <div style="font-size:12px; color:var(--muted); margin-top:4px;">0 y 0 para entrega el mismo día del despacho.</div>
+          </div>
+        </div>
+        <label class="toggle-row toggle-row-check">
+          <input type="checkbox" id="ship-rate-same-day" />
+          <div>
+            <div class="toggle-title">Antes de la hora de corte, sale el mismo día</div>
+            <div class="toggle-desc">Sin marcar, un pedido siempre sale el próximo día de despacho, aunque entre temprano.</div>
+          </div>
+        </label>
+        <label>Días en que no despachas</label>
+        <div id="ship-rate-nodispatch" style="display:flex; flex-wrap:wrap; gap:14px; margin-bottom:12px;">
+          <label style="display:flex; align-items:center; gap:6px; font-size:13px;"><input type="checkbox" data-weekday="1" /> Lunes</label>
+          <label style="display:flex; align-items:center; gap:6px; font-size:13px;"><input type="checkbox" data-weekday="2" /> Martes</label>
+          <label style="display:flex; align-items:center; gap:6px; font-size:13px;"><input type="checkbox" data-weekday="3" /> Miércoles</label>
+          <label style="display:flex; align-items:center; gap:6px; font-size:13px;"><input type="checkbox" data-weekday="4" /> Jueves</label>
+          <label style="display:flex; align-items:center; gap:6px; font-size:13px;"><input type="checkbox" data-weekday="5" /> Viernes</label>
+          <label style="display:flex; align-items:center; gap:6px; font-size:13px;"><input type="checkbox" data-weekday="6" /> Sábado</label>
+          <label style="display:flex; align-items:center; gap:6px; font-size:13px;"><input type="checkbox" data-weekday="0" /> Domingo</label>
+        </div>
         <div class="actions-row">
           <button class="btn-secondary" id="ship-rate-cancel-btn" style="display:none;" onclick="cancelEditShippingRate()">Cancelar</button>
           <button class="btn-primary" id="ship-rate-submit-btn" onclick="addShippingRate()">+ Agregar tarifa</button>

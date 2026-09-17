@@ -1,0 +1,119 @@
+{
+  "name": "el cliente que vuelve no empieza de cero (Aurora Joyas)",
+  "note": "Incidente real del 2026-09-17, cliente Andrés de MAGByLizN. Cerró un pedido el 16 a las 19:36; su conversación quedó en SOLD y, al escribir de nuevo 23 minutos después, se abrió una conversación NUEVA. El bot le pidió ciudad, barrio, nombre completo, celular y dirección. Se los volvió a pedir al día siguiente. La base ya tenía los cuatro. Dos cosas lo causaban: los campos de Customer no entraban a ningún prompt (etapa E02), y el bloque PEDIDO EN CURSO salía SIEMPRE, incluso sin un solo producto elegido, listando esos mismos datos como faltantes - el modelo no desobedeció, obedeció un dato falso que le dimos nosotros (etapa E03). Este fixture fija las dos garantías.",
+  "seed": {
+    "catalogName": "Aurora Joyas",
+    "saleStateEnabled": true
+  },
+  "turns": [
+    {
+      "customer": "Hola, soy Camila Ruiz, cedula 1020304050, celular 3001234567, vivo en Calle 10 #5-20, barrio Chapinero, apto 302, Bogota",
+      "note": "Turno de carga: el cliente da sus datos y el modelo los guarda. Lo que importa es el turno siguiente.",
+      "modelResponses": [
+        {
+          "toolCalls": [
+            {
+              "name": "save_customer_name",
+              "arguments": {
+                "name": "Camila Ruiz"
+              }
+            }
+          ]
+        },
+        {
+          "toolCalls": [
+            {
+              "name": "save_customer_contact_info",
+              "arguments": {
+                "idNumber": "1020304050",
+                "deliveryPhone": "3001234567",
+                "address": "Calle 10 #5-20, barrio Chapinero, apto 302, Bogota"
+              }
+            }
+          ]
+        },
+        {
+          "content": "Listo Camila, ya quedaron guardados."
+        }
+      ],
+      "expect": {
+        "toolSequence": [
+          "save_customer_name",
+          "save_customer_contact_info"
+        ],
+        "state": {
+          "customerName": "Camila Ruiz",
+          "customerIdNumber": "1020304050",
+          "customerDeliveryPhone": "3001234567"
+        }
+      }
+    },
+    {
+      "customer": "Oye, como va mi pedido?",
+      "note": "El turno del defecto. Sin llamar ninguna herramienta, el servidor tiene que poner delante del modelo quién es este cliente y qué datos ya dio. Y NO tiene que anunciar un pedido en curso que no existe: sin un solo producto elegido, lo que falta para despachar todavía no falta.",
+      "modelResponses": [
+        {
+          "content": "Dejame revisar como va."
+        }
+      ],
+      "expect": {
+        "toolSequence": [],
+        "systemMustContain": [
+          "DATOS DE ESTE CLIENTE",
+          "\"nombre\":\"Camila Ruiz\"",
+          "\"documento\":\"1020304050\"",
+          "\"telefonoDeEntrega\":\"3001234567\"",
+          "Calle 10 #5-20, barrio Chapinero, apto 302, Bogota"
+        ],
+        "systemMustNotContain": [
+          "(todavia sin productos)",
+          "PEDIDO EN CURSO:"
+        ]
+      }
+    },
+    {
+      "customer": "Quiero el Anillo Aurora en plata 925 con circonia",
+      "note": "Elige un producto. El bloque NO se afirma en este turno a proposito: systemContext captura la PRIMERA llamada al modelo, y set_order_item corre despues de esa. El bloque aparece en el turno siguiente, que es donde se afirma.",
+      "modelResponses": [
+        {
+          "toolCalls": [
+            {
+              "name": "set_order_item",
+              "arguments": {
+                "productId": "{{product:Anillo Aurora en plata 925 con circonia}}",
+                "quantity": 1
+              }
+            }
+          ]
+        },
+        {
+          "content": "Perfecto, te lo anoto."
+        }
+      ],
+      "expect": {
+        "toolSequence": [
+          "set_order_item"
+        ],
+        "saleState": {
+          "itemsCount": 1
+        }
+      }
+    },
+    {
+      "customer": "Y cuanto seria en total?",
+      "note": "Con un producto elegido, la venta en curso SI existe y el bloque vuelve. La ausencia del turno 1 no puede convertirse en que el bloque no salga nunca.",
+      "modelResponses": [
+        {
+          "content": "Ya te paso el total."
+        }
+      ],
+      "expect": {
+        "toolSequence": [],
+        "systemMustContain": [
+          "PEDIDO EN CURSO:",
+          "Anillo Aurora"
+        ]
+      }
+    }
+  ]
+}

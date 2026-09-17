@@ -6127,6 +6127,51 @@ function shippingRateModalityLabels(codes) {
   return SHIP_RATE_MODALITIES.filter(([, code]) => (codes || []).includes(code)).map(([, , label]) => label);
 }
 
+// Cuando sale y cuando llega en esta zona (2026-09-17, etapa E05). Se lee y se escribe con la misma
+// forma que las modalidades de arriba: el panel manda lo que el duenio marco, el servidor valida cada
+// campo por separado y descarta el que venga con mala forma.
+function readShippingRateDispatch() {
+  const nodes = document.querySelectorAll('#ship-rate-nodispatch input[type="checkbox"]');
+  const dias = [];
+  nodes.forEach((n) => { if (n.checked) dias.push(Number(n.dataset.weekday)); });
+  const min = document.getElementById('ship-rate-days-min').value.trim();
+  const max = document.getElementById('ship-rate-days-max').value.trim();
+  return {
+    cutoffTime: document.getElementById('ship-rate-cutoff').value.trim(),
+    sameDayBeforeCutoff: document.getElementById('ship-rate-same-day').checked,
+    deliveryDaysMin: min === '' ? null : Number(min),
+    deliveryDaysMax: max === '' ? null : Number(max),
+    noDispatchWeekdays: dias.sort(),
+  };
+}
+
+function setShippingRateDispatch(rate) {
+  document.getElementById('ship-rate-cutoff').value = rate.cutoffTime || '';
+  document.getElementById('ship-rate-same-day').checked = Boolean(rate.sameDayBeforeCutoff);
+  document.getElementById('ship-rate-days-min').value = rate.deliveryDaysMin === null || rate.deliveryDaysMin === undefined ? '' : rate.deliveryDaysMin;
+  document.getElementById('ship-rate-days-max').value = rate.deliveryDaysMax === null || rate.deliveryDaysMax === undefined ? '' : rate.deliveryDaysMax;
+  const dias = rate.noDispatchWeekdays || [];
+  document.querySelectorAll('#ship-rate-nodispatch input[type="checkbox"]').forEach((n) => {
+    n.checked = dias.includes(Number(n.dataset.weekday));
+  });
+}
+
+// Una linea corta para la lista, con lo que el bot va a poder prometer. Sin nada cargado lo dice.
+function shippingRateDispatchLabel(rate) {
+  const partes = [];
+  if (rate.cutoffTime) partes.push(rate.sameDayBeforeCutoff ? `Antes de ${rate.cutoffTime}, sale el mismo día` : `Corte ${rate.cutoffTime}`);
+  if (rate.deliveryDaysMin !== null && rate.deliveryDaysMin !== undefined) {
+    const max = rate.deliveryDaysMax === null || rate.deliveryDaysMax === undefined ? rate.deliveryDaysMin : rate.deliveryDaysMax;
+    partes.push(rate.deliveryDaysMin === 0 && max === 0 ? 'Entrega el mismo día' : `Entrega en ${rate.deliveryDaysMin} a ${max} días hábiles`);
+  }
+  const dias = rate.noDispatchWeekdays || [];
+  if (dias.length > 0) {
+    const nombres = ['domingos', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábados'];
+    partes.push(`No despacha: ${dias.map((d) => nombres[d]).join(', ')}`);
+  }
+  return partes.length > 0 ? partes.join(' · ') : 'Sin fechas cargadas: el bot no promete entrega';
+}
+
 async function loadShippingRates() {
   const container = document.getElementById('shipping-rates-list');
   const select = document.getElementById('ship-city-rate');
@@ -6150,6 +6195,7 @@ async function loadShippingRates() {
                   ? escapeHtml(shippingRateModalityLabels(r.paymentModalities).join(' · '))
                   : 'Usa las formas de pago del negocio'
               }</div>
+              <div style="font-size:12px; color:var(--muted); margin-top:2px;">${escapeHtml(shippingRateDispatchLabel(r))}</div>
             </div>
             <div style="display:flex; flex-wrap:wrap; gap:6px; flex-shrink:0;">
               <button class="btn-secondary" onclick="editShippingRate('${r.id}')">Editar</button>
@@ -6169,6 +6215,7 @@ function editShippingRate(id) {
   document.getElementById('ship-rate-label').value = rate.label;
   document.getElementById('ship-rate-cost').value = rate.cost;
   setShippingRateModalities(rate.paymentModalities);
+  setShippingRateDispatch(rate);
   document.getElementById('ship-rate-submit-btn').textContent = 'Guardar cambios';
   document.getElementById('ship-rate-cancel-btn').style.display = 'inline-block';
   document.getElementById('ship-rate-label').scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -6179,6 +6226,7 @@ function cancelEditShippingRate() {
   document.getElementById('ship-rate-label').value = '';
   document.getElementById('ship-rate-cost').value = '';
   setShippingRateModalities([]);
+  setShippingRateDispatch({ cutoffTime: '', sameDayBeforeCutoff: false, deliveryDaysMin: null, deliveryDaysMax: null, noDispatchWeekdays: [] });
   document.getElementById('ship-rate-submit-btn').textContent = '+ Agregar tarifa';
   document.getElementById('ship-rate-cancel-btn').style.display = 'none';
 }
@@ -6187,6 +6235,7 @@ async function addShippingRate() {
   const label = document.getElementById('ship-rate-label').value.trim();
   const cost = Number(document.getElementById('ship-rate-cost').value);
   const paymentModalities = readShippingRateModalities();
+  const dispatch = readShippingRateDispatch();
   if (!label || !Number.isFinite(cost) || cost < 0) {
     setStatus('Completa el nombre y un costo válido', true);
     return;
@@ -6196,14 +6245,14 @@ async function addShippingRate() {
       await apiFetch(`/admin/api/shipping-rates/${editingShippingRateId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ label, cost, paymentModalities }),
+        body: JSON.stringify({ label, cost, paymentModalities, ...dispatch }),
       });
       setStatus('Tarifa actualizada');
     } else {
       await apiFetch('/admin/api/shipping-rates', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ label, cost, paymentModalities }),
+        body: JSON.stringify({ label, cost, paymentModalities, ...dispatch }),
       });
       setStatus('Tarifa agregada');
     }

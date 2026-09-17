@@ -201,3 +201,25 @@ test("formatSaleStateForPrompt describe items y lo que falta", async () => {
   assert.match(text, /2x Cargador USB-C/);
   assert.match(text, /Falta:/);
 });
+
+test("sin un solo producto elegido no hay venta en curso, y el bloque no sale", async () => {
+  // El defecto real, medido el 2026-09-17: Andres preguntaba por un pedido YA DESPACHADO y el bloque
+  // igual salia diciendo "PEDIDO EN CURSO: (todavia sin productos). Falta: ... tu nombre y apellido,
+  // tu barrio, la direccion exacta ...". El modelo le pidio exactamente eso. No desobedecio: obedecio
+  // un dato falso. La condicion vieja (items vacios Y faltan vacio) no se cumplia nunca, porque sin
+  // productos `faltan` siempre trae algo.
+  const conversationId = await freshConversation();
+  const state = await getSaleState(conversationId);
+
+  assert.equal(state!.items.length, 0);
+  assert.ok(state!.checkout.faltan.length > 0, "sin productos, computeCheckoutState siempre lista faltantes");
+  assert.equal(formatSaleStateForPrompt(state!), "", "un pedido en curso que no existe no se anuncia");
+});
+
+test("en cuanto el cliente elige un producto, el bloque vuelve a aparecer", async () => {
+  const conversationId = await freshConversation();
+  assert.equal(formatSaleStateForPrompt((await getSaleState(conversationId))!), "");
+
+  await setOrderItem(businessId, conversationId, { productId: simpleProductId, quantity: 1 });
+  assert.match(formatSaleStateForPrompt((await getSaleState(conversationId))!), /PEDIDO EN CURSO/);
+});

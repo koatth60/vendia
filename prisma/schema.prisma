@@ -260,6 +260,25 @@ model ShippingRate {
   // entre otras 89 lineas. Aca es un dato, sale con la tarifa en la misma llamada que ya resuelve la
   // ciudad, y se responde con un SELECT.
   paymentModalities ShippingPaymentModality[] @default([])
+  // CUANDO SALE Y CUANDO LLEGA UN PEDIDO DE ESTA ZONA (2026-09-17, etapa E05 de ONIX-PLAN.md).
+  //
+  // Todas nullable o con valor por defecto: una tarifa sin nada de esto cargado no promete ninguna
+  // fecha, que es exactamente el comportamiento anterior a estas columnas.
+  //
+  // Existen porque MAG.IMP tenia sus plazos escritos como prosa RELATIVA AL RELOJ ("si compra antes de
+  // las 11:00 AM puede llegar el mismo dia; si es despues, llega al dia siguiente", "los domingos no se
+  // pueden hacer envios"), o sea tres reglas que el modelo tenia que evaluar a mano en cada turno. El
+  // 2026-09-17 no acerto: dijo "manana se realiza el despacho" a las 10:33 de un jueves, cuando el
+  // despacho era ese mismo dia. Aca son datos y el servidor calcula la fecha con un SELECT y aritmetica.
+  /** "HH:MM" en hora local del negocio. Antes de esa hora el pedido alcanza el despacho del dia. */
+  cutoffTime String?
+  /** true = comprando antes del corte, sale HOY. false = sale el proximo dia de despacho. */
+  sameDayBeforeCutoff Boolean @default(false)
+  /** Dias habiles de transito despues del despacho, minimo y maximo. */
+  deliveryDaysMin Int?
+  deliveryDaysMax Int?
+  /** Dias de la semana en que este negocio NO despacha. 0 = domingo, 6 = sabado. */
+  noDispatchWeekdays Int[] @default([])
   createdAt  DateTime @default(now())
 
   @@index([businessId])

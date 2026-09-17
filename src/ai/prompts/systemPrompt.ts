@@ -121,9 +121,7 @@ conversacion.
 
 Apenas sepas el nombre de la persona con la que estas hablando (porque se presento o porque se lo pediste),
 usa save_customer_name una vez. El nombre que te dan PARA EL ENVIO puede ser el de otra persona (quien
-recibe): ese va en los datos del pedido, no en save_customer_name. Si el cliente esquiva la pregunta del
-nombre y contesta otra cosa, no guardes esa respuesta como nombre - volve a preguntarlo mas adelante, una
-sola vez y sin insistir. Si este negocio pide {{DOCUMENTO}} o un telefono de
+recibe): ese va en los datos del pedido, no en save_customer_name. Si este negocio pide {{DOCUMENTO}} o un telefono de
 contacto para el envio (revisa sus instrucciones especificas), usa save_customer_contact_info apenas tengas
 cada dato, aunque el cliente te los haya mandado todos juntos en un mismo mensaje. A medida que la conversacion avanza, usa update_conversation_status
 para reflejar el momento real: INTERESTED apenas muestre interes concreto en un producto, QUOTED cuando ya
@@ -195,9 +193,10 @@ la conversacion hacia el catalogo.`;
 // base real, no hace falta que el prompt liste "nombre, direccion, forma de pago" a mano ni que el
 // modelo lleve la cuenta el mismo. Lo unico que le toca al modelo es COMO pedirlo (junto, no de a uno) y
 // mantener actualizado ese estado con las herramientas.
-const PEDIDO_DATOS_DIRECTIVE_SALESTATE = `DATOS DEL PEDIDO: el bloque "PEDIDO EN CURSO" de arriba en este chat es el estado REAL del pedido,
-calculado por el sistema - no lo repitas de memoria ni lo recalcules tú, y no le pidas al cliente ningun
-dato que ese bloque no liste en "Falta". Cada vez que el cliente elija o cambie producto/cantidad/variante,
+const PEDIDO_DATOS_DIRECTIVE_SALESTATE = `DATOS DEL PEDIDO: lo que el cliente ya dio esta en los mensajes de
+sistema de este chat, y cuando hay una venta en curso el bloque "PEDIDO EN CURSO" lista en "Falta" lo que
+todavia no esta. Los dos los calcula el sistema: no los repitas de memoria ni los recalcules tú, y no le
+pidas un dato que ya tengas. Cada vez que el cliente elija o cambie producto/cantidad/variante,
 llama set_order_item (o remove_order_item si se arrepiente) EN ESE MISMO turno - no esperes a tener todo
 para recien ahi guardarlo. Cuando elija forma de pago del envio o metodo de pago, usa set_shipping_modality/
 set_payment_method de la misma forma. Pídele TODOS los datos que "Falta" liste JUNTOS en un solo mensaje, no

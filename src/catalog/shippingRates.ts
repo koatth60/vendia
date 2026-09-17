@@ -1,6 +1,7 @@
 import { prisma } from "../db/client";
 import { normalizeForMatch, escapeForRegExp } from "../search/text";
 import type { ShippingPaymentModality } from "@prisma/client";
+import type { DispatchRule } from "../shipping/dispatchPromise";
 
 export async function listShippingRates(businessId: string) {
   return prisma.shippingRate.findMany({
@@ -30,7 +31,9 @@ export async function createShippingRate(
 export async function updateShippingRate(
   businessId: string,
   id: string,
-  data: Partial<{ label: string; cost: number; sortOrder: number; paymentModalities: ShippingPaymentModality[] }>
+  data: Partial<
+    { label: string; cost: number; sortOrder: number; paymentModalities: ShippingPaymentModality[] } & DispatchRule
+  >
 ) {
   const rate = await prisma.shippingRate.findFirst({ where: { id, businessId } });
   if (!rate) throw new Error("Tarifa de envío no encontrada");
@@ -189,6 +192,15 @@ export async function resolveShippingRateForCity(businessId: string, city: strin
     label: rate.label,
     cost: rate.cost,
     paymentModalities: await modalidadesDeLaZona(businessId, rule.paymentModalities.length > 0 ? rule : rate),
+    // Cuando sale y cuando llega, por el mismo viaje a la base que ya resuelve el costo (2026-09-17,
+    // etapa E05). Sin nada cargado, computeDispatchPromise devuelve null y no se promete ninguna fecha.
+    dispatch: {
+      cutoffTime: rate.cutoffTime,
+      sameDayBeforeCutoff: rate.sameDayBeforeCutoff,
+      deliveryDaysMin: rate.deliveryDaysMin,
+      deliveryDaysMax: rate.deliveryDaysMax,
+      noDispatchWeekdays: rate.noDispatchWeekdays,
+    } satisfies DispatchRule,
   };
 }
 

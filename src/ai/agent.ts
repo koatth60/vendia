@@ -43,6 +43,9 @@ import { listActivePaymentMethods, resolveConfiguredPaymentMethod, matchesConfig
 export { resolveConfiguredPaymentMethod, matchesConfiguredPaymentMethod };
 import { buildCheckoutState } from "../orders/checkoutStateFromDb";
 import { getCustomerCommerceState } from "../orders/customerCommerceState";
+import { getCustomerFacts, formatCustomerFactsForModel } from "../crm/customerFacts";
+import { resolveShippingRateForCity } from "../catalog/shippingRates";
+import { computeDispatchPromise, formatDispatchPromiseForModel } from "../shipping/dispatchPromise";
 import { getAgreedPriceFacts } from "../orders/agreedPrices";
 import {
   getSaleState,
@@ -153,12 +156,21 @@ const CONTEXT_SUMMARY_REFRESH_EVERY = 10;
 
 export async function getOrRefreshContextSummary(conversationId: string, businessId: string): Promise<string | null> {
   const total = await prisma.message.count({ where: { conversationId } });
-  if (total <= CONTEXT_SUMMARY_WINDOW) return null;
-
   const conversation = await prisma.conversation.findUnique({
     where: { id: conversationId },
     select: { contextSummary: true, contextSummarizedUpTo: true },
   });
+
+  // Una conversacion corta no tiene mensajes viejos que resumir, pero SI puede tener un resumen
+  // sembrado: cuando un cliente que ya compro vuelve a escribir, getOrCreateOpenConversation le siembra
+  // en `contextSummary` que compro, cuando y si ya se despacho (ver summarizePreviousPurchase).
+  //
+  // Hasta hoy la primera linea de esta funcion era `if (total <= CONTEXT_SUMMARY_WINDOW) return null`, y
+  // ese `return` salia ANTES de leer la fila. O sea que el resumen sembrado se escribia en la base y no
+  // llegaba nunca al modelo, justo en el unico caso para el que fue escrito: la conversacion de Andres
+  // tenia 14 mensajes el 2026-09-17, y su resumen ("ya compro con nosotros el 16 de septiembre… ese
+  // pedido todavia no ha sido despachado") nunca salio de la base. Etapa E03 de ONIX-PLAN.md.
+  if (total <= CONTEXT_SUMMARY_WINDOW) return conversation?.contextSummary ?? null;
 
   const olderCount = total - CONTEXT_SUMMARY_WINDOW;
   const lastUpTo = conversation?.contextSummarizedUpTo ?? 0;
@@ -1070,6 +1082,28 @@ export async function generateReply(
     locale: negocio.locale,
   });
 
+  // LOS DATOS DEL CLIENTE (2026-09-17, etapa E02 de ONIX-PLAN.md). Nombre, documento, telefono de
+  // entrega y direccion, leidos de `Customer` - que es del CLIENTE y no de la conversacion, asi que
+  // sobreviven a que la venta anterior haya cerrado y se haya abierto una conversacion nueva. El
+  // disparador es un SELECT ("este cliente tiene algun dato guardado"), nunca una lectura de prosa.
+  // Sin ningun dato guardado no sale ningun mensaje: un cliente nuevo no paga un solo token.
+  const customerFacts = await getCustomerFacts(context.businessId, context.customerId);
+
+  // CUANDO SALE Y CUANDO LLEGA (2026-09-17, etapa E05 de ONIX-PLAN.md). El disparador es un SELECT:
+  // este cliente tiene una direccion guardada, esa direccion resuelve a una zona de envio, y esa zona
+  // tiene plazos cargados. Ninguna de las tres condiciones se lee de prosa. Si falta cualquiera, no se
+  // promete ninguna fecha - que es exactamente lo que pasaba antes de esta pieza.
+  //
+  // La direccion del PEDIDO manda sobre la del cliente: si ya hay una compra cerrada, la pregunta
+  // "cuando me llega" es por esa direccion y no por la que el cliente tenga guardada hoy.
+  const direccionParaEnvio = postSale?.order.shippingAddress ?? customerFacts?.identidad.direccionDeEntrega ?? null;
+  const zonaDeEnvio = direccionParaEnvio
+    ? await resolveShippingRateForCity(context.businessId, direccionParaEnvio)
+    : null;
+  const dispatchPromise = zonaDeEnvio
+    ? computeDispatchPromise(ahora, negocio.timezone, negocio.locale, zonaDeEnvio.dispatch)
+    : null;
+
   // EL PRECIO ACORDADO (2026-09-16). Los descuentos que la duena autorizo para esta venta, leidos de la
   // base antes de la primera llamada al modelo, igual que los pedidos de arriba. El disparador es un
   // SELECT ("esta conversacion tiene precios acordados"), nunca una lectura de lo que escribio nadie. Sin
@@ -1125,6 +1159,14 @@ export async function generateReply(
       : []),
     ...(saleStateText
       ? [{ role: "system" as const, content: saleStateText }]
+      : []),
+    // QUIEN ES ESTE CLIENTE. Va antes que sus pedidos a proposito: primero la persona, despues lo que
+    // compro. Dato estructurado, sin ninguna instruccion alrededor (ver src/crm/customerFacts.ts).
+    ...(customerFacts ? [{ role: "system" as const, content: formatCustomerFactsForModel(customerFacts) }] : []),
+    // CUANDO SALE Y CUANDO LLEGA, ya calculado contra el reloj de este turno. El modelo deja de tener
+    // que evaluar "si compra antes de las 11:00" a mano (ver src/shipping/dispatchPromise.ts).
+    ...(dispatchPromise && zonaDeEnvio
+      ? [{ role: "system" as const, content: formatDispatchPromiseForModel(zonaDeEnvio.label, dispatchPromise) }]
       : []),
     // PIEZA 6: dato estructurado, misma forma que productFacts - no prosa, y ninguna instruccion sobre
     // que hacer con el. El modelo puede desobedecer una directiva; no puede ignorar un dato que tiene

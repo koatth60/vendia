@@ -49,6 +49,32 @@ shippingRouter.post("/api/shipping-rates", requireOwner, async (req, res) => {
   res.status(201).json(rate);
 });
 
+// Cuando sale y cuando llega un pedido de esta zona (2026-09-17, etapa E05). Cada campo se valida
+// aparte y un valor con mala forma se descarta en vez de guardarse: un formulario a medias no puede
+// dejar una tarifa prometiendole al cliente una fecha calculada sobre basura. `undefined` (el campo no
+// vino en el payload) deja la columna como esta.
+const HORA = /^([01]?\d|2[0-3]):[0-5]\d$/;
+
+function horaValida(valor: unknown): string | null | undefined {
+  if (valor === undefined) return undefined;
+  const texto = String(valor ?? "").trim();
+  if (!texto) return null; // vaciar el campo es una accion valida: la zona deja de tener corte por hora
+  return HORA.test(texto) ? texto : undefined;
+}
+
+function diasValidos(valor: unknown): number | null | undefined {
+  if (valor === undefined) return undefined;
+  if (valor === null || String(valor).trim() === "") return null;
+  const n = Number(valor);
+  return Number.isInteger(n) && n >= 0 && n <= 60 ? n : undefined;
+}
+
+function diasDeSemanaValidos(valor: unknown): number[] | undefined {
+  if (!Array.isArray(valor)) return undefined;
+  const dias = valor.map((v) => Number(v)).filter((n) => Number.isInteger(n) && n >= 0 && n <= 6);
+  return [...new Set(dias)].sort();
+}
+
 shippingRouter.put("/api/shipping-rates/:id", requireOwner, async (req, res) => {
   try {
     const rate = await updateShippingRate(businessIdOf(req), String(req.params.id), {
@@ -56,6 +82,12 @@ shippingRouter.put("/api/shipping-rates/:id", requireOwner, async (req, res) => 
       cost: req.body?.cost !== undefined ? Number(req.body.cost) : undefined,
       sortOrder: req.body?.sortOrder !== undefined ? Number(req.body.sortOrder) : undefined,
       paymentModalities: modalidadesValidas(req.body?.paymentModalities),
+      cutoffTime: horaValida(req.body?.cutoffTime),
+      sameDayBeforeCutoff:
+        req.body?.sameDayBeforeCutoff !== undefined ? Boolean(req.body.sameDayBeforeCutoff) : undefined,
+      deliveryDaysMin: diasValidos(req.body?.deliveryDaysMin),
+      deliveryDaysMax: diasValidos(req.body?.deliveryDaysMax),
+      noDispatchWeekdays: diasDeSemanaValidos(req.body?.noDispatchWeekdays),
     });
     res.json(rate);
   } catch (error) {

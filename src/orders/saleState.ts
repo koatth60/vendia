@@ -170,8 +170,31 @@ export async function getSaleState(conversationId: string): Promise<SaleStateSna
 
 // Texto fijo que agent.ts inyecta como mensaje system en cada turno (mismo canal que ya usa "FOTOS/
 // VIDEOS YA ENVIADOS") - el modelo lo lee, nunca lo escribe.
+//
+// UN PEDIDO EN CURSO QUE NO EXISTE NO SE ANUNCIA (2026-09-17, etapa E03 de ONIX-PLAN.md).
+//
+// Hasta hoy la condicion era `items.length === 0 && faltan.length === 0`, que no se cumple nunca:
+// sin productos elegidos, `computeCheckoutState` siempre tiene algo en `faltan`. O sea que el bloque
+// salia SIEMPRE, incluso cuando no habia ninguna venta en curso.
+//
+// EL DEFECTO QUE CIERRA, medido en produccion. Andres escribio el 2026-09-17 a las 11:42 preguntando
+// por un pedido que ya estaba despachado. No habia ninguna venta en curso. El bloque igual salio, y
+// decia:
+//
+//   PEDIDO EN CURSO: (todavia sin productos). Falta: que producto quieres y cuantas unidades, tu
+//   nombre y apellido, tu barrio, la direccion exacta, y si es casa o apartamento con piso, como
+//   prefieres pagar.
+//
+// El modelo le pidio exactamente eso. **No desobedecio: obedecio un dato falso que le dimos nosotros.**
+// El mismo dia le paso a Ariadna. Este era el defecto, y no estaba en el modelo.
+//
+// La regla nueva: sin un solo producto elegido no hay venta en curso, y lo que falte para despachar
+// todavia no falta - no hay nada que despachar. En cuanto el cliente elige un producto el bloque
+// aparece con lo que falta, igual que antes. Quien el cliente ES sigue viajando en todos los turnos,
+// en su propio bloque y como dato (src/crm/customerFacts.ts), que es donde corresponde: los datos de
+// la persona no son el estado de una venta.
 export function formatSaleStateForPrompt(state: SaleStateSnapshot): string {
-  if (state.items.length === 0 && state.checkout.faltan.length === 0) return "";
+  if (state.items.length === 0) return "";
   const itemsText =
     state.items.length > 0
       ? state.items.map((i) => `${i.quantity}x ${i.productName}${i.variantLabel ? ` (${i.variantLabel})` : ""}`).join(", ")

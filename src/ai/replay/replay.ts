@@ -58,6 +58,10 @@ export interface FixtureTurnExpectation {
   // modelo esta mockeado. Lo usa el reloj del turno (2026-09-17) y lo va a usar cualquier fase que
   // agregue un hecho leido de la base.
   systemMustContain?: string[];
+  // Lo contrario: texto que el servidor NO puede haberle puesto delante al modelo este turno. Existe
+  // para las piezas que se prueban por AUSENCIA - un bloque que salia cuando no correspondia y ahora
+  // no sale (el "PEDIDO EN CURSO" sin un solo producto elegido, 2026-09-17).
+  systemMustNotContain?: string[];
   // Bloqueador de produccion (2026-09-15, seguimiento de f9b994b): herramientas que generateReply
   // FORZO via tool_choice este turno, en orden. Es lo unico del forzado que un replay determinista puede
   // medir de verdad: las respuestas del modelo estan grabadas, asi que si el fixture programa la llamada
@@ -496,6 +500,12 @@ export function assertTurn(
     assert.ok(
       result.systemContext.includes(required),
       `${label}: el servidor debia ponerle "${required}" delante al modelo, y no esta en ningun mensaje system del turno`
+    );
+  }
+  for (const forbidden of expect_.systemMustNotContain ?? []) {
+    assert.ok(
+      !result.systemContext.includes(forbidden),
+      `${label}: el servidor NO debia ponerle "${forbidden}" delante al modelo, y se lo puso`
     );
   }
   if (expect_.sideEffects?.mediaSent !== undefined) {
