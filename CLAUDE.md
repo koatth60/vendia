@@ -51,8 +51,8 @@ payload to DeepSeek on every customer message. Keep this lean going forward:
 
 # Rediseño del panel (dirección A) — reglas de estilo
 
-El sistema vive en `public/admin/css/tokens.css`. El plan y el estado de cada
-fase están en `design/ONIX-REDESIGN-PLAN.md`.
+El sistema vive en `public/admin/css/tokens.css`. Las fases del rediseño que
+faltan son las etapas `E47` a `E55` de `ONIX-PLAN.md`.
 
 - **Ningún color literal fuera de `tokens.css`.** Ni un hex, ni un `rgba()`, ni
   `white`. Siempre `var(--onix-*)`. Esta es la regla que hace que claro y oscuro
@@ -106,8 +106,8 @@ puede nombrar cuál quitó es un parche disfrazado y hay que devolverla.
 ## Efectos requeridos: regla de admisión
 
 El mecanismo de efectos requeridos (declarar el efecto esperado, verificarlo contra la base
-antes de responder, reintentar, caer a código, escalar) está descrito en
-`ONIX-PLAN-CATALOGO-Y-MEDIOS.md`. Un efecto entra a la tabla solo si cumple las tres:
+antes de responder, reintentar, caer a código, escalar) está descrito en la Parte I de
+`ONIX-PLAN.md`. Un efecto entra a la tabla solo si cumple las tres:
 
 1. **Disparador determinista** — se calcula desde estado de la base o metadatos estructurados
    del mensaje (`mediaType`, quién habla). Nunca desde interpretar prosa, ni del cliente ni del

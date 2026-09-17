@@ -56,7 +56,11 @@ scripts/         utilidades (ej: generar claves de activación)
 ```
 
 El panel de administración (`public/admin/`) está organizado en 5 secciones - Inicio, CRM, Catálogo, Bot
-y Negocio - documentadas en `ONIX-CRM-REORG-PLAN.md` (diagnóstico y plan de la reorganización).
+y Negocio. El diagnóstico y el plan de esa reorganización están en
+`docs/historico/ONIX-CRM-REORG-PLAN.md`.
+
+El plan de trabajo vigente, y el único, es [`ONIX-PLAN.md`](ONIX-PLAN.md): 75 etapas numeradas, cada
+una desplegable sola. Todo lo demás está archivado en `docs/historico/`.
 
 ## Requisitos
 
