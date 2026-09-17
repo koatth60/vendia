@@ -898,6 +898,11 @@
   .thread-menu-list[hidden] { display: none; }
   .thread-menu-item {
     display: flex; align-items: center; gap: 9px;
+    /* justify-content explicito: la regla global de button centra el contenido, y
+       centrado cada fila arranca en una x distinta segun cuanto mida su texto -
+       "Crear venta" quedaba metida hacia adentro al lado de "Precio especial".
+       En una lista, lo que alinea la vista es el borde izquierdo, no el centro. */
+    justify-content: flex-start;
     width: 100%; padding: 7px 9px; border: none; background: transparent;
     border-radius: var(--onix-radius-chip);
     font: var(--onix-text-row); color: var(--onix-ink-2);
