@@ -84,15 +84,17 @@ el insumo directo y más detallado de la Fase 12.
 
 ---
 
-## Terminados
+## Terminados — en `docs/historico/`
 
-**`ONIX-ROBUSTNESS-AUDIT.md`** — fases A–G implementadas el 2026-09-13. El diagnóstico posterior lo
-declara superado: sus pendientes "ya no son la respuesta correcta". Su encabezado todavía dice que
-nada está implementado; es falso y quedó sin actualizar.
+Archivados el 2026-09-17, no borrados: el código los cita en comentarios que explican por qué está
+hecho así. Ver `docs/historico/README.md`.
 
-**`ONIX-CONVERSATIONS-GROUPING-PLAN.md`** — agrupar las conversaciones por cliente, implementado y
-desplegado el 2026-09-13. Su encabezado todavía dice "aprobado, no iniciado"; también quedó sin
-actualizar.
+**`docs/historico/ONIX-ROBUSTNESS-AUDIT.md`** — fases A–G implementadas el 2026-09-13. El diagnóstico
+posterior lo declara superado: sus pendientes "ya no son la respuesta correcta".
 
-Estos dos se pueden archivar cuando el dueño quiera. No se borran sin más porque el código los cita
-en comentarios que explican por qué está hecho así.
+**`docs/historico/ONIX-CONVERSATIONS-GROUPING-PLAN.md`** — agrupar las conversaciones por cliente,
+implementado y desplegado el 2026-09-13.
+
+**`docs/historico/claude-outputs/`** — salidas de sesiones anteriores. Guarda el encargo original del
+Master Audit, pero también copias VIEJAS de archivos que siguen vivos (el plan de rediseño y
+`tokens.css`); no confundirlas con las buenas.
