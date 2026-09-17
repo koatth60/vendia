@@ -2241,7 +2241,7 @@ function cycleMetaById(id) {
 function cycleSeparatorHtml(cycle) {
   const dateLabel = new Date(cycle.updatedAt).toLocaleDateString('es-CO', { day: 'numeric', month: 'short' });
   const label = cycle.status === 'SOLD'
-    ? `Venta cerrada · ${dateLabel}${cycle.order ? ` · ${escapeHtml(cycle.order.summary)} · ${formatMoney(cycle.order.totalAmount, cycle.order.currency)}` : ''}`
+    ? `Venta registrada · ${dateLabel}${cycle.order ? ` · ${escapeHtml(cycle.order.summary)} · ${formatMoney(cycle.order.totalAmount, cycle.order.currency)}` : ''}`
     : `Conversación cerrada sin venta · ${dateLabel}`;
   return `<div class="cycle-separator"><span>${label}</span></div>`;
 }
@@ -2764,7 +2764,7 @@ async function confirmCloseSale() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ items, shippingAddress, paymentMethodLabel, shippingCost, idNumber, deliveryPhone, notes, customerMessage }),
     });
-    setStatus('Venta cerrada, pedido registrado ✓');
+    setStatus('Venta registrada ✓');
     closeSaleFormCancel();
     openCustomer(currentCustomerId);
   } catch (err) {
@@ -5657,7 +5657,7 @@ function saleGateBlockCardHtml(health) {
       </div>`;
   }).join('');
   return `
-    <div class="section-title">El bot todavía no puede cerrar ventas</div>
+    <div class="section-title">El bot todavía no puede registrar ventas</div>
     <div style="font-size:12.5px; color:var(--muted); margin:-4px 0 10px;">Sin esto, no puede mostrarle un total al cliente ni registrar un pago - mientras tanto deja el pedido anotado y te avisa para que lo confirmes vos.</div>
     ${rows}
   `;
