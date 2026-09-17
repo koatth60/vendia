@@ -14,18 +14,35 @@ const authLimiter = rateLimit({
   message: { error: "Demasiados intentos. Prueba de nuevo en unos minutos." },
 });
 
-authRouter.post("/signup", authLimiter, async (req, res) => {
-  const { businessName, email, password, contactPhone, activationKey } = req.body;
+const PLAN_TIERS = ["BASICO", "EMPRENDEDOR", "NEGOCIO"] as const;
 
-  if (!businessName || !email || !password || !activationKey) {
+// La clave de activacion dejo de ser obligatoria el 2026-09-17. Quien la tiene entra activado en el
+// acto; quien no, igual crea su cuenta y entra a su panel en modo espera, con el bot apagado hasta
+// que Zaqi la active desde la consola de plataforma.
+//
+// No hay tabla de "solicitudes pendientes" y no debe haberla: una cuenta esperando activacion ES un
+// Business con active=false. La bandeja del panel de plataforma sale de un SELECT sobre ese campo,
+// asi que no existe el estado intermedio donde la cuenta esta inactiva y su solicitud se perdio, ni
+// al reves.
+authRouter.post("/signup", authLimiter, async (req, res) => {
+  const { businessName, email, password, contactPhone, activationKey, planTier } = req.body;
+
+  if (!businessName || !email || !password) {
     res.status(400).json({ error: "Faltan campos obligatorios" });
     return;
   }
 
-  const key = await prisma.activationKey.findUnique({ where: { code: String(activationKey).trim() } });
-  if (!key || key.used) {
-    res.status(400).json({ error: "La clave de activación no es válida o ya fue usada" });
-    return;
+  const code = String(activationKey ?? "").trim();
+
+  // Una clave escrita mal no se ignora en silencio: quien cree estar entrando activado tiene que
+  // enterarse ahi mismo, no tres dias despues preguntando por que su bot no contesta.
+  let key = null;
+  if (code) {
+    key = await prisma.activationKey.findUnique({ where: { code } });
+    if (!key || key.used) {
+      res.status(400).json({ error: "La clave de activación no es válida o ya fue usada" });
+      return;
+    }
   }
 
   const existing = await prisma.business.findUnique({ where: { email } });
@@ -34,6 +51,9 @@ authRouter.post("/signup", authLimiter, async (req, res) => {
     return;
   }
 
+  // Con clave manda la clave: es la que Zaqi emitio para un plan concreto y ya esta cobrada. Sin
+  // clave el plan es lo que el cliente pidio, y queda como propuesta hasta que se active.
+  const requestedTier = PLAN_TIERS.includes(planTier) ? planTier : "BASICO";
   const passwordHash = await hashPassword(password);
 
   const business = await prisma.business.create({
@@ -42,20 +62,28 @@ authRouter.post("/signup", authLimiter, async (req, res) => {
       email,
       passwordHash,
       contactPhone: contactPhone || null,
-      planTier: key.planTier,
-      active: true,
+      planTier: key ? key.planTier : requestedTier,
+      active: Boolean(key),
     },
   });
 
-  await prisma.activationKey.update({
-    where: { id: key.id },
-    data: { used: true, usedByBusinessId: business.id, usedAt: new Date() },
-  });
+  if (key) {
+    await prisma.activationKey.update({
+      where: { id: key.id },
+      data: { used: true, usedByBusinessId: business.id, usedAt: new Date() },
+    });
+  }
 
   req.session.businessId = business.id;
   req.session.role = "OWNER";
   req.session.email = business.email;
-  res.status(201).json({ id: business.id, name: business.name, email: business.email, planTier: business.planTier });
+  res.status(201).json({
+    id: business.id,
+    name: business.name,
+    email: business.email,
+    planTier: business.planTier,
+    active: business.active,
+  });
 });
 
 authRouter.post("/request-key", async (req, res) => {
@@ -86,12 +114,12 @@ authRouter.post("/login", authLimiter, async (req, res) => {
     return;
   }
 
+  // Una cuenta sin activar entra igual y ve su panel en modo espera. Antes se le devolvia
+  // "Credenciales inválidas", que es mentira y deja al cliente probando contrasenas que si eran
+  // correctas. El bot apagado no depende de este login: depende de active=false, que el servidor
+  // comprueba donde importa (conectar WhatsApp).
   const business = await prisma.business.findUnique({ where: { email } });
   if (business) {
-    if (!business.active) {
-      res.status(401).json({ error: "Credenciales inválidas" });
-      return;
-    }
     const valid = await verifyPassword(password, business.passwordHash);
     if (!valid) {
       res.status(401).json({ error: "Credenciales inválidas" });
@@ -100,12 +128,20 @@ authRouter.post("/login", authLimiter, async (req, res) => {
     req.session.businessId = business.id;
     req.session.role = "OWNER";
     req.session.email = business.email;
-    res.json({ id: business.id, name: business.name, email: business.email, planTier: business.planTier });
+    res.json({
+      id: business.id,
+      name: business.name,
+      email: business.email,
+      planTier: business.planTier,
+      active: business.active,
+    });
     return;
   }
 
+  // Un empleado desactivado sigue sin entrar. Que su negocio este esperando activacion ya no lo
+  // bloquea: ve el mismo panel en modo espera que su dueno.
   const member = await prisma.teamMember.findUnique({ where: { email }, include: { business: true } });
-  if (!member || !member.active || !member.business.active) {
+  if (!member || !member.active) {
     res.status(401).json({ error: "Credenciales inválidas" });
     return;
   }
@@ -117,7 +153,13 @@ authRouter.post("/login", authLimiter, async (req, res) => {
   req.session.businessId = member.business.id;
   req.session.role = "EMPLOYEE";
   req.session.email = member.email;
-  res.json({ id: member.business.id, name: member.business.name, email: member.email, planTier: member.business.planTier });
+  res.json({
+    id: member.business.id,
+    name: member.business.name,
+    email: member.email,
+    planTier: member.business.planTier,
+    active: member.business.active,
+  });
 });
 
 authRouter.post("/forgot-password", authLimiter, async (req, res) => {
@@ -175,6 +217,7 @@ authRouter.get("/me", async (req, res) => {
     email: req.session.email ?? business.email,
     planTier: business.planTier,
     whatsappConnected: Boolean(business.whatsappPhoneNumberId),
+    active: business.active,
     role: req.session.role ?? "OWNER",
   });
 });

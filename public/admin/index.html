@@ -115,6 +115,18 @@
       </div>
 
 <main>
+    <!-- Aviso de cuenta en espera de activacion. Lo enciende loadRole() cuando /auth/me
+         devuelve active:false; el bot sigue apagado por la comprobacion del servidor, no
+         por este cartel. -->
+    <div id="pending-activation" class="pending-banner" hidden>
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v5l3 1.8"/></svg>
+      <div class="pending-banner-text">
+        <div class="pending-banner-title">Tu cuenta todavía no está activada</div>
+        <p>Ya puedes cargar tu catálogo, tus precios y tus formas de pago. Cuando activemos tu cuenta conectamos tu WhatsApp y Onix empieza a atender.</p>
+      </div>
+      <a class="pending-banner-cta" href="https://wa.me/573204500599" target="_blank" rel="noopener">Escribirnos</a>
+    </div>
+
     <div id="status"></div>
 
     <div class="tab-panel active" data-tab-panel="inicio">

@@ -195,6 +195,51 @@ platformAdminRouter.patch("/key-requests/:id", async (req, res) => {
   res.json({ ok: true });
 });
 
+// Bandeja de cuentas esperando activacion. No hay tabla propia a proposito: la solicitud ES el
+// Business con active=false, asi que esta lista no puede quedar desincronizada de la realidad.
+platformAdminRouter.get("/pending-activations", async (_req, res) => {
+  const pending = await prisma.business.findMany({
+    where: { active: false },
+    orderBy: { createdAt: "asc" },
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      contactPhone: true,
+      planTier: true,
+      createdAt: true,
+    },
+  });
+  res.json(pending);
+});
+
+// Activar es un solo campo. El plan se confirma aqui porque el que trae la cuenta es el que el
+// cliente pidio en el formulario, no uno que Zaqi haya cobrado todavia.
+platformAdminRouter.post("/pending-activations/:id/activate", async (req, res) => {
+  const { planTier } = req.body;
+  if (planTier !== undefined && !["BASICO", "EMPRENDEDOR", "NEGOCIO"].includes(planTier)) {
+    res.status(400).json({ error: "Plan inválido" });
+    return;
+  }
+
+  const business = await prisma.business.findUnique({ where: { id: req.params.id } });
+  if (!business) {
+    res.status(404).json({ error: "No existe esa cuenta" });
+    return;
+  }
+
+  const updated = await prisma.business.update({
+    where: { id: business.id },
+    data: {
+      active: true,
+      ...(planTier ? { planTier } : {}),
+    },
+    select: { id: true, name: true, email: true, planTier: true, active: true },
+  });
+
+  res.json(updated);
+});
+
 platformAdminRouter.get("/activation-keys", async (_req, res) => {
   const keys = await prisma.activationKey.findMany({ orderBy: { createdAt: "desc" } });
   const businessIds = keys.map((k) => k.usedByBusinessId).filter((id): id is string => Boolean(id));

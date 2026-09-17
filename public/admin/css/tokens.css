@@ -306,7 +306,13 @@
    Base
    ========================================================================= */
 
+/* Los controles nativos (casillas, selects, barras de scroll) se pintan segun
+   color-scheme, no segun nuestros tokens. Sin las dos lineas de abajo seguian al
+   sistema operativo: con Windows en oscuro y el panel en claro, una casilla sin
+   marcar salia como un cuadro negro. El atributo manda; sin atributo, el SO. */
 :root { color-scheme: light dark; }
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
 
 html, body {
   background: var(--onix-bg);

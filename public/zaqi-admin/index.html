@@ -73,6 +73,27 @@
       <span style="color:var(--ink);"> — alguien está esperando una clave de activación, mira abajo.</span>
     </div>
 
+    <div id="pending-alert" style="display:none; margin-bottom:24px; background:var(--warn-light); border:1px solid var(--warn); border-radius:12px; padding:14px 18px;">
+      <strong id="pending-alert-count" style="color:var(--warn);"></strong>
+      <span style="color:var(--ink);"> — ya crearon su cuenta y están esperando que la actives.</span>
+    </div>
+
+    <h1>Cuentas esperando activación</h1>
+    <table id="pending-table" style="display:none; margin-bottom:20px;">
+      <thead>
+        <tr>
+          <th>Negocio</th>
+          <th>Email</th>
+          <th>WhatsApp</th>
+          <th>Plan que pidió</th>
+          <th>Creada</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="pending-body"></tbody>
+    </table>
+    <div class="empty" id="pending-empty" style="display:none; margin-bottom:20px;">Ninguna cuenta esperando activación.</div>
+
     <h1>Solicitudes de clave</h1>
     <table id="requests-table" style="display:none; margin-bottom:20px;">
       <thead>
@@ -386,6 +407,66 @@ document.getElementById('logout-btn').addEventListener('click', async () => {
   window.location.href = '/login.html';
 });
 
+// Cuentas creadas sin clave de activacion. No hay tabla de solicitudes detras: esto es
+// exactamente la lista de Business con active=false, asi que no puede mentir.
+async function loadPendingActivations() {
+  const res = await fetch('/zaqi-admin/api/pending-activations');
+  if (!res.ok) return;
+  const pending = await res.json();
+
+  const alertEl = document.getElementById('pending-alert');
+  if (pending.length > 0) {
+    alertEl.style.display = 'block';
+    document.getElementById('pending-alert-count').textContent =
+      pending.length === 1 ? '1 cuenta sin activar' : `${pending.length} cuentas sin activar`;
+  } else {
+    alertEl.style.display = 'none';
+  }
+
+  const table = document.getElementById('pending-table');
+  const empty = document.getElementById('pending-empty');
+  if (pending.length === 0) {
+    table.style.display = 'none';
+    empty.style.display = 'block';
+    return;
+  }
+  table.style.display = 'table';
+  empty.style.display = 'none';
+
+  const tiers = ['BASICO', 'EMPRENDEDOR', 'NEGOCIO'];
+  document.getElementById('pending-body').innerHTML = pending.map((b) => `
+    <tr>
+      <td>${escapeHtml(b.name)}</td>
+      <td>${escapeHtml(b.email)}</td>
+      <td>${escapeHtml(b.contactPhone || '—')}</td>
+      <td>
+        <select id="pending-tier-${b.id}">
+          ${tiers.map((t) => `<option value="${t}"${t === b.planTier ? ' selected' : ''}>${t}</option>`).join('')}
+        </select>
+      </td>
+      <td>${new Date(b.createdAt).toLocaleString('es-CO')}</td>
+      <td><button class="edit-btn" onclick="activateBusiness('${b.id}')">Activar</button></td>
+    </tr>
+  `).join('');
+}
+
+async function activateBusiness(id) {
+  const select = document.getElementById(`pending-tier-${id}`);
+  const planTier = select ? select.value : undefined;
+  const res = await fetch(`/zaqi-admin/api/pending-activations/${id}/activate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ planTier }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    alert(data.error || 'No se pudo activar la cuenta');
+    return;
+  }
+  loadPendingActivations();
+  loadBusinesses();
+}
+
 async function loadRequests() {
   const res = await fetch('/zaqi-admin/api/key-requests');
   if (!res.ok) return;
@@ -522,7 +603,7 @@ document.getElementById('log-close-btn').addEventListener('click', () => {
 
 (async () => {
   const ok = await checkAuth();
-  if (ok) { loadBusinesses(); loadKeys(); loadRequests(); }
+  if (ok) { loadBusinesses(); loadKeys(); loadRequests(); loadPendingActivations(); }
 })();
 </script>
 </body>

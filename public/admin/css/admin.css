@@ -2336,3 +2336,39 @@
     .close-sale-item-product { flex-basis: 100%; }
     .close-sale-item-variant { flex: 1 1 auto; }
   }
+
+/* --- Aviso de cuenta en espera de activacion ------------------------------ */
+/* Una cuenta creada sin clave de activacion entra al panel y puede cargar su
+   catalogo; lo unico que no puede es conectar WhatsApp. El aviso se queda arriba
+   de todo mientras eso siga asi. Que el bot este apagado lo garantiza el
+   servidor, no este cartel. */
+.pending-banner {
+  display: flex; align-items: flex-start; gap: var(--onix-gap-md);
+  margin-bottom: var(--onix-gap-lg);
+  padding: 15px 18px;
+  border: 1px solid var(--onix-warn);
+  border-radius: var(--onix-radius-panel);
+  background: var(--onix-warn-soft);
+}
+.pending-banner > svg { color: var(--onix-warn); flex-shrink: 0; margin-top: 1px; }
+.pending-banner-text { flex: 1; min-width: 0; }
+.pending-banner-title { font: var(--onix-text-row); color: var(--onix-ink); }
+.pending-banner-text p {
+  margin: 4px 0 0;
+  font: var(--onix-text-meta); line-height: 1.55; color: var(--onix-ink-3);
+}
+.pending-banner-cta {
+  flex-shrink: 0;
+  display: inline-flex; align-items: center; height: var(--onix-h-btn-sm);
+  padding: 0 14px;
+  border: 1px solid var(--onix-warn);
+  border-radius: var(--onix-radius-control);
+  font: var(--onix-text-meta); font-weight: 600; color: var(--onix-warn);
+  text-decoration: none; white-space: nowrap;
+}
+.pending-banner-cta:hover { background: var(--onix-warn); color: var(--onix-surface); }
+
+@media (max-width: 720px) {
+  .pending-banner { flex-wrap: wrap; }
+  .pending-banner-cta { margin-left: 34px; }
+}

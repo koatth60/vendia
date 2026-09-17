@@ -349,3 +349,87 @@ body.auth-split .foot { text-align: left; margin-top: 20px; }
   .card { padding: 24px 20px; border-radius: var(--onix-radius-card); }
   h1 { font-size: 20px; }
 }
+
+/* --- Formulario de alta: secciones y dos columnas -------------------------- */
+/* El alta pedia ocho campos en una sola columna, sin agrupar y sin panel de
+   muestra: al lado del login parecia otro producto. Se parte en secciones con
+   titulo, y los campos que caben de a dos van de a dos. Mismo layout partido
+   que el login, mismas piezas .show-* a la derecha. */
+.form-section { margin-top: 26px; }
+.form-section:first-of-type { margin-top: 0; }
+.form-section-title {
+  display: flex; align-items: center; gap: 9px;
+  font: var(--onix-text-caps); letter-spacing: var(--onix-tracking-caps);
+  text-transform: uppercase; color: var(--onix-dim);
+  padding-bottom: 9px; margin-bottom: 4px;
+  border-bottom: 1px solid var(--onix-border);
+}
+.form-section-title span {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 17px; height: 17px; flex-shrink: 0;
+  border-radius: 999px;
+  background: var(--onix-accent-soft); color: var(--onix-accent);
+  font-size: 10px; font-weight: 700;
+}
+
+.field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
+.field-grid > .field-full { grid-column: 1 / -1; }
+.field-grid label { margin-top: 14px; }
+
+/* La clave dejo de ser obligatoria: quien la tiene entra activado, quien no,
+   entra igual y espera. El campo no puede leerse como un requisito. */
+.key-optional {
+  margin-top: 14px; padding: 14px 16px;
+  border: 1px dashed var(--onix-border-strong);
+  border-radius: var(--onix-radius-card);
+  background: var(--onix-surface-field);
+}
+.key-optional label { margin-top: 0; }
+/* Las claves se escriben en mayuscula, pero el texto de ayuda del campo no: en
+   mayusculas se lee como un requisito a gritos, que es justo lo que dejo de ser. */
+.key-optional input { text-transform: uppercase; }
+.key-optional input::placeholder { text-transform: none; }
+.key-optional .hint { margin-top: 8px; }
+
+.terms-check {
+  display: flex; align-items: flex-start; gap: 9px;
+  margin-top: 22px;
+  font-size: 12.5px; font-weight: 400; line-height: 1.5; color: var(--onix-ink-3);
+}
+/* El selector global de `input` le daba alto de campo, fondo y borde de caja de
+   texto: la casilla salia como un cuadro negro. */
+.terms-check input[type="checkbox"] {
+  width: 15px; height: 15px; flex-shrink: 0;
+  margin: 2px 0 0; padding: 0;
+  background: none; border: none; border-radius: 0;
+  accent-color: var(--onix-accent);
+  cursor: pointer;
+}
+.terms-check input[type="checkbox"]:focus { box-shadow: none; }
+.terms-check input[type="checkbox"]:focus-visible {
+  outline: 2px solid var(--onix-accent); outline-offset: 2px;
+}
+
+/* --- Panel de muestra del alta: los tres pasos ---------------------------- */
+.show-steps { display: flex; flex-direction: column; gap: 2px; }
+.show-step {
+  display: flex; align-items: flex-start; gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--onix-border);
+  border-radius: var(--onix-radius-card);
+  background: var(--onix-surface);
+}
+.show-step + .show-step { margin-top: 10px; }
+.show-step-num {
+  display: flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; flex-shrink: 0;
+  border-radius: 999px;
+  background: var(--onix-accent-soft); color: var(--onix-accent);
+  font-family: var(--onix-font-mono); font-size: 11px; font-weight: 600;
+}
+.show-step-title { font-size: 13.5px; font-weight: 600; color: var(--onix-ink); }
+.show-step-text { font-size: 12.5px; line-height: 1.55; color: var(--onix-ink-3); margin-top: 3px; }
+
+@media (max-width: 560px) {
+  .field-grid { grid-template-columns: 1fr; }
+}

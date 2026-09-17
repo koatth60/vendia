@@ -70,6 +70,21 @@ whatsappConnectRouter.post("/api/whatsapp/connect", requireOwner, async (req, re
 
   const businessId = businessIdOf(req);
 
+  // Una cuenta que todavia espera activacion no conecta WhatsApp. Esta es la garantia de que el bot
+  // sigue apagado; el aviso del panel es solo como se lo contamos al cliente. Un cartel se puede
+  // ocultar desde las herramientas del navegador, esta comprobacion no.
+  const pending = await prisma.business.findUnique({
+    where: { id: businessId },
+    select: { active: true },
+  });
+  if (!pending?.active) {
+    res.status(403).json({
+      error: "Tu cuenta todavía no está activada. En cuanto la activemos podrás conectar tu WhatsApp.",
+      pendingActivation: true,
+    });
+    return;
+  }
+
   // Un negocio YA conectado no se puede pisar por accidente. MAG.IMP corre en produccion con clientes
   // reales: si alguien completa este flujo desde su panel con otro numero, le cambia el token y el
   // phoneNumberId, y su bot deja de contestar SIN ningun error visible - el peor modo de falla que
