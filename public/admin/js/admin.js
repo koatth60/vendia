@@ -43,7 +43,9 @@ function fitChatSplit() {
     return;
   }
   const top = split.getBoundingClientRect().top;
-  const bottomMargin = 16;
+  // Cero: la Bandeja llega hasta el borde de abajo de la ventana. Con 16px quedaba una franja muerta
+  // debajo del compositor, que en una laptop es alto de conversacion tirado.
+  const bottomMargin = 0;
   const available = window.innerHeight - top - bottomMargin;
   split.style.height = `${Math.max(480, available)}px`;
 }

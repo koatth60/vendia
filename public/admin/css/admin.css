@@ -75,18 +75,22 @@
      cambia es la variable de la que sale el valor - la barra se quedaba clavada
      en 64px al expandirla, con el token ya de vuelta en 248px. */
   body.sidebar-collapsed .sidebar { width: 64px; }
+  /* TODO lo de aca adentro va bajo .sidebar. Sin ese prefijo, ".tab-btn" alcanza
+     tambien a las pestanas de la subnavegacion (Bandeja/Clientes/Pedidos), que
+     usan la misma clase: con la barra retraida se quedaban sin padding y los tres
+     nombres aparecian pegados uno contra otro. */
   body.sidebar-collapsed .brand-text,
   body.sidebar-collapsed .brand-mark,
-  body.sidebar-collapsed .tab-label,
-  body.sidebar-collapsed .tab-count,
+  body.sidebar-collapsed .sidebar .tab-label,
+  body.sidebar-collapsed .sidebar .tab-count,
   body.sidebar-collapsed .session-badge { display: none; }
   body.sidebar-collapsed .sidebar-brand { justify-content: center; padding: 0; }
   body.sidebar-collapsed .tabbar { padding: 14px 8px; }
-  body.sidebar-collapsed .tab-btn { justify-content: center; padding: 0; position: relative; }
+  body.sidebar-collapsed .sidebar .tab-btn { justify-content: center; padding: 0; position: relative; }
   body.sidebar-collapsed .sidebar-foot { flex-direction: column; gap: 10px; padding: 12px 8px; }
   /* Sin lugar para el numero, queda el punto: que HAY sin leer se sigue viendo,
      cuantos se lee al abrirla. */
-  body.sidebar-collapsed .tab-btn .unread-badge {
+  body.sidebar-collapsed .sidebar .tab-btn .unread-badge {
     position: absolute; top: 4px; right: 6px; margin: 0;
     min-width: 8px; width: 8px; height: 8px; padding: 0;
     font-size: 0; overflow: hidden;
@@ -211,6 +215,11 @@
      franja propia debajo. */
   .subnav .realtime-indicator { margin-left: auto; align-self: center; flex-shrink: 0; }
   .subnav .tab-btn {
+    /* flex-shrink:0 - al meter "En vivo" en esta fila, las pestanas pasaron a ser
+       lo unico que podia encogerse, y lo primero que pierden al encogerse es su
+       padding: los tres nombres quedaban pegados entre si. La fila scrollea
+       antes que apretarlos. */
+    flex-shrink: 0;
     position: relative; height: 100%; padding: 0 12px;
     font-size: 13px; font-weight: 500; letter-spacing: -0.005em;
     color: var(--onix-dim); background: transparent;
@@ -344,7 +353,9 @@
     flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden;
     padding: 18px 28px 40px;
   }
-  main.wide { padding-bottom: 16px; }
+  /* La Bandeja llega hasta el borde de abajo: su alto lo calcula fitChatSplit y
+     cualquier padding aca es un hueco muerto debajo del compositor. */
+  main.wide { padding-bottom: 0; }
 
   .tab-panel { display: none; animation: fadeIn .18s ease; }
   .tab-panel .card + .card { margin-top: 18px; }
