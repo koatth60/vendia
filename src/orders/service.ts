@@ -8,6 +8,7 @@ import { sendToCustomer, type WhatsappCredentials } from "../whatsapp/outbound";
 import { getPresignedMediaUrl } from "../media/s3";
 import { emitOrderNew, emitOrderUpdated } from "../realtime/events";
 import { getAgreedPrices, applyAgreedPrices, agreedUnitPriceOf } from "./agreedPrices";
+import { recalcularEtapaDelCliente } from "../crm/customers";
 
 export interface ResolvedOrderItem {
   productId: string;
@@ -274,6 +275,15 @@ export async function createOrder(params: {
   });
 
   emitOrderNew(businessId, createdOrder.id);
+  // E41: la etapa del cliente la calcula el servidor, y este es el hecho que la mueve. Va DESPUES de la
+  // transaccion a proposito: si el recalculo fallara, el pedido igual quedo creado - la etapa es un dato
+  // derivado y el proximo pedido (o el job diario) la vuelve a poner bien. Al reves seria peor.
+  try {
+    await recalcularEtapaDelCliente(businessId, customerId);
+  } catch (error) {
+    console.error(`No se pudo recalcular la etapa de ${customerId} tras crear el pedido:`, error);
+  }
+
   return createdOrder;
 }
 

@@ -245,6 +245,40 @@ export async function updateCustomerProfile(
   });
 }
 
+/**
+ * E41 (2026-09-18). La etapa del cliente la calcula el SERVIDOR, a partir de sus pedidos.
+ *
+ * Hasta hoy `CustomerStage` estaba practicamente muerta: nada escribia jamas COMPRADOR ni RECURRENTE.
+ * Medido en produccion, los 84 clientes tocados en siete dias estaban TODOS en NUEVO, incluidos los que
+ * ya habian comprado. O sea que la columna existia, el panel la mostraba, y no significaba nada.
+ *
+ * La regla, en orden y sin empates posibles:
+ *
+ *   2 o mas pedidos  -> RECURRENTE
+ *   1 pedido         -> COMPRADOR
+ *   ningun pedido    -> se deja como esta (NUEVO, ACTIVO o INACTIVO)
+ *
+ * Solo SUBE. Un cliente que ya compro no vuelve a NUEVO porque se le cancele algo o pase el tiempo: eso
+ * lo maneja markCustomerInactive, que a proposito no toca a COMPRADOR ni RECURRENTE.
+ *
+ * Se cuentan los pedidos que existen, no los "cerrados con exito": un pedido cancelado igual prueba que
+ * esta persona llego a comprar. Si mas adelante se quiere excluir los cancelados, es un where aca y una
+ * decision aparte - no un cambio de forma.
+ */
+export async function recalcularEtapaDelCliente(businessId: string, customerId: string): Promise<void> {
+  const pedidos = await prisma.order.count({
+    where: { conversation: { customer: { id: customerId, businessId } } },
+  });
+  if (pedidos === 0) return;
+  const etapa = pedidos >= 2 ? "RECURRENTE" : "COMPRADOR";
+  // updateMany con la etapa actual en el WHERE: no reescribe la fila si ya estaba bien, asi que el job
+  // diario no genera escrituras por cada cliente en cada pasada.
+  await prisma.customer.updateMany({
+    where: { id: customerId, businessId, stage: { not: etapa } },
+    data: { stage: etapa },
+  });
+}
+
 // Fase 9 del plan maestro (2026-09-15): CustomerStage.INACTIVO existia en el enum desde antes pero nada
 // lo escribia nunca (comentario del propio schema.prisma:520). jobs/abandonment.ts llama esto cuando una
 // de las conversaciones del cliente pasa a ABANDONED por inactividad. Solo baja NUEVO/ACTIVO - un cliente

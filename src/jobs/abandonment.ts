@@ -7,7 +7,7 @@ import {
   markCartRecoverySent,
   recordMessage,
 } from "../conversation/service";
-import { markCustomerInactive } from "../crm/customers";
+import { markCustomerInactive, recalcularEtapaDelCliente } from "../crm/customers";
 import { getSaleState } from "../orders/saleState";
 
 // Fase 9 del plan maestro (2026-09-15), causa raiz C1+eje 18: el 61% de las conversaciones NEW no
@@ -25,6 +25,29 @@ export async function runAbandonmentJob(): Promise<void> {
     for (const conversation of due) {
       await markConversationAbandoned(business.id, conversation.id);
       await markCustomerInactive(business.id, conversation.customer.id);
+    }
+
+    // --- Paso 1b (E41): poner al dia la etapa de quien ya compro ---------------------------------
+    // Red de seguridad y relleno historico, no el camino principal: createOrder ya recalcula la etapa
+    // en el momento en que se crea el pedido, asi que COMPRADOR y RECURRENTE se mueven en vivo. Esto
+    // esta para los clientes que YA tenian pedidos antes de que E41 existiera - medido en produccion,
+    // los 84 clientes tocados en siete dias estaban todos en NUEVO, incluidos los que ya habian
+    // comprado.
+    //
+    // El filtro por etapa es lo que lo hace barato: en regimen no devuelve nada, porque a los que ya
+    // estan en COMPRADOR o RECURRENTE los mueve createOrder. El tope de 500 evita que la primera
+    // pasada sobre un negocio grande se coma la hora; las que falten entran en la pasada siguiente.
+    const sinEtapaDeCompra = await prisma.customer.findMany({
+      where: {
+        businessId: business.id,
+        stage: { notIn: ["COMPRADOR", "RECURRENTE"] },
+        conversations: { some: { order: { isNot: null } } },
+      },
+      select: { id: true },
+      take: 500,
+    });
+    for (const cliente of sinEtapaDeCompra) {
+      await recalcularEtapaDelCliente(business.id, cliente.id);
     }
 
     // --- Paso 2: recuperacion de carrito para abandonadas con SaleState -------------------------
