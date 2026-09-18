@@ -139,6 +139,7 @@ const GUIONES: Guion[] = [
         "soy Carlos Perez, cedula 1020304050, celular 3001112233, vivo en la Calle 10 #5-20, barrio Chapinero, Bogota",
         "quiero 1 solo, y todo contraentrega: producto y envio al recibir",
         "si, confirmo",
+        "listo, cierra el pedido por favor",
       ],
       [
         "buenas, me interesa un parlante",
@@ -147,6 +148,7 @@ const GUIONES: Guion[] = [
         "Maria Gomez, CC 52889900, tel 3155556677, Carrera 45 #23-11, barrio El Poblado, Medellin",
         "producto y envio todo por adelantado, pago por transferencia",
         "confirmo el pedido",
+        "si, cierralo",
       ],
       [
         "hola quiero pedir algo",
@@ -155,6 +157,7 @@ const GUIONES: Guion[] = [
         "mi nombre es Andres Quintero, cedula 79554433, numero 3209998877, Calle 80 #12-45 apto 302, barrio Suba, Bogota",
         "el producto por adelantado y el envio contraentrega",
         "si, confirmo",
+        "dale, cierra el pedido",
       ],
     ],
   },
@@ -168,6 +171,7 @@ const GUIONES: Guion[] = [
         "Sandra Ruiz, cedula 43556677, celular 3016665544, Calle 33 #22-10, barrio Laureles, Medellin",
         "todo contraentrega, producto y envio al recibir",
         "si, confirmo",
+        "listo, cierralo",
       ],
       [
         "hola", "me llevo dos parlantes", "cuanto seria el total con envio a Bogota",
@@ -175,6 +179,7 @@ const GUIONES: Guion[] = [
         "Julian Ospina, CC 80112233, tel 3187778899, Carrera 7 #45-12, barrio Chapinero, Bogota",
         "todo contraentrega",
         "si, confirmo",
+        "dale, cierra el pedido",
       ],
       [
         "buenas", "quiero un smartwatch y un parlante", "cual es el total",
@@ -182,6 +187,7 @@ const GUIONES: Guion[] = [
         "Paola Mendez, cedula 1122334455, celular 3145556677, Calle 12 #9-40, barrio Centro, Cali",
         "producto y envio todo por adelantado, pago por transferencia",
         "confirmo",
+        "si, cierra el pedido",
       ],
     ],
   },
@@ -445,6 +451,7 @@ const GUIONES: Guion[] = [
         "1 unidad",
         "todo contraentrega, producto y envio al recibir",
         "si, confirmo",
+        "listo, cierralo",
       ],
     ],
   },
@@ -536,6 +543,26 @@ async function limpiarCliente(customerId: string) {
   await prisma.saleState.deleteMany({ where: { conversation: { customerId } } });
   await prisma.order.deleteMany({ where: { customerId } });
   await prisma.conversation.deleteMany({ where: { customerId } });
+  await prisma.customerNote.deleteMany({ where: { customerId } });
+  // La ficha del cliente tambien se limpia, y esto NO es detalle: el numero se reusa entre corridas, y
+  // sin esto la conversacion nueva arranca con el nombre y la direccion de la anterior. Medido: el bot
+  // le dijo a "Carlos Perez" que en sus registros la conversacion figuraba a nombre de "Ana", que era
+  // la clienta del guion de saludo que habia usado ese mismo numero. Una prueba que arrastra datos de
+  // la anterior no prueba lo que dice probar.
+  await prisma.customer.update({
+    where: { id: customerId },
+    data: {
+      name: null,
+      whatsappProfileName: null,
+      idNumber: null,
+      deliveryPhone: null,
+      email: null,
+      address: null,
+      stage: "NUEVO",
+      tags: [],
+      lastContactAt: null,
+    },
+  });
 }
 
 interface Corrida {
