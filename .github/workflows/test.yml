@@ -43,9 +43,9 @@ jobs:
       # Y ademas, que ni siquiera haya a donde llamar. La key invalida garantiza que no se puede
       # facturar; esto garantiza que no se pierde tiempo averiguandolo. El puerto 9 (discard) no tiene
       # a nadie escuchando en el propio runner, asi que la conexion muere en el acto con ECONNREFUSED
-      # en vez de salir a internet. Medido el 2026-09-18 sin esta variable: la misma suite tarda 4 min
-      # 19 s local y 12 min 49 s aca, y esos ~8 minutos son espera de llamadas condenadas a fallar
-      # (timeout de 60s + reintento + failover de modelo).
+      # en vez de salir a internet, ni aunque una prueba traiga su propia key. Es garantia, no
+      # velocidad: medido el 2026-09-18, la suite tarda 12 min 49 s sin esta variable y 12 min 53 s con
+      # ella. La diferencia contra los 4 min 19 s de una maquina local es otra cosa, sin diagnosticar.
       DEEPSEEK_BASE_URL: http://127.0.0.1:9
       SESSION_SECRET: ci-test-secret
       TOKEN_ENCRYPTION_KEY: ci-test-token-encryption-key

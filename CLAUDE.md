@@ -73,15 +73,19 @@ payload to DeepSeek on every customer message. Keep this lean going forward:
   la key inválida. Las que pasan no llaman; la que falla, sí.
 - **`npm test` no sale a internet, y eso es parte del trato.** Junto con la key inválida, el workflow
   define `DEEPSEEK_BASE_URL: http://127.0.0.1:9` (puerto discard, nadie escuchando en el runner): la
-  conexión muere en el acto con ECONNREFUSED. Medido el 2026-09-18 sin esa variable: la misma suite
-  tarda **4 min 19 s local y 12 min 49 s en CI**, y esos ~8 minutos de diferencia son espera de llamadas
-  condenadas a fallar. `src/config/env.ts` tiene el default de producción
+  conexión muere en el acto con ECONNREFUSED. `src/config/env.ts` tiene el default de producción
   (`https://api.deepseek.com`), así que la variable solo existe para apagarlo en pruebas y en producción
   nadie la define.
-  **Por qué no se vio antes:** en la máquina donde se probaba, `api.deepseek.com` está bloqueada por el
-  proxy y fallaba en 0,2s sola. En un runner de GitHub no lo está. Una suite que pasa rápido local y
-  tarda el triple en CI es casi siempre esto: I/O de red real que en un lado muere gratis y en el otro
-  no. Correr la suite local y darla por buena no alcanza para medir tiempo de CI.
+  **Es una garantía, no una optimización, y eso se midió.** La hipótesis al agregarla era que explicaba
+  por qué la suite tarda 4 min 19 s local y 12 min 49 s en CI: llamadas a DeepSeek condenadas a fallar
+  que igual salen a internet. **Era falsa.** Con la variable puesta, la corrida siguiente tardó 12 min
+  53 s — cuatro segundos MÁS. La diferencia local/CI es otra cosa (runner más lento, Postgres en
+  contenedor) y sigue sin diagnosticar; no vale la pena perseguirla mientras CI esté verde.
+  Lo que la variable sí da es que `npm test` no pueda alcanzar la API de verdad ni aunque una prueba
+  traiga su propia key. Eso, junto con la key inválida, es el cinturón y los tirantes.
+  **La lección de método, que costó dos correcciones en una sola sesión:** un número medido en un lado
+  no explica un número medido en el otro hasta que se cambia UNA cosa y se vuelve a medir. Acá se
+  escribió la explicación en tres archivos antes de tener la segunda medición, y estaba mal.
 
 # Rediseño del panel (dirección A) — reglas de estilo
 

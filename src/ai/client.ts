@@ -12,11 +12,13 @@ const REQUEST_TIMEOUT_MS = 60_000;
 export const deepseek = new OpenAI({
   apiKey: env.deepseekApiKey,
   // Configurable solo para poder apagarlo en las pruebas; el default es el de siempre y produccion no
-  // define la variable. Medido el 2026-09-18: la misma suite tarda 4 min 19 s local y 12 min 49 s en un
-  // runner de GitHub. Los ~8 minutos de diferencia no son de las pruebas: son de llamadas a DeepSeek
-  // condenadas a fallar que igual salen a internet, con timeout de 60s, reintento y failover de modelo
-  // encima. Apuntando a una direccion donde no escucha nadie, el sistema operativo corta al instante y
-  // la misma prueba pasa igual pero sin esperar.
+  // define la variable. Sirve para que `npm test` no pueda alcanzar la API de verdad ni aunque una
+  // prueba traiga su propia key: apuntando a una direccion donde no escucha nadie, la conexion muere en
+  // el acto. Es una garantia, no una optimizacion.
+  // Se agrego (2026-09-18) creyendo ademas que explicaba por que la suite tarda 4 min 19 s local y
+  // 12 min 49 s en CI. NO era eso: con la variable puesta, la corrida siguiente tardo 12 min 53 s. La
+  // diferencia local/CI es otra cosa y sigue sin diagnosticar. Queda anotado para que nadie vuelva a
+  // tocar esto buscando velocidad.
   // No se noto antes porque en la maquina donde se probo, api.deepseek.com esta bloqueada y fallaba
   // rapido sola; en un runner de GitHub no lo esta.
   baseURL: env.deepseekBaseUrl,
