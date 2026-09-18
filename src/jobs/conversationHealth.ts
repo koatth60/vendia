@@ -117,76 +117,84 @@ export async function runConversationHealthJob(): Promise<void> {
   const businesses = await prisma.business.findMany({ where: { active: true }, select: { id: true } });
 
   for (const business of businesses) {
-    const touched = await prisma.message.findMany({
-      where: { createdAt: { gte: since }, conversation: { customer: { businessId: business.id } } },
-      select: { conversationId: true },
-      distinct: ["conversationId"],
-    });
-    if (touched.length === 0) continue;
-
-    const findings: HealthFinding[] = [];
-    for (const { conversationId } of touched) {
-      const conversation = await prisma.conversation.findUnique({
-        where: { id: conversationId },
-        select: { customer: { select: { idNumber: true, deliveryPhone: true } } },
+    // E14: un negocio que revienta no puede dejar sin atender a los que siguen. Antes un solo
+    // throw abortaba la pasada entera de este job, y como corre por temporizador nadie se entera:
+    // los demas negocios simplemente no reciben su salud de las conversaciones y no hay error visible en ningun lado.
+    // El continue de adentro sigue funcionando porque el try esta DENTRO del bucle, no afuera.
+    try {
+      const touched = await prisma.message.findMany({
+        where: { createdAt: { gte: since }, conversation: { customer: { businessId: business.id } } },
+        select: { conversationId: true },
+        distinct: ["conversationId"],
       });
-      if (!conversation) continue;
+      if (touched.length === 0) continue;
 
-      const [messages, order] = await Promise.all([
-        prisma.message.findMany({
-          where: { conversationId },
-          orderBy: { createdAt: "asc" },
-          select: { role: true, content: true, mediaType: true, createdAt: true },
-        }),
-        prisma.order.findFirst({ where: { conversationId }, select: { id: true } }),
-      ]);
+      const findings: HealthFinding[] = [];
+      for (const { conversationId } of touched) {
+        const conversation = await prisma.conversation.findUnique({
+          where: { id: conversationId },
+          select: { customer: { select: { idNumber: true, deliveryPhone: true } } },
+        });
+        if (!conversation) continue;
 
-      findings.push(
-        ...findHealthIssues({
-          conversationId,
-          messages,
-          since,
-          customer: conversation.customer,
-          hasOrder: Boolean(order),
-        })
-      );
-    }
+        const [messages, order] = await Promise.all([
+          prisma.message.findMany({
+            where: { conversationId },
+            orderBy: { createdAt: "asc" },
+            select: { role: true, content: true, mediaType: true, createdAt: true },
+          }),
+          prisma.order.findFirst({ where: { conversationId }, select: { id: true } }),
+        ]);
 
-    // Los incidentes que los backstops del turno ya registraron en vivo y que tambien ameritan aviso.
-    // Entran por el mismo embudo que el resto (dedupe + AgentIncident + alerta) en vez de tener su propio
-    // camino: el id del incidente original va en el detail, asi que la deduplicacion de las ventanas
-    // solapadas funciona igual que con los demas hallazgos.
-    const promesasSinHerramienta = await prisma.agentIncident.findMany({
-      where: { businessId: business.id, createdAt: { gte: since }, guard: ESCALATION_PROMISE_GUARD },
-      select: { id: true, conversationId: true },
-    });
-    for (const incidente of promesasSinHerramienta) {
-      if (!incidente.conversationId) continue;
-      findings.push({
-        kind: "ESCALACION_PROMETIDA_SIN_HERRAMIENTA",
-        conversationId: incidente.conversationId,
-        detail: `prometio consultar al dueno sin abrir ninguna pregunta real (incidente ${incidente.id})`,
+        findings.push(
+          ...findHealthIssues({
+            conversationId,
+            messages,
+            since,
+            customer: conversation.customer,
+            hasOrder: Boolean(order),
+          })
+        );
+      }
+
+      // Los incidentes que los backstops del turno ya registraron en vivo y que tambien ameritan aviso.
+      // Entran por el mismo embudo que el resto (dedupe + AgentIncident + alerta) en vez de tener su propio
+      // camino: el id del incidente original va en el detail, asi que la deduplicacion de las ventanas
+      // solapadas funciona igual que con los demas hallazgos.
+      const promesasSinHerramienta = await prisma.agentIncident.findMany({
+        where: { businessId: business.id, createdAt: { gte: since }, guard: ESCALATION_PROMISE_GUARD },
+        select: { id: true, conversationId: true },
       });
-    }
+      for (const incidente of promesasSinHerramienta) {
+        if (!incidente.conversationId) continue;
+        findings.push({
+          kind: "ESCALACION_PROMETIDA_SIN_HERRAMIENTA",
+          conversationId: incidente.conversationId,
+          detail: `prometio consultar al dueno sin abrir ninguna pregunta real (incidente ${incidente.id})`,
+        });
+      }
 
-    if (findings.length === 0) continue;
+      if (findings.length === 0) continue;
 
-    // No repetir un hallazgo que la corrida anterior ya registro: las ventanas se solapan a proposito.
-    const yaRegistrados = await prisma.agentIncident.findMany({
-      where: {
-        businessId: business.id,
-        createdAt: { gte: since },
-        detail: { startsWith: HEALTH_FINDING_PREFIX },
-      },
-      select: { detail: true, conversationId: true },
-    });
-    const vistos = new Set(yaRegistrados.map((i) => `${i.conversationId}|${i.detail}`));
+      // No repetir un hallazgo que la corrida anterior ya registro: las ventanas se solapan a proposito.
+      const yaRegistrados = await prisma.agentIncident.findMany({
+        where: {
+          businessId: business.id,
+          createdAt: { gte: since },
+          detail: { startsWith: HEALTH_FINDING_PREFIX },
+        },
+        select: { detail: true, conversationId: true },
+      });
+      const vistos = new Set(yaRegistrados.map((i) => `${i.conversationId}|${i.detail}`));
 
-    for (const f of findings) {
-      const detail = `${HEALTH_FINDING_PREFIX} ${f.kind}: ${f.detail}`;
-      if (vistos.has(`${f.conversationId}|${detail}`)) continue;
-      vistos.add(`${f.conversationId}|${detail}`);
-      await recordAgentIncident(business.id, "BACKSTOP_INTERVENTION", detail, f.conversationId);
+      for (const f of findings) {
+        const detail = `${HEALTH_FINDING_PREFIX} ${f.kind}: ${f.detail}`;
+        if (vistos.has(`${f.conversationId}|${detail}`)) continue;
+        vistos.add(`${f.conversationId}|${detail}`);
+        await recordAgentIncident(business.id, "BACKSTOP_INTERVENTION", detail, f.conversationId);
+      }
+    } catch (error) {
+      console.error(`[ZAQI ALERT] conversationHealth: fallo el negocio ${business.id}, sigo con los demas:`, error);
     }
   }
 }
