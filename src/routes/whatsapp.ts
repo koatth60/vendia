@@ -83,6 +83,7 @@ import { drainOwnerConfirmationQueue } from "../whatsapp/ownerConfirmation";
 import { recordOwnerMessage } from "../delivery/ownerLog";
 import { extractFrame } from "../media/videoFrame";
 import { extractPeaks } from "../media/voiceNote";
+import { eventosDelLote, guardarEventosEntrantes, despertarConsumidor } from "../conversation/inboundEvents";
 
 export const whatsappRouter = Router();
 
@@ -886,6 +887,476 @@ export function collectWebhookBatch(body: unknown): {
   return { statuses, messages };
 }
 
+// E20 (2026-09-18). ESTAS DOS FUNCIONES SALIERON DE ADENTRO DEL HANDLER DEL WEBHOOK.
+//
+// Eran closures de la ruta, y capturaban exactamente UNA variable del ambito: webhookReceivedAt, que
+// ahora entra por parametro. Nada mas. Por eso la extraccion pudo ser mecanica en vez de un rediseno:
+// todo lo demas que usan son imports del modulo.
+//
+// POR QUE SE SACARON: mientras vivieran adentro del handler, lo unico capaz de procesar un mensaje
+// entrante era una peticion HTTP de Meta en curso. Si el proceso moria en el medio -- y hubo 103
+// reinicios registrados -- ese turno no existia para nadie, porque Meta ya habia recibido el 200 y no
+// reintenta. Ahora el consumidor de InboundEvent (src/conversation/inboundEvents.ts) puede llamarlas
+// tantas veces como haga falta, sin ninguna peticion HTTP viva.
+
+// El estado de entrega de UN mensaje del lote.
+export async function procesarEstado(value: any, status: any, incomingPhoneNumberId: string | undefined): Promise<void> {
+    if (status.status === "failed") {
+      // Fase 8, punto 9: el telefono del cliente va enmascarado. El numero completo sigue quedando
+      // en DeliveryFailure.recipientPhone, que es donde tiene que estar: el panel lo necesita para
+      // decir a quien no le llego el mensaje, y esa tabla tiene control de acceso; el registro no.
+      console.error("WhatsApp delivery FAILED:", JSON.stringify({ id: status.id, recipient: maskPhone(status.recipient_id), errors: status.errors }));
+      // Meta reports this asynchronously, after the original send call already returned a wamid that
+      // looked successful - previously this only reached a pm2 log nobody watches. Persist it so the
+      // admin panel can surface it live instead (see src/delivery/failures.ts).
+      const failedForBusiness = incomingPhoneNumberId
+        ? await prisma.business.findUnique({ where: { whatsappPhoneNumberId: incomingPhoneNumberId } })
+        : null;
+      if (failedForBusiness) {
+        const recipient: string = status.recipient_id ?? "";
+        const onlyDigits = (phone: string) => phone.replace(/\D/g, "");
+        const critical = Boolean(failedForBusiness.contactPhone) && onlyDigits(recipient) === onlyDigits(failedForBusiness.contactPhone!);
+        const firstError = status.errors?.[0];
+        await recordDeliveryFailure(failedForBusiness.id, {
+          wamid: status.id ?? "",
+          recipientPhone: recipient,
+          errorCode: firstError?.code ?? null,
+          errorMessage: firstError?.title ? `${firstError.title}: ${firstError?.error_data?.details ?? firstError.message ?? ""}` : "Error desconocido",
+          critical,
+        });
+      }
+    } else {
+      console.log("WhatsApp status:", status.status, status.id, maskPhone(status.recipient_id));
+      if (status.id) {
+        try {
+          await recordMessageDeliveryStatus(status.id, status.status);
+        } catch (error) {
+          console.error("No se pudo persistir el estado de entrega:", error);
+        }
+      }
+    }
+    return;
+}
+
+// UN mensaje entrante del lote. Todo lo de adentro era el cuerpo del webhook hasta E16: los `return`
+// que corta cada caso ahora cortan ESE mensaje y el lote sigue, que es justamente lo que faltaba.
+export async function procesarMensaje(
+  value: any,
+  message: any,
+  incomingPhoneNumberId: string,
+  webhookReceivedAt: number,
+): Promise<void> {
+  // "reaction" (emoji reacting to a prior message) is intentionally excluded - replying to a 👍 with
+  // bot chatter is noise, not a real customer turn. Every other content type below used to fall
+  // through this same filter and get silently dropped with zero trace (no reply, nothing recorded) -
+  // a customer sharing a location (delivery address), sticker, document (receipt as PDF), or contact
+  // card just got no response at all.
+  const SUPPORTED_MESSAGE_TYPES = new Set(["text", "image", "video", "audio", "interactive", "location", "sticker", "document", "contacts"]);
+  if (!SUPPORTED_MESSAGE_TYPES.has(message.type)) return;
+
+  const business = await prisma.business.findUnique({
+    where: { whatsappPhoneNumberId: incomingPhoneNumberId },
+  });
+
+  if (!business || !business.whatsappAccessToken || !business.active) {
+    console.log("Mensaje recibido para un numero sin negocio asignado:", incomingPhoneNumberId);
+    return;
+  }
+
+  const credentials: WhatsappCredentials = {
+    phoneNumberId: business.whatsappPhoneNumberId!,
+    accessToken: business.whatsappAccessToken,
+  };
+
+  const from: string | undefined = message.from ?? message.from_user_id;
+  const whatsappMessageId: string | undefined = message.id;
+
+  if (!from) {
+    // Fase 8, punto 9: antes se volcaba el mensaje entero, que ademas del telefono lleva el texto
+    // que escribio el cliente. Para diagnosticar este caso alcanza con saber que tipo de mensaje
+    // era y su id.
+    console.log("Mensaje sin remitente (from) valido, ignorado:", JSON.stringify({ type: message.type, id: message.id }));
+    return;
+  }
+
+  const onlyDigits = (phone: string) => phone.replace(/\D/g, "");
+  if (business.contactPhone && onlyDigits(from) === onlyDigits(business.contactPhone)) {
+    const ownerIncomingBody =
+      message.type === "interactive"
+        ? (message.interactive?.button_reply?.title ?? message.interactive?.button_reply?.id ?? `[${message.type}]`)
+        : message.type === "text"
+          ? (message.text?.body ?? "")
+          : `[${message.type}]`;
+    await recordOwnerMessage(business.id, { direction: "IN", body: ownerIncomingBody });
+    await handleOwnerReply(business.id, credentials, from, message);
+    // El dueno acaba de escribir, asi que su ventana de 24h esta abierta de nuevo: sale cualquier
+    // confirmacion de venta que haya tenido que irse por plantilla (una plantilla no lleva botones de
+    // respuesta rapida). Va DESPUES de handleOwnerReply a proposito: si lo que escribio era justamente
+    // la respuesta, la confirmacion ya quedo cerrada y no hay nada que mandar - al reves le
+    // estariamos preguntando algo que acaba de contestar.
+    await drainOwnerConfirmationQueue(business.id, credentials, from);
+    return;
+  }
+
+  // La fila que el cliente toco, cuando la hubo: nombre para el historial, id para resolver el alcance.
+  let listSelection: { productId: string; label: string } | null = null;
+  // El producto de la foto que el cliente cito con "Responder", si cito alguna (se resuelve mas abajo,
+  // cuando ya se sabe si el mensaje trae un mensaje citado).
+  let quotedProductId: string | undefined;
+
+  // ELECCION CON EL DEDO. El cliente toco una fila de una lista interactiva y vuelve el id del producto
+  // tal cual lo mando el servidor. No se parsea nada: no hay forma de que esto resuelva a otro producto.
+  // Cae mas arriba que el bloque de botones porque un list_reply no es un boton y, hasta hoy, este
+  // `return` de abajo lo descartaba entero.
+  const listReplyId: string | undefined = message.interactive?.list_reply?.id;
+  if (message.type === "interactive" && listReplyId && !listReplyId.startsWith("csat_")) {
+    const elegido = await prisma.product.findFirst({
+      where: { id: listReplyId, businessId: business.id, active: true },
+      select: { id: true, name: true },
+    });
+    if (elegido) {
+      // El texto que queda en el historial es el nombre del producto, no el id: la conversacion tiene
+      // que leerse como lo que paso ("el cliente eligio X"), en el panel y en el contexto del modelo.
+      // Pero lo que decide el alcance es el id, que va aparte.
+      listSelection = { productId: elegido.id, label: elegido.name };
+    } else {
+      console.error(`list_reply con un producto que no existe o esta inactivo (business=${business.id}):`, listReplyId);
+    }
+  }
+
+  if (message.type === "interactive" && !listSelection) {
+    const buttonId: string | undefined = message.interactive?.button_reply?.id;
+    if (buttonId?.startsWith("csat_")) {
+      const result = await recordCsatReply(business.id, from, buttonId);
+      if (result.recorded && result.conversationId) {
+        await sendToCustomer({
+          businessId: business.id,
+          conversationId: result.conversationId,
+          credentials,
+          to: from,
+          content: { kind: "text", text: "¡Gracias por tu opinión! 🙏" },
+          // El cliente acaba de tocar el boton, la ventana esta abierta por definicion.
+          onWindowClosed: "fail",
+        });
+      }
+    }
+    return;
+  }
+
+  // Meta manda en cada webhook el nombre que la persona puso en SU perfil de WhatsApp. Hasta ahora se
+  // descartaba, asi que la bandeja mostraba numeros crudos y el bot tenia que gastar un turno
+  // preguntando como se llama alguien que ya nos lo estaba diciendo. Solo alimenta la vista del panel:
+  // NO entra al prompt del bot (esa decision sigue parqueada, ver la nota de consentimiento).
+  const whatsappProfileName: string | undefined = value?.contacts?.[0]?.profile?.name;
+  const customer = await getOrCreateCustomer(business.id, from, whatsappProfileName);
+  const conversation = await getOrCreateOpenConversation(business.id, customer.id);
+
+  // Fase 10 del plan maestro: apenas se sabe que es un mensaje real de este cliente, se marca
+  // como leido y se prende el indicador de "escribiendo" - no hace falta esperar a procesar el
+  // mensaje entero (puede tardar segundos si es una foto/audio). No es critico: si falla, el
+  // turno sigue igual (ver markCustomerMessageSeen en outbound.ts).
+  if (whatsappMessageId) {
+    await markCustomerMessageSeen(credentials, whatsappMessageId);
+  }
+
+  await withConversationLock(conversation.id, async () => {
+    // LA UNIDAD QUE SE FACTURA. Un mensaje real de un cliente abre un chat, o cae dentro del que ese
+    // cliente ya tenia abierto (ver src/billing/chats.ts). Va aca arriba, antes de decidir nada sobre
+    // la respuesta, porque un chat se cuenta por la interaccion del cliente y no por lo que el bot
+    // haya alcanzado a hacer con ella: una conversacion en control humano, una que termina escalada o
+    // una que se cae a mitad de camino son la misma interaccion vendida.
+    //
+    // Adentro del lock a proposito: el lock es por conversacion y la conversacion es por cliente, asi
+    // que dos mensajes simultaneos del mismo cliente no pueden abrir dos chats para la misma ventana.
+    const metaSentMs = Number(message.timestamp) * 1000;
+    await recordBillableChat({
+      businessId: business.id,
+      customerId: customer.id,
+      conversationId: conversation.id,
+      at: new Date(Number.isFinite(metaSentMs) && metaSentMs > 0 ? metaSentMs : webhookReceivedAt),
+    });
+
+    let text = "";
+    let media: { s3Key: string; type: "IMAGE" | "VIDEO" | "AUDIO"; peaks?: string | null } | undefined;
+    let imageAnalysis: string | undefined;
+
+    if (listSelection) {
+      text = listSelection.label;
+    } else if (message.type === "text") {
+      text = message.text.body;
+    } else if (message.type === "image") {
+      try {
+        const { buffer, mimeType } = await downloadMedia(credentials, message.image.id);
+        const { key, url } = await uploadMedia(buffer, mimeType, "receipts");
+        media = { s3Key: key, type: "IMAGE" };
+        text = message.image.caption ?? "";
+        const catalogHint = await getCatalogHintText(business.id);
+        imageAnalysis = await analyzeCustomerImage(business.id, conversation.id, url, text, catalogHint);
+        imageAnalysis = await conIdentificacionDelServidor(business.id, imageAnalysis);
+      } catch (error) {
+        console.error("No se pudo procesar la imagen entrante:", error);
+        text = "[El cliente envio una imagen, pero hubo un problema tecnico y no se pudo procesar. Pedile que la reenvie.]";
+      }
+    } else if (message.type === "video") {
+      try {
+        const { buffer, mimeType } = await downloadMedia(credentials, message.video.id);
+        const { key } = await uploadMedia(buffer, mimeType, "videos");
+        media = { s3Key: key, type: "VIDEO" };
+        text = message.video.caption ?? "";
+        const frame = await extractFrame(buffer);
+        const { url: frameUrl } = await uploadMedia(frame, "image/jpeg", "receipts");
+        const catalogHint = await getCatalogHintText(business.id);
+        imageAnalysis = await analyzeCustomerImage(business.id, conversation.id, frameUrl, text, catalogHint);
+        imageAnalysis = await conIdentificacionDelServidor(business.id, imageAnalysis);
+      } catch (error) {
+        console.error("No se pudo procesar el video entrante:", error);
+        text = "[El cliente envio un video, pero hubo un problema tecnico y no se pudo analizar. Pedile que mande una foto del producto en vez de video.]";
+      }
+    } else if (message.type === "audio") {
+      try {
+        const { buffer, mimeType } = await downloadMedia(credentials, message.audio.id);
+        const { key } = await uploadMedia(buffer, mimeType, "audio");
+        // La nota que manda el cliente tambien se dibuja en el panel, y por el mismo camino: los picos
+        // se calculan aca una vez en vez de que el navegador se baje el audio para calcularlos.
+        media = { s3Key: key, type: "AUDIO", peaks: await extractPeaks(buffer) };
+        const transcript = await transcribeAudio(buffer, mimeType);
+        text = transcript || "[El cliente envio una nota de voz, pero no se pudo transcribir. Pedile que la repita por texto.]";
+      } catch (error) {
+        console.error("No se pudo procesar el audio entrante:", error);
+        text = "[El cliente envio una nota de voz, pero hubo un problema tecnico y no se pudo procesar. Pedile que la reenvie o escriba el mensaje.]";
+      }
+    } else if (message.type === "location") {
+      const loc = message.location ?? {};
+      const parts = [loc.name, loc.address].filter(Boolean).join(", ");
+      // Un pin arrastrado en el mapa (el caso mas comun) llega SOLO con lat/lng, sin name ni address -
+      // y dos numeros crudos en el panel no le sirven a nadie para despachar. Real 2026-09-15: un
+      // cliente mando su ubicacion para el envio y en la bandeja se veia "(lat 4.68, lng -74.15)", que
+      // la duena no podia abrir. El link de mapa es clickeable desde el panel y desde WhatsApp.
+      const hasCoords = loc.latitude != null && loc.longitude != null;
+      const coords = hasCoords ? `lat ${loc.latitude}, lng ${loc.longitude}` : "";
+      const mapLink = hasCoords ? ` Ver en el mapa: https://www.google.com/maps?q=${loc.latitude},${loc.longitude}` : "";
+      text = `[El cliente comparte su ubicacion por WhatsApp${parts ? `: ${parts}` : ""}${coords ? ` (${coords})` : ""}.${mapLink} Si es para la direccion de envio, confirmale la direccion exacta en texto (barrio/calle/numero) antes de cerrar el pedido - una ubicacion de mapa sola no siempre alcanza para el mensajero.]`;
+    } else if (message.type === "sticker") {
+      text = "[El cliente envio un sticker, sin texto.]";
+    } else if (message.type === "document") {
+      const filename = message.document?.filename ?? "sin nombre";
+      text = `[El cliente envio un documento/archivo (${filename}), no una foto. Si esperabas un comprobante de pago, pedile que lo reenvie como foto/imagen para poder revisarlo.]`;
+    } else if (message.type === "contacts") {
+      // Real perdida de datos (2026-09-15): esto guardaba solo la frase fija y TIRABA la tarjeta
+      // entera. Un cliente compartio el contacto de la persona que recibe el pedido y ni el nombre ni
+      // el telefono quedaron en ningun lado - ni base, ni logs (el payload crudo no se registra), asi
+      // que la duena tuvo que abrir WhatsApp a mano para poder despachar.
+      //
+      // OJO: `message.contacts` (la tarjeta que comparte el cliente) NO es `value.contacts` (el perfil
+      // de quien escribe, que se lee mas arriba para whatsappProfileName). Se llaman igual y guardan
+      // cosas distintas: confundirlos guardaria el nombre del remitente en vez del destinatario.
+      const cards: any[] = Array.isArray(message.contacts) ? message.contacts : [];
+      const described = cards
+        .map((card) => {
+          const nombre = card?.name?.formatted_name || [card?.name?.first_name, card?.name?.last_name].filter(Boolean).join(" ");
+          const telefonos = (Array.isArray(card?.phones) ? card.phones : [])
+            .map((t: any) => t?.phone || t?.wa_id)
+            .filter(Boolean);
+          return [nombre, telefonos.length > 0 ? telefonos.join(" / ") : null].filter(Boolean).join(" - ");
+        })
+        .filter((d) => d.length > 0);
+      text =
+        described.length > 0
+          ? `[El cliente compartio ${described.length === 1 ? "esta tarjeta de contacto" : "estas tarjetas de contacto"}: ${described.join(" | ")}. Si es para el envio, esta es la persona que RECIBE el pedido - no es el nombre del cliente con el que estas hablando. Confirmale a quien te escribe si el pedido va a nombre de ese contacto antes de cerrarlo.]`
+          : "[El cliente compartio una tarjeta de contacto de WhatsApp, pero llego sin nombre ni telefono legibles. Pedile que te escriba el nombre y el numero por texto.]";
+    }
+
+    // If the customer replied/quoted a specific WhatsApp message (long-press "Reply"), and that message
+    // was a product photo/video we sent, tell the model directly which product it was - otherwise it has
+    // to guess or ask "¿cual de los dos?" since WhatsApp doesn't show us the quoted image, only its id.
+    // Keep the raw customer text separate from the marker-prefixed version: the marker itself contains
+    // the words "foto"/"video" and the product's full name, which would otherwise false-trigger the
+    // photo-resend safety net in generateReply (it would think the customer just asked for that photo).
+    const rawText = text;
+    const quotedMessageId: string | undefined = message.context?.id;
+    if (quotedMessageId) {
+      const relatedProductName = await getRelatedProductNameForMessage(quotedMessageId);
+      if (relatedProductName) {
+        text = `[El cliente esta respondiendo a la foto/video de: ${relatedProductName}] ${text}`;
+      }
+      // Y el ID, que es lo que DECIDE el alcance del turno. Hasta hoy solo viajaba el nombre, metido
+      // adentro del texto, y ese texto ni siquiera llegaba a resolveProductScope (se manda rawText,
+      // sin la marca): tocar "Responder" sobre una foto no cambiaba nada en el servidor. Con la
+      // vitrina de categoria ese gesto es justo la forma en que el cliente elige un producto entre
+      // varias fotos, asi que resuelve por id, igual que tocar una fila de una lista interactiva.
+      quotedProductId = (await getRelatedProductIdForMessage(business.id, quotedMessageId)) ?? undefined;
+    }
+
+    try {
+      await recordMessage(business.id, conversation.id, "CUSTOMER", text, whatsappMessageId, media, imageAnalysis);
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        console.log("Mensaje duplicado de WhatsApp ignorado:", whatsappMessageId);
+        return;
+      }
+      throw error;
+    }
+
+    // Todo lo que el equipo dejo pendiente cuando la ventana de 24h estaba cerrada se entrega ACA: este
+    // mensaje entrante es lo que la reabre. Va antes del gate de control humano a proposito - lo que hay
+    // en cola lo escribio un humano, no depende de quien tenga el control ahora.
+    await drainQueuedOutboundForCustomer(business.id, customer.id, credentials, from);
+
+    // Releer el estado en vez de confiar en el objeto `conversation` leido arriba: entre esa lectura y
+    // este punto corren la descarga del media, la vision y la transcripcion, que tardan segundos o
+    // decenas de segundos. Si la duena toco "Tomar control" o contesto desde el panel en ese rato, el
+    // valor viejo decia false y el bot respondia igual, encima de ella. Caso real 2026-09-14.
+    const gate = await prisma.conversation.findUnique({
+      where: { id: conversation.id },
+      select: { humanControl: true, humanControlAckSent: true },
+    });
+
+    if (gate?.humanControl) {
+      console.log("Conversacion en control humano, el bot no responde:", conversation.id);
+
+      // El bot no CONTESTA bajo control humano, pero eso no significa que el sistema deba ignorar lo
+      // que el cliente escribe. Real (2026-09-15): mientras la duena atendia a mano, un cliente dio el
+      // nombre de quien recibe, su celular y la direccion; los tres quedaron solo como prosa en el chat
+      // y la ficha siguio vacia, asi que el despacho salio sin datos estructurados. Capturar es callado
+      // y no le manda nada al cliente, asi que no pisa a la persona que esta atendiendo.
+      try {
+        // Fase 11: la forma de un documento, un telefono y una direccion depende del pais del negocio.
+        const { countryCode } = toBusinessLocale(business);
+        const found = extractDeliveryDataFromAnswer(rawText, countryCode);
+        const direccion = extractAddressFromAnswer(rawText, countryCode) ?? undefined;
+        if (found.idNumber || found.deliveryPhone || direccion) {
+          await saveCustomerContactInfo(business.id, customer.id, { ...found, address: direccion });
+        }
+      } catch (error) {
+        console.error("No se pudieron capturar los datos de entrega bajo control humano:", error);
+      }
+      // Silence with zero acknowledgment reads as the bot being broken to the customer, and the owner
+      // ends up having to jump in just to say "we got your message". Send one heads-up per pause period,
+      // gated on a dedicated flag (not "does the last ASSISTANT message match the ack text") - the owner's
+      // own manual replies are also recorded with role ASSISTANT, so comparing against the last ASSISTANT
+      // message re-fired the ack after every manual reply that wasn't itself the ack. Stay quiet until the
+      // owner/admin actually resumes it, which resets the flag.
+      const HUMAN_CONTROL_ACK = "Ya te leimos, en un momento te contesta el equipo directamente 🙏";
+      // Segunda condicion, ademas del flag: si de este lado se dijo algo hace muy poco, el humano esta
+      // presente (o el bot acaba de avisar que escala) y el acuse solo agrega ruido encima de un mensaje
+      // que el cliente ya vio. El flag solo se limpia en una transicion real a control humano
+      // (ver setHumanControl), esto cubre ademas la ventana en que la duena esta tipeando ahora mismo.
+      const recentlySpoken = await prisma.message.findFirst({
+        where: {
+          conversationId: conversation.id,
+          role: "ASSISTANT",
+          createdAt: { gte: new Date(Date.now() - ACK_QUIET_MINUTES * 60 * 1000) },
+        },
+        select: { id: true },
+      });
+      if (!gate.humanControlAckSent && !recentlySpoken) {
+        const ack = await sendToCustomer({
+          businessId: business.id,
+          conversationId: conversation.id,
+          credentials,
+          to: from,
+          content: { kind: "text", text: HUMAN_CONTROL_ACK },
+          onWindowClosed: "fail",
+          recordAs: { text: HUMAN_CONTROL_ACK },
+        });
+        if (ack.delivered) {
+          await prisma.conversation.update({
+            where: { id: conversation.id },
+            data: { humanControlAckSent: true },
+          });
+        } else {
+          console.error("No se pudo mandar el acuse de recibo durante control humano:", ack.failure?.message);
+        }
+      }
+      return;
+    }
+
+    // PASAR EL TOPE DEL PLAN YA NO APAGA NADA (2026-09-17). Aca vivia checkPlanCap: al pasar el tope
+    // de MENSAJES del mes, el bot le contestaba al cliente "alcanzamos el limite" y se callaba hasta
+    // el mes siguiente. Desde que los chats extra se facturan a EXTRA_CHAT_PRICE_COP, cortar el
+    // servicio seria dejar de prestar lo que se esta cobrando. El unico efecto de cruzar el tope es
+    // el aviso al dueno, una sola vez por periodo.
+    // EL FRENO DE GASTO (ver src/billing/spendCeiling.ts). Esto no es el tope comercial: es el
+    // cortacircuitos que salta cuando el costo de IA del mes se va por encima del techo de este
+    // negocio. Si salta, algo anda mal, y lo barato es que atienda una persona.
+    //
+    // El chat ya quedo contado mas arriba, a proposito: el cliente escribio, y el negocio lo va a
+    // atender a mano. Que el bot no haya sido el que contesto no borra la interaccion.
+    const spend = await checkSpendCeiling(business.id);
+    if (spend.exceeded) {
+      const pausedText =
+        "En este momento no puedo responderte automáticamente. Ya avisé al equipo y una persona te va a escribir en breve. ¡Gracias por la paciencia! 🙏";
+      await sendToCustomer({
+        businessId: business.id,
+        conversationId: conversation.id,
+        credentials,
+        to: from,
+        content: { kind: "text", text: pausedText },
+        onWindowClosed: "fail",
+        recordAs: { text: pausedText },
+      });
+
+      if (spend.justCrossed) {
+        // Sin ambiguedad para grep en `pm2 logs`: si esto salta, lo tenemos que ver nosotros ANTES
+        // que el dueno, porque el numero lo pusimos nosotros y el gasto lo pagamos nosotros.
+        console.error(
+          `ZAQI ALERT: "${business.name}" (${business.id}) cruzo su techo de gasto de IA: ` +
+            `US$ ${spend.spentUsd.toFixed(4)} de US$ ${spend.ceilingUsd.toFixed(2)} ` +
+            `(${spend.ceilingIsDefault ? "default del plan" : "techo propio"}). El bot quedo en pausa.`
+        );
+
+        if (business.contactPhone) {
+          const greeting = business.contactName ? `Hola ${business.contactName}` : "Hola";
+          await alertOwnerTracked(
+            business.id,
+            credentials,
+            business.contactPhone,
+            `${greeting}, pausé las respuestas automáticas de tu bot por una revisión técnica de nuestro lado. ` +
+              `Tus clientes están recibiendo un mensaje pidiéndoles que esperen a una persona. Ya estamos encima; te escribo apenas quede resuelto.`
+          );
+        }
+      }
+      return;
+    }
+
+    const chatOverage = await checkChatOverage(business.id);
+    if (chatOverage.justCrossed && business.contactPhone) {
+      const greeting = business.contactName ? `Hola ${business.contactName}` : "Hola";
+      const overageText =
+        `${greeting}, tu negocio pasó los ${chatOverage.chatCap} chats de tu plan ${chatOverage.planTier} este mes. ` +
+        `El bot sigue atendiendo normalmente: cada chat adicional se factura a $${EXTRA_CHAT_PRICE_COP} COP. ` +
+        `Escríbeme si quieres subir de plan.`;
+      await alertOwnerTracked(business.id, credentials, business.contactPhone!, overageText);
+    }
+
+    // Cuando el CLIENTE mando el mensaje, no cuando nosotros terminamos de procesarlo: la descarga del
+    // media y la vision ya se comieron parte del reloj antes de llegar aca. Meta manda su timestamp en
+    // segundos; si viene raro, se cae a la hora en que entro el webhook.
+    const metaTimestampMs = Number(message.timestamp) * 1000;
+    const customerSentAt = Number.isFinite(metaTimestampMs) && metaTimestampMs > 0 ? metaTimestampMs : webhookReceivedAt;
+
+    // Fase 10 del plan maestro: no se llama a generateReply directamente aca. Se agrupa con
+    // cualquier otro mensaje que este mismo cliente mande en los proximos ~8s y recien entonces se
+    // genera y manda UNA sola respuesta para toda la rafaga - ver runGenerateAndSend. Esto libera
+    // el lock de este mensaje puntual de inmediato en vez de tenerlo abierto esperando a que se
+    // genere una respuesta.
+    //
+    // E08: la espera es una fila en la base, no un timer en memoria. Cuando este await vuelve, un
+    // reinicio ya no puede perder este mensaje.
+    await enqueuePendingBurst({
+      conversationId: conversation.id,
+      businessId: business.id,
+      customerId: customer.id,
+      customerPhone: from,
+      rawText,
+      // La fila tocada de una lista interactiva manda sobre la foto citada: las dos son elecciones
+      // con el dedo, pero la fila es de ESTE mensaje y la foto puede ser de un mensaje viejo.
+      selectedProductId: listSelection?.productId ?? quotedProductId,
+      customerSentAt: new Date(customerSentAt),
+    });
+  });
+}
+
 whatsappRouter.post("/webhook", async (req, res) => {
   // Fase 8, punto 1: verificacion de la firma de Meta. Arranca en MODO REGISTRO - se anota la firma
   // invalida y la entrega se procesa igual. El rechazo 401 se prende con WEBHOOK_SIGNATURE_ENFORCE
@@ -902,8 +1373,6 @@ whatsappRouter.post("/webhook", async (req, res) => {
     }
   }
 
-  res.sendStatus(200);
-  const webhookReceivedAt = Date.now();
 
   // EL LOTE COMPLETO, NO EL PRIMERO DE CADA COSA (E16, 2026-09-18).
   //
@@ -916,479 +1385,29 @@ whatsappRouter.post("/webhook", async (req, res) => {
   // Ademas los estados ya no dependen de que el lote NO traiga mensajes: antes `statuses[0]` solo se
   // miraba si no habia ningun mensaje, asi que un acuse que viajara junto a un mensaje se perdia.
 
-  // El estado de entrega de UN mensaje del lote.
-  async function procesarEstado(value: any, status: any, incomingPhoneNumberId: string | undefined): Promise<void> {
-      if (status.status === "failed") {
-        // Fase 8, punto 9: el telefono del cliente va enmascarado. El numero completo sigue quedando
-        // en DeliveryFailure.recipientPhone, que es donde tiene que estar: el panel lo necesita para
-        // decir a quien no le llego el mensaje, y esa tabla tiene control de acceso; el registro no.
-        console.error("WhatsApp delivery FAILED:", JSON.stringify({ id: status.id, recipient: maskPhone(status.recipient_id), errors: status.errors }));
-        // Meta reports this asynchronously, after the original send call already returned a wamid that
-        // looked successful - previously this only reached a pm2 log nobody watches. Persist it so the
-        // admin panel can surface it live instead (see src/delivery/failures.ts).
-        const failedForBusiness = incomingPhoneNumberId
-          ? await prisma.business.findUnique({ where: { whatsappPhoneNumberId: incomingPhoneNumberId } })
-          : null;
-        if (failedForBusiness) {
-          const recipient: string = status.recipient_id ?? "";
-          const onlyDigits = (phone: string) => phone.replace(/\D/g, "");
-          const critical = Boolean(failedForBusiness.contactPhone) && onlyDigits(recipient) === onlyDigits(failedForBusiness.contactPhone!);
-          const firstError = status.errors?.[0];
-          await recordDeliveryFailure(failedForBusiness.id, {
-            wamid: status.id ?? "",
-            recipientPhone: recipient,
-            errorCode: firstError?.code ?? null,
-            errorMessage: firstError?.title ? `${firstError.title}: ${firstError?.error_data?.details ?? firstError.message ?? ""}` : "Error desconocido",
-            critical,
-          });
-        }
-      } else {
-        console.log("WhatsApp status:", status.status, status.id, maskPhone(status.recipient_id));
-        if (status.id) {
-          try {
-            await recordMessageDeliveryStatus(status.id, status.status);
-          } catch (error) {
-            console.error("No se pudo persistir el estado de entrega:", error);
-          }
-        }
-      }
-      return;
-  }
 
-  // UN mensaje entrante del lote. Todo lo de adentro era el cuerpo del webhook hasta E16: los `return`
-  // que corta cada caso ahora cortan ESE mensaje y el lote sigue, que es justamente lo que faltaba.
-  async function procesarMensaje(value: any, message: any, incomingPhoneNumberId: string): Promise<void> {
-    // "reaction" (emoji reacting to a prior message) is intentionally excluded - replying to a 👍 with
-    // bot chatter is noise, not a real customer turn. Every other content type below used to fall
-    // through this same filter and get silently dropped with zero trace (no reply, nothing recorded) -
-    // a customer sharing a location (delivery address), sticker, document (receipt as PDF), or contact
-    // card just got no response at all.
-    const SUPPORTED_MESSAGE_TYPES = new Set(["text", "image", "video", "audio", "interactive", "location", "sticker", "document", "contacts"]);
-    if (!SUPPORTED_MESSAGE_TYPES.has(message.type)) return;
-
-    const business = await prisma.business.findUnique({
-      where: { whatsappPhoneNumberId: incomingPhoneNumberId },
-    });
-
-    if (!business || !business.whatsappAccessToken || !business.active) {
-      console.log("Mensaje recibido para un numero sin negocio asignado:", incomingPhoneNumberId);
-      return;
-    }
-
-    const credentials: WhatsappCredentials = {
-      phoneNumberId: business.whatsappPhoneNumberId!,
-      accessToken: business.whatsappAccessToken,
-    };
-
-    const from: string | undefined = message.from ?? message.from_user_id;
-    const whatsappMessageId: string | undefined = message.id;
-
-    if (!from) {
-      // Fase 8, punto 9: antes se volcaba el mensaje entero, que ademas del telefono lleva el texto
-      // que escribio el cliente. Para diagnosticar este caso alcanza con saber que tipo de mensaje
-      // era y su id.
-      console.log("Mensaje sin remitente (from) valido, ignorado:", JSON.stringify({ type: message.type, id: message.id }));
-      return;
-    }
-
-    const onlyDigits = (phone: string) => phone.replace(/\D/g, "");
-    if (business.contactPhone && onlyDigits(from) === onlyDigits(business.contactPhone)) {
-      const ownerIncomingBody =
-        message.type === "interactive"
-          ? (message.interactive?.button_reply?.title ?? message.interactive?.button_reply?.id ?? `[${message.type}]`)
-          : message.type === "text"
-            ? (message.text?.body ?? "")
-            : `[${message.type}]`;
-      await recordOwnerMessage(business.id, { direction: "IN", body: ownerIncomingBody });
-      await handleOwnerReply(business.id, credentials, from, message);
-      // El dueno acaba de escribir, asi que su ventana de 24h esta abierta de nuevo: sale cualquier
-      // confirmacion de venta que haya tenido que irse por plantilla (una plantilla no lleva botones de
-      // respuesta rapida). Va DESPUES de handleOwnerReply a proposito: si lo que escribio era justamente
-      // la respuesta, la confirmacion ya quedo cerrada y no hay nada que mandar - al reves le
-      // estariamos preguntando algo que acaba de contestar.
-      await drainOwnerConfirmationQueue(business.id, credentials, from);
-      return;
-    }
-
-    // La fila que el cliente toco, cuando la hubo: nombre para el historial, id para resolver el alcance.
-    let listSelection: { productId: string; label: string } | null = null;
-    // El producto de la foto que el cliente cito con "Responder", si cito alguna (se resuelve mas abajo,
-    // cuando ya se sabe si el mensaje trae un mensaje citado).
-    let quotedProductId: string | undefined;
-
-    // ELECCION CON EL DEDO. El cliente toco una fila de una lista interactiva y vuelve el id del producto
-    // tal cual lo mando el servidor. No se parsea nada: no hay forma de que esto resuelva a otro producto.
-    // Cae mas arriba que el bloque de botones porque un list_reply no es un boton y, hasta hoy, este
-    // `return` de abajo lo descartaba entero.
-    const listReplyId: string | undefined = message.interactive?.list_reply?.id;
-    if (message.type === "interactive" && listReplyId && !listReplyId.startsWith("csat_")) {
-      const elegido = await prisma.product.findFirst({
-        where: { id: listReplyId, businessId: business.id, active: true },
-        select: { id: true, name: true },
-      });
-      if (elegido) {
-        // El texto que queda en el historial es el nombre del producto, no el id: la conversacion tiene
-        // que leerse como lo que paso ("el cliente eligio X"), en el panel y en el contexto del modelo.
-        // Pero lo que decide el alcance es el id, que va aparte.
-        listSelection = { productId: elegido.id, label: elegido.name };
-      } else {
-        console.error(`list_reply con un producto que no existe o esta inactivo (business=${business.id}):`, listReplyId);
-      }
-    }
-
-    if (message.type === "interactive" && !listSelection) {
-      const buttonId: string | undefined = message.interactive?.button_reply?.id;
-      if (buttonId?.startsWith("csat_")) {
-        const result = await recordCsatReply(business.id, from, buttonId);
-        if (result.recorded && result.conversationId) {
-          await sendToCustomer({
-            businessId: business.id,
-            conversationId: result.conversationId,
-            credentials,
-            to: from,
-            content: { kind: "text", text: "¡Gracias por tu opinión! 🙏" },
-            // El cliente acaba de tocar el boton, la ventana esta abierta por definicion.
-            onWindowClosed: "fail",
-          });
-        }
-      }
-      return;
-    }
-
-    // Meta manda en cada webhook el nombre que la persona puso en SU perfil de WhatsApp. Hasta ahora se
-    // descartaba, asi que la bandeja mostraba numeros crudos y el bot tenia que gastar un turno
-    // preguntando como se llama alguien que ya nos lo estaba diciendo. Solo alimenta la vista del panel:
-    // NO entra al prompt del bot (esa decision sigue parqueada, ver la nota de consentimiento).
-    const whatsappProfileName: string | undefined = value?.contacts?.[0]?.profile?.name;
-    const customer = await getOrCreateCustomer(business.id, from, whatsappProfileName);
-    const conversation = await getOrCreateOpenConversation(business.id, customer.id);
-
-    // Fase 10 del plan maestro: apenas se sabe que es un mensaje real de este cliente, se marca
-    // como leido y se prende el indicador de "escribiendo" - no hace falta esperar a procesar el
-    // mensaje entero (puede tardar segundos si es una foto/audio). No es critico: si falla, el
-    // turno sigue igual (ver markCustomerMessageSeen en outbound.ts).
-    if (whatsappMessageId) {
-      await markCustomerMessageSeen(credentials, whatsappMessageId);
-    }
-
-    await withConversationLock(conversation.id, async () => {
-      // LA UNIDAD QUE SE FACTURA. Un mensaje real de un cliente abre un chat, o cae dentro del que ese
-      // cliente ya tenia abierto (ver src/billing/chats.ts). Va aca arriba, antes de decidir nada sobre
-      // la respuesta, porque un chat se cuenta por la interaccion del cliente y no por lo que el bot
-      // haya alcanzado a hacer con ella: una conversacion en control humano, una que termina escalada o
-      // una que se cae a mitad de camino son la misma interaccion vendida.
-      //
-      // Adentro del lock a proposito: el lock es por conversacion y la conversacion es por cliente, asi
-      // que dos mensajes simultaneos del mismo cliente no pueden abrir dos chats para la misma ventana.
-      const metaSentMs = Number(message.timestamp) * 1000;
-      await recordBillableChat({
-        businessId: business.id,
-        customerId: customer.id,
-        conversationId: conversation.id,
-        at: new Date(Number.isFinite(metaSentMs) && metaSentMs > 0 ? metaSentMs : webhookReceivedAt),
-      });
-
-      let text = "";
-      let media: { s3Key: string; type: "IMAGE" | "VIDEO" | "AUDIO"; peaks?: string | null } | undefined;
-      let imageAnalysis: string | undefined;
-
-      if (listSelection) {
-        text = listSelection.label;
-      } else if (message.type === "text") {
-        text = message.text.body;
-      } else if (message.type === "image") {
-        try {
-          const { buffer, mimeType } = await downloadMedia(credentials, message.image.id);
-          const { key, url } = await uploadMedia(buffer, mimeType, "receipts");
-          media = { s3Key: key, type: "IMAGE" };
-          text = message.image.caption ?? "";
-          const catalogHint = await getCatalogHintText(business.id);
-          imageAnalysis = await analyzeCustomerImage(business.id, conversation.id, url, text, catalogHint);
-          imageAnalysis = await conIdentificacionDelServidor(business.id, imageAnalysis);
-        } catch (error) {
-          console.error("No se pudo procesar la imagen entrante:", error);
-          text = "[El cliente envio una imagen, pero hubo un problema tecnico y no se pudo procesar. Pedile que la reenvie.]";
-        }
-      } else if (message.type === "video") {
-        try {
-          const { buffer, mimeType } = await downloadMedia(credentials, message.video.id);
-          const { key } = await uploadMedia(buffer, mimeType, "videos");
-          media = { s3Key: key, type: "VIDEO" };
-          text = message.video.caption ?? "";
-          const frame = await extractFrame(buffer);
-          const { url: frameUrl } = await uploadMedia(frame, "image/jpeg", "receipts");
-          const catalogHint = await getCatalogHintText(business.id);
-          imageAnalysis = await analyzeCustomerImage(business.id, conversation.id, frameUrl, text, catalogHint);
-          imageAnalysis = await conIdentificacionDelServidor(business.id, imageAnalysis);
-        } catch (error) {
-          console.error("No se pudo procesar el video entrante:", error);
-          text = "[El cliente envio un video, pero hubo un problema tecnico y no se pudo analizar. Pedile que mande una foto del producto en vez de video.]";
-        }
-      } else if (message.type === "audio") {
-        try {
-          const { buffer, mimeType } = await downloadMedia(credentials, message.audio.id);
-          const { key } = await uploadMedia(buffer, mimeType, "audio");
-          // La nota que manda el cliente tambien se dibuja en el panel, y por el mismo camino: los picos
-          // se calculan aca una vez en vez de que el navegador se baje el audio para calcularlos.
-          media = { s3Key: key, type: "AUDIO", peaks: await extractPeaks(buffer) };
-          const transcript = await transcribeAudio(buffer, mimeType);
-          text = transcript || "[El cliente envio una nota de voz, pero no se pudo transcribir. Pedile que la repita por texto.]";
-        } catch (error) {
-          console.error("No se pudo procesar el audio entrante:", error);
-          text = "[El cliente envio una nota de voz, pero hubo un problema tecnico y no se pudo procesar. Pedile que la reenvie o escriba el mensaje.]";
-        }
-      } else if (message.type === "location") {
-        const loc = message.location ?? {};
-        const parts = [loc.name, loc.address].filter(Boolean).join(", ");
-        // Un pin arrastrado en el mapa (el caso mas comun) llega SOLO con lat/lng, sin name ni address -
-        // y dos numeros crudos en el panel no le sirven a nadie para despachar. Real 2026-09-15: un
-        // cliente mando su ubicacion para el envio y en la bandeja se veia "(lat 4.68, lng -74.15)", que
-        // la duena no podia abrir. El link de mapa es clickeable desde el panel y desde WhatsApp.
-        const hasCoords = loc.latitude != null && loc.longitude != null;
-        const coords = hasCoords ? `lat ${loc.latitude}, lng ${loc.longitude}` : "";
-        const mapLink = hasCoords ? ` Ver en el mapa: https://www.google.com/maps?q=${loc.latitude},${loc.longitude}` : "";
-        text = `[El cliente comparte su ubicacion por WhatsApp${parts ? `: ${parts}` : ""}${coords ? ` (${coords})` : ""}.${mapLink} Si es para la direccion de envio, confirmale la direccion exacta en texto (barrio/calle/numero) antes de cerrar el pedido - una ubicacion de mapa sola no siempre alcanza para el mensajero.]`;
-      } else if (message.type === "sticker") {
-        text = "[El cliente envio un sticker, sin texto.]";
-      } else if (message.type === "document") {
-        const filename = message.document?.filename ?? "sin nombre";
-        text = `[El cliente envio un documento/archivo (${filename}), no una foto. Si esperabas un comprobante de pago, pedile que lo reenvie como foto/imagen para poder revisarlo.]`;
-      } else if (message.type === "contacts") {
-        // Real perdida de datos (2026-09-15): esto guardaba solo la frase fija y TIRABA la tarjeta
-        // entera. Un cliente compartio el contacto de la persona que recibe el pedido y ni el nombre ni
-        // el telefono quedaron en ningun lado - ni base, ni logs (el payload crudo no se registra), asi
-        // que la duena tuvo que abrir WhatsApp a mano para poder despachar.
-        //
-        // OJO: `message.contacts` (la tarjeta que comparte el cliente) NO es `value.contacts` (el perfil
-        // de quien escribe, que se lee mas arriba para whatsappProfileName). Se llaman igual y guardan
-        // cosas distintas: confundirlos guardaria el nombre del remitente en vez del destinatario.
-        const cards: any[] = Array.isArray(message.contacts) ? message.contacts : [];
-        const described = cards
-          .map((card) => {
-            const nombre = card?.name?.formatted_name || [card?.name?.first_name, card?.name?.last_name].filter(Boolean).join(" ");
-            const telefonos = (Array.isArray(card?.phones) ? card.phones : [])
-              .map((t: any) => t?.phone || t?.wa_id)
-              .filter(Boolean);
-            return [nombre, telefonos.length > 0 ? telefonos.join(" / ") : null].filter(Boolean).join(" - ");
-          })
-          .filter((d) => d.length > 0);
-        text =
-          described.length > 0
-            ? `[El cliente compartio ${described.length === 1 ? "esta tarjeta de contacto" : "estas tarjetas de contacto"}: ${described.join(" | ")}. Si es para el envio, esta es la persona que RECIBE el pedido - no es el nombre del cliente con el que estas hablando. Confirmale a quien te escribe si el pedido va a nombre de ese contacto antes de cerrarlo.]`
-            : "[El cliente compartio una tarjeta de contacto de WhatsApp, pero llego sin nombre ni telefono legibles. Pedile que te escriba el nombre y el numero por texto.]";
-      }
-
-      // If the customer replied/quoted a specific WhatsApp message (long-press "Reply"), and that message
-      // was a product photo/video we sent, tell the model directly which product it was - otherwise it has
-      // to guess or ask "¿cual de los dos?" since WhatsApp doesn't show us the quoted image, only its id.
-      // Keep the raw customer text separate from the marker-prefixed version: the marker itself contains
-      // the words "foto"/"video" and the product's full name, which would otherwise false-trigger the
-      // photo-resend safety net in generateReply (it would think the customer just asked for that photo).
-      const rawText = text;
-      const quotedMessageId: string | undefined = message.context?.id;
-      if (quotedMessageId) {
-        const relatedProductName = await getRelatedProductNameForMessage(quotedMessageId);
-        if (relatedProductName) {
-          text = `[El cliente esta respondiendo a la foto/video de: ${relatedProductName}] ${text}`;
-        }
-        // Y el ID, que es lo que DECIDE el alcance del turno. Hasta hoy solo viajaba el nombre, metido
-        // adentro del texto, y ese texto ni siquiera llegaba a resolveProductScope (se manda rawText,
-        // sin la marca): tocar "Responder" sobre una foto no cambiaba nada en el servidor. Con la
-        // vitrina de categoria ese gesto es justo la forma en que el cliente elige un producto entre
-        // varias fotos, asi que resuelve por id, igual que tocar una fila de una lista interactiva.
-        quotedProductId = (await getRelatedProductIdForMessage(business.id, quotedMessageId)) ?? undefined;
-      }
-
-      try {
-        await recordMessage(business.id, conversation.id, "CUSTOMER", text, whatsappMessageId, media, imageAnalysis);
-      } catch (error) {
-        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
-          console.log("Mensaje duplicado de WhatsApp ignorado:", whatsappMessageId);
-          return;
-        }
-        throw error;
-      }
-
-      // Todo lo que el equipo dejo pendiente cuando la ventana de 24h estaba cerrada se entrega ACA: este
-      // mensaje entrante es lo que la reabre. Va antes del gate de control humano a proposito - lo que hay
-      // en cola lo escribio un humano, no depende de quien tenga el control ahora.
-      await drainQueuedOutboundForCustomer(business.id, customer.id, credentials, from);
-
-      // Releer el estado en vez de confiar en el objeto `conversation` leido arriba: entre esa lectura y
-      // este punto corren la descarga del media, la vision y la transcripcion, que tardan segundos o
-      // decenas de segundos. Si la duena toco "Tomar control" o contesto desde el panel en ese rato, el
-      // valor viejo decia false y el bot respondia igual, encima de ella. Caso real 2026-09-14.
-      const gate = await prisma.conversation.findUnique({
-        where: { id: conversation.id },
-        select: { humanControl: true, humanControlAckSent: true },
-      });
-
-      if (gate?.humanControl) {
-        console.log("Conversacion en control humano, el bot no responde:", conversation.id);
-
-        // El bot no CONTESTA bajo control humano, pero eso no significa que el sistema deba ignorar lo
-        // que el cliente escribe. Real (2026-09-15): mientras la duena atendia a mano, un cliente dio el
-        // nombre de quien recibe, su celular y la direccion; los tres quedaron solo como prosa en el chat
-        // y la ficha siguio vacia, asi que el despacho salio sin datos estructurados. Capturar es callado
-        // y no le manda nada al cliente, asi que no pisa a la persona que esta atendiendo.
-        try {
-          // Fase 11: la forma de un documento, un telefono y una direccion depende del pais del negocio.
-          const { countryCode } = toBusinessLocale(business);
-          const found = extractDeliveryDataFromAnswer(rawText, countryCode);
-          const direccion = extractAddressFromAnswer(rawText, countryCode) ?? undefined;
-          if (found.idNumber || found.deliveryPhone || direccion) {
-            await saveCustomerContactInfo(business.id, customer.id, { ...found, address: direccion });
-          }
-        } catch (error) {
-          console.error("No se pudieron capturar los datos de entrega bajo control humano:", error);
-        }
-        // Silence with zero acknowledgment reads as the bot being broken to the customer, and the owner
-        // ends up having to jump in just to say "we got your message". Send one heads-up per pause period,
-        // gated on a dedicated flag (not "does the last ASSISTANT message match the ack text") - the owner's
-        // own manual replies are also recorded with role ASSISTANT, so comparing against the last ASSISTANT
-        // message re-fired the ack after every manual reply that wasn't itself the ack. Stay quiet until the
-        // owner/admin actually resumes it, which resets the flag.
-        const HUMAN_CONTROL_ACK = "Ya te leimos, en un momento te contesta el equipo directamente 🙏";
-        // Segunda condicion, ademas del flag: si de este lado se dijo algo hace muy poco, el humano esta
-        // presente (o el bot acaba de avisar que escala) y el acuse solo agrega ruido encima de un mensaje
-        // que el cliente ya vio. El flag solo se limpia en una transicion real a control humano
-        // (ver setHumanControl), esto cubre ademas la ventana en que la duena esta tipeando ahora mismo.
-        const recentlySpoken = await prisma.message.findFirst({
-          where: {
-            conversationId: conversation.id,
-            role: "ASSISTANT",
-            createdAt: { gte: new Date(Date.now() - ACK_QUIET_MINUTES * 60 * 1000) },
-          },
-          select: { id: true },
-        });
-        if (!gate.humanControlAckSent && !recentlySpoken) {
-          const ack = await sendToCustomer({
-            businessId: business.id,
-            conversationId: conversation.id,
-            credentials,
-            to: from,
-            content: { kind: "text", text: HUMAN_CONTROL_ACK },
-            onWindowClosed: "fail",
-            recordAs: { text: HUMAN_CONTROL_ACK },
-          });
-          if (ack.delivered) {
-            await prisma.conversation.update({
-              where: { id: conversation.id },
-              data: { humanControlAckSent: true },
-            });
-          } else {
-            console.error("No se pudo mandar el acuse de recibo durante control humano:", ack.failure?.message);
-          }
-        }
-        return;
-      }
-
-      // PASAR EL TOPE DEL PLAN YA NO APAGA NADA (2026-09-17). Aca vivia checkPlanCap: al pasar el tope
-      // de MENSAJES del mes, el bot le contestaba al cliente "alcanzamos el limite" y se callaba hasta
-      // el mes siguiente. Desde que los chats extra se facturan a EXTRA_CHAT_PRICE_COP, cortar el
-      // servicio seria dejar de prestar lo que se esta cobrando. El unico efecto de cruzar el tope es
-      // el aviso al dueno, una sola vez por periodo.
-      // EL FRENO DE GASTO (ver src/billing/spendCeiling.ts). Esto no es el tope comercial: es el
-      // cortacircuitos que salta cuando el costo de IA del mes se va por encima del techo de este
-      // negocio. Si salta, algo anda mal, y lo barato es que atienda una persona.
-      //
-      // El chat ya quedo contado mas arriba, a proposito: el cliente escribio, y el negocio lo va a
-      // atender a mano. Que el bot no haya sido el que contesto no borra la interaccion.
-      const spend = await checkSpendCeiling(business.id);
-      if (spend.exceeded) {
-        const pausedText =
-          "En este momento no puedo responderte automáticamente. Ya avisé al equipo y una persona te va a escribir en breve. ¡Gracias por la paciencia! 🙏";
-        await sendToCustomer({
-          businessId: business.id,
-          conversationId: conversation.id,
-          credentials,
-          to: from,
-          content: { kind: "text", text: pausedText },
-          onWindowClosed: "fail",
-          recordAs: { text: pausedText },
-        });
-
-        if (spend.justCrossed) {
-          // Sin ambiguedad para grep en `pm2 logs`: si esto salta, lo tenemos que ver nosotros ANTES
-          // que el dueno, porque el numero lo pusimos nosotros y el gasto lo pagamos nosotros.
-          console.error(
-            `ZAQI ALERT: "${business.name}" (${business.id}) cruzo su techo de gasto de IA: ` +
-              `US$ ${spend.spentUsd.toFixed(4)} de US$ ${spend.ceilingUsd.toFixed(2)} ` +
-              `(${spend.ceilingIsDefault ? "default del plan" : "techo propio"}). El bot quedo en pausa.`
-          );
-
-          if (business.contactPhone) {
-            const greeting = business.contactName ? `Hola ${business.contactName}` : "Hola";
-            await alertOwnerTracked(
-              business.id,
-              credentials,
-              business.contactPhone,
-              `${greeting}, pausé las respuestas automáticas de tu bot por una revisión técnica de nuestro lado. ` +
-                `Tus clientes están recibiendo un mensaje pidiéndoles que esperen a una persona. Ya estamos encima; te escribo apenas quede resuelto.`
-            );
-          }
-        }
-        return;
-      }
-
-      const chatOverage = await checkChatOverage(business.id);
-      if (chatOverage.justCrossed && business.contactPhone) {
-        const greeting = business.contactName ? `Hola ${business.contactName}` : "Hola";
-        const overageText =
-          `${greeting}, tu negocio pasó los ${chatOverage.chatCap} chats de tu plan ${chatOverage.planTier} este mes. ` +
-          `El bot sigue atendiendo normalmente: cada chat adicional se factura a $${EXTRA_CHAT_PRICE_COP} COP. ` +
-          `Escríbeme si quieres subir de plan.`;
-        await alertOwnerTracked(business.id, credentials, business.contactPhone!, overageText);
-      }
-
-      // Cuando el CLIENTE mando el mensaje, no cuando nosotros terminamos de procesarlo: la descarga del
-      // media y la vision ya se comieron parte del reloj antes de llegar aca. Meta manda su timestamp en
-      // segundos; si viene raro, se cae a la hora en que entro el webhook.
-      const metaTimestampMs = Number(message.timestamp) * 1000;
-      const customerSentAt = Number.isFinite(metaTimestampMs) && metaTimestampMs > 0 ? metaTimestampMs : webhookReceivedAt;
-
-      // Fase 10 del plan maestro: no se llama a generateReply directamente aca. Se agrupa con
-      // cualquier otro mensaje que este mismo cliente mande en los proximos ~8s y recien entonces se
-      // genera y manda UNA sola respuesta para toda la rafaga - ver runGenerateAndSend. Esto libera
-      // el lock de este mensaje puntual de inmediato en vez de tenerlo abierto esperando a que se
-      // genere una respuesta.
-      //
-      // E08: la espera es una fila en la base, no un timer en memoria. Cuando este await vuelve, un
-      // reinicio ya no puede perder este mensaje.
-      await enqueuePendingBurst({
-        conversationId: conversation.id,
-        businessId: business.id,
-        customerId: customer.id,
-        customerPhone: from,
-        rawText,
-        // La fila tocada de una lista interactiva manda sobre la foto citada: las dos son elecciones
-        // con el dedo, pero la fila es de ESTE mensaje y la foto puede ser de un mensaje viejo.
-        selectedProductId: listSelection?.productId ?? quotedProductId,
-        customerSentAt: new Date(customerSentAt),
-      });
-    });
-  }
-
+  // E20 (2026-09-18). EL WEBHOOK HACE TRES COSAS Y NINGUNA MAS: validar la firma (arriba), insertar el
+  // lote entero, responder 200.
+  //
+  // El 200 se movio DESPUES del insert, y ese es el cambio. Antes se respondia 200 y se procesaba
+  // despues, en el mismo tick: descarga de medios, S3, vision, transcripcion, el modelo. Meta no
+  // reintenta, asi que si el proceso moria en el medio -- y hubo 103 reinicios registrados -- ese turno
+  // no existia para nadie y no quedaba ni el rastro de que la clienta habia escrito.
+  //
+  // Ahora, si el insert falla, NO se responde 200 y Meta reintenta. Es el unico momento del camino donde
+  // que Meta reintente es lo que se quiere, y por eso es el unico trabajo que se hace antes del 200.
   try {
-    const lote = collectWebhookBatch(req.body);
-    // Un fallo procesando un elemento no puede llevarse los que siguen: cada uno se atrapa solo. Antes
-    // no hacia falta porque solo habia un elemento; ahora un mensaje que revienta dejaria sin atender a
-    // los otros dos del mismo lote, que es el defecto que esta etapa cierra, al reves.
-    for (const { value, status, incomingPhoneNumberId } of lote.statuses) {
-      try {
-        await procesarEstado(value, status, incomingPhoneNumberId);
-      } catch (error) {
-        console.error("Error procesando un estado del lote:", error);
-      }
-    }
-    for (const { value, message, incomingPhoneNumberId } of lote.messages) {
-      try {
-        await procesarMensaje(value, message, incomingPhoneNumberId);
-      } catch (error) {
-        console.error("Error procesando un mensaje del lote:", error);
-      }
-    }
+    const filas = eventosDelLote(collectWebhookBatch(req.body));
+    const nuevos = await guardarEventosEntrantes(filas);
+    res.sendStatus(200);
+
+    // Despertar al consumidor en el acto, sin esperarlo: el job lo tomaria igual dentro de un segundo,
+    // pero ese segundo lo espera la clienta. Si falla, no pasa nada -- el job sigue estando.
+    if (nuevos > 0) despertarConsumidor();
   } catch (error) {
-    console.error("Error handling WhatsApp webhook:", error);
+    // Sin 200. Que Meta lo reintente es exactamente el comportamiento correcto: el evento todavia no
+    // esta guardado en ningun lado, asi que darlo por recibido seria perderlo.
+    console.error("[ZAQI ALERT] No se pudo encolar un webhook entrante:", error);
+    if (!res.headersSent) res.sendStatus(500);
   }
 });

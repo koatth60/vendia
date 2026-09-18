@@ -4,7 +4,9 @@ import { getChatUsage } from "../../billing/chats";
 import { getAgentIncidentSummary, getHealthFindings } from "../../ai/incidents";
 import { getConfigHealth } from "../../ai/configHealth";
 import { getShadowValidationSummary, getAgentAuthorshipSummary } from "../../ai/agentTurns";
+import { eventosEnCartaMuerta } from "../../conversation/inboundEvents";
 import { getAnalyticsSummary, getBaselineMetrics } from "../../analytics/service";
+import { prisma } from "../../db/client";
 import { businessIdOf } from "./shared";
 
 export const insightsRouter = Router();
@@ -46,6 +48,20 @@ insightsRouter.get("/api/agent-authorship", async (req, res) => {
   const days = ANALYTICS_RANGES.includes(requested) ? requested : 7;
   const summary = await getAgentAuthorshipSummary(businessIdOf(req), days);
   res.json(summary);
+});
+
+// E21 (2026-09-18): los mensajes entrantes que no se pudieron procesar ni tras cinco intentos. Antes
+// esto no existia como concepto: un mensaje que fallaba se perdia y nadie se enteraba nunca. La fila
+// queda con su payload entero, asi que se puede reprocesar cuando se arregle la causa.
+insightsRouter.get("/api/inbound-dead-letter", async (req, res) => {
+  // Acotado al numero de WhatsApp de ESTE negocio: InboundEvent no tiene businessId (el negocio se
+  // resuelve recien en el consumidor), asi que el numero de entrada es lo unico que separa un inquilino
+  // de otro. Sin esto la ruta le mostraria a una duena los mensajes fallidos de otro negocio.
+  const negocio = await prisma.business.findUnique({
+    where: { id: businessIdOf(req) },
+    select: { whatsappPhoneNumberId: true },
+  });
+  res.json({ eventos: await eventosEnCartaMuerta(negocio?.whatsappPhoneNumberId ?? "") });
 });
 
 // Fase G, 2026-09-13 audit: surfaces the config gaps that today fail silently in production - see

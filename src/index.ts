@@ -24,6 +24,7 @@ import { runTokenExpiryJob, TOKEN_EXPIRY_CHECK_INTERVAL_MS } from "./jobs/tokenE
 import { runAbandonmentJob, ABANDONMENT_CHECK_INTERVAL_MS } from "./jobs/abandonment";
 import { runSaleConfirmationChaserJob, SALE_CONFIRMATION_CHASER_INTERVAL_MS } from "./jobs/saleConfirmationChaser";
 import { runPendingBurstJob, PENDING_BURST_INTERVAL_MS } from "./jobs/pendingBursts";
+import { runInboundEventsJob, INBOUND_EVENTS_INTERVAL_MS } from "./jobs/inboundEvents";
 import { runStartupJobs } from "./jobs/startup";
 import { sinSolape } from "./jobs/sinSolape";
 import { runBackupJob, BACKUP_CHECK_INTERVAL_MS } from "./jobs/backup";
@@ -208,6 +209,19 @@ setInterval(() => {
 setInterval(() => {
   guardiaRafagasPendientes.correr().catch((error) => console.error("Error corriendo el job de rafagas pendientes:", error));
 }, PENDING_BURST_INTERVAL_MS);
+
+// E21: el consumidor de la cola de entrada. Corre cada segundo igual que las rafagas, y por el mismo
+// motivo: es latencia que ve la clienta entre que escribe y que el bot empieza a pensar.
+//
+// El webhook ademas lo despierta apenas encola, asi que este intervalo es la RED, no el camino normal:
+// existe para los eventos que quedaron de un reinicio, para los reintentos con espera, y para el dia
+// que el despertar falle. Sin el, un mensaje que fallo una vez esperaria a que escriba otra clienta.
+//
+// runInboundEventsJob ya trae su propio guard de solape adentro (inboundEventsGuard), asi que no se
+// envuelve de nuevo: dos guards sobre la misma tarea contarian las salteadas dos veces.
+setInterval(() => {
+  runInboundEventsJob().catch((error) => console.error("Error corriendo el job de la cola de entrada:", error));
+}, INBOUND_EVENTS_INTERVAL_MS);
 
 // Fase 9: conversaciones inactivas pasan a ABANDONED y su carrito (si tenia) recibe la plantilla de
 // recuperacion. Ver src/jobs/abandonment.ts.

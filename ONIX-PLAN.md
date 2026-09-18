@@ -1425,7 +1425,7 @@ error 190 para marcar la conexión como caída en el panel.
 
 ---
 
-### E20 · El mensaje entrante existe aunque el proceso muera
+### E20 · El mensaje entrante existe aunque el proceso muera — **CERRADA el 2026-09-18**, sin desplegar
 
 **Quita:** al webhook, decidir en memoria y sin red de seguridad si un mensaje del cliente existe.
 **Porque:** el webhook responde `200` antes de procesar y Meta no reintenta. La deduplicación por
@@ -1442,7 +1442,7 @@ modelo, sin S3. El `wamid @unique` hace la idempotencia **antes** de gastar.
 
 ---
 
-### E21 · El consumidor, el reintento y la carta muerta
+### E21 · El consumidor, el reintento y la carta muerta — **CERRADA el 2026-09-18**, sin desplegar
 
 **Quita:** al sistema, perder un evento sin que nadie se entere.
 **Porque:** es la otra mitad de `E20`. Sin consumidor, la tabla solo acumula.
@@ -1453,6 +1453,45 @@ criterio que ya tiene `QueuedOutboundMessage`.
 reprocesa y el cliente recibe respuesta.
 **Tamaño:** L. **Depende de:** `E20`. **Bandera:** no.
 **Vuelta atrás:** revertir junto con `E20`.
+
+**Cómo quedaron las dos (2026-09-18). Se hicieron juntas, y eso no es comodidad:** `E20` sin `E21` es
+una tabla que acumula y un bot mudo — la apariencia de una cola sin la cola. Partirlas en dos
+despliegues habría dejado una ventana donde el sistema está *peor* que antes.
+
+- **El `200` se movió DESPUÉS del insert, y ese es el cambio entero.** Si el insert falla, no se
+  responde `200` y Meta reintenta. Es el único punto del camino donde que Meta reintente es lo que se
+  quiere, y por eso es el único trabajo que se hace antes del `200`.
+- **La deduplicación pasó a ocurrir antes de gastar.** Vivía en `recordMessage`, o sea *después* de
+  pagar descarga de medios, subida a S3, visión y transcripción — y después de contar el chat
+  facturable. Un reintento de Meta las pagaba todas de nuevo.
+- **La clave no es el `wamid` pelado.** Meta manda `sent`, `delivered` y `read` con el mismo id; con el
+  wamid como clave única solo entraría el primero y el panel diría "enviado" de algo que la clienta ya
+  leyó. La clave es `msg:<wamid>` o `st:<wamid>:<estado>`.
+- **`procesarMensaje` y `procesarEstado` salieron de adentro del handler.** Capturaban exactamente UNA
+  variable del ámbito (`webhookReceivedAt`), así que la extracción fue mecánica. Mientras vivieran ahí,
+  lo único capaz de procesar un mensaje entrante era una petición HTTP de Meta en curso.
+- **`FOR UPDATE SKIP LOCKED` en SQL crudo**, que es lo que permitirá dos `worker` en `E23` sin que los
+  dos tomen la misma fila. Prisma no lo expone.
+- **El consumidor procesa secuencial a propósito**, no es una optimización pendiente: en paralelo, el
+  lock de conversación serializa en el orden en que lleguen a pedirlo, que con `Promise.all` es el que
+  quiera el planificador.
+- **Se cortó un ciclo de importación** (webhook → job → webhook) con un registro, en vez de confiar en
+  que CommonJS lo tolere. En este repositorio ya se pagó caro un módulo que se rompía al importar.
+- **Carta muerta visible** en `GET /api/inbound-dead-letter`, acotada al número de WhatsApp del
+  negocio: `InboundEvent` no tiene `businessId`, así que ese parámetro quedó **obligatorio y sin
+  default** para que no se pueda llamar mal por olvido. La fila muerta **no se borra** — el payload
+  entero queda, que es la diferencia entre un mensaje perdido y un mensaje pendiente.
+
+**Dos cosas se encontraron escribiéndolas, y las dos eran defectos míos, no de las pruebas:**
+
+1. `UPDATE ... WHERE id IN (SELECT ... ORDER BY ... FOR UPDATE SKIP LOCKED)` **no devuelve ordenado**:
+   el `ORDER BY` decide *cuáles* filas se toman, no en qué orden vuelven de `RETURNING`. Con eso puesto,
+   dos mensajes seguidos de la misma clienta podían procesarse al revés y el pedido quedaba armado mal.
+   Lo agarró la prueba del orden.
+2. La primera versión de `/api/inbound-dead-letter` **no filtraba por negocio** — una dueña habría visto
+   los mensajes fallidos de otra. Detectado antes de commitear.
+
+8 pruebas nuevas. Suite completa: 989, 975 pasan, 0 fallan.
 
 ---
 

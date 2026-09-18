@@ -1390,3 +1390,51 @@ model PlatformAuditLog {
   @@index([action, ip, createdAt])
   @@index([businessId, createdAt])
 }
+
+// E20 / E21 (2026-09-18). EL MENSAJE ENTRANTE EXISTE AUNQUE EL PROCESO MUERA.
+//
+// El webhook respondia 200 y DESPUES procesaba, en el mismo tick de la peticion. Meta no reintenta: si
+// el proceso moria en el medio -- y hubo 103 reinicios registrados -- ese turno no existio nunca para
+// nadie. No quedaba ni el rastro de que el cliente habia escrito.
+//
+// Ahora el webhook hace tres cosas y ninguna mas: validar la firma, INSERTAR el lote entero, responder
+// 200. Si el insert falla, no se responde 200 y Meta reintenta, que es exactamente lo que se quiere.
+model InboundEvent {
+  id String @id @default(cuid())
+
+  // LA IDEMPOTENCIA, Y OCURRE ANTES DE GASTAR. Hasta hoy la deduplicacion por wamid pasaba recien en
+  // recordMessage, o sea DESPUES de haber pagado descarga de medios, subida a S3, vision y
+  // transcripcion: un reintento de Meta las pagaba todas de nuevo (y contaba un chat facturable de mas).
+  //
+  // No es el wamid pelado: Meta manda VARIOS estados para el mismo mensaje saliente (sent, delivered,
+  // read) y todos traen el mismo id. Con el wamid como clave unica solo entraria el primero y se
+  // perderian los otros dos. Por eso la clave es "msg:<wamid>" o "st:<wamid>:<estado>".
+  dedupeKey String @unique
+
+  // "MESSAGE" o "STATUS".
+  kind String
+  // El wamid pelado, para poder buscar. No es unico: ver arriba.
+  wamid String
+  // De que numero entro. El negocio se resuelve en el consumidor, no aca: el webhook no consulta la base
+  // mas que para insertar.
+  phoneNumberId String?
+
+  // El elemento tal como lo mando Meta, entero. Es lo que se reprocesa.
+  payload Json
+
+  receivedAt  DateTime  @default(now())
+  processedAt DateTime?
+
+  // Reintento y carta muerta, mismo patron que QueuedOutboundMessage.
+  attempts      Int       @default(0)
+  nextAttemptAt DateTime  @default(now())
+  // Reclamo para varios procesos: quien lo toma lo marca hasta cuando. Si el proceso muere, vence solo.
+  lockedUntil   DateTime?
+  lastError     String?
+  // Carta muerta: se agotaron los intentos. Visible en el panel en vez de perdido en silencio.
+  failedAt      DateTime?
+
+  // El indice del consumidor: pendientes que ya tocan, en orden de llegada.
+  @@index([processedAt, nextAttemptAt])
+  @@index([failedAt])
+}
