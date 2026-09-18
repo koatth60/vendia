@@ -809,15 +809,21 @@ function renderCard(p) {
     ...variants.flatMap(v => (v.media || []).map(m => ({ ...m, variantId: v.id }))),
   ];
   const media = p.media || [];
+  // `m.unsendable` lo calcula el servidor (ver withSendability en catalog/products.ts): es el motivo por
+  // el que WhatsApp rechazaria este archivo, hoy siempre que pese mas que el tope. Una foto cargada antes
+  // del tope del 2026-09-16 se ve perfecta acá y sin embargo no le llega a NINGUNA clienta; sin esta
+  // marca, la única forma de enterarse era el reclamo de la clienta.
   const thumbs = allMedia.map(m => `
-    <span class="thumb-wrap">
+    <span class="thumb-wrap ${m.unsendable ? 'is-unsendable' : ''}" ${m.unsendable ? `title="${escapeHtml(m.unsendable)}"` : ''}>
       ${m.type === 'VIDEO'
         ? `<video class="thumb" src="${m.url}" onclick="openVideoLightbox('${m.url}')"></video>`
         : `<img class="thumb" src="${m.url}" onclick="openImageLightbox('${m.url}')" />`}
+      ${m.unsendable ? '<span class="thumb-warning">no se envía</span>' : ''}
       <button class="thumb-remove" onclick="deleteMedia('${m.id}')">×</button>
       ${renderMediaAssignSelect(m.id, m.variantId, variants)}
     </span>
   `).join('');
+  const pesadas = allMedia.filter(m => m.unsendable);
 
   // Once a product has variants, each sale decrements only that variant's own stock (see
   // orders/service.ts) - p.stock itself is never touched and would show a frozen, wrong number here
@@ -826,6 +832,7 @@ function renderCard(p) {
 
   return `
     <div class="product-card ${p.active ? '' : 'inactive'}" data-product-id="${p.id}">
+      ${pesadas.length > 0 ? `<div class="thumb-alert">⚠️ ${pesadas.length === 1 ? 'Una foto de este producto no le llega a las clientas' : `${pesadas.length} fotos de este producto no le llegan a las clientas`}. ${escapeHtml(pesadas[0].unsendable)}</div>` : ''}
       <div class="thumb-strip">
         ${thumbs}
         <label class="thumb-add">

@@ -511,6 +511,17 @@
     background: var(--danger); color: var(--onix-accent-ink); font-size: 10px; line-height: 16px; text-align: center; padding: 0; border: none;
   }
   .thumb-assign { width: 62px; font-size: 9.5px; padding: 2px 3px; border-radius: 5px; border-width: 1px; }
+  /* Una foto que WhatsApp no acepta se ve perfecta en el panel y no le llega a nadie (E17). El aviso va
+     sobre la miniatura misma porque el problema es de ESE archivo, no del producto. */
+  .thumb-wrap.is-unsendable .thumb { border: 2px solid var(--danger); opacity: 0.6; }
+  .thumb-warning {
+    position: absolute; top: 40px; left: 0; right: 0; background: var(--danger); color: #fff;
+    font-size: 8.5px; font-weight: 700; text-align: center; padding: 1px 0; border-radius: 0 0 7px 7px;
+  }
+  .thumb-alert {
+    margin: 10px 10px 0; padding: 7px 9px; border-radius: 8px; font-size: 11.5px; line-height: 1.35;
+    background: var(--danger-light); color: var(--danger); border: 1px solid var(--danger);
+  }
   .thumb-add {
     width: 60px; height: 60px; border-radius: 8px; border: 1.5px dashed var(--border); flex-shrink: 0;
     display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 20px; cursor: pointer; position: relative;

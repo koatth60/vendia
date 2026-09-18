@@ -1,5 +1,7 @@
+import type { MediaType } from "@prisma/client";
 import { prisma } from "../db/client";
 import { getPresignedMediaUrl, deleteMedia as deleteMediaFromS3 } from "../media/s3";
+import { unsendableReason } from "../media/oversizedMedia";
 import { tokenize, normalizeForMatch } from "../search/text";
 import { canonicalColors, canonicalizeCategoryWord } from "./attributeTaxonomy";
 import { formatPrice } from "../config/money";
@@ -69,6 +71,24 @@ export async function listAllProducts(businessId: string) {
 // de SKUs (feedback del dueño, 2026-09-13: paginar donde una lista pueda crecer mucho, no solo
 // Clientes/Envíos). listAllProducts de arriba queda intacta y sigue siendo la que usa cualquier otra
 // cosa que necesite el catálogo completo de una - esta es nueva, solo para la lista paginada.
+// Le cuelga a cada foto/video el motivo por el que WhatsApp no lo aceptaria, o null si esta bien (E17).
+// Lo calcula el servidor y no el JS del panel a proposito: el dia que cambie el tope, copiarlo al panel
+// habria dejado dos listas distintas de "que archivo sirve", que es el mismo defecto que el tope de
+// subida vino a cerrar. Null tambien cuando el peso todavia no se midio - el panel no inventa alarmas
+// sobre lo que no sabe.
+type ConMotivo<T> = T & { unsendable: string | null };
+
+function withSendability<T extends { media: { type: MediaType; bytes: number | null }[]; variants: { media: { type: MediaType; bytes: number | null }[] }[] }>(
+  products: T[]
+): T[] {
+  for (const product of products) {
+    for (const media of [...product.media, ...product.variants.flatMap((v) => v.media)]) {
+      (media as ConMotivo<typeof media>).unsendable = unsendableReason(media);
+    }
+  }
+  return products;
+}
+
 export async function listAllProductsPage(businessId: string, skip: number, take: number, q?: string) {
   const where = q
     ? { businessId, OR: [{ name: { contains: q, mode: "insensitive" as const } }, { category: { contains: q, mode: "insensitive" as const } }] }
@@ -82,7 +102,7 @@ export async function listAllProductsPage(businessId: string, skip: number, take
     prisma.product.count({ where }),
   ]);
   await withFreshVariantMediaUrls(products);
-  const items = await withFreshMediaUrls(products);
+  const items = withSendability(await withFreshMediaUrls(products));
   return { items, total };
 }
 
@@ -485,7 +505,9 @@ export async function deleteProduct(businessId: string, id: string) {
 export async function addProductMedia(
   businessId: string,
   productId: string,
-  media: { type: "IMAGE" | "VIDEO"; url: string; s3Key: string },
+  // `bytes` viene de uploadMedia y no es opcional por comodidad: sin el, esta foto entra al catalogo sin
+  // que nadie sepa si WhatsApp la va a aceptar, que es el defecto que E17 vino a cerrar.
+  media: { type: "IMAGE" | "VIDEO"; url: string; s3Key: string; bytes: number },
   variantId?: string
 ) {
   const product = await prisma.product.findFirst({ where: { id: productId, businessId } });

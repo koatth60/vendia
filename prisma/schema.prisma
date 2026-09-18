@@ -764,6 +764,13 @@ model ProductMedia {
   whatsappMediaId        String?
   whatsappMediaAt        DateTime?
   whatsappMediaPhoneId   String?
+  // Cuanto pesa el archivo en S3. Se guarda al subirlo (y se completa solo la primera vez que se manda
+  // un archivo viejo, ver resolveSendableMedia) para que "esta foto se puede enviar?" sea una consulta
+  // a la base y no un HeadObject a S3 por archivo. Sin esta columna, ningun camino de envio ni el panel
+  // podian mirar el peso, asi que una foto cargada antes del tope del 2026-09-16 se intentaba enviar
+  // igual y fallaba con 131053 despues de que el envio ya habia devuelto un wamid. Null = todavia no se
+  // midio; nunca significa que el archivo este bien.
+  bytes                  Int?
   createdAt DateTime        @default(now())
 }
 

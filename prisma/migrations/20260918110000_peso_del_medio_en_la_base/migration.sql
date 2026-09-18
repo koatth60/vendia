@@ -1,0 +1,19 @@
+-- El peso de cada foto/video del catalogo vive en la base (2026-09-18, etapa E17).
+--
+-- El tope por tipo (MAX_BYTES_BY_KIND en src/media/s3.ts) frena las subidas NUEVAS desde el
+-- 2026-09-16, pero los archivos cargados antes siguen en S3 pesando de mas. WhatsApp los rechaza en
+-- cada intento de envio ("Image file has size 6303812 bytes but must be atmost 5242880 bytes and
+-- non-empty", produccion 2026-09-16) y lo hace de forma asincrona: el envio ya devolvio un wamid, asi
+-- que el cliente nunca ve la foto y la duena no se entera.
+--
+-- Hasta hoy el peso solo se podia averiguar con un HeadObject a S3 por archivo, asi que ni el camino
+-- de envio ni el panel lo miraban. Con esta columna, "esta foto se puede enviar?" es un SELECT.
+--
+-- Aditiva y nullable a proposito: las filas que ya existen quedan en NULL y NULL nunca significa "el
+-- archivo esta bien", solo "todavia no se midio". Se completan solas la primera vez que se manda ese
+-- archivo (resolveSendableMedia ya baja los bytes para subirselos a Meta), y de una sola vez para todo
+-- el catalogo con `npx tsx scripts/list-oversized-media.ts`.
+--
+-- Reversible sin perder datos: la columna se puede borrar y el sistema vuelve al comportamiento
+-- anterior.
+ALTER TABLE "ProductMedia" ADD COLUMN "bytes" INTEGER;

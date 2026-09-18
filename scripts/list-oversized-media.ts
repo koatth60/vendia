@@ -12,9 +12,12 @@ import { excessBytes, isOversized, maxBytesFor } from "../src/media/oversizedMed
 // and non-empty", repetido en el log de produccion del 2026-09-16): el cliente nunca ve la foto de ese
 // producto, y la duena no se entera porque el panel ya se la mostro como cargada.
 //
-// SOLO LEE. No borra ni modifica nada, ni en S3 ni en la base: una consulta a la base y un HeadObject
-// por archivo (que devuelve el tamaño sin descargar el contenido). Que hacer con cada archivo - recortar,
-// reemplazar, borrar - lo decide el dueño con esta lista delante.
+// Lo unico que escribe es ProductMedia.bytes, con el tamaño real que devuelve S3 (E17, 2026-09-18). Esa
+// columna es la que le permite al panel marcar la foto pesada y al envio no intentarla; se completa sola
+// la primera vez que se manda cada archivo, y este script la completa para el catalogo entero de una, sin
+// esperar a que alguien intente mandar la foto. En S3 no toca nada: un HeadObject por archivo, que
+// devuelve el tamaño sin descargar el contenido. Que hacer con cada archivo pesado - recortar, reemplazar,
+// borrar - lo sigue decidiendo el dueño con esta lista delante.
 //
 //   npx tsx scripts/list-oversized-media.ts
 //   npx tsx scripts/list-oversized-media.ts <businessId>     # solo ese negocio
@@ -38,6 +41,7 @@ async function main(): Promise<void> {
       id: true,
       type: true,
       s3Key: true,
+      bytes: true,
       product: { select: { id: true, name: true, business: { select: { id: true, name: true } } } },
     },
     orderBy: { createdAt: "asc" },
@@ -53,6 +57,7 @@ async function main(): Promise<void> {
 
   const pasados: { negocio: string; producto: string; tipo: MediaType; bytes: number; exceso: number; s3Key: string }[] = [];
   const sinArchivo: string[] = [];
+  let medidos = 0;
 
   for (const item of media) {
     let bytes: number;
@@ -63,6 +68,11 @@ async function main(): Promise<void> {
       // El archivo esta en la base pero no en S3. Es otro problema, y tambien conviene verlo.
       sinArchivo.push(`${item.product.business.name} | ${item.product.name} | ${item.s3Key}`);
       continue;
+    }
+
+    if (bytes !== item.bytes) {
+      await prisma.productMedia.update({ where: { id: item.id }, data: { bytes } });
+      medidos++;
     }
 
     if (!isOversized({ type: item.type, bytes })) continue;
@@ -104,7 +114,7 @@ async function main(): Promise<void> {
     console.log("");
   }
 
-  console.log("Este script no borro ni modifico nada.");
+  console.log(`Peso guardado en la base para ${medidos} medio(s). En S3 no se toco nada.`);
   await prisma.$disconnect();
 }
 

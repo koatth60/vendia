@@ -132,11 +132,11 @@ catalogRouter.post("/api/products/:id/media", upload.single("file"), async (req,
 
   const type = req.file.mimetype.startsWith("video") ? "VIDEO" : "IMAGE";
   const folder = type === "VIDEO" ? "videos" : "images";
-  const { key, url } = await uploadMedia(req.file.buffer, req.file.mimetype, folder);
+  const { key, url, bytes } = await uploadMedia(req.file.buffer, req.file.mimetype, folder);
   // req.body.variantId (set by the admin UI when uploading photos for one specific color/size, not the
   // product overall) comes through as a plain form field alongside the multipart file.
   const variantId = req.body.variantId ? String(req.body.variantId) : undefined;
-  const media = await addProductMedia(businessIdOf(req), String(req.params.id), { type, url, s3Key: key }, variantId);
+  const media = await addProductMedia(businessIdOf(req), String(req.params.id), { type, url, s3Key: key, bytes }, variantId);
   res.status(201).json(media);
 });
 

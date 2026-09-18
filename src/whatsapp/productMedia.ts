@@ -1,11 +1,25 @@
 import { sendToCustomer, type WhatsappCredentials } from "./outbound";
 import { recordMessage } from "../conversation/service";
+import { recordDeliveryFailure } from "../delivery/failures";
 import { resolveSendableMedia, forgetWhatsappMediaId } from "./mediaUpload";
 
 // WhatsApp a veces no entrega/renderiza una imagen si sale inmediatamente despues de otra - una pausa
 // corta entre envios consecutivos evita esa colision.
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * El archivo no se puede enviar por lo que ES (hoy: pesa mas que el tope de WhatsApp), no porque el
+ * envio haya fallado. Tiene su propio tipo para que quien llama pueda distinguirlo: un fallo de envio
+ * corta el turno, pero un dato malo del catalogo no tiene por que hacerlo - el turno sigue, el modelo se
+ * entera de que esa foto no salio, y la duena lo ve en el panel (E17).
+ */
+export class UnsendableMediaError extends Error {
+  constructor(public readonly reason: string) {
+    super(reason);
+    this.name = "UnsendableMediaError";
+  }
 }
 
 /**
@@ -42,6 +56,20 @@ export async function sendMediaWithSpacing(
     // El archivo se le SUBE a Meta y viaja un id; solo si esa subida falla se cae al link de S3, que es
     // el camino que producia el 131053 (ver src/whatsapp/mediaUpload.ts).
     const enviable = await resolveSendableMedia(credentials, item);
+    // Un archivo que WhatsApp no acepta (hoy: pesa de mas) no se intenta enviar. Antes se intentaba
+    // igual, Meta devolvia un wamid, y el rechazo llegaba horas despues por el webhook de estados: la
+    // clienta nunca veia la foto y la duena no se enteraba. Se registra como fallo de entrega para que
+    // aparezca en Bot > Salud con el motivo, no solo en el log (E17).
+    if (!enviable.ok) {
+      await recordDeliveryFailure(businessId, {
+        wamid: "",
+        recipientPhone,
+        errorCode: null,
+        errorMessage: `${productName}: ${enviable.reason}`,
+        critical: false,
+      });
+      throw new UnsendableMediaError(enviable.reason);
+    }
     let result = await sendToCustomer({
       businessId,
       conversationId,
@@ -49,15 +77,16 @@ export async function sendMediaWithSpacing(
       to: recipientPhone,
       content:
         mediaType === "IMAGE"
-          ? { kind: "image", url: enviable, caption: itemCaption }
-          : { kind: "video", url: enviable, caption: itemCaption },
+          ? { kind: "image", url: enviable.value, caption: itemCaption }
+          : { kind: "video", url: enviable.value, caption: itemCaption },
     });
     // Un id que Meta ya no reconoce (vencido, o borrado de su lado) se cura solo: se olvida el cacheado y
     // se reintenta una vez subiendo el archivo de nuevo. Sin esto, un id muerto dejaria ese producto sin
     // fotos hasta que alguien lo notara.
-    if (!result.delivered && enviable !== item.url) {
+    if (!result.delivered && enviable.value !== item.url) {
       await forgetWhatsappMediaId(item.s3Key);
       const reintento = await resolveSendableMedia(credentials, item);
+      if (!reintento.ok) throw new UnsendableMediaError(reintento.reason);
       result = await sendToCustomer({
         businessId,
         conversationId,
@@ -65,8 +94,8 @@ export async function sendMediaWithSpacing(
         to: recipientPhone,
         content:
         mediaType === "IMAGE"
-          ? { kind: "image", url: reintento, caption: itemCaption }
-          : { kind: "video", url: reintento, caption: itemCaption },
+          ? { kind: "image", url: reintento.value, caption: itemCaption }
+          : { kind: "video", url: reintento.value, caption: itemCaption },
       });
     }
     // Se propaga como antes: quien llama a esto necesita saber que la foto NO salio, porque si no el

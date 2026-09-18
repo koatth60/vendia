@@ -887,6 +887,45 @@ sus fotos pesadas, con enlace a arreglarlas.
 **Tamaño:** M. **Depende de:** nada. **Bandera:** no.
 **Vuelta atrás:** revertir.
 
+**Estado (2026-09-18): implementada, sin desplegar.** Falta el despliegue y las 48 h contra la línea
+base; hasta entonces no se da por cerrada.
+
+Lo que se construyó:
+
+- `ProductMedia.bytes`, columna aditiva y nullable (migración `20260918110000_peso_del_medio_en_la_base`).
+  El peso deja de ser un `HeadObject` a S3 por archivo y pasa a ser un `SELECT`. `null` significa
+  "todavía no se midió", nunca "está bien".
+- Se llena al subir (`uploadMedia` devuelve `bytes`, `addProductMedia` lo exige) **y solo**, la primera
+  vez que se manda un archivo viejo: `resolveSendableMedia` ya baja los bytes de S3 para subírselos a
+  Meta, así que medirlos no cuesta ni una llamada extra. El catálogo viejo se mide con el tráfico real,
+  sin que nadie tenga que acordarse de correr nada.
+- `unsendableReason` en `src/media/oversizedMedia.ts`: la decisión pura, un solo lugar, el mismo que ya
+  compartían el tope de subida y el listado.
+- `resolveSendableMedia` devuelve `{ ok: false, reason }` y **nada llega a Meta**: ni el id ni el link.
+  Esto es lo que faltaba de verdad — el respaldo al link de S3, que protege a todos los demás casos,
+  para un archivo pesado devolvía el camino viejo y volvía a producir el 131053 asíncrono.
+- El envío se detiene y queda registrado como `DeliveryFailure` con el motivo, así que aparece en
+  **Bot > Salud** en vez de solo en el log.
+- El turno **no** se cae por eso. Un archivo que WhatsApp no acepta es un dato malo del catálogo, no una
+  falla del sistema: viaja como `UnsendableMediaError`, `send_product_media` lo devuelve como
+  `{ sent: false, reason }` y el modelo sigue la conversación sabiendo que esa foto no salió. Cortar el
+  turno habría dejado a la clienta peor que antes de la etapa (antes recibía el texto y solo perdía la
+  foto), y la regla de no regresión lo prohíbe.
+- El panel marca la miniatura en rojo con "no se envía" y pone el motivo arriba de la galería del
+  producto. El motivo lo calcula el servidor: copiar el tope al JS del panel habría creado una segunda
+  lista de "qué archivo sirve", que es el defecto que el tope de subida vino a cerrar.
+- `scripts/list-oversized-media.ts` ahora también guarda el peso mientras lista, para medir el catálogo
+  entero de una sin esperar al tráfico. Sigue sin tocar nada en S3.
+
+Pruebas nuevas: 4 en `src/media/oversizedMedia.test.ts` (el motivo, el masculino del video, el que cabe,
+el no medido) y 4 en `src/whatsapp/productMedia.test.ts` (ninguna llamada a la red, el fallo de entrega
+con el motivo, que un archivo sin medir no se bloquea, y que la herramienta devuelve `sent: false` en vez
+de tumbar el turno). `npm test`: 883 pruebas, 881 en verde, 0 en rojo, 2 `todo` — las dos fixtures de
+replay que ya estaban en `knownFailing`. Los 11 fixtures de replay dan idéntico.
+
+Al desplegar: `npx prisma migrate deploy`, y después `npx tsx scripts/list-oversized-media.ts` una vez
+para que la dueña vea sus fotos pesadas marcadas sin esperar a que alguien intente mandarlas.
+
 ---
 
 ### E18 · Fuera de la ventana de 24 h se manda plantilla

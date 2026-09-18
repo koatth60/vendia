@@ -87,7 +87,7 @@ import { prisma } from "../db/client";
 import { getPresignedMediaUrl } from "../media/s3";
 import { recordOwnerMessage } from "../delivery/ownerLog";
 import { askOwnerToConfirmSale, describeCustomerForOwner } from "../whatsapp/ownerConfirmation";
-import { sendMediaWithSpacing } from "../whatsapp/productMedia";
+import { sendMediaWithSpacing, UnsendableMediaError } from "../whatsapp/productMedia";
 
 async function describeCustomer(customerId: string, recipientPhone: string): Promise<string> {
   const customer = await prisma.customer.findUnique({ where: { id: customerId } });
@@ -1000,21 +1000,32 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
           (conversation?.mediaSentProductIds.includes(product.id) ?? false) ||
           (context.mediaQueuedProductIds?.includes(product.id) ?? false);
         if (business?.autoSendPhotoOnQuote && !alreadySent) {
-          await sendMediaWithSpacing(
-            businessId,
-            context.credentials,
-            context.recipientPhone,
-            context.conversationId,
-            product.id,
-            product.name,
-            allProductMedia
-          );
-          await prisma.conversation.update({
-            where: { id: context.conversationId },
-            data: { mediaSentProductIds: { push: product.id } },
-          });
-          await recordMediaSent(context.conversationId, product.name);
-          mediaJustSent = true;
+          // Mismo criterio que en send_product_media: una foto que WhatsApp no acepta no puede costarle
+          // al cliente la respuesta del turno. Acá la foto sale sola, sin que nadie la pida, así que
+          // menos todavía.
+          let seEnvio = true;
+          try {
+            await sendMediaWithSpacing(
+              businessId,
+              context.credentials,
+              context.recipientPhone,
+              context.conversationId,
+              product.id,
+              product.name,
+              allProductMedia
+            );
+          } catch (error) {
+            if (!(error instanceof UnsendableMediaError)) throw error;
+            seEnvio = false;
+          }
+          if (seEnvio) {
+            await prisma.conversation.update({
+              where: { id: context.conversationId },
+              data: { mediaSentProductIds: { push: product.id } },
+            });
+            await recordMediaSent(context.conversationId, product.name);
+            mediaJustSent = true;
+          }
         }
       }
 
@@ -1130,15 +1141,25 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
         return { sent: true, product: product.name, variant: variantLabel, count: media.length, alreadyGoingOutThisTurn: true };
       }
 
-      await sendMediaWithSpacing(
-        businessId,
-        context.credentials,
-        context.recipientPhone,
-        context.conversationId,
-        product.id,
-        variantLabel ? `${product.name} (${variantLabel})` : product.name,
-        media
-      );
+      try {
+        await sendMediaWithSpacing(
+          businessId,
+          context.credentials,
+          context.recipientPhone,
+          context.conversationId,
+          product.id,
+          variantLabel ? `${product.name} (${variantLabel})` : product.name,
+          media
+        );
+      } catch (error) {
+        // Un archivo que WhatsApp no acepta es un dato malo del catalogo, no una falla del sistema: el
+        // turno sigue y el modelo se entera de que esa foto NO salio, en vez de cortar la respuesta
+        // entera. Antes de E17 esa misma foto se "enviaba" con exito aparente y no llegaba nunca; que
+        // ahora no llegue Y ADEMAS se pierda la respuesta del turno seria empeorar lo que habia.
+        // Cualquier otro error de envio se propaga como siempre.
+        if (!(error instanceof UnsendableMediaError)) throw error;
+        return { sent: false, product: product.name, variant: variantLabel, reason: error.reason };
+      }
 
       if (!alreadySent) {
         const updated = new Set(conversation?.mediaSentProductIds ?? []);

@@ -1,5 +1,6 @@
 import { prisma } from "../db/client";
 import { downloadMediaBytes } from "../media/s3";
+import { unsendableReason } from "../media/oversizedMedia";
 import { uploadMediaToWhatsapp, WHATSAPP_MEDIA_TTL_DAYS, type WhatsappCredentials } from "./outbound";
 
 // EL ARCHIVO VIAJA UNA VEZ, HACIA META (2026-09-17).
@@ -32,24 +33,75 @@ export function cachedMediaIdIsUsable(
 }
 
 /**
+ * El resultado de preparar un archivo para enviarlo: o hay algo que mandarle a Meta (un id ya subido, o
+ * la URL de respaldo), o este archivo no se puede enviar y el motivo es para que lo lea una persona.
+ *
+ * Es un resultado y no una excepcion porque "esta foto pesa de mas" no es un error del sistema: es un
+ * dato del catalogo que alguien tiene que arreglar, y quien llama necesita poder contarlo (E17).
+ */
+export type SendableMedia = { ok: true; value: string } | { ok: false; reason: string };
+
+/** La fila del catalogo de este archivo, o null si no es un medio del catalogo (o si la base fallo). */
+async function findCatalogRow(s3Key: string) {
+  try {
+    return await prisma.productMedia.findFirst({
+      where: { s3Key },
+      select: {
+        id: true,
+        type: true,
+        bytes: true,
+        whatsappMediaId: true,
+        whatsappMediaAt: true,
+        whatsappMediaPhoneId: true,
+      },
+    });
+  } catch (error) {
+    console.error(`No se pudo leer el medio del catalogo (${s3Key}):`, error);
+    return null;
+  }
+}
+
+/**
  * Lo que hay que mandarle a Meta para este archivo: un id ya subido, o la URL de respaldo.
  *
  * `s3Key` identifica la fila de ProductMedia, que es donde vive el cache. Un medio que no este en el
  * catalogo (el comprobante que mando un cliente, por ejemplo) no tiene fila: se sube igual, sin cachear,
  * porque igual se manda una sola vez.
+ *
+ * ANTES DE INTENTAR NADA SE MIRA EL PESO (E17, 2026-09-18). Un archivo cargado antes del tope del
+ * 2026-09-16 pesa de mas y WhatsApp lo rechaza siempre; con el respaldo de aca abajo eso terminaba en el
+ * camino viejo (Meta descarga la URL) y volvia a fallar asincrono, sin que nadie se enterara. Un archivo
+ * que no se puede enviar no llega a Meta por ningun camino.
+ *
+ * El peso tambien se COMPLETA aca: para subirle el archivo a Meta ya hay que bajarlo de S3, asi que
+ * medirlo no cuesta una sola llamada extra. Por eso el catalogo viejo se mide solo, a medida que se
+ * manda, sin que nadie tenga que acordarse de correr nada.
  */
 export async function resolveSendableMedia(
   credentials: WhatsappCredentials,
   media: { url: string; s3Key: string }
-): Promise<string> {
-  try {
-    const row = await prisma.productMedia.findFirst({
-      where: { s3Key: media.s3Key },
-      select: { id: true, whatsappMediaId: true, whatsappMediaAt: true, whatsappMediaPhoneId: true },
-    });
-    if (row && cachedMediaIdIsUsable(row, credentials.phoneNumberId)) return row.whatsappMediaId!;
+): Promise<SendableMedia> {
+  const row = await findCatalogRow(media.s3Key);
 
+  if (row) {
+    const yaMedido = unsendableReason(row);
+    if (yaMedido) return { ok: false, reason: yaMedido };
+    if (cachedMediaIdIsUsable(row, credentials.phoneNumberId)) return { ok: true, value: row.whatsappMediaId! };
+  }
+
+  try {
     const { buffer, contentType } = await downloadMediaBytes(media.s3Key);
+
+    if (row) {
+      const recienMedido = unsendableReason({ type: row.type, bytes: buffer.length });
+      if (row.bytes !== buffer.length) {
+        await prisma.productMedia.update({ where: { id: row.id }, data: { bytes: buffer.length } });
+      }
+      // El peso queda guardado aunque el archivo no sirva - sobre todo si no sirve: es lo que hace que el
+      // panel pueda marcar esa foto sin esperar a que alguien intente mandarla otra vez.
+      if (recienMedido) return { ok: false, reason: recienMedido };
+    }
+
     const mediaId = await uploadMediaToWhatsapp(credentials, buffer, contentType, media.s3Key.split("/").pop() || "media");
 
     if (row) {
@@ -58,11 +110,13 @@ export async function resolveSendableMedia(
         data: { whatsappMediaId: mediaId, whatsappMediaAt: new Date(), whatsappMediaPhoneId: credentials.phoneNumberId },
       });
     }
-    return mediaId;
+    return { ok: true, value: mediaId };
   } catch (error) {
-    // Nunca bloqueante: el camino viejo (Meta descarga la URL) sigue existiendo y es el respaldo.
+    // Nunca bloqueante: el camino viejo (Meta descarga la URL) sigue existiendo y es el respaldo. Un
+    // archivo que YA se sabe que pesa de mas no llega hasta aca, asi que este respaldo no puede volver a
+    // producir el 131053 por tamano.
     console.error(`No se pudo subir el medio a WhatsApp (${media.s3Key}), se manda por link:`, error);
-    return media.url;
+    return { ok: true, value: media.url };
   }
 }
 

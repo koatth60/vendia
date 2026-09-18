@@ -128,11 +128,15 @@ function resolveOfficeVariant(declaredContentType: string): DetectedFileType {
   );
 }
 
+// Devuelve tambien `bytes` (E17, 2026-09-18): quien guarde este archivo en la base tiene que guardar
+// cuanto pesa, para que despues se pueda saber si es enviable sin ir a preguntarle a S3. Aca el peso ya
+// esta en la mano - es el buffer que se acaba de subir - y siempre esta por debajo del tope, porque
+// resolveUploadType rechaza antes de llegar hasta aca.
 export async function uploadMedia(
   buffer: Buffer,
   declaredContentType: string,
   folder: MediaFolder
-): Promise<{ key: string; url: string }> {
+): Promise<{ key: string; url: string; bytes: number }> {
   const detected = resolveUploadType(buffer, declaredContentType, folder);
 
   const key = `${folder}/${randomUUID()}.${detected.extension}`;
@@ -147,7 +151,7 @@ export async function uploadMedia(
   );
 
   const url = await getPresignedMediaUrl(key);
-  return { key, url };
+  return { key, url, bytes: buffer.length };
 }
 
 // Backups are named by timestamp (not a random key) so they sort and are identifiable in the S3
