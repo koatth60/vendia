@@ -80,6 +80,7 @@ import { formatBusinessHours, closedDays } from "../config/businessHours";
 import { formatPaymentExamples } from "../catalog/paymentMethods";
 import { COUNTRIES, type CountryCode } from "../config/countries";
 import type { ShippingPaymentModality } from "@prisma/client";
+import { BLOQUE_COMPROBANTE_EN_REVISION, comprobanteEsperandoVerificacion } from "../orders/comprobanteEnRevision";
 import { CLOSING_MESSAGE_PROMPT } from "./prompts/closingMessage";
 import { fillClosingPlaceholders } from "./prompts/closingPlaceholders";
 import {
@@ -1537,6 +1538,24 @@ ${CATALOG_BLOCK_MARKER}` : CATALOG_BLOCK_MARKER;
       saleBlocked: saleBlockedThisTurn,
     });
     text = renderedText;
+
+    // EL PAGO RECIBIDO LO DICE EL SERVIDOR, NO EL MODELO (2026-09-18).
+    //
+    // Caso medido: el cliente mando su comprobante y el bot contesto "Vale listo, si veo, ya llego, te
+    // vamos a generar el pedido". Nadie lo habia mirado; el pedido quedo UNPAID esperando al dueño.
+    //
+    // El disparador no lee una sola palabra: `customerSentMediaThisTurn` es metadato del mensaje
+    // (mediaType), y el resto son cuatro SELECT (ver comprobanteEsperandoVerificacion). Se agrega solo
+    // en el turno en que llega la imagen, que es donde vive la afirmacion falsa; repetirlo en cada turno
+    // siguiente seria ruido sin hecho nuevo.
+    if (customerSentMediaThisTurn && !text.includes(BLOQUE_COMPROBANTE_EN_REVISION)) {
+      if (await comprobanteEsperandoVerificacion(context.businessId, conversationId)) {
+        text = `${text.trimEnd()}
+
+${BLOQUE_COMPROBANTE_EN_REVISION}`;
+      }
+    }
+
     if (missingBlocks.length > 0) {
       await recordAgentIncident(
         context.businessId,
