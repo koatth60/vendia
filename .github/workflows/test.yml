@@ -29,6 +29,15 @@ jobs:
       DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
       SESSION_SECRET: ci-test-secret
       TOKEN_ENCRYPTION_KEY: ci-test-token-encryption-key
+      # Firmar una URL de S3 es una cuenta local, no una llamada a AWS: con region y bucket de mentira
+      # el codigo firma igual y la prueba corre sin credenciales reales. Sin estas cuatro variables,
+      # src/media/s3.ts corta con "AWS S3 no esta configurado todavia" y npm test queda rojo para
+      # siempre - que es como estaba el 2026-09-17, justo cuando el despliegue paso a depender de que
+      # este verde.
+      AWS_REGION: us-east-1
+      AWS_S3_BUCKET: ci-test-bucket
+      AWS_ACCESS_KEY_ID: ci-test-access-key
+      AWS_SECRET_ACCESS_KEY: ci-test-secret-key
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
