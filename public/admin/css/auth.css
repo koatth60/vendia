@@ -55,8 +55,17 @@ body {
   margin-bottom: 22px;
   text-decoration: none;
 }
-.brand-mark { width: 32px; height: 32px; flex-shrink: 0; }
-.brand-mark svg, .brand-mark img { width: 100%; height: 100%; display: block; }
+/* El emblema sobre pastilla blanca, igual que en el panel (2026-09-18): estas pantallas son oscuras y
+   el verde de marca necesita el blanco debajo para leerse como logo. Los verdes se fijan a los de tema
+   claro porque el fondo inmediato es blanco siempre, sea cual sea el tema de la pagina. */
+.brand-mark {
+  width: 34px; height: 34px; flex-shrink: 0;
+  display: grid; place-items: center;
+  background: #FFFFFF; border-radius: 10px; padding: 3px;
+  --onix-logo-leaf-dark: #08321A;
+  --onix-logo-leaf-light: #73916B;
+}
+.brand-mark svg, .brand-mark img { width: 100%; height: auto; display: block; }
 .brand-name {
   font-size: 16px; font-weight: 600; letter-spacing: -0.015em;
   color: var(--onix-ink);

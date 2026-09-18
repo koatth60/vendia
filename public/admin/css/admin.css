@@ -121,8 +121,19 @@
     height: 60px; padding: 0 20px;
     border-bottom: 1px solid var(--onix-border-soft);
   }
-  .brand-mark { width: 28px; height: 28px; flex-shrink: 0; }
-  .brand-mark svg { display: block; }
+  /* EL EMBLEMA VA SOBRE UNA PASTILLA BLANCA (2026-09-18), como la tenia el logo anterior. Sin ella, el
+     emblema queda suelto sobre el fondo de la barra y pierde el peso de marca; y en tema oscuro los
+     verdes tendrian que aclararse tanto que dejan de ser los de la marca.
+     Por eso adentro de la pastilla los dos verdes se fijan a los de tema claro, sin importar el tema de
+     la pagina: el fondo de abajo es blanco siempre. */
+  .brand-mark {
+    width: 32px; height: 32px; flex-shrink: 0;
+    display: grid; place-items: center;
+    background: #FFFFFF; border-radius: 9px; padding: 3px;
+    --onix-logo-leaf-dark: #08321A;
+    --onix-logo-leaf-light: #73916B;
+  }
+  .brand-mark svg { display: block; width: 100%; height: auto; }
   .brand-name { font-size: 15px; font-weight: 600; letter-spacing: -0.015em; line-height: 1.1; }
   .brand-sub {
     font-size: 10px; font-weight: 500; letter-spacing: 0.08em;
