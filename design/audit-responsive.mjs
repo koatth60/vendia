@@ -1,6 +1,40 @@
-import pw from '/home/claude/.npm-global/lib/node_modules/playwright/index.js';
-const { chromium } = pw;
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+
+/* Playwright NO es dependencia del proyecto a proposito: se usa solo para esta sonda, y meterlo en
+   package.json le agregaria la descarga de un navegador a cada `npm ci` de CI, que corre en cada push.
+   Se resuelve en tiempo de ejecucion y, si no esta, el script dice como instalarlo en vez de morir con
+   un stack trace.
+   Hasta el 2026-09-18 esta linea era un import de '/home/claude/.npm-global/...', o sea una ruta
+   absoluta de UNA maquina: el script no corria en ninguna otra, y la auditoria de cierre de fase
+   quedaba sin poder pasarse sin que el mensaje de error lo explicara. */
+let chromium;
+try {
+  ({ chromium } = await import('playwright'));
+} catch {
+  console.error(`
+No se encontro playwright. No es dependencia del proyecto (ver el comentario de arriba).
+Instalalo donde estes parado y volve a correr:
+
+    npm i --no-save playwright
+    node design/audit-responsive.mjs
+
+Si el navegador ya esta en la maquina y no queres que lo baje de nuevo:
+
+    PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm i --no-save playwright
+    PANEL_CHROMIUM=/ruta/al/chrome node design/audit-responsive.mjs
+`);
+  process.exit(2);
+}
+
+/* Todas las rutas salen de la ubicacion de ESTE archivo, no del directorio desde donde se invoca.
+   Antes leia '../out/public/admin/index.html', que solo existe en una maquina y solo si se corria
+   parado en el lugar exacto. */
+const AQUI = dirname(fileURLToPath(import.meta.url));
+const RAIZ = join(AQUI, '..');
+const PANEL = join(RAIZ, 'public', 'admin', 'index.html');
+const SONDA = join(AQUI, 'panel.html');
 
 /* Audita el panel REAL: toma index.html, le saca los scripts (no hay backend
    acá), destapa todos los tab-panel y subnav a la vez y mide en cada ancho:
@@ -18,11 +52,17 @@ const WIDTHS = [
   [1440, 'escritorio'],
 ];
 
-let html = readFileSync('../out/public/admin/index.html', 'utf8');
+if (!existsSync(PANEL)) {
+  console.error(`No encontre el panel en ${PANEL}`);
+  process.exit(2);
+}
+let html = readFileSync(PANEL, 'utf8');
 html = html
-  // Bajo file:// las rutas absolutas no resuelven: la sonda tiene que apuntar
-  // a las copias locales o mide una página SIN estilos (y todo parece roto).
-  .replace(/href="\/admin\/css\//g, 'href="')
+  // Bajo file:// las rutas absolutas no resuelven, y una pagina SIN estilos mide todo roto: parece
+  // que hay 200 problemas cuando el problema es que no cargo el CSS. Se apunta al CSS REAL del repo
+  // con una ruta absoluta de disco, asi no hacen falta copias al lado de la sonda (que se
+  // desactualizan y hacen medir una version vieja).
+  .replace(/href="\/admin\/css\//g, `href="${join(RAIZ, 'public', 'admin', 'css')}/`)
   .replace(/<script src="[^"]*"[^>]*><\/script>/g, '')
   .replace(/<script>\s*\(function \(\) \{\s*try \{\s*var t = localStorage[\s\S]*?<\/script>/, '');
 
@@ -58,16 +98,25 @@ html = html.replace('</body>', `
       <div class="metric-card"><div class="label">Satisfacción</div><div class="value">3.0/3</div><div class="sub">9 respuestas</div></div>
     </div>\`;
   var cl = document.getElementById('crm-list') || document.querySelector('#customers-list');
+  // Mismo marcado que emite fetchCustomerPage en admin.js: grilla de cuatro celdas, no el flex viejo.
+  // Si se le deja el de antes, la auditoria mide una fila que la aplicacion ya no pinta.
   if (cl) cl.innerHTML = Array.from({length:3}).map(() => \`
-    <button class="crm-row"><div class="crm-row-main">
-      <div class="crm-row-name">Ximena Alejandra Velásquez Numpaque</div>
-      <div class="crm-row-meta">573114975521 · ximena.velasquez.numpaque@gmail.com</div></div>
-      <span class="stage-pill stage-COMPRADOR">Comprador</span>
-      <div class="crm-row-side">1 pedido<br/>hace 20 h</div></button>\`).join('');
+    <button type="button" class="crm-row">
+      <div class="crm-cell-client">
+        <div class="conv-avatar">X</div>
+        <div class="crm-row-main">
+          <div class="crm-row-name">Ximena Alejandra Velásquez Numpaque</div>
+          <div class="crm-row-meta">573114975521 · mayorista, vip</div>
+        </div>
+      </div>
+      <div class="crm-cell-stage"><span class="stage-pill stage-COMPRADOR">Comprador</span></div>
+      <div class="crm-cell-num onix-num">1 pedido</div>
+      <div class="crm-cell-num onix-num">hace 20 h</div>
+    </button>\`).join('');
 </script>
 </body>`);
 
-writeFileSync('panel.html', html);
+writeFileSync(SONDA, html);
 
 const DETECTOR = () => {
   const out = { overflow: [], overlap: [], tiny: [], wide: [] };
@@ -150,11 +199,15 @@ const DETECTOR = () => {
   };
 };
 
-const browser = await chromium.launch();
+/* PANEL_CHROMIUM deja apuntar a un Chromium ya instalado (por ejemplo el de una imagen de CI), para
+   no bajar uno nuevo. Sin la variable, Playwright usa el suyo de siempre. */
+const browser = await chromium.launch(
+  process.env.PANEL_CHROMIUM ? { executablePath: process.env.PANEL_CHROMIUM } : {},
+);
 let bad = 0;
 for (const [w, name] of WIDTHS) {
   const page = await browser.newPage({ viewport: { width: w, height: 900 } });
-  await page.goto('file://' + process.cwd() + '/panel.html');
+  await page.goto('file://' + SONDA);
   await page.waitForTimeout(500);
   const r = await page.evaluate(DETECTOR);
   const ok = r.pageOverflow <= 1 && r.counts.overlap === 0 && r.counts.tiny === 0 && r.counts.wide === 0;

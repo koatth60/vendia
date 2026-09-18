@@ -10,3 +10,6 @@ Thumbs.db
 *.pem
 .claude/settings.local.json
 .deploy-previous
+
+# Salida de design/audit-responsive.mjs: se regenera en cada corrida.
+design/panel.html
