@@ -80,20 +80,27 @@ businessRouter.put("/api/business", requireOwner, async (req, res) => {
   // cambia de pais y no toca las otras dos, arrancan de los valores de ese pais.
   const pais = isCountryCode(countryCode) ? COUNTRIES[countryCode] : null;
   const horario = businessHours === null ? null : parseBusinessHours(businessHours);
+  // E46: un PUT con un solo campo no puede tocar los demas. Hasta el 2026-09-18, ocho campos usaban
+  // `x || null` y tres `Boolean(x)`: omitirlos no los dejaba como estaban, los BORRABA (a null los
+  // primeros, a false los otros tres). O sea que partir el guardado por seccion del panel - mandar solo
+  // lo que esa seccion edita - habria apagado en silencio el envio automatico de fotos, el pedido de
+  // comprobante y el nombre del asistente de cualquier negocio que guardara otra seccion.
+  // El patron es el que el resto de este bloque ya usaba: `undefined` significa "no tocar" para Prisma;
+  // presente-pero-vacio sigue significando "borrar", que es lo que hace el formulario al vaciar un campo.
   const business = await prisma.business.update({
     where: { id: businessIdOf(req) },
     data: {
       name,
       description,
       customInstructions,
-      assistantName: assistantName || null,
-      botTone: botTone || null,
-      botDialect: botDialect || null,
-      botGreeting: botGreeting || null,
-      botNeverSay: botNeverSay || null,
-      autoSendPhotoOnQuote: Boolean(autoSendPhotoOnQuote),
-      offerPhotosBeforeSending: Boolean(offerPhotosBeforeSending),
-      requirePaymentProof: Boolean(requirePaymentProof),
+      assistantName: assistantName !== undefined ? assistantName || null : undefined,
+      botTone: botTone !== undefined ? botTone || null : undefined,
+      botDialect: botDialect !== undefined ? botDialect || null : undefined,
+      botGreeting: botGreeting !== undefined ? botGreeting || null : undefined,
+      botNeverSay: botNeverSay !== undefined ? botNeverSay || null : undefined,
+      autoSendPhotoOnQuote: autoSendPhotoOnQuote !== undefined ? Boolean(autoSendPhotoOnQuote) : undefined,
+      offerPhotosBeforeSending: offerPhotosBeforeSending !== undefined ? Boolean(offerPhotosBeforeSending) : undefined,
+      requirePaymentProof: requirePaymentProof !== undefined ? Boolean(requirePaymentProof) : undefined,
       // requiredEffectsEnabled NO se lee del body (2026-09-17). Que el bot verifique contra la base lo que
       // su propia respuesta dice haber hecho dejo de ser una opcion del panel, asi que tampoco puede
       // apagarse por esta ruta: un PUT con el campo en false no lo toca. Se cambia por SQL, a sabiendas.
@@ -103,17 +110,17 @@ businessRouter.put("/api/business", requireOwner, async (req, res) => {
       // de guardarse: la columna es un enum, y un PUT viejo o un formulario a medias no puede dejar el
       // negocio con un alcance que el codigo no sabe leer.
       catalogPhotoScope: CATALOG_PHOTO_SCOPES.includes(catalogPhotoScope) ? catalogPhotoScope : undefined,
-      businessCategory: businessCategory || null,
+      businessCategory: businessCategory !== undefined ? businessCategory || null : undefined,
       contactPhone,
       contactName,
       ownerReminderMinutes: ownerReminderMinutes !== undefined ? Number(ownerReminderMinutes) : undefined,
       ownerQuestionTimeoutHours: ownerQuestionTimeoutHours !== undefined ? Number(ownerQuestionTimeoutHours) : undefined,
       intentEscalationTimeoutHours: intentEscalationTimeoutHours !== undefined ? Number(intentEscalationTimeoutHours) : undefined,
-      followUpTemplateName: followUpTemplateName || null,
+      followUpTemplateName: followUpTemplateName !== undefined ? followUpTemplateName || null : undefined,
       followUpTemplateLanguage: followUpTemplateLanguage || undefined,
       followUpDelayHours: followUpDelayHours !== undefined ? Number(followUpDelayHours) : undefined,
       abandonedAfterHours: abandonedAfterHours !== undefined ? Number(abandonedAfterHours) : undefined,
-      cartRecoveryTemplateName: cartRecoveryTemplateName || null,
+      cartRecoveryTemplateName: cartRecoveryTemplateName !== undefined ? cartRecoveryTemplateName || null : undefined,
       cartRecoveryTemplateLanguage: cartRecoveryTemplateLanguage || undefined,
       genderedAddressEnabled: genderedAddressEnabled !== undefined ? Boolean(genderedAddressEnabled) : undefined,
       femaleAddressTerm: femaleAddressTerm === "" ? null : femaleAddressTerm,
