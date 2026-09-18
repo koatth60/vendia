@@ -41,7 +41,14 @@ const SOLO = (process.env.PERSONA ?? "").trim().toLowerCase();
 /** El CASO a reproducir: una clienta escrita para llegar hasta un defecto concreto. Ver CASOS. */
 const CASO = (process.env.CASO ?? "").trim();
 const PARALELO = Number(process.env.PARALELO ?? 3);
-const MAX_TURNOS = Number(process.env.MAX_TURNOS ?? 24);
+/**
+ * Tope de turnos. No es un limite de conversacion: es el freno para que dos modelos hablando entre si no
+ * se queden en un bucle infinito si la clienta nunca se despide.
+ *
+ * La conversacion termina sola cuando la clienta escribe [FIN] o cuando el bot deja de contestar. Este
+ * numero solo existe para que un bucle roto no corra toda la noche.
+ */
+const MAX_TURNOS = Number(process.env.MAX_TURNOS ?? 100);
 const ESPERA_MAXIMA_MS = 90_000;
 
 const DEEPSEEK_URL = (process.env.DEEPSEEK_BASE_URL ?? "https://api.deepseek.com").replace(/\/$/, "");
