@@ -1,6 +1,7 @@
 import "dotenv/config";
 import { randomUUID } from "node:crypto";
 import { prisma } from "../src/db/client";
+import { atenderComoDueno } from "./dueno-simulado";
 
 // UNA CLIENTA QUE CONTESTA, EN VEZ DE UN GUION QUE RECITA (2026-09-18).
 //
@@ -170,7 +171,11 @@ async function limpiarCliente(customerId: string) {
   });
 }
 
-async function conversar(persona: Persona, indice: number, negocio: { id: string; whatsappPhoneNumberId: string }) {
+async function conversar(
+  persona: Persona,
+  indice: number,
+  negocio: { id: string; whatsappPhoneNumberId: string; whatsappAccessToken: string; contactPhone: string | null },
+) {
   const telefono = `573000${String(900_000 + indice).padStart(6, "0")}`;
   const cliente = await prisma.customer.upsert({
     where: { businessId_phoneNumber: { businessId: negocio.id, phoneNumber: telefono } },
@@ -210,6 +215,9 @@ async function conversar(persona: Persona, indice: number, negocio: { id: string
     }
     await new Promise((r) => setTimeout(r, 3500));
 
+    const conversacionActual = (
+      await prisma.conversation.findFirst({ where: { customerId: cliente.id }, orderBy: { updatedAt: "desc" }, select: { id: true } })
+    )?.id;
     const nuevos = await prisma.message.findMany({
       where: { conversation: { customerId: cliente.id }, role: "ASSISTANT" },
       orderBy: { createdAt: "asc" },
@@ -217,6 +225,32 @@ async function conversar(persona: Persona, indice: number, negocio: { id: string
       select: { content: true, mediaType: true },
     });
     leidos += nuevos.length;
+
+    // EL DUEÑO CONTESTA EN EL MOMENTO, no al final de la corrida.
+    //
+    // Si el bot escalo algo -- una pregunta citable o la conversacion entera a manos de una persona --
+    // se atiende aca mismo y la clienta ve la respuesta en su proximo turno. Sin esto se estaba midiendo
+    // un flujo cortado por la mitad: la clienta esperaba una respuesta que en esa corrida no iba a
+    // llegar nunca, y la conversacion se contaba como fallida por algo que en la realidad se resuelve.
+    if (negocio.contactPhone) {
+      const atendidas = await atenderComoDueno(
+        negocio.id,
+        conversacionActual ?? "",
+        { phoneNumberId: negocio.whatsappPhoneNumberId, accessToken: negocio.whatsappAccessToken },
+        negocio.contactPhone.replace(/[^0-9]/g, ""),
+      );
+      if (atendidas > 0) {
+        const despues = await prisma.message.findMany({
+          where: { conversation: { customerId: cliente.id }, role: "ASSISTANT" },
+          orderBy: { createdAt: "asc" },
+          skip: leidos,
+          select: { content: true, mediaType: true },
+        });
+        leidos += despues.length;
+        nuevos.push(...despues);
+      }
+    }
+
     if (nuevos.length === 0) break;
     // La clienta ve la foto como foto, no como un texto raro: es lo que le llega al celular.
     historia.push({
@@ -245,7 +279,7 @@ async function main() {
 
   const negocio = await prisma.business.findFirst({
     where: { name: NEGOCIO },
-    select: { id: true, name: true, whatsappPhoneNumberId: true, contactPhone: true },
+    select: { id: true, name: true, whatsappPhoneNumberId: true, whatsappAccessToken: true, contactPhone: true },
   });
   if (!negocio?.whatsappPhoneNumberId) {
     console.error(`No existe "${NEGOCIO}" o no tiene WhatsApp conectado.`);
@@ -262,7 +296,7 @@ async function main() {
   for (let desde = 0; desde < elegidas.length; desde += PARALELO) {
     const tanda = elegidas.slice(desde, desde + PARALELO);
     const hechas = await Promise.all(
-      tanda.map((p, i) => conversar(p, desde + i + 1, negocio as { id: string; whatsappPhoneNumberId: string })),
+      tanda.map((p, i) => conversar(p, desde + i + 1, negocio as { id: string; whatsappPhoneNumberId: string; whatsappAccessToken: string; contactPhone: string | null })),
     );
     resultados.push(...hechas);
     console.log(`(${resultados.length}/${cuantas})`);
