@@ -1800,7 +1800,7 @@ vencimiento mientras la venta está en curso; devolución automática al cancela
 
 ---
 
-### E33 · La plata es `Decimal` de punta a punta
+### E33 · La plata es `Decimal` de punta a punta — **CERRADA EN PARTE el 2026-09-18**, sin desplegar
 
 **Quita:** al código, mezclar punto flotante con dinero.
 **Porque:** es `Decimal` en Postgres y punto flotante en todos los caminos de código. Además
@@ -1810,6 +1810,39 @@ rechaza en vez de sumar números sin significado.
 **Se prueba:** prueba de arquitectura que hace `grep` de `Number(` sobre los módulos de precio.
 **Tamaño:** M. **Depende de:** `E31`. **Bandera:** no.
 **Vuelta atrás:** revertir.
+
+**Cómo quedó (2026-09-18). Se cerró el camino del pedido; los demás caminos de precio NO.**
+
+El defecto concreto que había en `createOrder`, textual:
+
+    const currency = items[0]?.currency ?? "COP";
+    const itemsTotal = items.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
+
+Tomaba la moneda del **primer** ítem y sumaba el resto como si fuera la misma unidad. Y se juntaba con
+el otro hallazgo: `Product.currency` tenía `@default("USD")` contra `Business.currency` en `COP`, así
+que un producto dado de alta sin moneda explícita quedaba en dólares dentro de un negocio colombiano
+**sin que nadie lo eligiera**. Los dos juntos dan un pedido cuyo total no es la suma de sus líneas.
+
+- **`src/config/dinero.ts`**: aritmética exacta sobre `Prisma.Decimal` y **la moneda viaja con el
+  número**. Esa segunda mitad importa más que la precisión: `59900` no significa nada solo. Sumar dos
+  monedas distintas **tira**; rechazar el pedido es ruidoso, cobrar mal se descubre tarde.
+- Un `number` entra **vía string**: pasarlo directo al `Decimal` arrastraría el error del flotante
+  adentro, y el cálculo saldría exacto sobre un valor ya equivocado.
+- `esIgualA` **no** tira con monedas distintas: comparar por igualdad tiene una respuesta correcta ("no
+  son iguales"), y tirar ahí obligaría a envolver en `try/catch` cada comparación inocente.
+- **`Product.currency` sin default**, y `createProduct` la resuelve desde el negocio. El tipo de Prisma
+  ahora **obliga** a pasarla: solo hubo que tocar un archivo de pruebas, porque casi todos los caminos ya
+  la pasaban — ese "casi" era el agujero.
+- **No se tocó ni una fila existente.** Con el default puesto no hay forma de distinguir "eligió USD" de
+  "nadie eligió nada", así que reescribir monedas guardadas cambiaría lo que se le cobra a una clienta
+  apoyándose en una adivinanza. Revisar el catálogo actual es del dueño (`D12`).
+- La **prueba de arquitectura** que pide la etapa existe, y se verificó que marca el código viejo — si
+  no fallara con el defecto puesto, no probaría nada.
+
+**Lo que falta:** los `Number(` de los demás caminos de precio (`saleState`, `agreedPrices`, el CRM,
+`fixtureCatalog`). **`E36` depende de esto**, así que sigue bloqueada.
+
+8 pruebas nuevas. Suite completa: 1015, 1001 pasan, 0 fallan.
 
 ---
 
@@ -2571,6 +2604,7 @@ Ninguna la resuelve el código. Cada una bloquea algo concreto.
 | **D7** | **Socket.IO con la Bandeja paginada:** ¿qué pasa cuando cambia una fila que no está en la página cargada? | (a) ignorarla, (b) mostrar "hay actividad más abajo" | `E45`. Es decisión de producto tanto como de código. |
 | **D8** | **Las tres cifras del hero de la landing** | (a) publicarlas, (b) borrar esa franja | `E54`. Sin ellas el hero queda igual de sólido. |
 | **D9** | **Construcción del logo** | A calada / B suelta a dos verdes / C en anillo | `E55`. Hasta que elijas, las pantallas siguen con la gota actual. |
+| **D12** | **Revisar las monedas del catálogo actual** | (a) revisar y corregir a mano, (b) dejarlo como está | Cierra del todo `E33`. `Product.currency` tenía default `USD` contra negocios en `COP`, así que puede haber productos en dólares que nadie eligió. Ninguna migración los toca: cambiar la moneda de un producto cambia lo que se le cobra a una clienta, y no hay forma de distinguir "elegiste USD" de "no elegiste nada". |
 | **D11** | **Migrar la contraseña de la consola de plataforma al hash** | (a) hacerlo ahora, (b) dejarla en texto plano | Cierra del todo `E29`. No es técnico: es correr `npm run hash:password`, poner `PLATFORM_ADMIN_PASSWORD_HASH` en el entorno del servidor y borrar `PLATFORM_ADMIN_PASSWORD`. El código ya acepta las dos. |
 | **D10** | **Retención de conversaciones y media en S3** | (a) indefinida, (b) 12 meses, (c) 24 meses | Costo de S3 y exposición legal. No bloquea ninguna etapa. |
 

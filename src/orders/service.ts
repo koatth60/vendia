@@ -11,6 +11,7 @@ import { emitOrderNew, emitOrderUpdated } from "../realtime/events";
 import { getAgreedPrices, applyAgreedPrices, agreedUnitPriceOf } from "./agreedPrices";
 import { recalcularEtapaDelCliente } from "../crm/customers";
 import { transicionarPedido, TransicionNoPermitida, type Actor, type TxCliente } from "./stateMachine";
+import { Money, sumar } from "../config/dinero";
 
 export interface ResolvedOrderItem {
   productId: string;
@@ -209,9 +210,25 @@ export async function createOrder(params: {
   shippingModality?: ShippingPaymentModality | null;
 }) {
   const { businessId, customerId, conversationId, summary, items, shippingAddress, paymentMethodLabel, shippingCost } = params;
+  // E33 (2026-09-18). ESTE ERA EL DEFECTO, y no es teorico.
+  //
+  // Antes: `const currency = items[0]?.currency ?? "COP"` y despues una suma de `number`s. O sea que se
+  // tomaba la moneda del PRIMER item y se sumaba todo el resto como si fuera la misma unidad. Un pedido
+  // con un producto en COP y otro en USD -- que el default `@default("USD")` de Product.currency hacia
+  // perfectamente posible sin que nadie lo eligiera -- se guardaba como un total en COP que no era la
+  // suma de nada.
+  //
+  // Ahora `sumar` TIRA si las monedas no coinciden, que es lo que pide el plan: "un pedido con monedas
+  // mezcladas se rechaza en vez de sumar numeros sin significado". Rechazar el pedido es ruidoso y
+  // molesto; cobrar mal es peor y se descubre tarde.
   const currency = items[0]?.currency ?? "COP";
-  const itemsTotal = items.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
-  const totalAmount = itemsTotal + (shippingCost || 0);
+  const totalDeItems = sumar(
+    items.map((item) => Money.de(item.unitPrice, item.currency).por(item.quantity)),
+    currency,
+  );
+  const envio = Money.de(shippingCost || 0, currency);
+  const itemsTotal = totalDeItems.comoNumeroParaMostrar();
+  const totalAmount = totalDeItems.mas(envio).comoNumeroParaMostrar();
   // Lo que el mensajero tiene que cobrar. Se guarda calculado y no derivado al leer: el precio de un
   // producto puede cambiar manana, y lo que se acordo en este pedido no.
   const amountOnDelivery = montoACobrarAlEntregar(params.shippingModality ?? null, {

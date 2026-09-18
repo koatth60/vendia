@@ -33,11 +33,13 @@ before(async () => {
   otroBusinessId = otro.id;
 
   const producto = await prisma.product.create({
-    data: { businessId, name: "Audifonos Bluetooth", description: "d", price: 59900, stock: 4 },
+    // currency explicita: desde E33 el tipo la exige, justamente para que ninguna fila pueda quedar con
+    // una moneda que nadie eligio.
+    data: { businessId, name: "Audifonos Bluetooth", description: "d", price: 59900, currency: "COP", stock: 4 },
   });
   productId = producto.id;
   const inactivo = await prisma.product.create({
-    data: { businessId, name: "Parlante viejo", description: "d", price: 80000, stock: 0, active: false },
+    data: { businessId, name: "Parlante viejo", description: "d", price: 80000, currency: "COP", stock: 0, active: false },
   });
   inactivoId = inactivo.id;
 

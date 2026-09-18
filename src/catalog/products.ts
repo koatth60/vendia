@@ -442,6 +442,21 @@ export async function getCatalogHintText(businessId: string): Promise<string> {
   return products.map((p) => (p.category ? `${p.name} (categoria: ${p.category})` : p.name)).join(", ");
 }
 
+/**
+ * La moneda del negocio, que es la unica respuesta correcta cuando un producto no trae la suya.
+ *
+ * NO cae a una constante si el negocio no la tiene: `Business.currency` tiene default "COP" en el
+ * esquema, asi que siempre hay una. Si algun dia no la hubiera, es mejor que reviente aca -- en el alta,
+ * con el dueno mirando la pantalla -- que elegir una moneda por el y que se descubra al cobrar.
+ */
+async function monedaDelNegocio(businessId: string): Promise<string> {
+  const negocio = await prisma.business.findUniqueOrThrow({
+    where: { id: businessId },
+    select: { currency: true },
+  });
+  return negocio.currency;
+}
+
 export async function createProduct(
   businessId: string,
   data: {
@@ -464,6 +479,16 @@ export async function createProduct(
   return prisma.product.create({
     data: {
       ...productData,
+      // E33 (2026-09-18): la moneda del NEGOCIO cuando el alta no la trae.
+      //
+      // `Product.currency` tenia `@default("USD")` en el esquema contra `Business.currency` en "COP".
+      // O sea que un producto dado de alta sin moneda explicita quedaba en dolares dentro de un negocio
+      // colombiano, y despues se sumaba con el resto del pedido como si fueran la misma unidad. Es el
+      // tipo de defecto que no se ve hasta que alguien cobra mal.
+      //
+      // El default del esquema se saco: un valor que nadie eligio no puede seguir siendo indistinguible
+      // de uno elegido. Aca se resuelve, en el unico camino por donde el panel da de alta productos.
+      currency: productData.currency || (await monedaDelNegocio(businessId)),
       businessId,
       ...(variants && variants.length > 0 ? { variants: { create: variants } } : {}),
     },
@@ -488,7 +513,14 @@ export async function updateProduct(
 ) {
   const product = await prisma.product.findFirst({ where: { id, businessId } });
   if (!product) throw new Error("Producto no encontrado");
-  return prisma.product.update({ where: { id }, data });
+  // Una edicion que manda `currency: ""` (un select vacio en el panel) borraria la moneda. Se ignora en
+  // vez de escribir vacio: cambiar la moneda de un producto es una decision, no un efecto secundario de
+  // guardar otra cosa.
+  const { currency, ...resto } = data;
+  return prisma.product.update({
+    where: { id },
+    data: currency ? { ...resto, currency } : resto,
+  });
 }
 
 export async function deleteProduct(businessId: string, id: string) {
