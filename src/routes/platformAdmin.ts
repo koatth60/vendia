@@ -1,6 +1,8 @@
 import { Router } from "express";
+import rateLimit from "express-rate-limit";
 import { prisma } from "../db/client";
-import { env } from "../config/env";
+import { verificarCredencialDePlataforma } from "../auth/platformPassword";
+import { recordPlatformAction, estaBloqueadaPorIntentos, auditarCambiosDePlataforma } from "../auth/platformAudit";
 import { requirePlatformAdmin } from "../auth/requirePlatformAdmin";
 import { generateActivationCode } from "../auth/service";
 import { listOwnerMessages } from "../delivery/ownerLog";
@@ -10,22 +12,52 @@ import { defaultCeilingUsd } from "../billing/spendCeiling";
 
 export const platformAdminRouter = Router();
 
-platformAdminRouter.post("/login", (req, res) => {
-  const { email, password } = req.body;
-  if (
-    !env.platformAdmin.email ||
-    !env.platformAdmin.password ||
-    email !== env.platformAdmin.email ||
-    password !== env.platformAdmin.password
-  ) {
+// E29 (2026-09-18): el MISMO limitador que authRouter, con los mismos numeros. La consola de plataforma
+// puede activar y desactivar cualquier negocio: que estuviera sin limite de tasa mientras el login de
+// los duenos si lo tenia era el agujero mas grande de los dos.
+const platformLoginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Demasiados intentos. Prueba de nuevo en unos minutos." },
+});
+
+platformAdminRouter.post("/login", platformLoginLimiter, async (req, res) => {
+  const { email, password } = req.body ?? {};
+  const ip = req.ip ?? null;
+  const intentado = typeof email === "string" ? email.trim().toLowerCase() : null;
+
+  // El bloqueo va ANTES de verificar: si ya lleva diez fallos, ni se mira la contrasena. El limitador de
+  // arriba hace lo mismo pero en memoria, y la memoria se pierde al reiniciar - hubo trece reinicios en
+  // un dia. Este se lee de la base, asi que reiniciar el proceso no es la forma de saltearlo.
+  if (await estaBloqueadaPorIntentos(ip)) {
+    await recordPlatformAction({ action: "LOGIN_BLOCKED", actorEmail: intentado, ip });
+    res.status(429).json({ error: "Demasiados intentos. Prueba de nuevo en unos minutos." });
+    return;
+  }
+
+  if (!(await verificarCredencialDePlataforma(email, password))) {
+    // Se ESPERA a que se escriba: esta fila no es solo auditoria, es el contador del bloqueo, y un
+    // contador que no se escribio es un intento que no se conto.
+    await recordPlatformAction({ action: "LOGIN_FAILED", actorEmail: intentado, ip });
     res.status(401).json({ error: "Credenciales inválidas" });
     return;
   }
+
+  // Igual que E28 en el login de los duenos: se regenera el identificador de sesion ANTES de escribir
+  // nada en ella. Sin esto, quien ya tenia una cookie en ese navegador se queda con el mismo
+  // identificador despues de que el administrador entra, que es fijacion de sesion de manual.
+  await new Promise<void>((resolve, reject) => {
+    req.session.regenerate((error) => (error ? reject(error) : resolve()));
+  });
   req.session.platformAdmin = true;
+  await recordPlatformAction({ action: "LOGIN_OK", actorEmail: intentado, ip });
   res.json({ ok: true });
 });
 
 platformAdminRouter.post("/logout", (req, res) => {
+  void recordPlatformAction({ action: "LOGOUT", ip: req.ip ?? null });
   req.session.destroy(() => {
     res.status(204).send();
   });
@@ -40,6 +72,11 @@ platformAdminRouter.get("/me", (req, res) => {
 });
 
 platformAdminRouter.use(requirePlatformAdmin);
+
+// E29: todo lo que pase de aca para abajo y cambie algo queda auditado, sin que haya que acordarse de
+// ponerlo ruta por ruta. Va DESPUES de requirePlatformAdmin: lo que no se autentico no llego a cambiar
+// nada, y auditarlo solo ensuciaria la tabla.
+platformAdminRouter.use(auditarCambiosDePlataforma);
 
 platformAdminRouter.get("/businesses", async (_req, res) => {
   const businesses = await prisma.business.findMany({

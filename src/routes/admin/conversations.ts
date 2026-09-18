@@ -42,6 +42,7 @@ import {
   validateProposedPrices,
 } from "../../orders/agreedPrices";
 import { upload, businessIdOf, isUnsupportedImageType, MAX_FILES_PER_MESSAGE } from "./shared";
+import { adminCostlyLimiter } from "../../auth/rateLimits";
 
 export const conversationsRouter = Router();
 
@@ -115,7 +116,7 @@ function placeholderForFolder(folder: UploadFolder, filename: string): string {
   return `[Documento] ${filename}`;
 }
 
-conversationsRouter.post("/api/conversations/:id/messages", upload.array("files", MAX_FILES_PER_MESSAGE), async (req, res) => {
+conversationsRouter.post("/api/conversations/:id/messages", adminCostlyLimiter, upload.array("files", MAX_FILES_PER_MESSAGE), async (req, res) => {
   const text = String(req.body?.text ?? "").trim();
   // El panel manda "files" (varios). El singular "file" queda aceptado porque la ruta es publica para
   // cualquier cliente que ya la use, y porque un solo archivo es el caso mas comun.

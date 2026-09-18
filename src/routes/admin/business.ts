@@ -17,6 +17,7 @@ import { logAiUsage } from "../../ai/usage";
 import { upload, businessIdOf } from "./shared";
 import { COUNTRIES, COUNTRY_CODES, isCountryCode } from "../../config/countries";
 import { parseBusinessHours } from "../../config/businessHours";
+import { adminCostlyLimiter } from "../../auth/rateLimits";
 
 // Los tres valores validos de Business.catalogPhotoScope. Vive aca y no en el panel: el servidor no
 // puede confiar en que el formulario mande uno de ellos.
@@ -235,7 +236,7 @@ businessRouter.delete("/api/whatsapp-templates/:name", requireOwner, async (req,
   }
 });
 
-businessRouter.post("/api/business/profile-photo", requireOwner, upload.single("file"), async (req, res) => {
+businessRouter.post("/api/business/profile-photo", requireOwner, adminCostlyLimiter, upload.single("file"), async (req, res) => {
   const file = req.file;
   if (!file) {
     res.status(400).json({ error: "No se subió ninguna imagen" });
@@ -279,7 +280,7 @@ businessRouter.delete("/api/reset-test-data", requireOwner, async (req, res) => 
   res.json({ ok: true });
 });
 
-businessRouter.post("/api/improve-instructions", requireOwner, async (req, res) => {
+businessRouter.post("/api/improve-instructions", requireOwner, adminCostlyLimiter, async (req, res) => {
   const text = String(req.body?.text ?? "").trim();
   if (!text) {
     res.status(400).json({ error: "No hay texto para mejorar" });

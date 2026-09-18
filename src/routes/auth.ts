@@ -2,7 +2,10 @@ import { Router } from "express";
 import rateLimit from "express-rate-limit";
 import { prisma } from "../db/client";
 import { hashPassword, verifyPassword, requestPasswordReset, resetPasswordWithCode } from "../auth/service";
-import { env } from "../config/env";
+
+import { normalizarCorreo } from "../auth/email";
+import { verificarCredencialDePlataforma } from "../auth/platformPassword";
+import { recordPlatformAction } from "../auth/platformAudit";
 
 export const authRouter = Router();
 
@@ -68,8 +71,17 @@ authRouter.post("/signup", authLimiter, async (req, res) => {
     }
   }
 
-  const existing = await prisma.business.findUnique({ where: { email } });
-  if (existing) {
+  const correo = normalizarCorreo(email);
+
+  // E29: se mira TeamMember ademas de Business, y esto no es cosmetico. Antes, registrar un negocio
+  // con el correo de un miembro de equipo existente CREABA el negocio igual; despues, el login busca
+  // Business primero, encuentra el nuevo, y esa persona no puede volver a entrar a su equipo nunca mas.
+  // Quedaba bloqueada para siempre y sin ningun mensaje que lo explicara.
+  const [existing, existingMember] = await Promise.all([
+    prisma.business.findUnique({ where: { email: correo } }),
+    prisma.teamMember.findUnique({ where: { email: correo } }),
+  ]);
+  if (existing || existingMember) {
     res.status(400).json({ error: "Ya existe una cuenta con ese email" });
     return;
   }
@@ -82,7 +94,7 @@ authRouter.post("/signup", authLimiter, async (req, res) => {
   const business = await prisma.business.create({
     data: {
       name: businessName,
-      email,
+      email: correo,
       passwordHash,
       contactPhone: contactPhone || null,
       planTier: key ? key.planTier : requestedTier,
@@ -134,8 +146,18 @@ authRouter.post("/login", authLimiter, async (req, res) => {
     return;
   }
 
-  if (env.platformAdmin.email && env.platformAdmin.password && email === env.platformAdmin.email && password === env.platformAdmin.password) {
+  const correo = normalizarCorreo(email);
+
+  // E29: ESTA ERA LA SEGUNDA COPIA del mismo agujero. La consola de plataforma tenia su propio login en
+  // platformAdmin.ts, y ademas se podia entrar por aca comparando la contrasena en texto plano con
+  // `===`. Arreglar solo una de las dos habria dejado la puerta abierta por la otra: ahora las dos
+  // llaman a la misma funcion, que es la unica que sabe como se verifica esa credencial.
+  if (await verificarCredencialDePlataforma(email, password)) {
+    await new Promise<void>((resolve, reject) => {
+      req.session.regenerate((error) => (error ? reject(error) : resolve()));
+    });
     req.session.platformAdmin = true;
+    await recordPlatformAction({ action: "LOGIN_OK", actorEmail: correo, ip: req.ip ?? null, detail: "por /api/auth/login" });
     res.json({ isPlatformAdmin: true });
     return;
   }
@@ -144,7 +166,7 @@ authRouter.post("/login", authLimiter, async (req, res) => {
   // "Credenciales inválidas", que es mentira y deja al cliente probando contrasenas que si eran
   // correctas. El bot apagado no depende de este login: depende de active=false, que el servidor
   // comprueba donde importa (conectar WhatsApp).
-  const business = await prisma.business.findUnique({ where: { email } });
+  const business = await prisma.business.findUnique({ where: { email: correo } });
   if (business) {
     const valid = await verifyPassword(password, business.passwordHash);
     if (!valid) {
@@ -169,7 +191,7 @@ authRouter.post("/login", authLimiter, async (req, res) => {
 
   // Un empleado desactivado sigue sin entrar. Que su negocio este esperando activacion ya no lo
   // bloquea: ve el mismo panel en modo espera que su dueno.
-  const member = await prisma.teamMember.findUnique({ where: { email }, include: { business: true } });
+  const member = await prisma.teamMember.findUnique({ where: { email: correo }, include: { business: true } });
   if (!member || !member.active) {
     res.status(401).json({ error: "Credenciales inválidas" });
     return;
@@ -202,7 +224,7 @@ authRouter.post("/forgot-password", authLimiter, async (req, res) => {
     return;
   }
 
-  await requestPasswordReset(String(email));
+  await requestPasswordReset(normalizarCorreo(email));
 
   // Misma respuesta exista o no la cuenta, para no revelar que emails estan registrados
   res.json({ ok: true });
@@ -219,7 +241,7 @@ authRouter.post("/reset-password", authLimiter, async (req, res) => {
     return;
   }
 
-  const ok = await resetPasswordWithCode(String(email), String(code), String(newPassword));
+  const ok = await resetPasswordWithCode(normalizarCorreo(email), String(code), String(newPassword));
   if (!ok) {
     res.status(400).json({ error: "Código inválido o expirado" });
     return;

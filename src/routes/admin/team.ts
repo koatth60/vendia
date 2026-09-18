@@ -3,6 +3,7 @@ import { prisma } from "../../db/client";
 import { requireOwner } from "../../auth/requireOwner";
 import { hashPassword } from "../../auth/service";
 import { businessIdOf } from "./shared";
+import { normalizarCorreo } from "../../auth/email";
 
 export const teamRouter = Router();
 
@@ -21,15 +22,18 @@ teamRouter.post("/api/team", requireOwner, async (req, res) => {
     res.status(400).json({ error: "Faltan email, nombre o contraseña" });
     return;
   }
-  const existing = await prisma.teamMember.findUnique({ where: { email } });
-  const existingBusiness = await prisma.business.findUnique({ where: { email } });
+  // E29: normalizado antes de buscar Y antes de guardar. Buscar sin normalizar dejaba pasar un alta
+  // con el mismo correo escrito con mayusculas, que despues nadie podia usar para entrar.
+  const correo = normalizarCorreo(email);
+  const existing = await prisma.teamMember.findUnique({ where: { email: correo } });
+  const existingBusiness = await prisma.business.findUnique({ where: { email: correo } });
   if (existing || existingBusiness) {
     res.status(400).json({ error: "Ya existe una cuenta con ese email" });
     return;
   }
   const passwordHash = await hashPassword(password);
   const member = await prisma.teamMember.create({
-    data: { businessId: businessIdOf(req), email, name, passwordHash },
+    data: { businessId: businessIdOf(req), email: correo, name, passwordHash },
     select: { id: true, email: true, name: true, role: true, active: true, createdAt: true },
   });
   res.status(201).json(member);

@@ -14,6 +14,7 @@ import { uploadOnceToWhatsapp } from "../../whatsapp/mediaUpload";
 import { requireOwner } from "../../auth/requireOwner";
 import { upload, businessIdOf, isUnsupportedImageType, rolDe, emailDe } from "./shared";
 import { TransicionNoPermitida } from "../../orders/stateMachine";
+import { adminCostlyLimiter } from "../../auth/rateLimits";
 
 export const ordersRouter = Router();
 
@@ -34,7 +35,7 @@ ordersRouter.get("/api/orders/counts", async (req, res) => {
   res.json(counts);
 });
 
-ordersRouter.put("/api/orders/:id/ship", upload.single("file"), async (req, res) => {
+ordersRouter.put("/api/orders/:id/ship", adminCostlyLimiter, upload.single("file"), async (req, res) => {
   const businessId = businessIdOf(req);
   const note = String(req.body?.note ?? "").trim();
   const file = req.file;

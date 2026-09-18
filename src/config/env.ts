@@ -49,6 +49,10 @@ export const env = {
   },
   platformAdmin: {
     email: process.env.PLATFORM_ADMIN_EMAIL ?? "",
+    // E29 (2026-09-18): si el hash esta, es lo unico que se usa y la de texto plano se ignora. La de
+    // texto plano sigue existiendo para que cambiar esto no deje al dueno afuera de su propia consola
+    // en el despliegue siguiente - ver src/auth/platformPassword.ts, que es donde vive la decision.
+    passwordHash: process.env.PLATFORM_ADMIN_PASSWORD_HASH ?? "",
     password: process.env.PLATFORM_ADMIN_PASSWORD ?? "",
   },
   aws: {

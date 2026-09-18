@@ -1358,3 +1358,35 @@ model Session {
   @@index([expire])
   @@map("session")
 }
+
+// E29 (2026-09-18). AUDITORIA DE LA CONSOLA DE PLATAFORMA.
+//
+// La consola puede activar y desactivar negocios, cambiar su plan y su techo de gasto, y leer los
+// mensajes del dueno. Hasta hoy no quedaba rastro de nada de eso. Con clientes que pagan, "alguien
+// desactivo el negocio de Milena el martes" no tenia forma de responderse.
+//
+// UNA TABLA PARA DOS COSAS, a proposito: el bloqueo por intentos se calcula contando los LOGIN_FAILED
+// recientes de esa IP. Una segunda tabla de "intentos" tendria que mantenerse en sincronia con esta, y
+// el dia que se desincronicen el bloqueo dejaria de coincidir con lo que dice la auditoria. El registro
+// de lo que paso ES el contador.
+model PlatformAuditLog {
+  id String @id @default(cuid())
+  // LOGIN_OK / LOGIN_FAILED / LOGIN_BLOCKED / LOGOUT / BUSINESS_UPDATED.
+  action String
+  // El correo TAL COMO SE INTENTO, exista o no: en un intento fallido es el unico dato que hay sobre
+  // quien lo intento.
+  actorEmail String?
+  // Desde donde. Es lo que permite bloquear por intentos sin una segunda tabla.
+  ip String?
+  // Sobre que negocio, cuando la accion toca uno. SIN relacion declarada a proposito: si el negocio se
+  // borra, el rastro de lo que se le hizo tiene que sobrevivir. Una relacion con onDelete: Cascade
+  // borraria justamente la evidencia que esta tabla existe para guardar.
+  businessId String?
+  // Que cambio, en texto libre. No se guardan valores de secretos aca nunca.
+  detail String?
+  createdAt DateTime @default(now())
+
+  // El indice del bloqueo: se consulta por accion + ip + ventana de tiempo, en ese orden.
+  @@index([action, ip, createdAt])
+  @@index([businessId, createdAt])
+}

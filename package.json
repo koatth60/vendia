@@ -16,7 +16,8 @@
     "prisma:migrate": "prisma migrate dev",
     "backfill:peaks": "tsx scripts/backfill-voice-peaks.ts",
     "backup:db": "tsx scripts/backupDb.ts",
-    "restore:db": "tsx scripts/restoreDb.ts"
+    "restore:db": "tsx scripts/restoreDb.ts",
+    "hash:password": "tsx scripts/hashPassword.ts"
   },
   "keywords": [],
   "author": "",

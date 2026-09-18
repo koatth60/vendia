@@ -18,6 +18,7 @@ import { uploadMedia } from "../../media/s3";
 import { indexProductMedia } from "../../ai/photoIndex";
 import { requireOwner } from "../../auth/requireOwner";
 import { upload, businessIdOf, isUnsupportedImageType } from "./shared";
+import { adminCostlyLimiter } from "../../auth/rateLimits";
 
 export const catalogRouter = Router();
 
@@ -121,7 +122,7 @@ catalogRouter.post("/api/products/:id/detect-colors", async (req, res) => {
   res.json({ colors });
 });
 
-catalogRouter.post("/api/products/:id/media", upload.single("file"), async (req, res) => {
+catalogRouter.post("/api/products/:id/media", adminCostlyLimiter, upload.single("file"), async (req, res) => {
   if (!req.file) {
     res.status(400).json({ error: "No file uploaded" });
     return;

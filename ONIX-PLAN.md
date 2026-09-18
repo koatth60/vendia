@@ -1584,7 +1584,7 @@ cada login.
 
 ---
 
-### E29 · El login de plataforma y los límites de tasa
+### E29 · El login de plataforma y los límites de tasa — **CERRADA el 2026-09-18**, sin desplegar
 
 **Quita:** a la plataforma, tener una contraseña en texto plano en el entorno.
 **Porque:** `src/routes/platformAdmin.ts` compara contra texto plano, sin límite de tasa ni bloqueo
@@ -1598,6 +1598,58 @@ existente deje de bloquear a esa persona para siempre.
 **Se prueba:** una prueba por punto.
 **Tamaño:** L. **Depende de:** nada. **Bandera:** no.
 **Vuelta atrás:** revertir.
+
+**Cómo quedó (2026-09-18).**
+
+- **La contraseña de plataforma.** `PLATFORM_ADMIN_PASSWORD_HASH` (bcrypt). Si está, es lo único que se
+  usa y la de texto plano se ignora. Si no está, la vieja sigue funcionando con un `[ZAQI ALERT]` por
+  arranque — **a propósito**: cambiar el nombre de la variable y ya habría dejado al dueño afuera de su
+  propia consola en el despliegue siguiente, y una plataforma donde el administrador no puede entrar no
+  es más segura, es una plataforma caída. Lo que sí se cerró en los dos caminos es la comparación:
+  ninguno compara strings con `!==`, los dos van en tiempo constante, y ninguno sale temprano cuando el
+  correo no coincide (salir antes convertiría el tiempo de respuesta en un oráculo de "ese correo
+  existe").
+- **Había DOS copias del agujero.** Además de `platformAdmin.ts`, `/api/auth/login` tenía su propia
+  comparación en texto plano contra la misma variable. Arreglar una sola habría dejado la puerta
+  abierta por la otra; ahora las dos llaman a `verificarCredencialDePlataforma`.
+- **Límite de tasa y bloqueo por intentos.** El mismo limitador de `authRouter` en el login de la
+  consola, más un bloqueo por IP que se **lee de la base**, no de memoria: el limitador en memoria se
+  pierde al reiniciar, y hubo trece reinicios en un día — reiniciar el proceso no puede ser la forma de
+  saltearlo. El bloqueo es de esa IP y de nadie más: si bloqueara a todos, diez intentos de un
+  desconocido dejarían al dueño afuera, que es como un límite se convierte en el ataque.
+- **`PlatformAuditLog`, una tabla para dos cosas.** El bloqueo cuenta los `LOGIN_FAILED` recientes de
+  esa IP: el registro de lo que pasó **es** el contador. Una segunda tabla de "intentos" tendría que
+  mantenerse en sincronía con esta, y el día que se desincronicen el bloqueo dejaría de coincidir con
+  lo que dice la auditoría. Sin relación declarada a `Business` a propósito: si el negocio se borra, el
+  rastro de lo que se le hizo tiene que sobrevivir.
+- **La auditoría es middleware, no una llamada por ruta.** Una llamada por ruta es una regla que
+  alguien tiene que cumplir, y la ruta que se agregue mañana no la va a cumplir. **Nunca se guarda el
+  cuerpo:** `PATCH /businesses/:id/whatsapp` recibe el token de acceso de Meta, y una auditoría que
+  copie el cuerpo sería una tabla llena de credenciales.
+- **Límite de tasa en todo `/admin/api/*`**, con la clave puesta en el **negocio** cuando hay sesión y
+  en la IP cuando no: con la IP como única clave, dos empleadas del mismo local comparten cupo y se
+  limitan entre ellas, mientras que un mismo negocio desde cuatro conexiones tiene cuatro cupos. Y un
+  limitador aparte, mucho más bajo, para lo que cuesta plata o disco (las cuatro subidas de archivo y
+  `improve-instructions`): 300 peticiones por minuto son nada para leer conversaciones y son 300
+  llamadas al modelo si el límite es uno solo.
+- **El correo deja de distinguir mayúsculas, y la garantía está en la base.** Índices únicos sobre
+  `lower("email")` en `Business` y `TeamMember`: dos cuentas que solo difieran en mayúsculas **no
+  pueden existir**, aunque una ruta futura se olvide de normalizar. `normalizarCorreo()` es para que el
+  error salga como un 400 claro, no para ser la garantía. La migración normaliza los datos existentes y
+  **falla si dos filas colisionan** — eso lo resuelve una persona decidiendo cuál se queda, no una
+  migración borrando una sola.
+- **`TeamMember` chequeado en el alta.** Antes, registrar un negocio con el correo de un miembro
+  existente creaba el negocio igual; después, el login busca `Business` primero, encuentra el nuevo, y
+  esa persona no podía volver a entrar a su equipo nunca más, sin ningún mensaje que lo explicara.
+
+18 pruebas nuevas (12 en `src/auth/platformSecurity.test.ts`, 6 en `src/routes/auth.email.test.ts`).
+Las de rutas levantan el server **con `trust proxy` igual que producción**: sin eso `req.ip` es la IP
+del socket y el bloqueo contaría a todos como la misma IP — el test habría pasado con el defecto puesto.
+
+> **Requiere un paso tuyo antes de que la etapa sirva de verdad** (está en `D11`): generar el hash con
+> `npm run hash:password -- 'la-contraseña'`, ponerlo en `PLATFORM_ADMIN_PASSWORD_HASH` y **borrar**
+> `PLATFORM_ADMIN_PASSWORD`. Hasta que lo hagas, la contraseña sigue en texto plano en el entorno y el
+> arranque lo grita en los logs. Es un paso de operaciones, no un despliegue.
 
 ---
 
@@ -2421,6 +2473,7 @@ Ninguna la resuelve el código. Cada una bloquea algo concreto.
 | **D7** | **Socket.IO con la Bandeja paginada:** ¿qué pasa cuando cambia una fila que no está en la página cargada? | (a) ignorarla, (b) mostrar "hay actividad más abajo" | `E45`. Es decisión de producto tanto como de código. |
 | **D8** | **Las tres cifras del hero de la landing** | (a) publicarlas, (b) borrar esa franja | `E54`. Sin ellas el hero queda igual de sólido. |
 | **D9** | **Construcción del logo** | A calada / B suelta a dos verdes / C en anillo | `E55`. Hasta que elijas, las pantallas siguen con la gota actual. |
+| **D11** | **Migrar la contraseña de la consola de plataforma al hash** | (a) hacerlo ahora, (b) dejarla en texto plano | Cierra del todo `E29`. No es técnico: es correr `npm run hash:password`, poner `PLATFORM_ADMIN_PASSWORD_HASH` en el entorno del servidor y borrar `PLATFORM_ADMIN_PASSWORD`. El código ya acepta las dos. |
 | **D10** | **Retención de conversaciones y media en S3** | (a) indefinida, (b) 12 meses, (c) 24 meses | Costo de S3 y exposición legal. No bloquea ninguna etapa. |
 
 **Trámites que no son código y conviene empezar ya:** verificación de negocio en Meta más URL de

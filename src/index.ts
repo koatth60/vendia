@@ -12,6 +12,8 @@ import { setupRealtime } from "./realtime/socket";
 import { whatsappRouter, getActiveTurnCount, flushPendingReplyBursts, getPendingReplyBurstCount } from "./routes/whatsapp";
 import { createOrderedShutdown } from "./shutdown";
 import { adminRouter } from "./routes/admin";
+import { adminApiLimiter } from "./auth/rateLimits";
+import { avisarSiLaClaveEstaEnTextoPlano } from "./auth/platformPassword";
 import { authRouter } from "./routes/auth";
 import { platformAdminRouter } from "./routes/platformAdmin";
 import { runFollowUpJob } from "./jobs/followUp";
@@ -30,6 +32,8 @@ const app = express();
 app.set("trust proxy", 1);
 // Fase 8, punto 8: va primero, para que cubra tambien las respuestas de error de todo lo que viene
 // despues. Ver src/security/headers.ts.
+avisarSiLaClaveEstaEnTextoPlano();
+
 app.use(securityHeaders);
 // Fase 8, punto 1: el cuerpo crudo de /webhook se captura ANTES del express.json() global, porque una
 // vez parseado el JSON los bytes originales se pierden y la firma HMAC de Meta ya no se puede
@@ -114,9 +118,12 @@ app.get("/sw.js", (_req, res) => {
 
 app.use(whatsappRouter);
 app.use("/auth", authRouter);
-app.use("/admin", adminRouter);
+// E29 (2026-09-18): el limitador va ANTES del router, no adentro de cada ruta. Adentro habria que
+// acordarse de ponerlo en cada una que se agregue; aca no hay forma de agregar una ruta del panel que
+// quede sin limite.
+app.use("/admin", adminApiLimiter, adminRouter);
 app.use("/admin", express.static(path.join(__dirname, "..", "public", "admin"), staticOptions));
-app.use("/zaqi-admin/api", platformAdminRouter);
+app.use("/zaqi-admin/api", adminApiLimiter, platformAdminRouter);
 app.use("/zaqi-admin", express.static(path.join(__dirname, "..", "public", "zaqi-admin"), staticOptions));
 // Fase 5 (ver ONIX-CRM-REORG-PLAN.md, P12 del diagnostico): el panel interno se llamaba
 // /vendia-admin desde antes del rebrand a Zaqi Solutions (2026-09-10). Redirect, no borrado - un
