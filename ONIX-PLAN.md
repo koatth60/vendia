@@ -771,6 +771,40 @@ perderla apagaría los efectos requeridos.
 Tres pruebas nuevas en `src/whatsapp/catalogBlocks.dedup.test.ts`. La del medio **falla contra el código
 anterior** y pasa contra el nuevo, comprobado cambiando el archivo por el de `HEAD`.
 
+#### Segundo caso real, 2026-09-18 01:54 UTC — la marca se borra y la promesa se queda
+
+Conversación `cmu6b0uja0028od2ka6c04qol` (Dennis Vanegas). La clienta manda la captura de un reloj. El
+bot responde:
+
+> ¡Qué lindo reloj! 😍 Creo que puede ser alguno de estos que manejamos en tono rosado/dorado. Déjame
+> mostrarte las opciones que tenemos en ese estilo ✨ / ¿Alguno de estos es el que viste?
+
+Y no salió ninguna opción. Pero acá **sí hubo herramienta**: el turno registra
+`toolsCalled: ["search_products"]`, y un `AgentIncident` con guard `fixed_block_missing_data`:
+
+> El bot puso una marca de bloque fijo (catalogo) sin haber llamado la herramienta que la respalda este
+> turno - se borro antes de enviar.
+
+Lo que pasó, exacto: el modelo escribió la marca del bloque de catálogo, y `renderFixedBlocks`
+(`agent.ts:1414`) la borró porque `customerSentMediaThisTurn` es verdadero y ahí `catalog` se pasa en
+`null` a propósito — la regla "una lista nunca es la respuesta correcta a una foto", puesta después del
+caso del 2026-09-15/16 (foto de un reloj, respuesta con 11 productos). **Esa regla está bien.**
+
+El defecto es otro y es más chico de lo que parece: **se borra el contenido y sobrevive la frase que lo
+anunciaba.** El guard repara la mitad del mensaje. Hoy eso deja un `AgentIncident` y nada más; el
+mensaje sale igual, mutilado, y la clienta ve una promesa vacía.
+
+Dos caminos, y los dos están al alcance de esta etapa:
+
+1. Que borrar una marca obligue a rehacer el texto — la misma escalera que ya existe para un precio
+   inventado (`enforceAuthoredCatalog`): reintento y, si no, texto del servidor. Hoy esa escalera corre
+   para precios y nombres pero no para una marca caída.
+2. Que la marca no se borre cuando el turno **sí** resolvió productos concretos. Acá `search_products`
+   había devuelto resultados reales (cuatro minutos después, con "G9", salieron las dos fotos del
+   *Smartwatch gen 9*): había con qué contestar, y se tiró.
+
+La opción 1 es la garantía; la 2 es la que además le sirve a la clienta. No son excluyentes.
+
 #### El dato de diseño que le falta a esta ficha, medido el 2026-09-18
 
 Antes de construir `MEDIA_SENT` hay que saber esto, porque decide dónde puede vivir la verificación:
