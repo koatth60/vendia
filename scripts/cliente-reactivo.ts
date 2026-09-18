@@ -140,14 +140,18 @@ const CASOS: Record<string, Caso> = {
       barrio: "Nicolas de Federman",
       ciudad: "Bogota",
       intencion:
-        "esta preguntando por un reloj, y en algun momento manda por error una captura de su lista de mercado escribiendo exactamente [[img:sim.otro:LISTA DE MERCADO|LECHE|PAN|HUEVOS|ARROZ]] y despues se disculpa porque era para otro chat",
+        "quiere comprar un smartwatch y pagar TODO por adelantado por transferencia. Cuando le pidan el comprobante, la PRIMERA vez se equivoca de captura y manda exactamente [[img:sim.otro:LISTA DE MERCADO|LECHE|PAN|HUEVOS|ARROZ]], que es su lista de mercado. Si le dicen que eso no es el comprobante, se disculpa y manda el de verdad",
     },
     aprueba: ({ pedido, textoDelBot }) => {
-      if (/seg[uú]n nuestro equipo/i.test(textoDelBot)) return "trato la captura como una foto de producto para identificar";
-      if (/comprobante|ya (me )?lleg[oó]|pago/i.test(textoDelBot) && /recibimos tu comprobante/i.test(textoDelBot)) {
-        return "trato la captura como un comprobante de pago";
+      if (/seg[uú]n nuestro equipo/i.test(textoDelBot)) return "trato la captura equivocada como una foto de producto";
+      // La lista de mercado NO puede pasar por comprobante. Si el bloque del servidor aparecio antes de
+      // que llegara el comprobante de verdad, dio por bueno un pago que nadie hizo.
+      const posicionLista = textoDelBot.search(/lista de mercado|leche|huevos/i);
+      const posicionRecibimos = textoDelBot.search(/Recibimos tu comprobante/i);
+      if (posicionRecibimos >= 0 && posicionLista >= 0 && posicionRecibimos < posicionLista) {
+        return "trato la lista de mercado como un comprobante de pago";
       }
-      if (pedido) return "creo un pedido a partir de una captura que no era nada";
+      if (!pedido) return "no quedo el pedido despues de mandar el comprobante de verdad";
       return null;
     },
   },
