@@ -24,6 +24,7 @@ import {
   resolveConfiguredPaymentMethod,
 } from "../catalog/paymentMethods";
 import { porQueNoEsUnNombre } from "../catalog/nombreDeCliente";
+import { metodosCompatibles } from "../catalog/pagoSegunModalidad";
 import { esLaImagenDelComprobante, faltaComprobanteDePago, FALTA_COMPROBANTE_NOTE } from "../orders/paymentProof";
 import { resolverModalidadDelPedido, filtrarMetodosPorZona } from "../orders/paymentTiming";
 import { listShippingRates, resolveShippingRateForCity } from "../catalog/shippingRates";
@@ -1206,7 +1207,28 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
       // El disparador es la ciudad que el SERVIDOR ya resolvio contra sus propias reglas (ver
       // recordShippingCity), no una lectura del mensaje. Sin ciudad resuelta no se filtra nada: todavia no
       // sabemos a donde va el pedido, y esconder un metodo por las dudas seria el error opuesto.
-      const methods = await filtrarMetodosPorZona(businessId, await listActivePaymentMethods(businessId), context.conversationId);
+      // E15b (2026-09-18). LO QUE YA SE DECIDIO NO SE VUELVE A PREGUNTAR.
+      //
+      // Elegida la modalidad, el momento en que entra la plata queda determinado, y con el el settlement
+      // que puede tener el metodo. Ofrecer igual los otros es hacerle al cliente la misma pregunta dos
+      // veces -- medido con una clienta que dijo "pago todo contraentrega", le preguntaron igual como
+      // queria pagar el producto, y tuvo que contestar "como te dije".
+      //
+      // Sale de una tabla de tres filas (ver pagoSegunModalidad.ts), no de leer la conversacion. Sin
+      // modalidad elegida no se filtra nada.
+      const porZona = await filtrarMetodosPorZona(businessId, await listActivePaymentMethods(businessId), context.conversationId);
+      const estadoDeLaVenta = await getSaleState(context.conversationId);
+      const modalidadElegida = estadoDeLaVenta?.shippingModality ?? null;
+      const methods = metodosCompatibles(porZona, modalidadElegida);
+      if (modalidadElegida && methods.length === 1) {
+        // Con la modalidad puesta y un solo metodo compatible, no hay nada que preguntar: el servidor lo
+        // deja registrado y el bot sigue con el cierre.
+        await setSaleStatePaymentMethod(businessId, context.conversationId, methods[0].id);
+        return {
+          methods: [{ id: methods[0].id, type: methods[0].type, label: methods[0].label, details: methods[0].details, seCobraAlRecibir: methods[0].settlement === "ON_DELIVERY" }],
+          note: `El cliente ya eligio como paga, asi que la forma de pago quedo resuelta sola: "${methods[0].label}". NO se lo vuelvas a preguntar. Si necesitas mostrar el numero/llave/titular, pon la marca ${PAYMENT_BLOCK_MARKER}.`,
+        };
+      }
       if (methods.length === 0) {
         return { methods: [], note: "Este negocio todavia no configuro formas de pago. Dile al cliente que un asesor le va a confirmar como pagar." };
       }

@@ -1,4 +1,5 @@
 import { prisma } from "../db/client";
+import { contradiceLaModalidad } from "../catalog/pagoSegunModalidad";
 import type { ShippingPaymentModality } from "@prisma/client";
 import { getProductById } from "../catalog/products";
 import { resolveShippingRateForCity } from "../catalog/shippingRates";
@@ -365,6 +366,21 @@ export async function setPaymentMethod(
       validMethods: active,
     };
   }
+  // E15b: un metodo que contradice la modalidad ya elegida NO se guarda en silencio.
+  //
+  // En la conversacion de Dennis (2026-09-18) el cliente eligio "Contraentrega" para el envio y despues
+  // "Nequi" para el producto; el pedido quedo con Contraentrega y nadie le dijo que su segunda respuesta
+  // se habia descartado. Elegir dos veces y que una se pierda sin avisar es peor que preguntar una vez.
+  //
+  // La contradiccion se calcula, no se interpreta: PaymentMethod.settlement contra
+  // SaleState.shippingModality (ver src/catalog/pagoSegunModalidad.ts). Rechazarla frena el cierre, que
+  // es lo que pide la etapa: el pedido no avanza hasta que el cliente resuelva cual de las dos vale.
+  const actual = await getSaleState(conversationId);
+  const choque = contradiceLaModalidad(method, actual?.shippingModality ?? null);
+  if (choque) {
+    return { ok: false, reason: "contradice_la_modalidad", error: choque };
+  }
+
   await upsertSaleState(conversationId, { paymentMethodId: method.id });
   const state = await getSaleState(conversationId);
   return { ok: true, state: state! };
