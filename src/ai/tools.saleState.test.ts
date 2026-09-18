@@ -113,6 +113,38 @@ test("save_customer_contact_info rechaza una cedula con forma invalida pero igua
   assert.equal(state?.idNumber, null);
 });
 
+test("un celular escrito con espacios o puntos se guarda igual, sin la puntuacion", async () => {
+  // Reportado desde produccion el 2026-09-18: el cliente escribio el celular separado y no se guardo
+  // nada, asi que el bot se lo volvio a pedir como si no lo hubiera dado. La validacion exigia que CADA
+  // caracter fuera un digito y un solo espacio tiraba el dato entero.
+  const context = await freshContext();
+  const result = (await runCatalogTool(context, "save_customer_contact_info", {
+    deliveryPhone: "314 863 7722",
+    idNumber: "1.004.074.880",
+  })) as { saved: boolean; deliveryPhone?: string; idNumber?: string; rejected?: Record<string, string> };
+
+  assert.equal(result.saved, true);
+  assert.equal(result.deliveryPhone, "3148637722", "se guarda limpio, no como lo escribio el cliente");
+  assert.equal(result.idNumber, "1004074880");
+  assert.equal(result.rejected, undefined);
+
+  const state = await prisma.saleState.findUnique({ where: { conversationId: context.conversationId } });
+  assert.equal(state?.deliveryPhone, "3148637722");
+  assert.equal(state?.idNumber, "1004074880");
+});
+
+test("limpiar separadores no convierte en telefono lo que no lo es", async () => {
+  // El filtro saca puntuacion de agrupar digitos, nunca letras: si no queda un numero real, se sigue
+  // rechazando igual que antes.
+  const context = await freshContext();
+  const result = (await runCatalogTool(context, "save_customer_contact_info", {
+    deliveryPhone: "no tengo celular",
+  })) as { saved: boolean; deliveryPhone?: string; rejected?: Record<string, string> };
+
+  assert.equal(result.deliveryPhone, undefined);
+  assert.ok(result.rejected?.deliveryPhone);
+});
+
 test("show_order_summary con la bandera activa lee SaleState e ignora el items del llamado", async () => {
   const context = await freshContext();
   await runCatalogTool(context, "set_order_item", { productId, quantity: 2 });

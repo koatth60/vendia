@@ -1337,14 +1337,28 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
       // herramienta, no prosa generada (la clase de guard que el plan si permite). Sin regex nueva:
       // conteo de caracteres plano. Por campo, no todo-o-nada: lo que sirve se guarda igual.
       const onlyDigits = (s: string) => [...s].every((c) => c >= "0" && c <= "9");
+      // LA GENTE ESCRIBE LOS NUMEROS SEPARADOS (2026-09-18). "314 863 7722", "1.004.074.880",
+      // "(+57) 320-893-5318" son el mismo dato que "3148637722" con la puntuacion con la que uno lee un
+      // numero en voz alta. La validacion de arriba exigia que CADA caracter fuera un digito, asi que un
+      // solo espacio tiraba el celular entero: no se guardaba, y el bot volvia a pedirlo como si el
+      // cliente no lo hubiera dado. Reportado desde produccion.
+      //
+      // Se limpian solo los separadores que una persona usa para agrupar digitos, nunca letras: "tres
+      // catorce" sigue sin ser un telefono, y "CC 1004074880" ya viene sin la etiqueta desde
+      // extractDeliveryDataFromAnswer. Lo que se guarda es la version limpia, asi que la base queda con
+      // un solo formato y dos numeros iguales escritos distinto dejan de ser dos numeros distintos.
+      const SEPARADORES = new Set([" ", "-", ".", "(", ")", "+", " "]);
+      const soloDigitos = (s: string) => [...s].filter((c) => !SEPARADORES.has(c)).join("");
       const rejected: Record<string, string> = {};
-      let validIdNumber = idNumber;
-      let validDeliveryPhone = deliveryPhone;
-      if (idNumber && !(onlyDigits(idNumber) && idNumber.length >= 6 && idNumber.length <= 15)) {
+      const idLimpio = idNumber ? soloDigitos(idNumber) : undefined;
+      const telefonoLimpio = deliveryPhone ? soloDigitos(deliveryPhone) : undefined;
+      let validIdNumber = idLimpio;
+      let validDeliveryPhone = telefonoLimpio;
+      if (idNumber && !(idLimpio && onlyDigits(idLimpio) && idLimpio.length >= 6 && idLimpio.length <= 15)) {
         rejected.idNumber = `"${idNumber}" no parece un numero de cedula real (solo digitos, 6 a 15).`;
         validIdNumber = undefined;
       }
-      if (deliveryPhone && !(onlyDigits(deliveryPhone) && deliveryPhone.length >= 7 && deliveryPhone.length <= 15)) {
+      if (deliveryPhone && !(telefonoLimpio && onlyDigits(telefonoLimpio) && telefonoLimpio.length >= 7 && telefonoLimpio.length <= 15)) {
         rejected.deliveryPhone = `"${deliveryPhone}" no parece un celular real (solo digitos, 7 a 15).`;
         validDeliveryPhone = undefined;
       }
