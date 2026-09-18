@@ -304,3 +304,15 @@ Cinco, y no una, porque esto es estocástico: una corrida limpia después de un 
 de las veces por azar aunque el defecto siga ahí. Cinco seguidas ya no.
 
 `PERSONA=<nombre> CONVERSACIONES=5 npx tsx scripts/cliente-reactivo.ts` repite la misma conversación.
+
+## `npx tsc --noEmit` NO mira `scripts/`
+
+`tsconfig.json` tiene `"include": ["src"]`. Los scripts se chequean con **`npm run typecheck:all`**
+(`tsconfig.scripts.json`), y hay que correrlo además del otro.
+
+Medido el 2026-09-18: cuatro veces seguidas se dio por bueno un script con `tsc --noEmit` en verde y el
+archivo ni siquiera parseaba — una cadena sin cerrar que esbuild rechazaba al ejecutarlo. Y al correr
+por fin `typecheck:all` aparecieron tres errores más, dos de ellos un `HumanControlReason` que no existe
+en el enum: `setHumanControl` habría fallado justo al devolverle el control al bot.
+
+Un `TSC_OK` que no incluye `typecheck:all` no dice nada sobre `scripts/`.

@@ -138,7 +138,7 @@ async function atenderLasQueEsperanUnaPersona(businessId: string) {
     });
     // Y se le devuelve la conversacion al bot, que es lo que cierra el circuito: sin esto queda muda
     // para siempre aunque la persona ya haya contestado.
-    await setHumanControl(businessId, c.id, false, "RESPUESTA_DEL_DUENO");
+    await setHumanControl(businessId, c.id, false, "PANEL_MESSAGE");
     console.log(`--- ${c.intent ?? "sin intent"} ${c.customer.phoneNumber}`);
     console.log(`    conteste como persona: ${enviado.delivered ? "SI" : "NO (" + (enviado.failure?.message ?? "sin detalle") + ")"}`);
     console.log(`    el bot vuelve a atender: SI\n`);

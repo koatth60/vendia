@@ -181,7 +181,7 @@ export async function atenderComoDueno(
     });
     // Devolverle el control al bot es lo que cierra el circuito: sin esto la conversacion queda muda
     // para siempre aunque la persona ya haya contestado.
-    await setHumanControl(businessId, conversationId, false, "RESPUESTA_DEL_DUENO");
+    await setHumanControl(businessId, conversationId, false, "PANEL_MESSAGE");
     atendidas++;
     await new Promise((r) => setTimeout(r, 2500));
   }

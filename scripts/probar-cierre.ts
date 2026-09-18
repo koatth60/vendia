@@ -140,7 +140,7 @@ async function main() {
   }
 
   const turnos = await prisma.agentTurn.findMany({
-    where: { conversation: { customerId: cliente.id } },
+    where: { conversationId: { in: conversaciones } },
     orderBy: { createdAt: "asc" },
     select: { toolsCalled: true },
   });

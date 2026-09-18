@@ -416,8 +416,7 @@ async function conversar(
     })
   )
     .map((m) => m.content ?? "")
-    .join("
-");
+    .join(String.fromCharCode(10));
 
   return { persona, telefono, pedido, incidentes, fichaFinal, mensajes: leidos, dichoPorElBot };
 }
