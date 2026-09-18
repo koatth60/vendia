@@ -28,6 +28,14 @@ import { prisma } from "../src/db/client";
 const URL_BASE = process.env.URL ?? "http://localhost:3000";
 const NEGOCIO = process.env.NEGOCIO ?? "Boutique Alondra";
 const PERSONAS = Number(process.env.PERSONAS ?? 1);
+/**
+ * Cuántas conversaciones correr en total, rotando las personas.
+ *
+ * Existe porque un hallazgo se CUENTA, no se ve una vez: esto es estocástico y dos corridas idénticas
+ * dan resultados distintos. Con una sola no se sabe si un defecto ocurre el 50% de las veces o el 10%.
+ */
+const CONVERSACIONES = Number(process.env.CONVERSACIONES ?? PERSONAS);
+const PARALELO = Number(process.env.PARALELO ?? 3);
 const MAX_TURNOS = Number(process.env.MAX_TURNOS ?? 14);
 const ESPERA_MAXIMA_MS = 90_000;
 
@@ -179,7 +187,12 @@ async function conversar(persona: Persona, indice: number, negocio: { id: string
     const mio = turno === 0 ? await loQueDiriaLaClienta(persona, [{ role: "user", content: "(abris el chat de la tienda)" }]) : await loQueDiriaLaClienta(persona, historia);
     const termina = mio.includes("[FIN]");
     const texto = mio.replace("[FIN]", "").trim();
-    if (!texto) break;
+    if (!texto) {
+      // Un mensaje vacio de la clienta corta el bucle. Se dice, para no confundirlo con una conversacion
+      // que el bot abandono: es del banco de pruebas.
+      console.log(`  (${persona.nombre}: la clienta devolvio un mensaje vacio, se corta aca)`);
+      break;
+    }
 
     historia.push({ role: "assistant", content: mio });
     const antes = await prisma.message.count({ where: { conversation: { customerId: cliente.id }, role: "ASSISTANT" } });
@@ -239,12 +252,21 @@ async function main() {
     process.exit(65);
   }
 
-  const elegidas = PERSONAS_POSIBLES.slice(0, Math.max(1, Math.min(PERSONAS, PERSONAS_POSIBLES.length)));
-  console.log(`${negocio.name}: ${elegidas.length} clienta(s) reactiva(s), hasta ${MAX_TURNOS} turnos cada una.\n`);
+  const cuantas = Math.max(1, CONVERSACIONES);
+  const elegidas = Array.from({ length: cuantas }, (_, i) => PERSONAS_POSIBLES[i % PERSONAS_POSIBLES.length]);
+  console.log(`${negocio.name}: ${cuantas} conversacion(es), hasta ${MAX_TURNOS} turnos cada una, ${PARALELO} a la vez.
+`);
 
-  const resultados = await Promise.all(
-    elegidas.map((p, i) => conversar(p, i + 1, negocio as { id: string; whatsappPhoneNumberId: string })),
-  );
+  // Cada conversacion lleva su propio numero (el indice), asi que repetir la misma persona no se pisa.
+  const resultados: Awaited<ReturnType<typeof conversar>>[] = [];
+  for (let desde = 0; desde < elegidas.length; desde += PARALELO) {
+    const tanda = elegidas.slice(desde, desde + PARALELO);
+    const hechas = await Promise.all(
+      tanda.map((p, i) => conversar(p, desde + i + 1, negocio as { id: string; whatsappPhoneNumberId: string })),
+    );
+    resultados.push(...hechas);
+    console.log(`(${resultados.length}/${cuantas})`);
+  }
 
   console.log("\n==================== RESUMEN ====================\n");
   for (const r of resultados) {

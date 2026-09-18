@@ -263,3 +263,22 @@ cierre que ocurre porque el guion adivinó los campos no demuestra nada.
 **Consecuencia práctica:** un guion de secuencia fija no puede cumplir esto del todo, porque no sabe qué
 le van a preguntar ni en qué orden. La forma correcta es un cliente que RESPONDA a lo que el bot dice,
 con una identidad y unos datos en el bolsillo que sólo suelta cuando se los piden.
+
+## Un arreglo no está hecho hasta que el error deja de reproducirse
+
+Decisión del dueño, 2026-09-18.
+
+**Cada vez que se encuentra un defecto y se arregla, hay que volver a correr la prueba que lo encontró,
+hasta que salga limpia.** No vale desplegar el arreglo y pasar al siguiente.
+
+Y como estas pruebas son estocásticas —dos corridas idénticas dan resultados distintos—, **una corrida
+limpia no prueba nada**. Un hallazgo se cuenta, no se ve una vez:
+
+- Si el defecto aparecía en 1 de cada 2 conversaciones, hacen falta varias corridas para poder decir que
+  bajó. Una sola sale limpia la mitad de las veces por azar.
+- Lo que se reporta es una **tasa** ("2 de 10"), no un veredicto ("funciona").
+
+Esto salió de tres afirmaciones equivocadas hechas en un solo día, las tres desde una sola corrida: "el
+pedido nunca se crea" (se creaba), "no sale el aviso de venta" (salía, se buscó la frase equivocada) y
+"32 incidentes reales" (el detector contaba promesas condicionales y se disparaba antes de que se
+registrara la consulta).
