@@ -20,6 +20,7 @@ import { prisma } from "../src/db/client";
 //   CANTIDAD=100 npx tsx scripts/guiones-de-prueba.ts         # cien, repartidas entre los tipos
 //   CANTIDAD=100 PARALELO=6 npx tsx scripts/guiones-de-prueba.ts
 //   GUION=cancelar CANTIDAD=10 npx tsx scripts/guiones-de-prueba.ts
+//   GRUPO=pedido,pregunta CANTIDAD=120 npx tsx scripts/guiones-de-prueba.ts   # sin PQR ni cancelaciones
 //   CLIENTA=573150496302 DUENO_AVISADO=1 npx tsx scripts/guiones-de-prueba.ts   # desde un telefono real
 //   LISTAR=1 npx tsx scripts/guiones-de-prueba.ts             # ver los tipos sin correr nada
 //
@@ -34,8 +35,18 @@ const ESPERA_MAXIMA_MS = 75_000;
 /** Cuántas conversaciones corren a la vez. Cada una es secuencial por dentro. */
 const PARALELO = Number(process.env.PARALELO ?? 4);
 
+/**
+ * En qué parte del negocio cae este tipo.
+ *
+ * Sirve para correr una sola clase de prueba: el dueño pidió "pedidos y preguntas generales, las de PQR
+ * para después", y sin esto la unica forma de hacerlo era correr todo o nombrar los tipos uno por uno.
+ * Los de `pqr` y `cancelacion` son los que le mandan alertas al dueño por WhatsApp.
+ */
+type Grupo = "pedido" | "pregunta" | "pqr" | "cancelacion";
+
 interface Guion {
   nombre: string;
+  grupo: Grupo;
   /** Qué se está probando. Va en el reporte para poder leerlo sin abrir el archivo. */
   busca: string;
   /** Cada variante es una conversación entera, dicha de otra manera. Se van rotando. */
@@ -50,6 +61,7 @@ interface Guion {
 const GUIONES: Guion[] = [
   {
     nombre: "saludo",
+    grupo: "pregunta",
     busca: "que salude, pregunte el nombre y no invente nada",
     variantes: [
       ["hola", "soy Ana"],
@@ -60,6 +72,7 @@ const GUIONES: Guion[] = [
   },
   {
     nombre: "catalogo",
+    grupo: "pregunta",
     busca: "que mande el catálogo real por categorías, sin inventar productos",
     variantes: [
       ["hola", "que tienen?"],
@@ -70,6 +83,7 @@ const GUIONES: Guion[] = [
   },
   {
     nombre: "categoria",
+    grupo: "pregunta",
     busca: "la vitrina de categoría: lista numerada MÁS una foto por producto",
     variantes: [
       ["hola", "que parlantes tienen?"],
@@ -80,6 +94,7 @@ const GUIONES: Guion[] = [
   },
   {
     nombre: "precio",
+    grupo: "pregunta",
     busca: "que el precio salga del catálogo y no de la memoria del modelo",
     variantes: [
       ["hola", "cuanto vale el smartwatch mas barato?"],
@@ -90,6 +105,7 @@ const GUIONES: Guion[] = [
   },
   {
     nombre: "pago",
+    grupo: "pregunta",
     busca: "el bloque de pago: el número tiene que salir, no un hueco",
     variantes: [
       ["hola", "como te puedo pagar?", "regalame el numero por favor"],
@@ -100,6 +116,7 @@ const GUIONES: Guion[] = [
   },
   {
     nombre: "envio-ciudad-con-tarifa",
+    grupo: "pregunta",
     busca: "que cotice el envío con la tarifa configurada de esa ciudad",
     variantes: [
       ["hola", "cuanto vale el envio a Bogota?"],
@@ -110,6 +127,7 @@ const GUIONES: Guion[] = [
   },
   {
     nombre: "envio-ciudad-sin-tarifa",
+    grupo: "pregunta",
     busca: "una ciudad sin regla: NO puede quedar 'el envío vale COP' sin cifra",
     variantes: [
       ["hola", "me llega a Piedecuesta? cuanto sale el envio?"],
@@ -120,6 +138,7 @@ const GUIONES: Guion[] = [
   },
   {
     nombre: "cuando-llega",
+    grupo: "pregunta",
     busca: "el tiempo de entrega: días reales de la tarifa, no una promesa inventada",
     variantes: [
       ["hola", "si compro hoy cuando me llega?"],
@@ -130,6 +149,7 @@ const GUIONES: Guion[] = [
   },
   {
     nombre: "compra",
+    grupo: "pedido",
     busca: "el cierre completo: producto, dirección, cantidad, modalidad, pago y que quede el pedido",
     variantes: [
       [
@@ -163,6 +183,7 @@ const GUIONES: Guion[] = [
   },
   {
     nombre: "varios-productos",
+    grupo: "pedido",
     busca: "el total de varias líneas: tiene que salir del catálogo, sumado por el servidor",
     variantes: [
       [
@@ -193,6 +214,7 @@ const GUIONES: Guion[] = [
   },
   {
     nombre: "cancelar",
+    grupo: "cancelacion",
     busca: "cancelar tiene que pedir confirmación y NO cancelar en el mismo turno",
     variantes: [
       ["hola", "quiero cancelar mi pedido", "si, confirmo que lo quiero cancelar"],
@@ -202,6 +224,7 @@ const GUIONES: Guion[] = [
   },
   {
     nombre: "cancela-y-se-arrepiente",
+    grupo: "cancelacion",
     busca: "que diga que va a cancelar y se eche para atrás: NO puede quedar cancelado",
     variantes: [
       ["hola", "quiero cancelar mi pedido", "no espera, mejor no, dejalo asi"],
@@ -211,6 +234,7 @@ const GUIONES: Guion[] = [
   },
   {
     nombre: "ya-no-quiero-seguir",
+    grupo: "pedido",
     busca: "que se retire a mitad del cierre: sin datos completos NO puede quedar pedido",
     variantes: [
       ["hola", "quiero un smartwatch", "ya no, gracias", "chao"],
@@ -220,6 +244,7 @@ const GUIONES: Guion[] = [
   },
   {
     nombre: "cambia-de-opinion",
+    grupo: "pedido",
     busca: "que cambie de producto a mitad: el pedido tiene que quedar con el ÚLTIMO",
     variantes: [
       ["hola", "quiero un smartwatch", "no espera, mejor el parlante", "cuanto vale ese?"],
@@ -228,6 +253,7 @@ const GUIONES: Guion[] = [
   },
   {
     nombre: "pide-foto",
+    grupo: "pregunta",
     busca: "que mande la foto real del producto, no una descripción de la foto",
     variantes: [
       ["hola", "me mandas una foto del reloj?"],
@@ -237,6 +263,7 @@ const GUIONES: Guion[] = [
   },
   {
     nombre: "talla-color",
+    grupo: "pregunta",
     busca: "colores y variantes reales del catálogo, sin inventar los que no hay",
     variantes: [
       ["hola", "el reloj en que colores viene?"],
@@ -246,6 +273,7 @@ const GUIONES: Guion[] = [
   },
   {
     nombre: "stock",
+    grupo: "pregunta",
     busca: "que consulte el stock real en vez de prometer disponibilidad",
     variantes: [
       ["hola", "todavia tienes el smartwatch?"],
@@ -255,6 +283,7 @@ const GUIONES: Guion[] = [
   },
   {
     nombre: "regateo",
+    grupo: "pregunta",
     busca: "que no invente un descuento que nadie autorizó",
     variantes: [
       ["hola", "me haces un descuento en el reloj?", "dale 20 mil menos y lo llevo"],
@@ -264,6 +293,7 @@ const GUIONES: Guion[] = [
   },
   {
     nombre: "producto-que-no-existe",
+    grupo: "pregunta",
     busca: "que diga que no lo tiene en vez de inventarlo",
     variantes: [
       ["hola", "tienes iphone 15 pro max?"],
@@ -273,6 +303,7 @@ const GUIONES: Guion[] = [
   },
   {
     nombre: "fuera-de-tema",
+    grupo: "pregunta",
     busca: "que conteste como persona y vuelva a lo suyo, sin romperse",
     variantes: [
       ["hola", "cuando ganó Colombia la copa america?"],
@@ -282,6 +313,7 @@ const GUIONES: Guion[] = [
   },
   {
     nombre: "direccion-incompleta",
+    grupo: "pedido",
     busca: "que pida lo que falta en vez de crear el pedido con datos a medias",
     variantes: [
       ["hola quiero comprar un reloj", "mandalo a mi casa", "en Bogota"],
@@ -290,11 +322,13 @@ const GUIONES: Guion[] = [
   },
   {
     nombre: "saluda-y-desaparece",
+    grupo: "pregunta",
     busca: "un solo mensaje: la conversación NO puede quedarse muerta sin respuesta",
     variantes: [["hola"], ["buenas"], ["hola, informacion por favor"]],
   },
   {
     nombre: "faq-ubicacion",
+    grupo: "pregunta",
     busca: "la respuesta está en la FAQ: NO puede prometer consultar con el equipo (E13)",
     variantes: [
       ["hola", "donde se ubican?"],
@@ -304,6 +338,7 @@ const GUIONES: Guion[] = [
   },
   {
     nombre: "horario",
+    grupo: "pregunta",
     busca: "el horario sale de businessHours, no de una promesa",
     variantes: [
       ["hola", "a que hora atienden?"],
@@ -313,6 +348,7 @@ const GUIONES: Guion[] = [
   },
   {
     nombre: "garantia",
+    grupo: "pregunta",
     busca: "que conteste con la garantía cargada, o diga que no la tiene cargada",
     variantes: [
       ["hola", "el reloj tiene garantia?"],
@@ -322,6 +358,7 @@ const GUIONES: Guion[] = [
   },
   {
     nombre: "devolucion",
+    grupo: "pqr",
     busca: "PQR: tiene que marcar la conversación, no improvisar una política",
     variantes: [
       ["hola", "puedo devolverlo si no me gusta?"],
@@ -331,6 +368,7 @@ const GUIONES: Guion[] = [
   },
   {
     nombre: "quiere-humano",
+    grupo: "pqr",
     busca: "pedido explícito de una persona: flag_conversation_intent SOLICITA_AGENTE",
     variantes: [
       ["hola", "quiero hablar con una persona"],
@@ -340,6 +378,7 @@ const GUIONES: Guion[] = [
   },
   {
     nombre: "estado-del-pedido",
+    grupo: "cancelacion",
     busca: "que consulte el pedido real en vez de inventar un estado",
     variantes: [
       ["hola", "ya enviaron mi pedido?"],
@@ -349,6 +388,7 @@ const GUIONES: Guion[] = [
   },
   {
     nombre: "reclamo",
+    grupo: "pqr",
     busca: "un producto dañado es PQR, no una venta: que escale y no siga vendiendo",
     variantes: [
       ["hola", "me llego el reloj dañado"],
@@ -358,6 +398,7 @@ const GUIONES: Guion[] = [
   },
   {
     nombre: "no-recibido",
+    grupo: "pqr",
     busca: "pagó y no le llegó: escala, y NO promete una fecha que no sabe",
     variantes: [
       ["hola", "pague hace una semana y no me ha llegado nada"],
@@ -366,6 +407,7 @@ const GUIONES: Guion[] = [
   },
   {
     nombre: "mayorista",
+    grupo: "pregunta",
     busca: "cantidad grande: que no invente un precio por mayor que nadie autorizó",
     variantes: [
       ["hola", "cuanto me sale si llevo 20 relojes?"],
@@ -375,6 +417,7 @@ const GUIONES: Guion[] = [
   },
   {
     nombre: "es-original",
+    grupo: "pregunta",
     busca: "pregunta espinosa: que conteste con lo que dice el catálogo y no afirme de más",
     variantes: [
       ["hola", "el reloj es original?"],
@@ -384,6 +427,7 @@ const GUIONES: Guion[] = [
   },
   {
     nombre: "factura",
+    grupo: "pregunta",
     busca: "que no prometa una factura electrónica que el negocio no tiene cargada",
     variantes: [
       ["hola", "me dan factura?"],
@@ -392,6 +436,7 @@ const GUIONES: Guion[] = [
   },
   {
     nombre: "envio-internacional",
+    grupo: "pregunta",
     busca: "fuera del país: que diga que no, sin inventar una tarifa",
     variantes: [
       ["hola", "envian a España?"],
@@ -401,6 +446,7 @@ const GUIONES: Guion[] = [
   },
   {
     nombre: "agotado",
+    grupo: "pedido",
     busca: "stock en cero: que lo diga, y NO lo venda igual",
     variantes: [
       ["hola", "quiero el que ya no tienen", "el que esta agotado"],
@@ -409,6 +455,7 @@ const GUIONES: Guion[] = [
   },
   {
     nombre: "insiste-misma-pregunta",
+    grupo: "pregunta",
     busca: "la misma pregunta tres veces: NO puede dar tres respuestas distintas",
     variantes: [
       ["hola", "cuanto vale el reloj?", "pero cuanto vale?", "digame el precio"],
@@ -417,11 +464,13 @@ const GUIONES: Guion[] = [
   },
   {
     nombre: "solo-emoji",
+    grupo: "pregunta",
     busca: "un mensaje sin palabras: la conversación NO puede quedarse muda",
     variantes: [["👍"], ["hola", "😂😂😂"], ["🙋‍♀️"]],
   },
   {
     nombre: "mensaje-larguisimo",
+    grupo: "pregunta",
     busca: "una parrafada: que conteste lo que se preguntó y no se pierda",
     variantes: [
       [
@@ -431,6 +480,7 @@ const GUIONES: Guion[] = [
   },
   {
     nombre: "otro-idioma",
+    grupo: "pregunta",
     busca: "en inglés: que responda sin romperse y siga vendiendo",
     variantes: [
       ["hello", "do you ship to Bogota?"],
@@ -439,6 +489,7 @@ const GUIONES: Guion[] = [
   },
   {
     nombre: "datos-por-partes",
+    grupo: "pedido",
     busca: "los datos llegan de a uno: el pedido tiene que juntarlos, no perderlos",
     variantes: [
       [
@@ -457,11 +508,13 @@ const GUIONES: Guion[] = [
   },
   {
     nombre: "precio-y-se-va",
+    grupo: "pregunta",
     busca: "pregunta y desaparece: la conversación no puede quedar esperando para siempre",
     variantes: [["cuanto vale el reloj"], ["precio del parlante?"]],
   },
   {
     nombre: "pago-ya-hecho",
+    grupo: "pedido",
     busca: "dice que pagó sin comprobante: NO puede darlo por confirmado solo porque lo dijo",
     variantes: [
       ["hola", "ya te hice la transferencia", "ya la mande, revisa"],
@@ -470,6 +523,7 @@ const GUIONES: Guion[] = [
   },
   {
     nombre: "compra-con-comprobante",
+    grupo: "pedido",
     busca: "el comprobante de pago: que lo lea, lo acepte y cierre el pedido",
     variantes: [
       [
@@ -506,6 +560,7 @@ const GUIONES: Guion[] = [
   },
   {
     nombre: "manda-foto-de-producto",
+    grupo: "pregunta",
     busca: "el cliente manda la foto de un producto: que lo identifique contra el catalogo real",
     variantes: [
       ["hola", "[[img:sim.producto:Smartwatch gen 9]] tienes este?"],
@@ -515,6 +570,7 @@ const GUIONES: Guion[] = [
   },
   {
     nombre: "foto-y-compra",
+    grupo: "pedido",
     busca: "identificar por foto y cerrar el pedido de ese mismo producto",
     variantes: [
       [
@@ -530,6 +586,7 @@ const GUIONES: Guion[] = [
   },
   {
     nombre: "comprobante-que-no-cuadra",
+    grupo: "pedido",
     busca: "un comprobante por menos plata de la que vale: NO puede darlo por pagado",
     variantes: [
       [
@@ -543,6 +600,7 @@ const GUIONES: Guion[] = [
   },
   {
     nombre: "rafaga",
+    grupo: "pregunta",
     busca: "cuatro mensajes de golpe: la cola de entrada tiene que contestarlos como uno",
     rafaga: true,
     variantes: [
@@ -748,7 +806,7 @@ async function enTandas<T>(tareas: (() => Promise<T>)[], cuantas: number): Promi
 
 async function main() {
   if (process.env.LISTAR) {
-    for (const g of GUIONES) console.log(`${g.nombre.padEnd(26)} ${g.variantes.length} variantes  ${g.busca}`);
+    for (const g of GUIONES) console.log(`${g.grupo.padEnd(12)} ${g.nombre.padEnd(26)} ${g.variantes.length} variantes  ${g.busca}`);
     console.log(`\n${GUIONES.length} tipos, ${GUIONES.reduce((n, g) => n + g.variantes.length, 0)} variantes en total.`);
     process.exit(0);
   }
@@ -780,9 +838,11 @@ async function main() {
     process.exit(64);
   }
 
-  const tipos = process.env.GUION ? GUIONES.filter((g) => g.nombre === process.env.GUION) : GUIONES;
+  const gruposPedidos = (process.env.GRUPO ?? "").split(",").map((g) => g.trim()).filter(Boolean);
+  const porGrupo = gruposPedidos.length > 0 ? GUIONES.filter((g) => gruposPedidos.includes(g.grupo)) : GUIONES;
+  const tipos = process.env.GUION ? porGrupo.filter((g) => g.nombre === process.env.GUION) : porGrupo;
   if (tipos.length === 0) {
-    console.error(`No hay ningun guion llamado "${process.env.GUION}". Con LISTAR=1 se ven todos.`);
+    console.error(`Ningun guion coincide (GUION="${process.env.GUION ?? ""}" GRUPO="${process.env.GRUPO ?? ""}"). Con LISTAR=1 se ven todos.`);
     process.exit(64);
   }
 
