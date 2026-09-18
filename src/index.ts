@@ -25,6 +25,7 @@ import { runAbandonmentJob, ABANDONMENT_CHECK_INTERVAL_MS } from "./jobs/abandon
 import { runSaleConfirmationChaserJob, SALE_CONFIRMATION_CHASER_INTERVAL_MS } from "./jobs/saleConfirmationChaser";
 import { runPendingBurstJob, PENDING_BURST_INTERVAL_MS } from "./jobs/pendingBursts";
 import { runInboundEventsJob, INBOUND_EVENTS_INTERVAL_MS } from "./jobs/inboundEvents";
+import { runReconciliacionJob, RECONCILIACION_INTERVAL_MS } from "./jobs/reconciliacion";
 import { runStartupJobs } from "./jobs/startup";
 import { sinSolape } from "./jobs/sinSolape";
 import { runBackupJob, BACKUP_CHECK_INTERVAL_MS } from "./jobs/backup";
@@ -165,6 +166,9 @@ const guardiaChequeoDeConversaciones = sinSolape("chequeo de conversaciones", ru
 const guardiaColaDeSalida = sinSolape("cola de salida", runOutboundQueueJob);
 const guardiaVencimientoDeToken = sinSolape("vencimiento de token", runTokenExpiryJob);
 const guardiaRafagasPendientes = sinSolape("rafagas pendientes", runPendingBurstJob);
+const guardiaReconciliacion = sinSolape("reconciliacion de turnos perdidos", async () => {
+  await runReconciliacionJob();
+});
 const guardiaAbandonoDeConversaciones = sinSolape("abandono de conversaciones", runAbandonmentJob);
 const guardiaRespaldoDeLaBase = sinSolape("respaldo de la base", runBackupJob);
 const guardiaPerseguidorDeVentas = sinSolape("perseguidor de confirmaciones de venta", runSaleConfirmationChaserJob);
@@ -222,6 +226,13 @@ setInterval(() => {
 setInterval(() => {
   runInboundEventsJob().catch((error) => console.error("Error corriendo el job de la cola de entrada:", error));
 }, INBOUND_EVENTS_INTERVAL_MS);
+
+// E22: la reconciliacion. La cola de entrada cubre los fallos que VE; esto cubre la ausencia -- la
+// clienta escribio, el mensaje se registro, y la respuesta nunca salio. Hasta hoy eso no lo detectaba
+// nada: el unico numero que existia salio de una consulta escrita a mano para el plan.
+setInterval(() => {
+  guardiaReconciliacion.correr().catch((error) => console.error("Error corriendo el job de reconciliacion:", error));
+}, RECONCILIACION_INTERVAL_MS);
 
 // Fase 9: conversaciones inactivas pasan a ABANDONED y su carrito (si tenia) recibe la plantilla de
 // recuperacion. Ver src/jobs/abandonment.ts.

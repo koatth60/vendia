@@ -1495,7 +1495,7 @@ despliegues habría dejado una ventana donde el sistema está *peor* que antes.
 
 ---
 
-### E22 · Un turno perdido deja de ser invisible
+### E22 · Un turno perdido deja de ser invisible — **CERRADA el 2026-09-18**, sin desplegar
 
 **Quita:** al operador, tener que descubrir a mano que un cliente se quedó sin respuesta.
 **Porque:** hoy nada detecta una ausencia. `conversationHealth` detecta respuestas duplicadas y
@@ -1507,6 +1507,31 @@ para no contestar algo de hace horas como si fuera nuevo.
 **Se prueba:** una conversación con un mensaje sin respuesta aparece en la métrica y se reencola.
 **Tamaño:** M. **Depende de:** `E21`. **Bandera:** no.
 **Vuelta atrás:** revertir.
+
+**Cómo quedó (2026-09-18).** `E20`/`E21` cubren los fallos que la cola **ve**. Esto cubre la
+**ausencia**: la clienta escribió, el mensaje se registró, y la respuesta nunca salió.
+
+- **El criterio es que la ÚLTIMA palabra sea de ella**, no "hay mensajes sin respuesta después". Una
+  conversación donde escribió tres veces y el bot contestó una sola vez al final está bien atendida;
+  contarla como perdida haría que el bot conteste de nuevo algo que ya contestó.
+- **Se reencola la ráfaga, no el evento entrante.** El mensaje ya está en `Message`, así que reprocesar
+  el `InboundEvent` se deduplicaría ahí y no pasaría nada. Lo que falta es el turno.
+- **Más de 6 horas se anota pero NO se contesta.** Contestarle a alguien que escribió anoche como si
+  acabara de escribir es peor que no contestarle: la conversación ya siguió por otro lado y el bot
+  aparece hablando solo. Que ese número exista y se pueda ver es la otra mitad de la etapa.
+- **Cuatro exclusiones, cada una con su propia prueba**, porque cada una evita un mensaje de más a una
+  clienta real: control humano, ráfaga ya encolada, evento todavía reintentándose, negocio apagado.
+- La exclusión por `InboundEvent` va **atada por `wamid` al último mensaje**, no por negocio. La primera
+  versión excluía cualquier conversación de un negocio que tuviera algún evento pendiente — o sea que en
+  un negocio con tráfico la reconciliación no habría corrido nunca.
+
+**Lo que encontró la suite, y no era solo del test:** `runReconciliacionJob()` barría toda la base sin
+poder acotarse, así que en una prueba encolaba ráfagas para conversaciones dejadas por otros archivos.
+La propiedad de fondo es la misma fuera de las pruebas — **un trabajo que no se puede acotar es un
+trabajo que no se puede ejercitar sin efectos de más**. Ahora acepta un negocio opcional; el job lo llama
+sin él, y además permite reconciliar un negocio puntual a mano.
+
+10 pruebas nuevas. Suite completa: 999, 985 pasan, 0 fallan.
 
 ---
 
