@@ -9,14 +9,14 @@
 export interface OrderedShutdownDeps {
   closeServer: () => void;
   getActiveTurnCount: () => number;
-  // Fase 10, eje 19: un mensaje que llego y quedo esperando su ventana de agrupacion de rafaga
-  // (replyBurstBuffer en src/routes/whatsapp.ts) ya esta grabado en la base y Meta ya recibio el
-  // 200 - si el proceso se reinicia antes de que el timer normal dispare, nadie lo vuelve a
-  // intentar. flushPendingBursts fuerza esa descarga YA (entra a withConversationLock de
-  // inmediato, lo que incrementa getActiveTurnCount() de forma sincronica), asi que el bucle de
-  // espera de abajo, que ya existia para los turnos normales, tambien las cubre.
+  // Fase 10, eje 19, reescrito por E08 (2026-09-17): un mensaje que llego y quedo esperando su
+  // ventana de agrupacion de rafaga ya no se pierde en un reinicio -- espera como fila de
+  // PendingBurst, y el job de src/jobs/pendingBursts.ts la drena al arrancar. Asi que aca ya NO se
+  // arrancan turnos nuevos (arrancarlos justo antes de morir era como se quedaban a medias): lo
+  // unico que se hace es adelantar el reloj de lo que estaba esperando, para que la rafaga no tenga
+  // que terminar de esperar una ventana que empezo antes del reinicio.
   flushPendingBursts: () => Promise<void>;
-  getPendingBurstCount: () => number;
+  getPendingBurstCount: () => number | Promise<number>;
   sleep: (ms: number) => Promise<void>;
   now: () => number;
   log: (message: string) => void;
@@ -40,18 +40,13 @@ export function createOrderedShutdown(deps: OrderedShutdownDeps): ShutdownFn {
 
     deps.closeServer();
 
-    const pendingBursts = deps.getPendingBurstCount();
+    const pendingBursts = await deps.getPendingBurstCount();
     if (pendingBursts > 0) {
-      deps.log(
-        `Forzando la descarga de ${pendingBursts} rafaga(s) agrupada(s) pendiente(s) antes de esperar los turnos en vuelo...`
-      );
+      deps.log(`Adelantando el reloj de ${pendingBursts} rafaga(s) pendiente(s) para que se drenen al volver...`);
     }
-    // No se espera aca: podria tardar lo que tarde generateReply, y ya alcanza con que arranque -
-    // withConversationLock incrementa getActiveTurnCount() de inmediato (ver la nota en el tipo de
-    // arriba), asi que el bucle de espera que sigue ya la cubre dentro del mismo tope. Si de todos
-    // modos revienta, ya quedo reportado adentro (ver flushAll en burstBuffer.ts); esto es una red
-    // de seguridad extra.
-    deps.flushPendingBursts().catch((error) => deps.logError(`Error vaciando el buffer de rafaga en el apagado: ${error}`));
+    // No se espera: es un UPDATE corto y, si fallara, la rafaga sigue guardada y se drena igual
+    // cuando venza su ventana original. Nada de esto arranca turnos nuevos.
+    deps.flushPendingBursts().catch((error) => deps.logError(`Error adelantando las rafagas pendientes en el apagado: ${error}`));
 
     const deadline = deps.now() + graceMs;
     while (deps.getActiveTurnCount() > 0 && deps.now() < deadline) {

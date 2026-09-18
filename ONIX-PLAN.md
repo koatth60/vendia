@@ -374,6 +374,12 @@ escrituras de credenciales de WhatsApp están cubiertas — la del cliente respo
 el flujo completo: crear una cuenta sin clave, ver el aviso en el panel, activarla, comprobar que
 ya conecta WhatsApp.
 
+**Deriva de esquema encontrada el 2026-09-17** (al generar la migración de `E08`): la base tiene un
+índice `Conversation_pendingConfirmationNextAttemptAt_idx` que `schema.prisma` ya no declara, así que
+`prisma migrate dev` propone borrarlo en cada migración nueva. Se quitó a mano del SQL de `E08`
+—ninguna migración de este plan borra nada— y hay que quitarlo a mano de la siguiente también, hasta
+que se decida aparte si el índice se declara de nuevo o se borra en una migración propia.
+
 **Decisión pendiente, sin urgencia:** `POST /auth/request-key` y el modelo `KeyRequest` quedaron
 sin uso desde el front el 2026-09-17 — crear la cuenta *es* la solicitud. La sección "Solicitudes
 de clave" del panel de plataforma sigue mostrando filas históricas. No se borró nada.
@@ -463,6 +469,8 @@ en MAGByLizN pesaba más: 84 líneas contra 541. Toda etapa que se lleve un hech
 ---
 
 ### E06 · De dónde sale la respuesta duplicada — diagnóstico, sin cambio de código
+**Lectura del código HECHA el 2026-09-17** (hallazgos debajo de la ficha). Falta correr la
+clasificación contra producción para cerrarla.
 
 **Quita:** nada todavía. Es la única etapa de lectura del plan, y existe porque el incidente número
 uno no tiene causa raíz escrita en ningún lado.
@@ -478,9 +486,77 @@ y se escribe el resultado en este archivo, debajo de esta ficha. Nada más.
 **Tamaño:** S. **Depende de:** nada.
 **Vuelta atrás:** no aplica.
 
+#### Lo que encontró la lectura del código (2026-09-17)
+
+**Qué cuenta exactamente el detector.** Dos filas `ASSISTANT` seguidas, ninguna con `mediaType`,
+menos de 12 s entre ellas y **sin ninguna fila del cliente en el medio** — cualquier `CUSTOMER`
+rompe la adyacencia y el par no se forma (`conversationHealth.ts:95-103`). Eso no es "dos turnos":
+es "de este lado salieron dos mensajes seguidos". Todo lo que sigue nace de esa distinción.
+
+**Las tres candidatas, medidas contra el árbol:**
+
+1. **El lock en memoria — no puede producir esta firma hoy.** Tres razones, las tres verificables sin
+   base de datos. `ecosystem.config.js` fija `exec_mode: "fork"` + `instances: 1`, así que no existe
+   el segundo proceso contra el cual el `Map` no protege. En `withConversationLock`
+   (`whatsapp.ts:106-128`) el `get` y el `set` del `Map` ocurren sin ningún `await` en medio, así que
+   dos webhooks no pueden leer el mismo `previous`. Y la fila `CUSTOMER` del mensaje entrante se
+   graba **adentro** de ese mismo lock (`whatsapp.ts:1045`): un mensaje que llega mientras se está
+   generando una respuesta se graba *después* de esa respuesta, así que la secuencia queda `C A C A`
+   y nunca forma un par. Lo que el lock no protege es todo lo que nunca se lo pide — punto 4.
+2. **El `burstBuffer` — tampoco.** Una ráfaga que se descarga mientras corre otra queda encolada
+   detrás del mismo lock, y le suma su ventana de silencio (8 s) más su propia generación antes de
+   escribir: el hueco entre las dos filas queda casi siempre por encima de los 12 s que el detector
+   mira. Que pierda mensajes en un reinicio es cierto y es el problema que `E08` arregla, pero
+   perder no es duplicar: el webhook ya devolvió 200 y Meta no reintenta.
+3. **Un turno que escribe varios mensajes — es la única de las tres que produce la firma**, y lo hace
+   por dos caminos distintos, los dos a menos de un segundo entre filas:
+   - `sendTextInChunks` (`outbound.ts:398`): toda respuesta de más de 700 caracteres sale partida, y
+     **cada trozo graba su propia fila** (`recordAs` por trozo, `outbound.ts:405`), con
+     `SPLIT_PAUSE_MS = 600` de pausa. Una respuesta larga de tres trozos deja dos pares, no uno.
+   - `sendCatalogBlocks` (`catalogBlocks.ts:92`): la frase del modelo sale primero y el bloque
+     compuesto por el servidor después, con `BLOCK_GAP_MS = 900` entre bloques, y cada bloque de
+     texto graba su fila. Solo ocurre cuando el bloque **no** viajó dentro del mensaje del modelo
+     (`AgentTurn.catalogInlined = false`), que es la columna con la que el script de abajo lo
+     confirma sin tener que adivinar.
+
+**Una cuarta clase que este plan no listaba: los escritores que nunca piden el lock.** Graban filas
+`ASSISTANT` en la conversación del cliente sin pasar por `withConversationLock`, así que pueden caer
+al lado de una respuesta del bot: la respuesta del dueño relevada al cliente (`whatsapp.ts:323, 345,
+403, 422, 433` — corre en el webhook del teléfono del **dueño**, que es otra conversación y otro
+lock), el cierre de venta por confirmación del dueño (`whatsapp.ts:502, 521`), el mensaje manual y la
+plantilla del panel (`admin/conversations.ts:247, 359`), los avisos de pedido (`admin/orders.ts:70,
+141`), los jobs (`followUp.ts:45`, `abandonment.ts:67`, `escalationReminder.ts`,
+`saleConfirmationChaser.ts`) y el drenaje de la cola (`outbound.ts:634`). Para el cliente esto sí es
+un mensaje encima de otro — el del dueño es el que se lee contradictorio — pero **no lo arreglan
+`E07` ni `E08`**, porque no hay dos turnos compitiendo: hay dos autores distintos.
+
+**Un defecto aparte, encontrado de paso.** `deliverOwnerAnswerToCustomer` (`whatsapp.ts:190`) manda
+con `onWindowClosed: "queue"` y **sin** `recordAs`, y el llamador graba la fila igual
+(`whatsapp.ts:323, 345, 403, 422, 433`). Si la ventana de 24 h estaba cerrada, el mensaje queda en
+cola y, al entregarse, `deliverQueuedItem` lo graba **otra vez** (`outbound.ts:634`): un envío, dos
+filas. El detector no lo ve (quedan separadas por minutos u horas), pero el modelo lee esa respuesta
+dos veces en el historial. No es de `E06` arreglarlo — queda anotado acá para que no se redescubra.
+
+**Lo que esto le hace a `E07` y `E08`.** Las dos siguen valiendo por lo que dicen quitar: `E07` le
+quita al operador ser responsable de no escalar el proceso, `E08` le quita a un reinicio poder
+perder una ráfaga. Pero **ninguna de las dos baja el número que este detector reporta**, salvo la
+porción que caiga en `DOS_TURNOS`. Si esa porción sale chica contra producción, lo que hay que
+cambiar es el detector: estaría contando como incidente algo que el sistema hace a propósito, y un
+detector que cuenta lo normal entrena a ignorar lo anormal — el mismo motivo por el que el
+2026-09-17 se le sacó el aviso al dueño.
+
+**Lo que falta para cerrar `E06`.** La clasificación contra producción, que no se puede hacer desde
+un entorno sin la base: `npx tsx scripts/e06-clasificar-duplicadas.ts` en el droplet (solo lectura,
+se puede correr con el bot andando) reconstruye los pares desde `Message` con la regla exacta del
+detector y los reparte en `TROZOS`, `BLOQUE_CATALOGO`, `DOS_TURNOS`, `OTRO_AUTOR`, `COLA` y
+`UN_TURNO_OTRO`, contrastando contra `AgentTurn.blocks` y `QueuedOutboundMessage`. Los reinicios de
+pm2 no están en la base; el script imprime la marca de hora de cada par para cruzarla a mano con
+`grep -iE "restart|starting" ~/.pm2/pm2.log`. **La tabla que salga va acá abajo, y con eso la etapa
+queda cerrada.**
+
 ---
 
-### E07 · El lock de conversación deja de vivir en memoria
+### E07 · El lock de conversación deja de vivir en memoria — **CERRADA el 2026-09-17** (commit `416dce7`), sin desplegar
 
 **Quita:** al operador, ser responsable de no escalar el proceso.
 **Porque:** lo que impide hoy que dos instancias dupliquen mensajes a clientes reales es una línea
@@ -492,9 +568,38 @@ entre procesos, se libera solo si el proceso muere, y no necesita Redis.
 **Tamaño:** M. **Depende de:** `E06` (para saber si es la causa). **Bandera:** no.
 **Vuelta atrás:** revertir; vuelve el `Map`.
 
+**Lo que quedó** (`src/db/conversationLock.ts`): un lock consultivo de **sesión**
+(`pg_advisory_lock` / `pg_advisory_unlock`, espacio de nombres `ONIX`) sobre
+`hashtext(conversationId)`, con su propio pool de `pg`.
+
+**No es `pg_advisory_xact_lock`, que es lo que pedía esta ficha.** Un lock de transacción obliga a
+tener una transacción **abierta** durante toda la sección crítica, y la sección crítica de un turno
+es `generateReply` + el envío: hasta 10 minutos (`STALE_REPLY_MINUTES`). Eso es una transacción
+inactiva por minutos y por conversación, con el horizonte de `xmin` congelado y `VACUUM` frenado; y
+las transacciones interactivas de Prisma **vencen solas**, así que al vencer sueltan el lock mientras
+el turno sigue corriendo. Un lock que se suelta a mitad de la sección crítica es peor que no tener
+lock, porque parece que protege. El lock de sesión da la misma garantía entre procesos, tampoco
+necesita Redis, y también se libera solo si el proceso muere — porque al morir se cae la conexión,
+que es justo lo que la cuarta prueba comprueba.
+
+**La cadena en memoria se queda, con otro trabajo.** No son dos mecanismos para lo mismo: la cadena
+garantiza el **orden de llegada** dentro del proceso (el lock no puede: dos llamadas simultáneas
+compiten por una conexión del pool, y el orden en que la consiguen no está definido), y el lock
+garantiza la **exclusión entre procesos** (la cadena no puede: cada proceso tiene su propio `Map`).
+
+**Se probó** con dos pools distintos, que para Postgres es exactamente lo mismo que dos procesos:
+no se solapan en la misma conversación, sí corren en paralelo en conversaciones distintas, una
+sección que revienta suelta el lock, y un proceso que muere lo suelta solo.
+
+**Esto no baja el número de `RESPUESTA_DUPLICADA`** — `E06` ya mostró que ese detector cuenta sobre
+todo un turno mandando varios mensajes. Lo que quita es la responsabilidad del operador de no
+escalar el proceso, que es lo que `E23` necesita para poder separar `web` y `worker`. El comentario
+de `ecosystem.config.js` ya dice eso: `instances: 1` sigue ahí porque nada pide todavía dos
+procesos, no porque correr dos duplique respuestas.
+
 ---
 
-### E08 · La ráfaga no muere con el proceso
+### E08 · La ráfaga no muere con el proceso — **CERRADA el 2026-09-17** (commit `7644d70`), sin desplegar
 
 **Quita:** al operador, que un reinicio pierda los mensajes agrupados.
 **Porque:** `burstBuffer` vive en memoria. Un reinicio en medio de una ráfaga la pierde entera, y una
@@ -504,6 +609,35 @@ ráfaga a medias es una de las formas en que salen dos respuestas.
 un reinicio en el medio.
 **Tamaño:** M. **Depende de:** `E06`. **Bandera:** no.
 **Vuelta atrás:** revertir el código; la tabla queda muerta.
+
+**Lo que quedó.** Tabla `PendingBurst` (migración `20260917233820_rafaga_persistente`, aditiva: tabla
+nueva y dos índices, nada existente se toca) con una fila por mensaje entrante;
+`src/conversation/pendingBursts.ts` tiene el encolado, el reclamo y el drenaje, y
+`src/jobs/pendingBursts.ts` mira el reloj cada segundo. La ventana de silencio y su tope no cambian
+de valor, solo de lugar. `src/whatsapp/burstBuffer.ts` y su prueba se borraron: no los usaba nadie
+más.
+
+**Cuatro decisiones que valen más que el código.**
+1. El negocio, el cliente y las credenciales **no** se guardan en la fila: se leen de la base al
+   contestar. Es la regla que dejó el despliegue de `E01`–`E05c` — un hecho que se escribe una vez y
+   se lee muchas es un hecho que va a mentir.
+2. El drenaje **arranca** los turnos y no los espera. Esperar uno por uno habría puesto a cada
+   cliente en fila detrás del turno más lento de otro negocio, que es justo lo que la versión con
+   timers no hacía.
+3. Una ráfaga reclamada por un proceso que murió se suelta a los 10 minutos (`STALE_REPLY_MINUTES`).
+   Al volver a tomarse, `runGenerateAndSend` la descarta por vieja y pasa la conversación a una
+   persona — que es exactamente lo que corresponde con un mensaje de hace diez minutos.
+4. Un turno que revienta borra igual su ráfaga. Reintentar después de un envío a medias es como se
+   le manda dos veces lo mismo a un cliente.
+
+**El apagado ordenado cambió de sentido.** Ya no fuerza la descarga (arrancar turnos justo antes de
+morir era como se quedaban a medias): ahora solo adelanta el `flushAt` de lo pendiente, para que al
+volver se drene de una en vez de terminar de esperar una ventana que empezó antes del reinicio.
+
+**Se probó** con 9 pruebas, entre ellas la que pedía la ficha — tres mensajes en dos segundos
+producen **una** sola generación, también con un reinicio en el medio — más el reclamo exclusivo
+entre dos procesos, el rescate de una ráfaga cuyo proceso murió con el reclamo puesto, y que dos
+conversaciones distintas se contestan en paralelo.
 
 ---
 
@@ -551,7 +685,7 @@ Va cuando haya 48 h de pedidos creados bien, no antes: hoy esa plantilla es el r
 
 ---
 
-### E09b · La FAQ entra al turno como dato
+### E09b · La FAQ entra al turno como dato — **CERRADA el 2026-09-17** (commit `cf23211`), desplegada
 
 **Quita:** al modelo, decidir si va a mirar lo que el negocio ya respondió.
 **Porque:** medido el 2026-09-17 sobre 14 días: **`get_faq` se llamó 0 veces en 179 turnos.**
@@ -1281,7 +1415,7 @@ descartes. Y es el diferenciador que ningún competidor tiene. Está a mitad de 
 
 ---
 
-### E56 · Lo que el dueño contesta a mano deja de tirarse
+### E56 · Lo que el dueño contesta a mano deja de tirarse — **CERRADA el 2026-09-17** (commit `7803a93`), sin desplegar
 
 **Quita:** al sistema, destruir la evidencia más valiosa que produce.
 **Porque:** cuando el dueño responde a mano desde el panel, ese par pregunta/respuesta se pierde: no
@@ -1314,6 +1448,26 @@ pregunta del dueño, un turno posterior **no** vuelve a exigir el efecto ni a re
 **Tamaño:** S. **Depende de:** nada. **Es el ítem de mejor relación valor/tamaño de todo el plan**, y
 desde el 2026-09-17 además corrige un defecto visible.
 **Vuelta atrás:** revertir.
+
+**Lo que quedó.** Columna `resolvedAt` en `PendingOwnerQuestion` (migración
+`20260917235030_pregunta_resuelta_no_borrada`, aditiva). Resolver marca y ya no borra:
+`clearPendingOwnerQuestion` pasó a `markPendingOwnerQuestionResolved` y
+`clearPendingOwnerQuestionsForConversation` a `markConversationOwnerQuestionsResolved`, porque los
+nombres viejos ya no dirían la verdad. El panel, al mandarle un mensaje de **texto** al cliente,
+llama `recordAskOwnerResolution` con ese texto como respuesta; una plantilla no, porque una plantilla
+no es la respuesta del dueño a nada y ensuciaría la FAQ.
+
+**La parte peligrosa no es marcar: es que "abierta" siga significando abierta** ahora que las filas
+no desaparecen. Llevan `resolvedAt: null` las cinco consultas que lo significan (preguntas abiertas
+por conversación y por negocio, el recordatorio, el timeout, y la que matchea la respuesta citada del
+dueño) y el conteo que libera `blockedBy`. **La única que no filtra es `ownerWasNotifiedSince`, a
+propósito**: ahí la pregunta no es "¿sigue abierta?" sino "¿se le avisó al dueño?", y avisado sigue
+avisado después de contestar. Esa distinción es toda la corrección del defecto visible.
+
+**Se probó** con 6 pruebas nuevas, incluida la que pedía la ficha (contestada la pregunta, un turno
+posterior ya no vuelve a exigir el aviso por la imagen ni a reenviar la respuesta) y la del panel
+dejando un candidato de FAQ. Cuatro pruebas existentes afirmaban que la fila **se borraba**: es el
+contrato que esta etapa cambia a propósito, y pasaron a afirmar `resolvedAt`.
 
 ---
 

@@ -19,6 +19,7 @@ import { runOutboundQueueJob, OUTBOUND_QUEUE_INTERVAL_MS } from "./jobs/outbound
 import { runTokenExpiryJob, TOKEN_EXPIRY_CHECK_INTERVAL_MS } from "./jobs/tokenExpiry";
 import { runAbandonmentJob, ABANDONMENT_CHECK_INTERVAL_MS } from "./jobs/abandonment";
 import { runSaleConfirmationChaserJob, SALE_CONFIRMATION_CHASER_INTERVAL_MS } from "./jobs/saleConfirmationChaser";
+import { runPendingBurstJob, PENDING_BURST_INTERVAL_MS } from "./jobs/pendingBursts";
 import { runStartupJobs } from "./jobs/startup";
 
 const app = express();
@@ -125,6 +126,13 @@ setInterval(() => {
 setInterval(() => {
   runTokenExpiryJob().catch((error) => console.error("Error corriendo el chequeo de vencimiento de token:", error));
 }, TOKEN_EXPIRY_CHECK_INTERVAL_MS);
+
+// E08: el reloj de las rafagas de mensajes. Antes era un setTimeout por rafaga dentro del proceso, asi
+// que un reinicio se llevaba la rafaga; ahora las rafagas son filas y este job las drena cuando vencen.
+// Corre cada segundo: la ventana de silencio es de 8 s, asi que esta resolucion no agrega latencia.
+setInterval(() => {
+  runPendingBurstJob().catch((error) => console.error("Error drenando las rafagas pendientes:", error));
+}, PENDING_BURST_INTERVAL_MS);
 
 // Fase 9: conversaciones inactivas pasan a ABANDONED y su carrito (si tenia) recibe la plantilla de
 // recuperacion. Ver src/jobs/abandonment.ts.

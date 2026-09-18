@@ -6,7 +6,7 @@ import {
   findPendingOwnerQuestionsDueForReminder,
   markPendingOwnerQuestionReminded,
   findPendingOwnerQuestionsPastTimeout,
-  clearPendingOwnerQuestionsForConversation,
+  markConversationOwnerQuestionsResolved,
   setHumanControl,
   findStalledConversationsDueForReminder,
   markStalledReminderSent,
@@ -159,7 +159,7 @@ export async function runEscalationReminderJob(): Promise<void> {
       });
       if (!alert.delivered) console.error(`No se pudo enviar aviso de timeout de escalacion (conversation=${pending.conversationId}):`, alert.failure?.message);
 
-      await clearPendingOwnerQuestionsForConversation(pending.conversationId);
+      await markConversationOwnerQuestionsResolved(pending.conversationId);
       await setHumanControl(business.id, pending.conversationId, true, "OWNER_QUESTION_TIMEOUT");
       await recordAgentIncident(business.id, "OWNER_QUESTION_TIMEOUT", text, pending.conversationId, "owner_question_timeout");
     }

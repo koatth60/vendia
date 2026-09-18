@@ -1,9 +1,12 @@
-// Fase 7 del plan maestro (2026-09-15): hasta esta fase esta config no estaba versionada, asi que la
+// Fase 7 del plan maestro (2026-09-15): hasta esa fase esta config no estaba versionada, asi que la
 // suposicion "pm2 corre esto como un solo proceso fork" vivia solo en un comentario
-// (src/routes/whatsapp.ts, cerca de conversationLocks) - de esa suposicion depende que el lock por
-// conversacion en memoria funcione. `instances: 1` + `exec_mode: "fork"` la dejan escrita en codigo: con
-// mas de una instancia o modo cluster, dos procesos pueden tomar la misma conversacion a la vez sin que
-// el lock se entere, porque el lock vive en la memoria de UN SOLO proceso.
+// (src/routes/whatsapp.ts, cerca de conversationLocks).
+//
+// E07 de ONIX-PLAN.md (2026-09-17): esa suposicion DEJO DE SER LA GARANTIA. La exclusion por
+// conversacion la da ahora un lock consultivo de Postgres (src/db/conversationLock.ts), que funciona
+// entre procesos; `instances: 1` + `exec_mode: "fork"` quedan como estan porque nada pide todavia mas
+// de un proceso, no porque correr dos duplique respuestas. El dia que E23 separe `web` y `worker`,
+// esto se cambia sin tener que arreglar nada mas antes.
 //
 // El script se corre con `node --import tsx` sobre la fuente en TypeScript, no sobre `dist/` - `dist/`
 // es salida de `npm run build` que produccion no usa (ver CLAUDE.md).

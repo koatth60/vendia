@@ -1,9 +1,11 @@
 import { Router } from "express";
 import { Prisma } from "@prisma/client";
+import type { PendingBurst as PendingBurstRow } from "@prisma/client";
 import { env } from "../config/env";
 import { toBusinessLocale, getBusinessLocale } from "../config/businessConfig";
 import { getPaymentExamples } from "../catalog/paymentMethods";
 import { prisma } from "../db/client";
+import { conversationLocker } from "../db/conversationLock";
 import {
   sendAlertToOwner,
   sendToCustomer,
@@ -15,7 +17,12 @@ import {
   computeTypingDelayMs,
   type WhatsappCredentials,
 } from "../whatsapp/outbound";
-import { createBurstBuffer } from "../whatsapp/burstBuffer";
+import {
+  enqueuePendingBurst,
+  drainDuePendingBursts,
+  flushPendingBurstsNow,
+  countPendingBursts,
+} from "../conversation/pendingBursts";
 import { uploadMedia } from "../media/s3";
 import { checkWebhookSignature, signatureHeaderOf } from "../whatsapp/webhookSignature";
 import { maskPhone } from "../whatsapp/logging";
@@ -26,7 +33,7 @@ import {
   findConversationByPendingConfirmation,
   clearPendingConfirmation,
   findConversationByPendingOwnerQuestion,
-  clearPendingOwnerQuestion,
+  markPendingOwnerQuestionResolved,
   updatePendingOwnerQuestion,
   findOpenPendingOwnerQuestionsForBusiness,
   findOpenPendingConfirmationsForBusiness,
@@ -84,13 +91,20 @@ export const whatsappRouter = Router();
 // their own reply - the customer got two different, sometimes flatly contradictory answers within
 // seconds of each other (confirmed against real conversations: one telling a customer "no manejamos
 // micrófonos" for a typo the OTHER reply correctly read as "audífonos", another saving the wrong name -
-// see looksLikeNonNameAnswer in agent.ts for a related but separate cause). pm2 runs this as a single
-// process (fork mode, not cluster - see ecosystem.config.js, `exec_mode: "fork"` + `instances: 1`, versioned
-// as of Fase 7 instead of living only in this comment), so a plain in-memory per-conversation queue is
-// enough - no Redis/DB lock needed. Each conversationId gets its own promise chain: a new webhook for that
-// conversation waits for the previous one's full handling (generateReply + the reply send + recordMessage)
-// to finish before it starts, so the two are serialized instead of racing. Different conversations are
-// unaffected and run fully in parallel, same as before.
+// see looksLikeNonNameAnswer in agent.ts for a related but separate cause).
+//
+// E07 (2026-09-17): esa serializacion dejo de depender de que haya UN SOLO PROCESO. Antes, lo unico
+// que impedia que dos instancias duplicaran la respuesta era `instances: 1` en ecosystem.config.js -
+// una decision que el operador tenia que acordarse de no cambiar, y que E23 (web + worker) va a
+// cambiar a proposito. Ahora son dos piezas, cada una con su propia garantia:
+//   - esta cadena de promesas por conversationId: el ORDEN DE LLEGADA dentro de este proceso. Un
+//     webhook espera a que termine el manejo completo del anterior (generateReply + envio +
+//     recordMessage) antes de empezar. Conversaciones distintas siguen corriendo en paralelo.
+//   - conversationLocker (src/db/conversationLock.ts): la EXCLUSION ENTRE PROCESOS, con un lock
+//     consultivo de Postgres. Ahi esta escrito por que es un lock de sesion y no uno de transaccion.
+// Ninguna de las dos alcanza sola: la cadena no ve a los otros procesos, y el lock no puede decidir
+// cual de dos llamadas simultaneas de ESTE proceso llego primero (dependeria de a quien le toque
+// antes una conexion del pool).
 const conversationLocks = new Map<string, Promise<void>>();
 
 // Fase 7 del plan maestro (2026-09-15): cuantos turnos (webhook -> generateReply -> envio -> recordMessage)
@@ -105,11 +119,12 @@ export function getActiveTurnCount(): number {
 
 export async function withConversationLock(conversationId: string, fn: () => Promise<void>): Promise<void> {
   const previous = conversationLocks.get(conversationId) ?? Promise.resolve();
-  // .then(fn, fn) runs fn once `previous` SETTLES, whether it resolved or rejected - a prior turn
+  // .then(x, x) runs the body once `previous` SETTLES, whether it resolved or rejected - a prior turn
   // throwing must never wedge every later turn for this conversation behind a permanently-rejected
   // promise.
   activeTurnCount++;
-  const run = previous.then(fn, fn);
+  const conLockDeProceso = () => conversationLocker.run(conversationId, fn);
+  const run = previous.then(conLockDeProceso, conLockDeProceso);
   // The map only ever stores a swallowed-error version of `run` - otherwise the NEXT caller's `previous`
   // would itself reject before its own turn even starts.
   const tail = run.catch(() => {});
@@ -294,7 +309,7 @@ export async function handleOwnerReply(
       if (slots.length === 0) {
         // Fila sin ranuras (solo posible si alguien la escribio a mano): no hay formulario que llenar, y
         // adivinar a que se referia seria justo lo que esta fase vino a borrar. Se cierra y se avisa.
-        await clearPendingOwnerQuestion(pendingQuestion.questionId);
+        await markPendingOwnerQuestionResolved(pendingQuestion.questionId);
         await replyToOwner(businessId, credentials, ownerPhone, "Esa consulta de precio ya no tiene los productos asociados - vuelve a abrirla desde el panel.");
         return;
       }
@@ -314,7 +329,7 @@ export async function handleOwnerReply(
             })),
             "OWNER_REPLY"
           );
-          await clearPendingOwnerQuestion(pendingQuestion.questionId);
+          await markPendingOwnerQuestionResolved(pendingQuestion.questionId);
           // El aviso al cliente lo compone el SERVIDOR con las cifras que acaba de escribir en la base.
           // Es el fallback sin modelo adentro: el precio existe y el cliente se entera aunque el turno
           // siguiente del agente falle.
@@ -339,7 +354,7 @@ export async function handleOwnerReply(
       }
 
       if (DENY_WORDS.includes(answerNorm)) {
-        await clearPendingOwnerQuestion(pendingQuestion.questionId);
+        await markPendingOwnerQuestionResolved(pendingQuestion.questionId);
         const noDiscountText = formatForWhatsapp("Consulté con el equipo y por ahora el precio publicado es el que aplica.");
         const noDiscountOutcome = await deliverOwnerAnswerToCustomer(businessId, pendingQuestion.conversationId, credentials, pendingQuestion.customer.phoneNumber, noDiscountText);
         await recordMessage(businessId, pendingQuestion.conversationId, "ASSISTANT", noDiscountText);
@@ -421,7 +436,7 @@ export async function handleOwnerReply(
         outcome = await deliverOwnerAnswerToCustomer(businessId, pendingQuestion.conversationId, credentials, pendingQuestion.customer.phoneNumber, fallbackText);
         await recordMessage(businessId, pendingQuestion.conversationId, "ASSISTANT", fallbackText);
       }
-      await clearPendingOwnerQuestion(pendingQuestion.questionId);
+      await markPendingOwnerQuestionResolved(pendingQuestion.questionId);
       await setHumanControl(businessId, pendingQuestion.conversationId, false);
       const confirmedProductText = ownerConfirmationText(outcome, "Listo, le confirme el producto al cliente ✅");
       await replyToOwner(businessId, credentials, ownerPhone, confirmedProductText);
@@ -431,7 +446,7 @@ export async function handleOwnerReply(
     const formattedAnswer = formatForWhatsapp(answerText);
     const answerOutcome = await deliverOwnerAnswerToCustomer(businessId, pendingQuestion.conversationId, credentials, pendingQuestion.customer.phoneNumber, formattedAnswer);
     await recordMessage(businessId, pendingQuestion.conversationId, "ASSISTANT", formattedAnswer);
-    await clearPendingOwnerQuestion(pendingQuestion.questionId);
+    await markPendingOwnerQuestionResolved(pendingQuestion.questionId);
     await setHumanControl(businessId, pendingQuestion.conversationId, false);
     // The owner just answered a real customer question for the first time - surface it as a suggested
     // FAQ entry instead of discarding it after this one use (never auto-published, just queued for
@@ -540,10 +555,13 @@ export async function handleOwnerReply(
 // Antes, dos o tres mensajes seguidos del mismo cliente (webhooks separados de Meta, segundos de
 // diferencia) disparaban cada uno su propio generateReply completo - el cliente recibia varias
 // respuestas, a veces contradictorias entre si porque cada llamada partia del mismo historial sin
-// ver lo que la otra iba a contestar. replyBurstBuffer los agrupa por conversation.id con una
-// ventana de silencio de ~8s (createBurstBuffer, generico y probado aparte en
-// src/whatsapp/burstBuffer.test.ts) y recien entonces genera y manda UNA sola respuesta para todo
-// lo que el cliente escribio en ese rato.
+// ver lo que la otra iba a contestar. La rafaga los agrupa por conversation.id con una ventana de
+// silencio de ~8s y recien entonces genera y manda UNA sola respuesta para todo lo que el cliente
+// escribio en ese rato.
+//
+// E08 (2026-09-17): esa espera dejo de vivir en la memoria del proceso. Los mensajes esperan como
+// filas de PendingBurst y los drena un job con reclamo de fila (src/conversation/pendingBursts.ts),
+// asi que un reinicio en mitad de la ventana ya no se lleva la rafaga entera.
 //
 // Corre DELANTE del lock por conversacion: cada mensaje individual sigue pasando por su propio
 // withConversationLock para el trabajo que no puede esperar (grabar el mensaje, el gate de control
@@ -702,22 +720,63 @@ async function runGenerateAndSend(conversationId: string, items: ReplyBurstItem[
   }
 }
 
-const replyBurstBuffer = createBurstBuffer<ReplyBurstItem>(
-  async (conversationId, items) => {
-    await withConversationLock(conversationId, () => runGenerateAndSend(conversationId, items));
-  },
-  { windowMs: Number(process.env.WHATSAPP_BURST_WINDOW_MS ?? "") || 8000 }
-);
-
-// El apagado ordenado (src/shutdown.ts) necesita poder vaciar esto ANTES de esperar los locks: un
-// mensaje esperando su ventana de rafaga ya esta grabado en la base y Meta ya recibio el 200 - si
-// el proceso se reinicia antes de que el timer normal (hasta 8s) dispare, se pierde en silencio.
-export function flushPendingReplyBursts(): Promise<void> {
-  return replyBurstBuffer.flushAll();
+// Reconstruye la rafaga guardada para poder generar el turno. El negocio, el cliente y las
+// credenciales NO viajan en la fila: se leen de la base ACA, en el momento de contestar. Si el
+// negocio se desconecto o se desactivo mientras la rafaga esperaba, no hay nada que mandar - y la
+// fila se borra igual, porque reintentarla mañana seria contestarle a destiempo a alguien que
+// pregunto hoy.
+async function itemsDeLaRafaga(filas: PendingBurstRow[]): Promise<ReplyBurstItem[]> {
+  const business = await prisma.business.findUnique({ where: { id: filas[0].businessId } });
+  if (!business || !business.whatsappAccessToken || !business.whatsappPhoneNumberId || !business.active) {
+    console.error(`Rafaga pendiente de un negocio sin WhatsApp conectado o inactivo, se descarta: ${filas[0].businessId}`);
+    return [];
+  }
+  const customer = await prisma.customer.findUnique({ where: { id: filas[0].customerId } });
+  if (!customer) {
+    console.error(`Rafaga pendiente de un cliente que ya no existe, se descarta: ${filas[0].customerId}`);
+    return [];
+  }
+  const credentials: WhatsappCredentials = {
+    phoneNumberId: business.whatsappPhoneNumberId,
+    accessToken: business.whatsappAccessToken,
+  };
+  return filas.map((fila) => ({
+    rawText: fila.rawText,
+    selectedProductId: fila.selectedProductId ?? undefined,
+    customerSentAt: fila.customerSentAt.getTime(),
+    business,
+    customer,
+    credentials,
+    from: fila.customerPhone,
+  }));
 }
 
-export function getPendingReplyBurstCount(): number {
-  return replyBurstBuffer.pendingCount();
+/**
+ * Una pasada del drenaje de rafagas vencidas. La llama el job de src/jobs/pendingBursts.ts cada
+ * segundo. Devuelve las promesas de los turnos que arranco - no las espera: dos conversaciones
+ * distintas se contestan en paralelo, como cuando cada rafaga tenia su propio timer.
+ */
+export function drainPendingBursts(): Promise<Promise<void>[]> {
+  return drainDuePendingBursts(
+    async (conversationId, filas) => {
+      const items = await itemsDeLaRafaga(filas);
+      if (items.length === 0) return;
+      await withConversationLock(conversationId, () => runGenerateAndSend(conversationId, items));
+    },
+    (conversationId, error) => console.error(`Error generando la respuesta de la rafaga de ${conversationId}:`, error)
+  );
+}
+
+// El apagado ordenado (src/shutdown.ts) ya no tiene que vaciar nada para no perderlo: la rafaga esta
+// en la base y la levanta este proceso al volver, u otro. Lo unico que hace es adelantar el reloj de
+// lo que estaba esperando su ventana, para que al arrancar se drene de una en vez de terminar de
+// esperar una ventana que empezo antes del reinicio.
+export function flushPendingReplyBursts(): Promise<void> {
+  return flushPendingBurstsNow().then(() => undefined);
+}
+
+export function getPendingReplyBurstCount(): Promise<number> {
+  return countPendingBursts();
 }
 
 whatsappRouter.get("/webhook", (req, res) => {
@@ -1190,20 +1249,23 @@ whatsappRouter.post("/webhook", async (req, res) => {
       const customerSentAt = Number.isFinite(metaTimestampMs) && metaTimestampMs > 0 ? metaTimestampMs : webhookReceivedAt;
 
       // Fase 10 del plan maestro: no se llama a generateReply directamente aca. Se agrupa con
-      // cualquier otro mensaje que este mismo cliente mande en los proximos ~8s (replyBurstBuffer,
-      // definido arriba) y recien entonces se genera y manda UNA sola respuesta para toda la
-      // rafaga - ver runGenerateAndSend. Esto libera el lock de este mensaje puntual de inmediato
-      // en vez de tenerlo abierto esperando a que se genere una respuesta.
-      replyBurstBuffer.add(conversation.id, {
+      // cualquier otro mensaje que este mismo cliente mande en los proximos ~8s y recien entonces se
+      // genera y manda UNA sola respuesta para toda la rafaga - ver runGenerateAndSend. Esto libera
+      // el lock de este mensaje puntual de inmediato en vez de tenerlo abierto esperando a que se
+      // genere una respuesta.
+      //
+      // E08: la espera es una fila en la base, no un timer en memoria. Cuando este await vuelve, un
+      // reinicio ya no puede perder este mensaje.
+      await enqueuePendingBurst({
+        conversationId: conversation.id,
+        businessId: business.id,
+        customerId: customer.id,
+        customerPhone: from,
         rawText,
         // La fila tocada de una lista interactiva manda sobre la foto citada: las dos son elecciones
         // con el dedo, pero la fila es de ESTE mensaje y la foto puede ser de un mensaje viejo.
         selectedProductId: listSelection?.productId ?? quotedProductId,
-        customerSentAt,
-        business,
-        customer,
-        credentials,
-        from,
+        customerSentAt: new Date(customerSentAt),
       });
     });
   } catch (error) {
