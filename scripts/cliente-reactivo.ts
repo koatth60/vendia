@@ -38,6 +38,8 @@ const PERSONAS = Number(process.env.PERSONAS ?? 1);
 const CONVERSACIONES = Number(process.env.CONVERSACIONES ?? PERSONAS);
 /** Repetir SOLO a esta persona, por nombre o por un pedazo. Para reproducir un caso hasta que salga bien. */
 const SOLO = (process.env.PERSONA ?? "").trim().toLowerCase();
+/** El CASO a reproducir: una clienta escrita para llegar hasta un defecto concreto. Ver CASOS. */
+const CASO = (process.env.CASO ?? "").trim();
 const PARALELO = Number(process.env.PARALELO ?? 3);
 const MAX_TURNOS = Number(process.env.MAX_TURNOS ?? 14);
 const ESPERA_MAXIMA_MS = 90_000;
@@ -62,6 +64,80 @@ const PERSONAS_POSIBLES: Persona[] = [
   { nombre: "Jorge Rincon", cedula: "80113355", celular: "3189994422", direccion: "Carrera 15 #93-40", barrio: "Chico", ciudad: "Bogota", intencion: "vio un combo y quiere saber que trae" },
   { nombre: "Marcela Nieto", cedula: "1093224466", celular: "3145557788", direccion: "Calle 72 #10-15", barrio: "Chapinero", ciudad: "Bogota", intencion: "quiere cancelar una compra que hizo, cambio de opinion" },
 ];
+
+
+/**
+ * Un CASO es una clienta escrita para llegar hasta UN defecto, con el criterio de cuando esa
+ * conversacion se considera aprobada.
+ *
+ * Regla del dueño (2026-09-18): cuando aparece un error, se corren cinco conversaciones QUE LLEGUEN A
+ * ESE ERROR -- no cinco al azar -- y no se sigue con otra cosa hasta que las cinco pasen. Cinco
+ * conversaciones cualesquiera no sirven: si el defecto vive en el camino del comprobante, una clienta
+ * que paga contraentrega nunca lo toca y "pasa" sin haber probado nada.
+ */
+interface Caso {
+  persona: Persona;
+  /** Que tiene que haber pasado para decir que esta conversacion salio bien. */
+  aprueba: (r: { pedido: unknown; incidentes: { kind: string; detail: string }[]; textoDelBot: string }) => string | null;
+}
+
+const CASOS: Record<string, Caso> = {
+  // Defecto: el bot decia "si veo, ya llego" sobre un comprobante que nadie miro, y el pedido prepago
+  // no llegaba a existir porque nadie contestaba la confirmacion.
+  comprobante: {
+    persona: {
+      nombre: "Paula Idarraga",
+      cedula: "43778899",
+      celular: "3117774455",
+      direccion: "Calle 30 #18-22",
+      barrio: "Belen",
+      ciudad: "Medellin",
+      intencion: "quiere comprar unos AIRPODS SERIE 4 y pagar TODO por adelantado por transferencia, no contraentrega",
+    },
+    aprueba: ({ pedido, textoDelBot }) => {
+      if (!pedido) return "no quedo el pedido";
+      if (/ya (me )?lleg[oó]|ya (lo )?(vi|recib[ií])|pago confirmado/i.test(textoDelBot)) {
+        return "el bot dio el pago por recibido el solo";
+      }
+      return null;
+    },
+  },
+  // Defecto: "estoy esperando que me confirmen el valor exacto del envio a Cali", con la tarifa de Cali
+  // cargada en la tabla, y despues "ya me confirmaron" sin que nadie confirmara nada.
+  "envio-ciudad": {
+    persona: {
+      nombre: "Rocio Bermudez",
+      cedula: "31556677",
+      celular: "3153338877",
+      direccion: "Calle 9 #6-20",
+      barrio: "San Antonio",
+      ciudad: "Cali",
+      intencion: "quiere un parlante y necesita saber cuanto le sale el envio hasta Cali antes de decidir",
+    },
+    aprueba: ({ pedido, incidentes, textoDelBot }) => {
+      const prometio = incidentes.some((i) => i.detail.includes("prometio consultar"));
+      if (prometio) return "prometio consultar algo que ya tenia";
+      if (/esperando que me confirmen|ya me confirmaron/i.test(textoDelBot)) {
+        return "dijo que estaba esperando o que ya le confirmaron, sin que nadie confirmara";
+      }
+      if (!pedido) return "no quedo el pedido";
+      return null;
+    },
+  },
+  // El camino completo de contraentrega, que es el que mas se usa.
+  "compra-contraentrega": {
+    persona: {
+      nombre: "Hernan Calle",
+      cedula: "71889900",
+      celular: "3004445566",
+      direccion: "Carrera 7 #45-12",
+      barrio: "Chapinero",
+      ciudad: "Bogota",
+      intencion: "quiere un smartwatch y pagar todo cuando le llegue",
+    },
+    aprueba: ({ pedido }) => (pedido ? null : "no quedo el pedido"),
+  },
+};
 
 /**
  * Lo que la clienta es y lo que NO hace.
@@ -289,7 +365,17 @@ async function conversar(
   const incidentes = await prisma.agentIncident.findMany({ where: { conversationId: { in: conversaciones } }, select: { kind: true, detail: true } });
   const fichaFinal = await prisma.customer.findUnique({ where: { id: cliente.id }, select: { name: true, idNumber: true, address: true } });
 
-  return { persona, telefono, pedido, incidentes, fichaFinal, mensajes: leidos };
+  const dichoPorElBot = (
+    await prisma.message.findMany({
+      where: { conversationId: { in: conversaciones }, role: "ASSISTANT" },
+      select: { content: true },
+    })
+  )
+    .map((m) => m.content ?? "")
+    .join("
+");
+
+  return { persona, telefono, pedido, incidentes, fichaFinal, mensajes: leidos, dichoPorElBot };
 }
 
 async function main() {
@@ -308,9 +394,16 @@ async function main() {
   }
 
   const cuantas = Math.max(1, CONVERSACIONES);
-  const disponibles = SOLO
-    ? PERSONAS_POSIBLES.filter((p) => p.nombre.toLowerCase().includes(SOLO))
-    : PERSONAS_POSIBLES;
+  const caso = CASO ? CASOS[CASO] : null;
+  if (CASO && !caso) {
+    console.error(`No hay ningun caso "${CASO}". Hay: ${Object.keys(CASOS).join(", ")}`);
+    process.exit(64);
+  }
+  const disponibles = caso
+    ? [caso.persona]
+    : SOLO
+      ? PERSONAS_POSIBLES.filter((p) => p.nombre.toLowerCase().includes(SOLO))
+      : PERSONAS_POSIBLES;
   if (disponibles.length === 0) {
     console.error(`Ninguna persona coincide con "${SOLO}". Hay: ${PERSONAS_POSIBLES.map((p) => p.nombre).join(", ")}`);
     process.exit(64);
@@ -339,6 +432,20 @@ async function main() {
     console.log(`    ficha:     nombre=${JSON.stringify(r.fichaFinal?.name)} cedula=${JSON.stringify(r.fichaFinal?.idNumber)}`);
     for (const i of r.incidentes) console.log(`    INCIDENTE ${i.kind}: ${i.detail.replace(/\n/g, " ").slice(0, 110)}`);
     console.log();
+  }
+  if (caso) {
+    const veredictos = resultados.map((r) =>
+      caso.aprueba({ pedido: r.pedido, incidentes: r.incidentes, textoDelBot: r.dichoPorElBot }),
+    );
+    const pasaron = veredictos.filter((v) => v === null).length;
+    console.log(`
+==================== CASO "${CASO}" ====================`);
+    veredictos.forEach((v, i) => console.log(`  ${i + 1}. ${v === null ? "PASA" : `FALLA -- ${v}`}`));
+    console.log(`
+${pasaron} de ${resultados.length} pasaron.`);
+    if (pasaron < resultados.length) {
+      console.log("NO se puede seguir con otra cosa hasta que pasen las cinco.");
+    }
   }
   console.log(`${resultados.filter((r) => r.pedido).length} de ${resultados.length} terminaron en pedido.`);
   console.log(`Los hilos completos se leen en la Bandeja de ${negocio.name}.`);

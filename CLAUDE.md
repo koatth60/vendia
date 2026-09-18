@@ -288,8 +288,17 @@ registrara la consulta).
 Decisión del dueño, 2026-09-18, ampliando la regla de arriba.
 
 **Cada vez que se encuentra un error —sea del bot, del banco de pruebas o de una decisión vieja— se
-corren CINCO conversaciones sobre ese error, y no se deja de correrlas hasta que las cinco salgan
-bien.** No importa de qué sea el error ni de cuándo venga.
+corren CINCO conversaciones QUE LLEGUEN A ESE ERROR, y no se sigue con otra cosa hasta que las cinco
+salgan bien.** No importa de qué sea el error ni de cuándo venga.
+
+**Cinco conversaciones cualesquiera no sirven.** Si el defecto vive en el camino del comprobante, una
+clienta que paga contraentrega nunca lo toca y "pasa" sin haber probado nada. La clienta se escribe para
+llegar hasta ahí: si el error era que prometía revisar el comprobante y no lo revisaba, las cinco tienen
+que mandar el comprobante.
+
+Por eso cada caso vive en `CASOS` (en `scripts/cliente-reactivo.ts`) con dos cosas: la clienta que llega
+hasta el defecto, y **el criterio de cuándo esa conversación se considera aprobada** — que no es "no se
+cayó", es que el efecto correcto ocurrió y el texto no afirma nada que no haya pasado.
 
 Cinco, y no una, porque esto es estocástico: una corrida limpia después de un arreglo sale bien la mitad
 de las veces por azar aunque el defecto siga ahí. Cinco seguidas ya no.
