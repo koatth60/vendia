@@ -10,7 +10,7 @@ import { getPresignedMediaUrl } from "../media/s3";
 import { emitOrderNew, emitOrderUpdated } from "../realtime/events";
 import { getAgreedPrices, applyAgreedPrices, agreedUnitPriceOf } from "./agreedPrices";
 import { recalcularEtapaDelCliente } from "../crm/customers";
-import { transicionarPedido, TransicionNoPermitida, type Actor } from "./stateMachine";
+import { transicionarPedido, TransicionNoPermitida, type Actor, type TxCliente } from "./stateMachine";
 
 export interface ResolvedOrderItem {
   productId: string;
@@ -253,23 +253,36 @@ export async function createOrder(params: {
       include: { items: true },
     });
 
+    // E32 (2026-09-18). Dos cosas cambian aca, y las dos son la misma idea: que el numero diga la
+    // verdad y que se pueda deshacer.
+    //
+    // 1. `{ decrement }` en vez de leer-restar-escribir. Lo de antes tenia una carrera real: dos
+    //    ventas simultaneas del mismo producto leian el mismo stock y las dos escribian el mismo
+    //    resultado, asi que una de las dos unidades no se descontaba nunca.
+    // 2. Sin Math.max(0, ...). Ese recorte TAPABA la sobreventa: vender 5 con 3 en stock dejaba 0 y
+    //    borraba el hecho de que faltaban 2. Peor todavia, hacia imposible devolver lo justo al
+    //    cancelar - se habian descontado 3, no 5, y nadie sabia cual de los dos numeros era el bueno.
+    //    Un stock negativo no es un dato corrupto: es "vendiste mas de lo que tenias", que es
+    //    exactamente lo que paso. El catalogo ya lo lee bien, porque su regla es `stock <= 0` ->
+    //    "(sin stock)".
+    //
+    // NO se rechaza la venta cuando no alcanza el stock, a proposito. Product.stock arranca en 0 y hay
+    // negocios que no llevan inventario: hacerlo fallar dejaria al bot sin poder cerrar NINGUNA venta
+    // en esos negocios. Rechazar es una politica por negocio - o sea una bandera - y esta etapa dice
+    // "Bandera: no". Queda propuesto aparte.
     for (const item of items) {
       // A variant sale decrements that variant's own stock, not the parent product's (which a
       // multi-variant product doesn't meaningfully track - see ProductVariant in schema.prisma).
       if (item.variantId) {
-        const variant = await tx.productVariant.findUnique({ where: { id: item.variantId }, select: { stock: true } });
-        if (!variant) continue;
-        await tx.productVariant.update({
+        await tx.productVariant.updateMany({
           where: { id: item.variantId },
-          data: { stock: Math.max(0, variant.stock - item.quantity) },
+          data: { stock: { decrement: item.quantity } },
         });
         continue;
       }
-      const product = await tx.product.findUnique({ where: { id: item.productId }, select: { stock: true } });
-      if (!product) continue;
-      await tx.product.update({
+      await tx.product.updateMany({
         where: { id: item.productId },
-        data: { stock: Math.max(0, product.stock - item.quantity) },
+        data: { stock: { decrement: item.quantity } },
       });
     }
 
@@ -468,6 +481,41 @@ export async function markOrderShipped(
   return prisma.order.findFirst({ where: { id: orderId, businessId } });
 }
 
+/**
+ * E32 (2026-09-18). Cancelar devuelve el stock.
+ *
+ * Hasta hoy el stock se descontaba en la venta y NO volvia nunca: cada cancelacion destruia unidades
+ * para siempre. Un negocio que cancelaba diez pedidos perdia diez veces esas unidades del inventario,
+ * sin que nada lo dijera.
+ *
+ * Se devuelve exactamente lo que dice OrderItem.quantity, que es lo mismo que se descontio al crear el
+ * pedido (desde E32 el descuento es exacto y no recorta en cero, justamente para que esto cierre). Va
+ * DENTRO de la transaccion del cambio de estado: si la devolucion fallara, la cancelacion tampoco
+ * ocurre, en vez de dejar el pedido cancelado con las unidades perdidas.
+ */
+async function devolverStockDelPedido(tx: TxCliente, orderId: string): Promise<void> {
+  const items = await tx.orderItem.findMany({
+    where: { orderId },
+    select: { productId: true, variantId: true, quantity: true },
+  });
+  for (const item of items) {
+    if (item.variantId) {
+      await tx.productVariant.updateMany({
+        where: { id: item.variantId },
+        data: { stock: { increment: item.quantity } },
+      });
+      continue;
+    }
+    // productId es opcional: un item cargado a mano desde el panel puede no apuntar a ningun producto
+    // del catalogo. No hay stock que devolver ahi, y forzarlo seria inventar a que producto pertenece.
+    if (!item.productId) continue;
+    await tx.product.updateMany({
+      where: { id: item.productId },
+      data: { stock: { increment: item.quantity } },
+    });
+  }
+}
+
 export async function markOrderCanceled(
   businessId: string,
   orderId: string,
@@ -481,6 +529,7 @@ export async function markOrderCanceled(
     actor,
     motivo,
     datos: { canceledAt: new Date() },
+    enLaMismaTransaccion: (tx) => devolverStockDelPedido(tx, orderId),
   });
   if (!movido) return null;
   emitOrderUpdated(businessId, orderId);

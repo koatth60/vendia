@@ -82,6 +82,13 @@ export function sePuede(desde: OrderFulfillmentStatus, hacia: OrderFulfillmentSt
   return TRANSICIONES[normalizarEstado(desde)].includes(hacia);
 }
 
+/**
+ * El cliente de transaccion tal como lo entrega ESTE prisma, que esta extendido (ver src/db/client.ts:
+ * la extension que cifra y descifra el token de WhatsApp). Prisma.TransactionClient describe el cliente
+ * sin extender y no encaja; derivarlo del propio `prisma` lo mantiene correcto si la extension cambia.
+ */
+export type TxCliente = Omit<typeof prisma, "$connect" | "$disconnect" | "$on" | "$transaction" | "$use" | "$extends">;
+
 export interface Actor {
   tipo: OrderEventActor;
   /** Email de la sesion del panel, o el nombre del job. Null para el agente y el sistema. */
@@ -102,8 +109,14 @@ export async function transicionarPedido(params: {
   motivo?: string | null;
   /** Campos extra que esta transicion escribe en el pedido (shippedAt, canceledAt, la nota de envio). */
   datos?: Prisma.OrderUpdateInput;
+  /**
+   * Trabajo extra que tiene que ocurrir en LA MISMA transaccion que el cambio de estado. Lo usa la
+   * cancelacion para devolver el stock: si la devolucion fuera un paso aparte y fallara, el pedido
+   * quedaria cancelado con las unidades perdidas, que es el defecto que E32 vino a cerrar.
+   */
+  enLaMismaTransaccion?: (tx: TxCliente) => Promise<void>;
 }): Promise<{ estadoAnterior: OrderFulfillmentStatus } | null> {
-  const { businessId, orderId, hacia, actor, motivo, datos } = params;
+  const { businessId, orderId, hacia, actor, motivo, datos, enLaMismaTransaccion } = params;
 
   const actual = await prisma.order.findFirst({
     where: { id: orderId, businessId },
@@ -133,6 +146,7 @@ export async function transicionarPedido(params: {
         reason: motivo ?? null,
       },
     });
+    if (enLaMismaTransaccion) await enLaMismaTransaccion(tx);
   });
 
   return { estadoAnterior: desde };
