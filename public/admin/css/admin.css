@@ -321,9 +321,8 @@
   .crm-row:last-child { border-bottom: none; }
   .crm-row:hover { background: var(--border-soft); }
   .crm-row-main { flex: 1; min-width: 0; }
-  .crm-row-name { font-weight: 650; font-size: 13.5px; color: var(--ink); }
-  .crm-row-meta { font-size: 12px; color: var(--muted); margin-top: 2px; }
-  .crm-row-side { text-align: right; flex-shrink: 0; font-size: 12px; color: var(--muted); }
+  /* .crm-row-name y .crm-row-meta se mudaron al bloque de la Fase 3 (buscá "Perfil del cliente"), ya
+     con tokens. .crm-row-side se borro: ningun renderizador la emite desde que la lista paso a grilla. */
   .stage-pill {
     display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 999px;
     font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em;
@@ -770,6 +769,45 @@
     text-align: right; font-size: 12px; color: var(--onix-muted);
     white-space: nowrap;
   }
+  /* Nombre y sublinea de la fila. Estaban abajo del todo con las variables viejas (--ink, --muted):
+     funcionaban, porque esas son alias de los tokens, pero eran el ultimo hilo de la lista de Clientes
+     que no leia el token directo. */
+  .crm-row-name { font-size: 13.5px; font-weight: 650; color: var(--onix-ink); }
+  .crm-row-meta { font-size: 12px; color: var(--onix-muted); margin-top: 2px; }
+
+  /* --- Perfil del cliente -------------------------------------------------
+     La ficha que se abre al tocar una fila. Era la superficie del CRM que
+     seguia con marcado viejo: cada pedido y cada texto auxiliar traia su
+     style="" con colores de las variables viejas, asi que no habia forma de
+     ajustar la vista sin editar plantillas de JavaScript una por una. */
+  .crm-profile-order {
+    display: flex; flex-wrap: wrap; justify-content: space-between;
+    gap: var(--onix-gap-sm); padding: 10px 0;
+    border-bottom: 1px solid var(--onix-border-soft);
+  }
+  .crm-profile-order:last-child { border-bottom: none; }
+  .crm-profile-order-main { flex: 1 1 220px; min-width: 0; }
+  .crm-profile-order-title { font-size: 13px; font-weight: 600; color: var(--onix-ink); }
+  .crm-profile-order-meta { font-size: 11.5px; color: var(--onix-muted); margin-top: 2px; }
+  /* El total a la derecha, igual que en la vista de Pedidos: misma jerarquia
+     para el mismo dato, no dos tratamientos para lo mismo. */
+  .crm-profile-order-total {
+    font-size: 13.5px; font-weight: 600; color: var(--onix-ink);
+    white-space: nowrap; flex-shrink: 0;
+  }
+  .crm-profile-hint { font-size: 12.5px; color: var(--onix-muted); margin-bottom: 8px; }
+  .crm-profile-note-input { min-height: 60px; }
+  /* La fecha de "Última compra" no entra a 20px en una tarjeta angosta. */
+  .crm-profile-metric-date { font-size: 15px; }
+  .crm-profile-notes { margin-top: 12px; }
+  .crm-profile-note-body { font-size: 13px; white-space: pre-wrap; color: var(--onix-ink); }
+  .crm-profile-note-delete { padding: 0 6px; font-size: 11px; }
+  .crm-profile-metrics { margin-bottom: 16px; }
+  .crm-profile-empty { padding: 18px; }
+  /* Dos clases y no una: .empty-state aparece MAS ABAJO en este archivo y fija el color en gris. Con
+     la misma especificidad gana la ultima, asi que un ".crm-profile-error" suelto no pintaba nada -
+     el aviso de "no se pudo cargar" se veia igual que un "sin actividad todavia". */
+  .empty-state.crm-profile-error { color: var(--onix-danger); }
 
   /* Barra de filtros del CRM, fuera de la tarjeta como en el diseño. */
   .crm-filters {
@@ -1510,7 +1548,6 @@
     .chat-panel-actions button:not(.thread-icon-btn) { min-height: 44px; }
     .chat-panel-header { padding: 7px 12px; }
     .crm-row { padding: 12px 14px; }
-    .crm-row-side { width: 100%; text-align: left; }
     .stage-pill { flex-shrink: 0; }
   }
 
@@ -1695,7 +1732,7 @@
 
   /* El peso tampoco se hereda de forma útil dentro de un botón. */
   .inicio-shortcut-card .desc { font-weight: 400; }
-  .crm-row-meta, .crm-row-side { font-weight: 400; }
+  .crm-row-meta { font-weight: 400; }
 
   /* El buscador tenía menos aire del que le sobra en escritorio. */
   /* El buscador es un campo con dos cosas encima: la lupa a la izquierda y el

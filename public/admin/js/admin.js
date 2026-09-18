@@ -5755,50 +5755,50 @@ function renderCustomerProfile(p) {
   document.getElementById('crm-open-chat-btn').hidden = !p.activeConversationId;
 
   const orderRows = p.orders.length === 0
-    ? '<div class="empty-state" style="padding:18px;">Todavía no tiene pedidos.</div>'
+    ? '<div class="empty-state crm-profile-empty">Todavía no tiene pedidos.</div>'
     : p.orders.map((o) => `
-        <div style="display:flex; flex-wrap:wrap; justify-content:space-between; gap:10px; padding:10px 0; border-bottom:1px solid var(--border-soft);">
-          <div style="flex:1 1 220px; min-width:0;">
-            <div style="font-size:13px; font-weight:600;">${escapeHtml(o.summary)}</div>
-            <div style="font-size:11.5px; color:var(--muted); margin-top:2px;">
-              ${new Date(o.createdAt).toLocaleDateString('es-CO')} · ${escapeHtml(o.fulfillmentStatus)}
+        <div class="crm-profile-order">
+          <div class="crm-profile-order-main">
+            <div class="crm-profile-order-title">${escapeHtml(o.summary)}</div>
+            <div class="crm-profile-order-meta">
+              <span class="onix-num">${new Date(o.createdAt).toLocaleDateString('es-CO')}</span> · ${escapeHtml(o.fulfillmentStatus)}
             </div>
           </div>
-          <div style="font-weight:700; white-space:nowrap; flex-shrink:0;">${escapeHtml(formatMoney(o.totalAmount, o.currency))}</div>
+          <div class="crm-profile-order-total onix-num">${escapeHtml(formatMoney(o.totalAmount, o.currency))}</div>
         </div>
       `).join('');
 
   const noteItems = p.notes.length === 0
-    ? '<div style="font-size:12.5px; color:var(--muted);">Sin notas todavía.</div>'
+    ? '<div class="crm-profile-hint">Sin notas todavía.</div>'
     : p.notes.map((n) => `
         <div class="note-item">
-          <div style="font-size:13px; white-space:pre-wrap;">${escapeHtml(n.body)}</div>
+          <div class="crm-profile-note-body">${escapeHtml(n.body)}</div>
           <div class="note-meta">
             ${escapeHtml(n.authorName || 'Alguien')} · ${escapeHtml(timeAgo(n.createdAt))}
-            <button class="btn-ghost" style="padding:0 6px; font-size:11px;" onclick="deleteCrmNote('${n.id}')">Eliminar</button>
+            <button class="btn-ghost crm-profile-note-delete" onclick="deleteCrmNote('${n.id}')">Eliminar</button>
           </div>
         </div>
       `).join('');
 
   document.getElementById('crm-detail-body').innerHTML = `
-    <div class="metric-grid" style="margin-bottom:16px;">
+    <div class="metric-grid crm-profile-metrics">
       <div class="metric-card">
         <div class="label">Total comprado</div>
-        <div class="value">${escapeHtml(formatMoney(m.totalSpent, m.currency))}</div>
+        <div class="value onix-num">${escapeHtml(formatMoney(m.totalSpent, m.currency))}</div>
         <div class="sub">${m.orderCount} pedido${m.orderCount === 1 ? '' : 's'}</div>
       </div>
       <div class="metric-card">
         <div class="label">Ticket promedio</div>
-        <div class="value">${escapeHtml(formatMoney(m.avgTicket, m.currency))}</div>
+        <div class="value onix-num">${escapeHtml(formatMoney(m.avgTicket, m.currency))}</div>
       </div>
       <div class="metric-card">
         <div class="label">Última compra</div>
-        <div class="value" style="font-size:15px;">${m.lastPurchaseAt ? new Date(m.lastPurchaseAt).toLocaleDateString('es-CO') : '—'}</div>
+        <div class="value onix-num crm-profile-metric-date">${m.lastPurchaseAt ? new Date(m.lastPurchaseAt).toLocaleDateString('es-CO') : '—'}</div>
         <div class="sub">${m.firstPurchaseAt ? 'primera: ' + new Date(m.firstPurchaseAt).toLocaleDateString('es-CO') : 'sin compras'}</div>
       </div>
       <div class="metric-card">
         <div class="label">Sin contacto hace</div>
-        <div class="value">${m.daysSinceContact === null ? '—' : m.daysSinceContact + ' d'}</div>
+        <div class="value onix-num">${m.daysSinceContact === null ? '—' : m.daysSinceContact + ' d'}</div>
       </div>
     </div>
 
@@ -5827,16 +5827,16 @@ function renderCustomerProfile(p) {
 
     <div class="section-title">Notas internas</div>
     <div class="card">
-      <div style="font-size:12.5px; color:var(--muted); margin-bottom:8px;">Solo las ve tu equipo. Nunca se le mandan al cliente ni las usa el bot.</div>
-      <textarea id="crm-note-body" placeholder="Ej: Pidió factura a nombre de la empresa" style="min-height:60px;"></textarea>
+      <div class="crm-profile-hint">Solo las ve tu equipo. Nunca se le mandan al cliente ni las usa el bot.</div>
+      <textarea id="crm-note-body" class="crm-profile-note-input" placeholder="Ej: Pidió factura a nombre de la empresa"></textarea>
       <div class="actions-row">
         <button class="btn-secondary" onclick="addCrmNote()">+ Agregar nota</button>
       </div>
-      <div style="margin-top:12px;">${noteItems}</div>
+      <div class="crm-profile-notes">${noteItems}</div>
     </div>
 
     <div class="section-title">Línea de tiempo</div>
-    <div class="card" id="crm-timeline"><div class="empty-state" style="padding:18px;">Cargando…</div></div>
+    <div class="card" id="crm-timeline"><div class="empty-state crm-profile-empty">Cargando…</div></div>
   `;
 }
 
@@ -5848,7 +5848,7 @@ async function loadCustomerTimeline(customerId) {
     const events = await res.json();
     const KIND_LABEL = { MESSAGE: 'Mensaje', ORDER: 'Pedido', NOTE: 'Nota' };
     container.innerHTML = events.length === 0
-      ? '<div class="empty-state" style="padding:18px;">Sin actividad todavía.</div>'
+      ? '<div class="empty-state crm-profile-empty">Sin actividad todavía.</div>'
       : events.map((e) => {
           let kindLabel = KIND_LABEL[e.kind] || e.kind;
           let rowClass = '';
@@ -5877,7 +5877,7 @@ async function loadCustomerTimeline(customerId) {
           `;
         }).join('');
   } catch (err) {
-    container.innerHTML = `<div class="empty-state" style="color:var(--danger); padding:18px;">No se pudo cargar: ${escapeHtml(err.message)}</div>`;
+    container.innerHTML = `<div class="empty-state crm-profile-empty crm-profile-error">No se pudo cargar: ${escapeHtml(err.message)}</div>`;
   }
 }
 
