@@ -33,23 +33,40 @@ test("withConversationLock serializes calls for the same conversationId", async 
   assert.deepEqual(order, ["A-start", "A-end", "B-start", "B-end"]);
 });
 
+// NO DELAYS HERE, ON PURPOSE (2026-09-18). This test used to prove concurrency by making `a` sleep
+// 30ms and `b` sleep 5ms and asserting b finished first. That is a race, not a proof: the lock now
+// goes through a Postgres advisory lock (E07), so under a loaded test run acquiring b's lock can take
+// longer than a's 30ms sleep and the order flips - a green/red that depends on the machine, not on the
+// code. It failed exactly that way in a full `npm test` run.
+//
+// The rewrite proves the same property by CONSTRUCTION: `a` cannot finish until `b` has started. If
+// the lock were global (the bug this guards against), `b` could never start while `a` holds it, so the
+// two would deadlock - which the timeout below reports as such instead of hanging the suite.
 test("withConversationLock lets different conversationIds run fully concurrently", async () => {
   const order: string[] = [];
+  let avisarQueBArranco: () => void;
+  const bArranco = new Promise<void>((resolve) => {
+    avisarQueBArranco = resolve;
+  });
+
   const calls = [
     withConversationLock("conv-a", async () => {
       order.push("a-start");
-      await delay(30);
+      await bArranco;
       order.push("a-end");
     }),
     withConversationLock("conv-b", async () => {
       order.push("b-start");
-      await delay(5);
+      avisarQueBArranco();
       order.push("b-end");
     }),
   ];
-  await Promise.all(calls);
-  // b (the shorter one) finishes before a even though a started first - proves they ran in parallel,
-  // not serialized behind an accidentally-global lock.
+
+  const seTrabo = delay(5000).then(() => {
+    throw new Error("conv-a quedo esperando a conv-b: el lock esta serializando conversaciones distintas");
+  });
+  await Promise.race([Promise.all(calls), seTrabo]);
+
   assert.deepEqual(order, ["a-start", "b-start", "b-end", "a-end"]);
 });
 
