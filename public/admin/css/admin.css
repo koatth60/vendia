@@ -510,6 +510,27 @@
     position: absolute; top: -5px; right: -5px; width: 16px; height: 16px; border-radius: 50%;
     background: var(--danger); color: var(--onix-accent-ink); font-size: 10px; line-height: 16px; text-align: center; padding: 0; border: none;
   }
+  /* LA APLICACION INSTALADA (2026-09-18). La barra del telefono (hora, wifi, bateria) queda arriba y
+     legible: el contenido baja lo que mida esa franja en vez de meterse debajo. `env(safe-area-inset-*)`
+     vale 0 en el navegador de escritorio, asi que esto no cambia nada fuera del telefono. */
+  body { padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }
+
+  .pwa-estado { font-size: 13px; color: var(--muted); margin: 10px 0 4px; }
+  .pwa-ayuda { margin-top: 10px; }
+  .pwa-ayuda summary { font-size: 12.5px; color: var(--brand-dark); cursor: pointer; }
+
+  /* El aviso de version nueva. Flota abajo, no tapa el compositor del chat, y no interrumpe: la
+     persona actualiza cuando quiere. */
+  .aviso-version {
+    position: fixed; left: 50%; transform: translateX(-50%);
+    bottom: calc(18px + env(safe-area-inset-bottom));
+    z-index: 9000; display: flex; align-items: center; gap: 12px;
+    padding: 10px 12px 10px 16px; border-radius: 999px;
+    background: var(--onix-ink); color: var(--onix-surface);
+    box-shadow: var(--shadow-md); font-size: 13px; max-width: calc(100vw - 32px);
+  }
+  .aviso-version button { padding: 7px 14px; font-size: 12.5px; border-radius: 999px; }
+
   /* El final de la Bandeja paginada: cuando entra en pantalla, se pide la página siguiente. */
   .inbox-sentinel {
     padding: 14px; text-align: center; font-size: 12px; color: var(--muted);

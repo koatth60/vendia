@@ -65,11 +65,122 @@ const PANEL_SECTION = {
   conversations: 'crm', customers: 'crm', orders: 'crm',
   catalog: 'catalogo',
   business: 'bot', rules: 'bot', faq: 'bot', payments: 'bot', shipping: 'bot', whatsapp: 'bot', health: 'bot',
-  negocio: 'negocio', team: 'negocio', 'ai-usage': 'negocio', analytics: 'negocio',
+  negocio: 'negocio', team: 'negocio', 'ai-usage': 'negocio', analytics: 'negocio', configuracion: 'negocio',
 };
 const SECTION_DEFAULT = {
   inicio: 'inicio', crm: 'conversations', catalogo: 'catalog', bot: 'business', negocio: 'negocio',
 };
+
+// ===========================================================================================
+// LA APLICACION INSTALADA (2026-09-18)
+// ===========================================================================================
+//
+// Onix se instala como aplicacion desde Configuracion. Lo que sigue es el minimo para que eso funcione
+// sin sorpresas: el aviso de que se puede instalar, el aviso de version nueva, y nada mas.
+//
+// Por que el panel y no la landing: una aplicacion instalada que abre una pagina de ventas no le sirve
+// a nadie. El `start_url` del manifiesto apunta a /admin/, asi que el icono abre directo el panel - y a
+// quien no tenga sesion el servidor lo manda al login, que es el unico otro lugar que la aplicacion
+// necesita.
+
+// Chrome dispara esto cuando la aplicacion se puede instalar. El evento hay que GUARDARLO: solo se
+// puede abrir el dialogo desde un gesto de la persona, y este evento no lo es.
+let promptDeInstalacion = null;
+
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  promptDeInstalacion = e;
+  pintarEstadoPwa();
+});
+
+window.addEventListener('appinstalled', () => {
+  promptDeInstalacion = null;
+  pintarEstadoPwa('¡Listo! Onix quedó instalada. Abrila desde el ícono de tu pantalla.');
+});
+
+function estaInstalada() {
+  return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+}
+
+function pintarEstadoPwa(mensajeFijo) {
+  const estado = document.getElementById('pwa-estado');
+  const boton = document.getElementById('pwa-instalar');
+  if (!estado || !boton) return;
+
+  if (mensajeFijo) {
+    estado.textContent = mensajeFijo;
+    boton.hidden = true;
+    return;
+  }
+  if (estaInstalada()) {
+    estado.textContent = 'Ya estás usando la aplicación instalada.';
+    boton.hidden = true;
+    return;
+  }
+  if (promptDeInstalacion) {
+    estado.textContent = 'Tu navegador puede instalarla ahora.';
+    boton.hidden = false;
+    return;
+  }
+  estado.textContent = 'Abrí el panel en Chrome desde el teléfono para poder instalarla.';
+  boton.hidden = true;
+}
+
+async function instalarAplicacion() {
+  if (!promptDeInstalacion) return;
+  promptDeInstalacion.prompt();
+  const { outcome } = await promptDeInstalacion.userChoice;
+  // El evento se consume: Chrome no deja reusarlo. Si dijo que no, vuelve a dispararse solo mas adelante.
+  promptDeInstalacion = null;
+  pintarEstadoPwa(outcome === 'accepted' ? 'Instalando…' : 'No pasa nada: podés instalarla cuando quieras.');
+}
+
+// ------------------------------------------------------------------------------------------
+// VERSION NUEVA SIN PERDER LA SESION
+// ------------------------------------------------------------------------------------------
+//
+// El service worker nuevo se queda ESPERANDO a proposito (no hace skipWaiting solo): cambiarle el
+// codigo debajo a alguien que esta escribiendo un mensaje es peor que esperar. Cuando hay uno esperando
+// sale este aviso, y recien al tocar Actualizar toma el control y se recarga la pagina. La sesion vive
+// en una cookie del servidor, asi que recargar no desloguea a nadie.
+function mostrarAvisoDeVersion(registro) {
+  if (document.getElementById('aviso-version')) return;
+  const aviso = document.createElement('div');
+  aviso.id = 'aviso-version';
+  aviso.className = 'aviso-version';
+  aviso.innerHTML = '<span>Hay una versión nueva de Onix.</span><button type="button" class="btn-primary">Actualizar</button>';
+  aviso.querySelector('button').onclick = () => {
+    const esperando = registro.waiting;
+    if (!esperando) { window.location.reload(); return; }
+    // Cuando el worker nuevo toma el control, se recarga una sola vez.
+    navigator.serviceWorker.addEventListener('controllerchange', () => window.location.reload(), { once: true });
+    esperando.postMessage('onix:activar-ahora');
+  };
+  document.body.appendChild(aviso);
+}
+
+async function registrarServiceWorker() {
+  if (!('serviceWorker' in navigator)) return;
+  try {
+    const registro = await navigator.serviceWorker.register('/sw.js');
+    if (registro.waiting) mostrarAvisoDeVersion(registro);
+    registro.addEventListener('updatefound', () => {
+      const nuevo = registro.installing;
+      if (!nuevo) return;
+      nuevo.addEventListener('statechange', () => {
+        // `controller` existente = ya habia una version corriendo, o sea esto es una ACTUALIZACION y no
+        // la primera instalacion. Sin esa condicion, el aviso saldria la primera vez que alguien abre.
+        if (nuevo.state === 'installed' && navigator.serviceWorker.controller) mostrarAvisoDeVersion(registro);
+      });
+    });
+    // Al volver a la aplicacion se pregunta si hay algo nuevo, que es cuando la persona esta por usarla.
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') registro.update().catch(() => {});
+    });
+  } catch (err) {
+    console.error('No se pudo registrar el service worker:', err);
+  }
+}
 
 function switchSection(section) {
   switchTab(SECTION_DEFAULT[section] || section);
@@ -187,6 +298,7 @@ function switchTab(name) {
   if (name === 'health') cargarSeccion('health', loadHealth);
   if (name === 'shipping') cargarSeccion('shipping', loadShipping);
   if (name === 'whatsapp') cargarSeccion('whatsapp', loadWhatsappConnection);
+  if (name === 'configuracion') pintarEstadoPwa();
   // Sin boton "Actualizar": la vista se refresca sola mientras está abierta (ver AUTO_REFRESH). Se
   // reinicia en cada cambio de pestaña, así que entrar de nuevo a la misma vista no acumula timers.
   startAutoRefresh(name);
@@ -5444,6 +5556,10 @@ async function boot() {
   loadAiUsage();
   if (isOwner) loadTeamMembers();
   initRealtime();
+  // La aplicacion instalable y el aviso de version nueva. Va al final: no bloquea nada de lo de arriba
+  // y, si el navegador no soporta service workers, simplemente no hace nada.
+  registrarServiceWorker();
+  pintarEstadoPwa();
 }
 
 // ==============================================================================================

@@ -33,6 +33,11 @@ export const securityHeaders: RequestHandler = helmet({
       "connect-src": ["'self'", FACEBOOK_SDK, "https://graph.facebook.com"],
       // El popup de Embedded Signup crea iframes ocultos del lado de Facebook.
       "frame-src": [FACEBOOK_SDK, FACEBOOK_FRAMES],
+      // La aplicacion instalada (2026-09-18): el service worker y el manifiesto son propios y del mismo
+      // origen. Van explicitos y no por herencia de default-src para que se lea que estan permitidos a
+      // proposito y no por descuido.
+      "worker-src": ["'self'"],
+      "manifest-src": ["'self'"],
       "object-src": ["'none'"],
       "base-uri": ["'self'"],
       "form-action": ["'self'"],

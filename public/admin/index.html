@@ -2,7 +2,19 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<!-- LA BARRA DEL TELEFONO NO SE TAPA CON LA APLICACION (2026-09-18). `viewport-fit=cover` deja que la
+     pagina ocupe hasta el borde, y el `padding-top: env(safe-area-inset-top)` del layout (ver
+     admin.css) baja el contenido para que la hora, el wifi y la bateria queden arriba y legibles, como
+     en WhatsApp. El `theme-color` pinta esa franja del mismo color que el panel en cada tema, para que
+     se lea como una sola pantalla y no como una banda de otro color encima. -->
+<meta name="theme-color" content="#F4F6F4" media="(prefers-color-scheme: light)" />
+<meta name="theme-color" content="#0B0E0D" media="(prefers-color-scheme: dark)" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-title" content="Onix" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<link rel="manifest" href="/manifest.webmanifest" />
 <script>
   /* Fase 0 del rediseno: aplica el tema guardado ANTES de pintar. Si esto se
      mueve al final del body, el usuario ve un fogonazo blanco en cada carga. */
@@ -112,6 +124,7 @@
         <button class="tab-btn owner-only" data-tab="team" onclick="switchTab('team')" hidden>Equipo</button>
         <button class="tab-btn" data-tab="ai-usage" onclick="switchTab('ai-usage')">Consumo IA</button>
         <button class="tab-btn" data-tab="analytics" onclick="switchTab('analytics')">Analytics</button>
+        <button class="tab-btn" data-tab="configuracion" onclick="switchTab('configuracion')">Configuración</button>
       </div>
 
 <main>
@@ -1232,6 +1245,32 @@
           <button class="btn-primary" onclick="addTeamMember()">+ Agregar empleado</button>
         </div>
         <div id="team-list" style="margin-top:16px; display:flex; flex-direction:column; gap:8px;"></div>
+      </div>
+    </div>
+
+    <div class="tab-panel" data-tab-panel="configuracion">
+      <div class="panel-header">
+        <div>
+          <div class="panel-title">Configuración</div>
+          <div class="panel-subtitle">La aplicación de Onix y los ajustes de este dispositivo.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Instalar Onix en el teléfono</div>
+        <div class="card-sub">Queda como una aplicación más: ícono propio, pantalla completa y sin la barra del navegador. Es el mismo panel, así que no hay nada que aprender de nuevo ni una sesión aparte.</div>
+        <div id="pwa-estado" class="pwa-estado"></div>
+        <div class="actions-row">
+          <button class="btn-primary" id="pwa-instalar" onclick="instalarAplicacion()" hidden>Instalar Onix</button>
+        </div>
+        <details class="pwa-ayuda">
+          <summary>¿No te aparece el botón?</summary>
+          <div class="card-sub" style="margin-top:8px;">
+            <b>Android (Chrome):</b> menú de tres puntos → <i>Agregar a la pantalla principal</i> o <i>Instalar aplicación</i>.<br/>
+            <b>iPhone (Safari):</b> botón de compartir → <i>Agregar a inicio</i>.<br/>
+            Si ya la instalaste, el botón no vuelve a aparecer: abrila desde el ícono de tu pantalla.
+          </div>
+        </details>
       </div>
     </div>
     </main>

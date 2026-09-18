@@ -1,5 +1,7 @@
 import express from "express";
 import http from "node:http";
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import path from "path";
 import { env } from "./config/env";
 import { prisma } from "./db/client";
@@ -63,6 +65,50 @@ const staticOptions = {
     }
   },
 };
+
+// EL SERVICE WORKER DE LA APLICACION INSTALADA (2026-09-18).
+//
+// Se sirve desde una ruta y no como archivo estatico por un motivo: adentro lleva el identificador de
+// version del panel, y ese identificador tiene que cambiar SOLO cuando el panel cambia. Si fuera un
+// numero escrito a mano, actualizar la aplicacion dependeria de que alguien se acuerde de subirlo en
+// cada despliegue - y lo que no se arregla solo, eventualmente no se arregla.
+//
+// El identificador es el hash del HTML, el CSS y el JS del panel, calculado una vez al arrancar: dos
+// reinicios sin cambios dan el mismo, y un despliegue con cambios da uno nuevo. Ese cambio es lo que
+// hace que el navegador descargue el worker nuevo y que al dueño le aparezca "Hay una version nueva".
+//
+// Scope: el archivo se sirve desde la raiz a proposito. Un service worker solo controla lo que cuelga
+// de su propia ruta, y la aplicacion abarca /admin/ y tambien /login.html.
+const PANEL_FILES = [
+  path.join(__dirname, "..", "public", "admin", "index.html"),
+  path.join(__dirname, "..", "public", "admin", "css", "admin.css"),
+  path.join(__dirname, "..", "public", "admin", "css", "tokens.css"),
+  path.join(__dirname, "..", "public", "admin", "js", "admin.js"),
+];
+
+const PANEL_BUILD_ID = (() => {
+  const hash = createHash("sha1");
+  for (const file of PANEL_FILES) {
+    try {
+      hash.update(readFileSync(file));
+    } catch {
+      // Un archivo que no esta no puede tumbar el arranque: se ignora y el hash sale de los que si estan.
+    }
+  }
+  return hash.digest("hex").slice(0, 12);
+})();
+
+app.get("/sw.js", (_req, res) => {
+  try {
+    const sw = readFileSync(path.join(__dirname, "..", "public", "sw.js"), "utf8").replace("__BUILD__", PANEL_BUILD_ID);
+    res.type("application/javascript");
+    // El worker en si NUNCA se cachea: es el archivo que le avisa al navegador que todo lo demas cambio.
+    res.setHeader("Cache-Control", "no-cache");
+    res.send(sw);
+  } catch {
+    res.sendStatus(404);
+  }
+});
 
 app.use(whatsappRouter);
 app.use("/auth", authRouter);
