@@ -469,6 +469,79 @@ const GUIONES: Guion[] = [
     ],
   },
   {
+    nombre: "compra-con-comprobante",
+    busca: "el comprobante de pago: que lo lea, lo acepte y cierre el pedido",
+    variantes: [
+      [
+        "hola, quiero comprar un parlante",
+        "el mas economico",
+        "1 unidad",
+        "Laura Restrepo, cedula 1026778899, celular 3126667788, Calle 22 #14-50, barrio La Candelaria, Bogota",
+        "producto y envio todo por adelantado, pago por transferencia",
+        "si, confirmo",
+        "[[img:sim.comprobante:94.000:NEQUI]] ya te transferi, aqui esta el comprobante",
+        "listo, cierra el pedido",
+      ],
+      [
+        "buenas, quiero unos audifonos",
+        "el que me recomiendes",
+        "1 unidad",
+        "Felipe Arango, cedula 71445566, celular 3159998877, Carrera 80 #33-21, barrio Belen, Medellin",
+        "todo por adelantado, transferencia",
+        "si, confirmo",
+        "[[img:sim.comprobante:79.000:BANCOLOMBIA]] listo, ya hice la consignacion",
+        "dale, cierra el pedido",
+      ],
+      [
+        "hola quiero un smartwatch",
+        "el mas economico esta bien",
+        "1 unidad",
+        "Camilo Duque, cedula 1093221100, celular 3178889900, Calle 9 #7-30, barrio San Antonio, Cali",
+        "producto adelantado, envio contraentrega, pago por transferencia",
+        "si, confirmo",
+        "[[img:sim.comprobante:85.000:DAVIPLATA]] ya quedo el pago",
+        "listo, cierralo",
+      ],
+    ],
+  },
+  {
+    nombre: "manda-foto-de-producto",
+    busca: "el cliente manda la foto de un producto: que lo identifique contra el catalogo real",
+    variantes: [
+      ["hola", "[[img:sim.producto:Smartwatch gen 9]] tienes este?"],
+      ["buenas", "[[img:sim.producto:parlante]] cuanto vale este?"],
+      ["hola", "[[img:sim.producto:audifonos]] me interesa este, todavia lo tienes?"],
+    ],
+  },
+  {
+    nombre: "foto-y-compra",
+    busca: "identificar por foto y cerrar el pedido de ese mismo producto",
+    variantes: [
+      [
+        "hola",
+        "[[img:sim.producto:Smartwatch gen 9]] quiero este",
+        "1 unidad",
+        "Natalia Cardona, cedula 1017889900, celular 3102223344, Calle 45 #28-19, barrio Galerias, Bogota",
+        "todo contraentrega, producto y envio al recibir",
+        "si, confirmo",
+        "dale, cierralo",
+      ],
+    ],
+  },
+  {
+    nombre: "comprobante-que-no-cuadra",
+    busca: "un comprobante por menos plata de la que vale: NO puede darlo por pagado",
+    variantes: [
+      [
+        "hola quiero un smartwatch",
+        "el mas caro",
+        "1 unidad, todo por adelantado con transferencia",
+        "Diego Salas, cedula 1015443322, celular 3134445566, Carrera 30 #40-15, barrio Teusaquillo, Bogota",
+        "[[img:sim.comprobante:20.000:NEQUI]] listo, ya pague",
+      ],
+    ],
+  },
+  {
     nombre: "rafaga",
     busca: "cuatro mensajes de golpe: la cola de entrada tiene que contestarlos como uno",
     rafaga: true,
@@ -494,7 +567,20 @@ async function esperarRespuesta(customerId: string, desde: number): Promise<void
   }
 }
 
+/**
+ * Un mensaje del guion que en vez de texto manda una imagen.
+ *
+ * Se escribe dentro del propio mensaje, `[[img:<mediaId>]] pie de foto`, para que un guion siga siendo
+ * una lista de strings y no haya que inventar otra estructura. El `mediaId` lo resuelve el servidor sin
+ * salir a Meta: ver src/whatsapp/simulacion.ts.
+ */
+function comoImagen(mensaje: string): { mediaId: string; pie: string } | null {
+  const marca = mensaje.match(/^\[\[img:([^\]]+)\]\]\s*(.*)$/);
+  return marca ? { mediaId: marca[1], pie: marca[2] } : null;
+}
+
 function cuerpoDeWebhook(phoneNumberId: string, desde: string, texto: string) {
+  const imagen = comoImagen(texto);
   return {
     object: "whatsapp_business_account",
     entry: [
@@ -512,8 +598,9 @@ function cuerpoDeWebhook(phoneNumberId: string, desde: string, texto: string) {
                   from: desde,
                   id: `wamid.GUION.${randomUUID()}`,
                   timestamp: String(Math.floor(Date.now() / 1000)),
-                  type: "text",
-                  text: { body: texto },
+                  ...(imagen
+                    ? { type: "image", image: { id: imagen.mediaId, mime_type: "image/png", ...(imagen.pie ? { caption: imagen.pie } : {}) } }
+                    : { type: "text", text: { body: texto } }),
                 },
               ],
             },

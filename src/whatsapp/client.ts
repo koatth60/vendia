@@ -1,3 +1,5 @@
+import { descargarMedioSimulado, esMedioSimulado } from "./simulacion";
+
 const GRAPH_BASE_URL = "https://graph.facebook.com/v21.0";
 const META_APP_ID = process.env.WHATSAPP_APP_ID ?? "";
 
@@ -455,6 +457,11 @@ export async function downloadMedia(
   credentials: WhatsappCredentials,
   mediaId: string
 ): Promise<{ buffer: Buffer; mimeType: string }> {
+  // Un medio de prueba no existe en Meta: lo resuelve el servidor. Es el unico punto donde el camino
+  // de una imagen entrante se bifurca, y solo para ids que empiezan por "sim." -- un id de Meta es
+  // siempre numerico. Ver src/whatsapp/simulacion.ts.
+  if (esMedioSimulado(mediaId)) return descargarMedioSimulado(mediaId);
+
   const metaResponse = await fetchWithTimeout(
     `${GRAPH_BASE_URL}/${mediaId}`,
     { headers: { Authorization: `Bearer ${credentials.accessToken}` } },
