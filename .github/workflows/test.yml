@@ -26,7 +26,20 @@ jobs:
           --health-retries 5
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/vendia_test?schema=public
-      DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+      # DE MENTIRA A PROPOSITO, no es un olvido. Antes aca viajaba secrets.DEEPSEEK_API_KEY, o sea que
+      # un `npm test` cualquiera tenia con que pagarle a DeepSeek. CLAUDE.md lleva TRES incidentes
+      # anotados de pruebas que facturaban sin querer, y los tres se "arreglaron" con una regla de
+      # nombres (*Paid.ts) que hay que acordarse de cumplir. El 2026-09-18 aparecio el cuarto:
+      # src/routes/whatsapp.test.ts dice "Real DeepSeek call (no mocking)" en un comentario y se
+      # llamaba .test.ts igual. Estaba escondido porque el archivo moria al importar (ver el arreglo de
+      # Groq); al destaparlo, esa corrida se colgo 17 minutos facturando.
+      # Una key invalida no es una regla que recordar: es que no hay con que pagar. El SDK necesita un
+      # valor NO VACIO para construirse (src/ai/client.ts lo crea al importar), asi que no se puede
+      # dejar en blanco - pero con uno invalido la llamada muere en 401 al instante en vez de colgarse.
+      # Si un *.test.ts vuelve a llamar a DeepSeek de verdad, CI se pone rojo en segundos y gratis.
+      # Las pruebas que SI tienen que llamar de verdad son las *Paid.ts, y esas no las corre CI: las
+      # corre el dueño a mano con `npm run test:paid`.
+      DEEPSEEK_API_KEY: ci-test-deepseek-key-invalida-a-proposito
       SESSION_SECRET: ci-test-secret
       TOKEN_ENCRYPTION_KEY: ci-test-token-encryption-key
       # Firmar una URL de S3 es una cuenta local, no una llamada a AWS: con region y bucket de mentira
