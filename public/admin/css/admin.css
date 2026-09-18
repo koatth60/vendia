@@ -532,15 +532,26 @@
 
   /* El aviso de version nueva. Flota abajo, no tapa el compositor del chat, y no interrumpe: la
      persona actualiza cuando quiere. */
+  /* El aviso era una pastilla con max-width al ancho de la pantalla: en telefono el texto no entraba en
+     una linea, se partia palabra por palabra y la pastilla quedaba como un huevo con el boton adentro
+     (reportado con captura, 2026-09-18). Ahora es una barra: ocupa el ancho disponible con margenes,
+     el texto fluye normal y el boton nunca se encoge. */
   .aviso-version {
-    position: fixed; left: 50%; transform: translateX(-50%);
-    bottom: calc(18px + env(safe-area-inset-bottom));
-    z-index: 9000; display: flex; align-items: center; gap: 12px;
-    padding: 10px 12px 10px 16px; border-radius: 999px;
+    position: fixed; z-index: 9000;
+    left: 16px; right: 16px;
+    bottom: calc(16px + env(safe-area-inset-bottom));
+    display: flex; align-items: center; justify-content: space-between; gap: 14px;
+    padding: 12px 12px 12px 16px; border-radius: 14px;
     background: var(--onix-ink); color: var(--onix-surface);
-    box-shadow: var(--shadow-md); font-size: 13px; max-width: calc(100vw - 32px);
+    box-shadow: var(--shadow-md); font-size: 13.5px; line-height: 1.35;
   }
-  .aviso-version button { padding: 7px 14px; font-size: 12.5px; border-radius: 999px; }
+  .aviso-version > span { flex: 1 1 auto; min-width: 0; }
+  .aviso-version button { flex: 0 0 auto; padding: 9px 16px; font-size: 13px; border-radius: 10px; }
+
+  /* En pantalla ancha no tiene por que cruzar todo el monitor: se centra y se acota. */
+  @media (min-width: 640px) {
+    .aviso-version { left: 50%; right: auto; transform: translateX(-50%); max-width: 460px; }
+  }
 
   /* El final de la Bandeja paginada: cuando entra en pantalla, se pide la página siguiente. */
   .inbox-sentinel {
