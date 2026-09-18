@@ -67,6 +67,11 @@ model Business {
   // whatsappTokenExpiryNotifiedAt en cada reconexion para que la proxima expiracion vuelva a avisar.
   whatsappTokenExpiresAt        DateTime?
   whatsappTokenExpiryNotifiedAt DateTime?
+  // E30 (2026-09-18): el texto cifrado de whatsappAccessToken no se pudo descifrar al leerlo. El token
+  // queda en null y ESTA fila queda marcada, porque un token null tambien lo tiene un negocio que nunca
+  // conecto WhatsApp: sin la marca, "roto" y "nunca conectado" se ven identicos en el panel y el dueño
+  // no sabe que tiene que reconectar. La escribe la extension de lectura de src/db/client.ts.
+  secretsBroken                 Boolean   @default(false)
   // Error 190 de Meta (token vencido o revocado) marca la conexion como caida - src/whatsapp/outbound.ts
   // la setea al clasificar ese error, whatsappConnect.ts la limpia al reconectar. Distinto de un token
   // que todavia no vencio pero que Meta igual rechazo (revocado a mano, WABA desconectada).

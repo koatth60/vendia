@@ -42,8 +42,38 @@ function decryptTokenInResult<T>(result: T): T {
   if (!result || typeof result !== "object") return result;
   const record = result as Record<string, unknown>;
   const value = record[TOKEN_FIELD];
-  if (typeof value === "string") record[TOKEN_FIELD] = decryptSecret(value);
+  if (typeof value === "string") {
+    try {
+      record[TOKEN_FIELD] = decryptSecret(value);
+    } catch (error) {
+      // E30: UNA fila con el texto cifrado corrupto tumbaba a TODOS los inquilinos. decryptSecret llama
+      // a decipher.final(), que tira cuando el tag de autenticacion no cierra (token escrito con otra
+      // TOKEN_ENCRYPTION_KEY, fila truncada, copia de base entre entornos). Como esto corre dentro de la
+      // extension de lectura, ese throw salia por el findMany: el panel de plataforma, los jobs y el
+      // webhook se caian enteros por un negocio.
+      //
+      // Ahora el token queda en null - ese negocio no puede mandar mensajes, que es la verdad - y los
+      // demas siguen funcionando. Se marca la fila para que sea VISIBLE: un token null tambien lo tiene
+      // un negocio que nunca conecto WhatsApp, y sin la marca los dos casos se ven iguales.
+      record[TOKEN_FIELD] = null;
+      const id = typeof record.id === "string" ? record.id : null;
+      console.error(`[ZAQI ALERT] secreto ilegible en Business${id ? ` ${id}` : ""}: el token quedo en null`, error);
+      if (id) marcarSecretoRoto(id);
+    }
+  }
   return result;
+}
+
+/**
+ * Marca la fila sin pasar por la extension: $executeRaw no entra a $allOperations del modelo business,
+ * asi que no se reentra aca desde aca mismo. Va sin await a proposito - es una marca de diagnostico, no
+ * puede demorar ni hacer fallar la lectura que la disparo - y es idempotente, asi que repetirla no
+ * cuesta nada.
+ */
+function marcarSecretoRoto(businessId: string): void {
+  prisma
+    .$executeRaw`UPDATE "Business" SET "secretsBroken" = true WHERE "id" = ${businessId} AND "secretsBroken" = false`
+    .catch((error: unknown) => console.error(`No se pudo marcar secretsBroken en ${businessId}:`, error));
 }
 
 export const prisma = new PrismaClient({ adapter }).$extends({
