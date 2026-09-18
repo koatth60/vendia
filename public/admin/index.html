@@ -971,7 +971,7 @@
                   <div class="modal-header-name">
                     <span id="modal-title"></span>
                     <input id="modal-title-input" type="text" placeholder="Nombre del cliente" class="modal-title-input" style="display:none;" onkeydown="if(event.key==='Enter') saveCustomerNameEdit(); if(event.key==='Escape') cancelEditCustomerName();" />
-                    <button class="btn-ghost" type="button" id="save-name-btn" onclick="saveCustomerNameEdit()" style="display:none; padding:1px 6px; font-size:11px;">✓</button>
+                    <button class="btn-ghost" type="button" id="save-name-btn" onclick="saveCustomerNameEdit()" style="display:none; padding:1px 6px; font-size:11px;" aria-label="Guardar nombre"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"></path></svg></button>
                   </div>
                   <div class="modal-header-meta">
                     <span id="modal-subtitle"></span>
@@ -1054,7 +1054,7 @@
                 </div>
                 <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:10px;">
                   <span id="close-sale-status" style="font-size:12px;"></span>
-                  <button class="btn-secondary" type="button" onclick="prefillCloseSaleForm()" style="white-space:nowrap; font-size:12px; padding:4px 10px;">🔄 Releer conversación</button>
+                  <button class="btn-secondary" type="button" onclick="prefillCloseSaleForm()" style="white-space:nowrap; font-size:12px; padding:4px 10px;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66"></path><path d="M20 4v4.5h-4.5"></path></svg>Releer conversación</button>
                 </div>
                 <label>Productos</label>
                 <datalist id="close-sale-product-options"></datalist>

@@ -1985,7 +1985,10 @@ function applyInboxFilter() {
   const unreadOnly = select.value === 'unread';
   let shown = 0;
   list.querySelectorAll('.conv-row').forEach((row) => {
-    const hide = unreadOnly && !row.classList.contains('has-unread');
+    // Se lee data-unread, que es el contador que el propio codigo mantiene (ver customerRowHtml y
+    // setRowUnreadCount). Antes preguntaba por la clase 'has-unread', que NADIE ponia nunca: el filtro
+    // "Sin leer" no encontraba una sola conversacion y el negrita de sin leer no se aplicaba jamas.
+    const hide = unreadOnly && !(Number(row.dataset.unread) > 0);
     row.hidden = hide;
     if (!hide) shown++;
   });

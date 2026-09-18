@@ -489,7 +489,6 @@
   .tpl-row-name { font-weight: 700; font-family: monospace; font-size: 13px; }
   .tpl-row-body { color: var(--muted); font-size: 12.5px; margin-top: 6px; white-space: pre-wrap; }
   .tpl-row-delete { border: none; background: none; color: var(--danger); font-size: 12px; font-weight: 600; cursor: pointer; padding: 2px; }
-  .conv-row.has-unread .conv-name { font-weight: 700; }
 
   .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
   .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; }
@@ -1894,7 +1893,11 @@
   }
   .conv-row.active .conv-avatar { background: var(--onix-accent-soft); color: var(--onix-accent); }
   .conv-name { font-size: 13px; font-weight: 600; color: var(--onix-ink); }
-  .conv-row.has-unread .conv-name { font-weight: 700; }
+  /* El selector cuelga de data-unread, el mismo atributo que ya mantiene el contador de sin leer, y no
+     de una clase aparte. Antes era ".conv-row.has-unread": esa clase no se la ponia nadie, asi que la
+     conversacion sin leer nunca se veia en negrita. Dos copias del mismo hecho y una se quedo atras;
+     con una sola no puede volver a pasar. */
+  .conv-row:not([data-unread="0"]) .conv-name { font-weight: 700; }
   .conv-preview, .conv-meta {
     font-size: 11.5px; color: var(--onix-muted);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
