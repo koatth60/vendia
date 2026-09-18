@@ -1136,6 +1136,101 @@ salida que se envenena sin avisar. El bloque termina con "turnos perdidos = 0, y
 
 ---
 
+### E13b · Una pregunta que ya no hace falta no se hace, y una respuesta vieja no se despacha
+
+**Quita:** al sistema, molestar a la dueña por algo ya resuelto, y tirarle al cliente una respuesta que
+perdió su contexto.
+
+**Porque:** conversación `cmu6b0uja0028od2ka6c04qol` (Dennis, 2026-09-18). La secuencia, con los tiempos
+de la base:
+
+```
+01:54:18  el cliente manda la foto de un reloj
+01:58:43  el cliente escribe "G9"
+01:58:52  el servidor le manda las 2 fotos del Smartwatch gen 9   <- YA quedo identificado
+01:58:57  "¡Ese es el *Smartwatch gen 9*!"
+02:00:16  el cliente: "Si"
+02:00:25  se crea PendingOwnerQuestion PHOTO_PRODUCT              <- se le pregunta igual a la dueña
+02:00:50  al cliente le llega: "Según nuestro equipo: Gen9"
+```
+
+Dos defectos encadenados, los dos con causa escrita en el código:
+
+**(a) La pregunta se hizo cuando ya sobraba.** El efecto requerido `OWNER_NOTIFIED_ABOUT_IMAGE` mira
+`findUnattendedCustomerImage`, y "atendida" hoy significa una sola cosa: que haya salido un aviso a la
+dueña (`PendingOwnerQuestion` o `OwnerMessageLog`) después de esa imagen. **Que el servidor haya
+identificado el producto y le haya mandado las fotos al cliente no cuenta.** Por eso, minuto y medio
+después de resolverlo solo, el turno forzó `ask_owner_about_photo` y despertó a la dueña por un producto
+que el cliente ya tenía en pantalla.
+
+**(b) La respuesta se despachó cruda y fuera de tiempo.** La dueña contestó "Gen9".
+`findConfidentProductMatch(businessId, "Gen9")` no resolvió —un solo token no llega al piso de
+confianza— así que el camino de respaldo mandó el texto tal cual, con su prefijo: *"Según nuestro
+equipo: Gen9"*. Al cliente, que hacía 90 segundos había dicho "Si" a ese mismo reloj, le llegó una línea
+sin producto, sin precio y sin sentido.
+
+**Se hace:**
+
+1. `findUnattendedCustomerImage` suma una tercera forma de "atendida", y es la más fuerte de las tres:
+   **el servidor mandó media de un producto en esta conversación después de esa imagen**
+   (`Message` con `mediaType` y `relatedProductId`, o `SaleState.mediaSent`). Es un `SELECT`, no una
+   lectura de prosa.
+2. Antes de despachar la respuesta de una `PendingOwnerQuestion`, se mira si la pregunta **sigue
+   teniendo sentido**: si entre que se preguntó y que contestó el producto ya se identificó, la respuesta
+   va **a la dueña** ("ya se resolvió solo, no le mandé nada al cliente") y no al cliente.
+3. Una respuesta `PHOTO_PRODUCT` que no resuelve a ningún producto no sale cruda al cliente. Hoy
+   "Gen9" viaja literal; tiene que resolver contra el catálogo o pedirle a la dueña que lo diga con el
+   nombre completo.
+
+**Se prueba:** con media de un producto enviada después de la imagen, `computeRequiredEffects` no exige
+`OWNER_NOTIFIED_ABOUT_IMAGE`; y una respuesta del dueño que no resuelve a un producto no produce ningún
+mensaje al cliente.
+**Tamaño:** M. **Depende de:** nada. **Bandera:** no.
+**Vuelta atrás:** revertir; vuelve a exigirse el aviso como hoy.
+
+---
+
+### E15b · La modalidad y el método de pago son dos datos, no dos veces la misma pregunta
+
+**Quita:** al cliente, tener que contestar dos veces lo mismo; y al sistema, descartar en silencio lo
+que el cliente contestó.
+
+**Porque:** la misma conversación de Dennis, cuatro minutos después:
+
+```
+02:05:20  bot: "¿cómo prefieres manejar el pago DEL ENVÍO?  1) Pagar producto + envío..."
+02:06:37  cliente: "Pagar contra entrega"
+02:06:46  bot: "Todo contraentrega entonces. Ahora, ¿cómo prefieres pagar EL PRODUCTO?
+               - Contraentrega (pagas al recibir)  - Nequi  - ..."
+02:07:27  cliente: "Nequi"
+...
+02:11:51  bot: "en total serían $94.000 a pagar contra entrega"
+```
+
+El pedido quedó con `paymentMethodLabel = "Contraentrega"` y `shippingModality = COD_ALL`. **El cliente
+dijo "Nequi" y eso se descartó sin decírselo.**
+
+Las dos preguntas son datos distintos de verdad —*cuándo* se paga y *con qué* se paga— pero al cliente
+le llegan como la misma pregunta dos veces, porque **"Contraentrega" está cargado como método de pago**
+(`PaymentMethod` con `settlement = ON_DELIVERY`) y vuelve a aparecer en la segunda lista. Elegir dos
+veces la misma palabra y que el sistema se quede con una sola es peor que preguntar una vez.
+
+**Se hace:** la lista de métodos deja de ofrecer lo que ya se decidió en la modalidad, y un método cuyo
+`settlement` contradice la modalidad elegida **no se resuelve en silencio**: o el servidor lo toma como
+cambio explícito de modalidad, o se le pregunta al cliente cuál de las dos vale. Ninguna de las dos
+puede ser "quedarse con una y no decir nada".
+
+**Se prueba:** con `COD_ALL` elegido, la lista de métodos no incluye el método `ON_DELIVERY` otra vez; y
+un método que contradice la modalidad no cierra el pedido sin resolver la contradicción.
+**Tamaño:** M. **Depende de:** nada. **Bandera:** no.
+**Vuelta atrás:** revertir.
+
+**Nota de la misma conversación:** a las 02:08:47 el bot rechazó el celular *"314 863 7722"* por los
+espacios y se lo hizo repetir dos veces. Ese defecto ya está arreglado y desplegado (`26560fb`), 20
+minutos después de que le pasara a este cliente.
+
+---
+
 ### E14 · Un job que revienta no deja sin atender a los demás negocios
 
 **Quita:** al operador, tener que descubrir a mano que un job dejó de correr.
