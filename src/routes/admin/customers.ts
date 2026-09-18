@@ -1,6 +1,7 @@
 import { Router } from "express";
 import {
   listCustomerThreadsForBusiness,
+  decodeInboxCursor,
   getCustomerThreadForBusiness,
   setCustomerTags,
   saveCustomerName,
@@ -47,9 +48,15 @@ customersRouter.put("/api/customers/:id/name", async (req, res) => {
 // doesn't reappear as a second, unrelated-looking row the next time they write in. The underlying data
 // model is untouched: /api/conversations/:id and everything under it still operate on a single
 // Conversation id (the customer row's activeConversationId).
+// PAGINADA (2026-09-18). Traia TODOS los clientes del negocio de una: 72 conversaciones el dia que se
+// midio, con la ultima linea de cada uno, en la primera pantalla. La respuesta cambia de forma - de un
+// array a `{ items, nextCursor }` - a proposito: un endpoint que devuelve un array no tiene donde decir
+// "hay mas", y ese es justamente el dato que faltaba.
 customersRouter.get("/api/customers", async (req, res) => {
-  const customers = await listCustomerThreadsForBusiness(businessIdOf(req));
-  res.json(customers);
+  const limit = Number(req.query.limit) || undefined;
+  const cursor = decodeInboxCursor(typeof req.query.cursor === "string" ? req.query.cursor : undefined);
+  const page = await listCustomerThreadsForBusiness(businessIdOf(req), { limit, cursor });
+  res.json(page);
 });
 
 customersRouter.get("/api/customers/:id/thread", async (req, res) => {

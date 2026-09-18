@@ -9,6 +9,7 @@ import {
   saveCustomerContactInfo,
   setCustomerTags,
   listCustomerThreadsForBusiness,
+  decodeInboxCursor,
   getCustomerThreadForBusiness,
   setConversationIntent,
   clearConversationIntent,
@@ -185,7 +186,7 @@ test("listCustomerThreadsForBusiness collapses a customer's closed + open conver
     });
     await prisma.conversation.update({ where: { id: soldOld.id }, data: { unreadCount: 1 } });
 
-    const rows = await listCustomerThreadsForBusiness(businessId);
+    const { items: rows } = await listCustomerThreadsForBusiness(businessId, { limit: 100 });
     const row = rows.find((r) => r.customerId === customer.id);
     assert.ok(row, "customer must appear exactly once in the grouped list");
     assert.equal(row.activeConversationId, open.id, "the non-SOLD/LOST conversation is the active one");
@@ -228,7 +229,7 @@ test("listCustomerThreadsForBusiness muestra el mensaje mas reciente de VERDAD, 
       data: { conversationId: sold.id, role: "ASSISTANT", content: "Tu pedido fue cancelado. Cualquier duda me escribes.", createdAt: new Date(now) },
     });
 
-    const rows = await listCustomerThreadsForBusiness(businessId);
+    const { items: rows } = await listCustomerThreadsForBusiness(businessId, { limit: 100 });
     const row = rows.find((r) => r.customerId === customer.id);
     assert.ok(row);
     assert.equal(row.activeConversationId, active.id, "la conversación NEW sigue siendo la activa");
@@ -251,7 +252,7 @@ test("listCustomerThreadsForBusiness picks the most recently updated conversatio
       data: { customerId: customer.id, status: "LOST", updatedAt: new Date(now) },
     });
 
-    const rows = await listCustomerThreadsForBusiness(businessId);
+    const { items: rows } = await listCustomerThreadsForBusiness(businessId, { limit: 100 });
     const row = rows.find((r) => r.customerId === customer.id);
     assert.ok(row);
     assert.equal(row.activeConversationId, mostRecent.id);
@@ -954,5 +955,88 @@ test("un ciclo que ya trae 30 mensajes no arrastra los anteriores", async () => 
     await prisma.message.deleteMany({ where: { conversationId: { in: [vieja.id, actual.id] } } });
     await prisma.conversation.deleteMany({ where: { id: { in: [vieja.id, actual.id] } } });
     await prisma.customer.deleteMany({ where: { id: customerId } });
+  }
+});
+
+// LA BANDEJA PAGINADA (2026-09-18). Cargaba TODOS los clientes del negocio en la primera pantalla: 72
+// conversaciones el dia que se midio, con la ultima linea de cada una y su cuenta de compras, y
+// creciendo cada semana. El agrupado por cliente ahora lo hace la base con un GROUP BY, y la paginacion
+// es por llave (updatedAt, customerId) y no por OFFSET: mientras alguien scrollea entran mensajes
+// nuevos, y con OFFSET una fila que sube de posicion se muestra dos veces o no se muestra nunca.
+
+test("la Bandeja devuelve solo la pagina pedida y dice desde donde sigue", async () => {
+  const negocio = await prisma.business.create({
+    data: { name: `Test ${randomUUID()}`, email: `test-${randomUUID()}@example.com`, passwordHash: "x" },
+  });
+  try {
+    const base = Date.now() - 60 * 60 * 1000;
+    for (let i = 0; i < 5; i++) {
+      const cliente = await prisma.customer.create({ data: { businessId: negocio.id, phoneNumber: `5731${Date.now()}${i}` } });
+      await prisma.conversation.create({ data: { customerId: cliente.id, updatedAt: new Date(base + i * 1000) } });
+    }
+
+    const primera = await listCustomerThreadsForBusiness(negocio.id, { limit: 2 });
+    assert.equal(primera.items.length, 2);
+    assert.ok(primera.nextCursor, "con mas clientes por delante tiene que decir desde donde sigue");
+
+    const segunda = await listCustomerThreadsForBusiness(negocio.id, {
+      limit: 2,
+      cursor: decodeInboxCursor(primera.nextCursor!),
+    });
+    assert.equal(segunda.items.length, 2);
+
+    const tercera = await listCustomerThreadsForBusiness(negocio.id, {
+      limit: 2,
+      cursor: decodeInboxCursor(segunda.nextCursor!),
+    });
+    assert.equal(tercera.items.length, 1, "la ultima pagina trae lo que queda");
+    assert.equal(tercera.nextCursor, null, "y no promete una pagina que no existe");
+
+    // Ninguna fila repetida entre paginas, y todas las que hay.
+    const ids = [...primera.items, ...segunda.items, ...tercera.items].map((r) => r.customerId);
+    assert.equal(new Set(ids).size, 5, "cinco clientes distintos, ninguno dos veces");
+
+    // Y el orden es por actividad mas reciente primero, que es lo que ve el dueño.
+    const tiempos = [...primera.items, ...segunda.items, ...tercera.items].map((r) => r.updatedAt.getTime());
+    assert.deepEqual(tiempos, [...tiempos].sort((a, b) => b - a));
+  } finally {
+    await prisma.conversation.deleteMany({ where: { customer: { businessId: negocio.id } } });
+    await prisma.customer.deleteMany({ where: { businessId: negocio.id } });
+    await prisma.business.deleteMany({ where: { id: negocio.id } });
+  }
+});
+
+test("un cliente con varias conversaciones ocupa UNA fila y no se repite en la pagina siguiente", async () => {
+  // Es el defecto que abre la paginacion mal hecha: agrupar en memoria y despues cortar significa que la
+  // conversacion vieja del mismo cliente reaparece mas abajo como otra fila.
+  const negocio = await prisma.business.create({
+    data: { name: `Test ${randomUUID()}`, email: `test-${randomUUID()}@example.com`, passwordHash: "x" },
+  });
+  try {
+    const base = Date.now() - 60 * 60 * 1000;
+    const repetido = await prisma.customer.create({ data: { businessId: negocio.id, phoneNumber: `5732${Date.now()}` } });
+    // Su conversacion mas nueva es la primera de todas; la vieja caeria en la ultima pagina.
+    await prisma.conversation.create({ data: { customerId: repetido.id, status: "SOLD", updatedAt: new Date(base) } });
+    await prisma.conversation.create({ data: { customerId: repetido.id, updatedAt: new Date(base + 10_000) } });
+    for (let i = 0; i < 3; i++) {
+      const otro = await prisma.customer.create({ data: { businessId: negocio.id, phoneNumber: `5733${Date.now()}${i}` } });
+      await prisma.conversation.create({ data: { customerId: otro.id, updatedAt: new Date(base + 1000 + i * 1000) } });
+    }
+
+    const todas: string[] = [];
+    let cursor = undefined as ReturnType<typeof decodeInboxCursor>;
+    for (let pagina = 0; pagina < 5; pagina++) {
+      const res = await listCustomerThreadsForBusiness(negocio.id, { limit: 2, cursor });
+      todas.push(...res.items.map((r) => r.customerId));
+      if (!res.nextCursor) break;
+      cursor = decodeInboxCursor(res.nextCursor);
+    }
+
+    assert.equal(todas.filter((id) => id === repetido.id).length, 1, "el cliente con dos conversaciones sale una sola vez");
+    assert.equal(new Set(todas).size, 4);
+  } finally {
+    await prisma.conversation.deleteMany({ where: { customer: { businessId: negocio.id } } });
+    await prisma.customer.deleteMany({ where: { businessId: negocio.id } });
+    await prisma.business.deleteMany({ where: { id: negocio.id } });
   }
 });

@@ -1223,9 +1223,93 @@ function formatCustomerRow(
   };
 }
 
-export async function listCustomerThreadsForBusiness(businessId: string): Promise<CustomerRow[]> {
+/**
+ * Cuantos clientes trae la Bandeja de una sola vez. El resto llega al bajar.
+ *
+ * Por que 15: la Bandeja cargaba TODOS los clientes del negocio en la primera pantalla - 72
+ * conversaciones el 2026-09-18 en el negocio piloto, y creciendo - con la ultima linea de cada uno y su
+ * cuenta de compras. Eso es una consulta que crece sin techo por cada vez que alguien abre el panel, y
+ * una pantalla que tarda mas cada semana que pasa. Quince filas llenan la primera pantalla de un
+ * telefono con margen; lo que sigue se pide cuando el ojo llega ahi.
+ */
+export const INBOX_PAGE_SIZE = 15;
+
+/** La posicion desde donde sigue la Bandeja: el ultimo cliente que ya se mando. */
+export interface InboxCursor {
+  updatedAt: Date;
+  customerId: string;
+}
+
+export function encodeInboxCursor(cursor: InboxCursor): string {
+  return `${cursor.updatedAt.toISOString()}|${cursor.customerId}`;
+}
+
+export function decodeInboxCursor(raw: string | undefined): InboxCursor | undefined {
+  if (!raw) return undefined;
+  const corte = raw.lastIndexOf("|");
+  if (corte <= 0) return undefined;
+  const updatedAt = new Date(raw.slice(0, corte));
+  const customerId = raw.slice(corte + 1);
+  if (Number.isNaN(updatedAt.getTime()) || !customerId) return undefined;
+  return { updatedAt, customerId };
+}
+
+/**
+ * La Bandeja, de a paginas.
+ *
+ * EL AGRUPADO LO HACE LA BASE, NO EL PROCESO. Antes se traian todas las conversaciones del negocio y se
+ * agrupaban por cliente en memoria: para mandar quince filas habia que leer y ordenar el historial
+ * entero. Ahora Postgres devuelve los quince clientes de esta pagina con un GROUP BY, y recien despues
+ * se leen las conversaciones de ESOS quince.
+ *
+ * La paginacion es por llave (updatedAt, customerId) y no por OFFSET a proposito: mientras alguien
+ * scrollea entran mensajes nuevos, y con OFFSET una fila que sube de posicion se muestra dos veces o no
+ * se muestra nunca. El desempate por customerId existe porque dos clientes pueden compartir el mismo
+ * instante al milisegundo.
+ */
+export async function listCustomerThreadsForBusiness(
+  businessId: string,
+  opts: { limit?: number; cursor?: InboxCursor } = {}
+): Promise<{ items: CustomerRow[]; nextCursor: string | null; total?: number }> {
+  const limit = Math.max(1, Math.min(opts.limit ?? INBOX_PAGE_SIZE, 100));
+  const cursor = opts.cursor;
+
+  // Un cliente = una fila, ordenado por su actividad mas reciente. El HAVING es el corte por llave.
+  const ordenados = cursor
+    ? await prisma.$queryRaw<{ customerId: string; lastAt: Date }[]>`
+        SELECT c."customerId" AS "customerId", MAX(c."updatedAt") AS "lastAt"
+        FROM "Conversation" c
+        JOIN "Customer" cu ON cu.id = c."customerId"
+        WHERE cu."businessId" = ${businessId}
+        GROUP BY c."customerId"
+        HAVING MAX(c."updatedAt") < ${cursor.updatedAt}
+            OR (MAX(c."updatedAt") = ${cursor.updatedAt} AND c."customerId" < ${cursor.customerId})
+        ORDER BY "lastAt" DESC, "customerId" DESC
+        LIMIT ${limit + 1}`
+    : await prisma.$queryRaw<{ customerId: string; lastAt: Date }[]>`
+        SELECT c."customerId" AS "customerId", MAX(c."updatedAt") AS "lastAt"
+        FROM "Conversation" c
+        JOIN "Customer" cu ON cu.id = c."customerId"
+        WHERE cu."businessId" = ${businessId}
+        GROUP BY c."customerId"
+        ORDER BY "lastAt" DESC, "customerId" DESC
+        LIMIT ${limit + 1}`;
+
+  // Se pide uno de mas para saber si hay pagina siguiente sin tener que contar el total.
+  const hayMas = ordenados.length > limit;
+  const pagina = hayMas ? ordenados.slice(0, limit) : ordenados;
+
+  // El total solo en la primera pagina: es lo que el panel pinta en el contador de la pestaña, y
+  // recalcularlo en cada scroll seria pagar un COUNT por cada quince filas que bajan.
+  const total = cursor
+    ? undefined
+    : (await prisma.customer.count({ where: { businessId, conversations: { some: {} } } }));
+
+  if (pagina.length === 0) return { items: [], nextCursor: null, total };
+
+  const ids = pagina.map((fila) => fila.customerId);
   const conversations = await prisma.conversation.findMany({
-    where: { customer: { businessId } },
+    where: { customerId: { in: ids } },
     include: {
       customer: true,
       messages: { orderBy: { createdAt: "desc" }, take: 1 },
@@ -1240,13 +1324,20 @@ export async function listCustomerThreadsForBusiness(businessId: string): Promis
     else byCustomer.set(c.customerId, [c]);
   }
 
-  const rows = [...byCustomer.values()].map(formatCustomerRow);
-  // Sorted explicitly rather than relying on Map insertion order matching it (it already does, since
-  // `conversations` above is globally sorted desc and a customer's first appearance in that stream is
-  // always their own max updatedAt) - explicit is cheap here and doesn't depend on that holding under
-  // timestamp ties or future changes to the query above.
-  rows.sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
-  return rows;
+  // El orden lo manda la consulta de arriba, que es la que sabe paginar. Formatear y volver a ordenar
+  // por updatedAt aca abriria la puerta a que una fila caiga en dos paginas distintas: formatCustomerRow
+  // calcula su propio updatedAt (el del mensaje mas reciente de verdad) y ese no es el que corta.
+  const items = pagina
+    .map((fila) => byCustomer.get(fila.customerId))
+    .filter((grupo): grupo is typeof conversations => Boolean(grupo && grupo.length > 0))
+    .map(formatCustomerRow);
+
+  const ultima = pagina[pagina.length - 1];
+  return {
+    items,
+    nextCursor: hayMas ? encodeInboxCursor({ updatedAt: ultima.lastAt, customerId: ultima.customerId }) : null,
+    total,
+  };
 }
 
 // The grouped-thread view behind a customer row: messages for ONE cycle (the active one, or an older

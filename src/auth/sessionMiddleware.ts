@@ -32,6 +32,16 @@ export const sessionMiddleware = session({
   secret: env.sessionSecret,
   resave: false,
   saveUninitialized: false,
+  // LA SESION SE RENUEVA SOLA MIENTRAS SE USA (2026-09-18). `maxAge` ya eran 30 dias, pero sin `rolling`
+  // se contaban desde el login y nunca mas: el dia 30 la sesion se caia aunque la persona hubiera estado
+  // usando el panel todos los dias. Con `rolling`, cada request que pasa por aca vuelve a poner el reloj
+  // en 30 dias, asi que la unica forma de que se cierre es no entrar durante un mes seguido. Es lo que
+  // hace falta para la aplicacion instalada: nadie vuelve a escribir su clave porque paso un mes desde
+  // que la instalo.
+  //
+  // El costo es un UPDATE por request sobre la fila de la sesion; por eso `store.touch` en un store de
+  // Postgres existe y por eso el pool de este archivo es aparte del de Prisma.
+  rolling: true,
   cookie: {
     httpOnly: true,
     maxAge: 30 * 24 * 60 * 60 * 1000,

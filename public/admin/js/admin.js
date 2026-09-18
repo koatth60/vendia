@@ -134,6 +134,30 @@ function refreshCustomerListIfVisible() {
   return fetchCustomerPage(undefined, true);
 }
 
+// Cuanto vale lo que ya esta en pantalla antes de volver a pedirlo, por seccion. Envios cambia cuando
+// alguien lo edita y nada mas; Inicio y Salud tienen numeros que se mueven solos.
+const SECCION_TTL_MS = { inicio: 45_000, health: 45_000, shipping: 10 * 60_000, whatsapp: 5 * 60_000 };
+const seccionCargadaEn = new Map();
+
+function cargarSeccion(nombre, loader) {
+  const ttl = SECCION_TTL_MS[nombre] ?? 60_000;
+  const ultima = seccionCargadaEn.get(nombre) || 0;
+  if (Date.now() - ultima < ttl) return;
+  // Se marca ANTES de esperar la respuesta: dos cambios de pestaña seguidos no pueden disparar dos
+  // cargas de lo mismo.
+  seccionCargadaEn.set(nombre, Date.now());
+  Promise.resolve(loader()).catch((err) => {
+    // Si fallo, no vale como cargada: la proxima entrada tiene que reintentar.
+    seccionCargadaEn.delete(nombre);
+    console.error(`No se pudo cargar la seccion ${nombre}:`, err);
+  });
+}
+
+/** Lo que cambio deja de valer: la proxima vez que se entre a esa seccion se pide de nuevo. */
+function invalidarSeccion(nombre) {
+  seccionCargadaEn.delete(nombre);
+}
+
 function switchTab(name) {
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.dataset.tabPanel === name));
@@ -151,10 +175,18 @@ function switchTab(name) {
     loadTagManager();
     loadCustomerList(true);
   }
-  if (name === 'inicio') loadDashboard();
-  if (name === 'health') loadHealth();
-  if (name === 'shipping') loadShipping();
-  if (name === 'whatsapp') loadWhatsappConnection();
+  // LA SECCION YA VISTA NO SE VUELVE A PEDIR (2026-09-18). Cada cambio de pestaña disparaba su carga
+  // otra vez, asi que moverse entre Inicio, Salud y Envios era ver "Cargando..." una y otra vez sobre
+  // datos que ya estaban en pantalla. Los paneles no se destruyen al cambiar de pestaña (solo se les
+  // saca la clase `active`), asi que lo que ya se pinto SIGUE AHI: pedirlo de nuevo solo tapaba
+  // contenido bueno con un spinner.
+  //
+  // El TTL es corto a proposito. No reemplaza al auto-refresh: mientras la vista esta abierta se sigue
+  // refrescando sola (startAutoRefresh). Esto es solo para el ida y vuelta entre pestañas.
+  if (name === 'inicio') cargarSeccion('inicio', loadDashboard);
+  if (name === 'health') cargarSeccion('health', loadHealth);
+  if (name === 'shipping') cargarSeccion('shipping', loadShipping);
+  if (name === 'whatsapp') cargarSeccion('whatsapp', loadWhatsappConnection);
   // Sin boton "Actualizar": la vista se refresca sola mientras está abierta (ver AUTO_REFRESH). Se
   // reinicia en cada cambio de pestaña, así que entrar de nuevo a la misma vista no acumula timers.
   startAutoRefresh(name);
@@ -1746,31 +1778,94 @@ function customerRowFromConversationEvent(c) {
   };
 }
 
+// LA BANDEJA BAJA DE A PEDACITOS (2026-09-18). Antes se traia la lista entera en la primera pantalla
+// - 72 conversaciones el dia que se midio, y creciendo - con la ultima linea de cada una. Ahora bajan
+// quince y el resto llega cuando el scroll se acerca al final. `inboxCursor` es desde donde sigue;
+// null significa "ya esta todo".
+let inboxCursor = null;
+let inboxCargando = false;
+let inboxTotal = 0;
+
 async function loadCustomers() {
   const container = document.getElementById('conversations-list');
+  inboxCursor = null;
+  inboxCargando = false;
   try {
     const res = await apiFetch('/admin/api/customers');
-    const customers = await res.json();
-    setTabCount('tab-count-conversations', customers.length);
+    const page = await res.json();
+    const customers = page.items || [];
+    inboxCursor = page.nextCursor || null;
+    inboxTotal = typeof page.total === 'number' ? page.total : customers.length;
+    setTabCount('tab-count-conversations', inboxTotal);
 
-    if (!Array.isArray(customers) || customers.length === 0) {
+    if (customers.length === 0) {
       container.innerHTML = '<div class="empty-state"><div class="big">💬</div>Todavía no hay conversaciones.<br/>Van a aparecer acá apenas un cliente le escriba al bot.</div>';
       updateTotalUnreadBadge();
       return;
     }
 
-    container.innerHTML = customers.map(customerRowHtml).join('');
+    container.innerHTML = customers.map(customerRowHtml).join('') + inboxSentinelHtml();
     const inboxCount = document.getElementById('inbox-count');
-    if (inboxCount) inboxCount.textContent = customers.length;
+    if (inboxCount) inboxCount.textContent = inboxTotal;
     applyInboxFilter();
     updateTotalUnreadBadge();
+    observarFinDeBandeja();
   } catch (err) {
     container.innerHTML = `<div class="empty-state" style="color:var(--danger);">No se pudieron cargar las conversaciones: ${escapeHtml(err.message)}</div>`;
   }
 }
 
-// La lista no está paginada (loadCustomers trae todos los clientes), así que
-// filtrar acá no esconde filas que estén en otra página: no hay otra página.
+function inboxSentinelHtml() {
+  return inboxCursor ? '<div id="inbox-sentinel" class="inbox-sentinel">Cargando más…</div>' : '';
+}
+
+// Trae la pagina siguiente y la PEGA al final, sin volver a pintar lo que ya esta: repintar la lista
+// entera perderia el scroll y el estado de la fila abierta.
+async function cargarMasClientes() {
+  if (!inboxCursor || inboxCargando) return;
+  inboxCargando = true;
+  try {
+    const res = await apiFetch(`/admin/api/customers?cursor=${encodeURIComponent(inboxCursor)}`);
+    const page = await res.json();
+    const nuevos = page.items || [];
+    inboxCursor = page.nextCursor || null;
+
+    const container = document.getElementById('conversations-list');
+    const centinela = document.getElementById('inbox-sentinel');
+    if (!container) return;
+    // Un cliente que ya esta en pantalla no se duplica: pudo haber subido por un mensaje nuevo mientras
+    // se scrolleaba, y la pagina siguiente lo trae igual.
+    const yaEstan = new Set([...container.querySelectorAll('.conv-row')].map((r) => r.dataset.customerId));
+    const html = nuevos.filter((c) => !yaEstan.has(c.customerId)).map(customerRowHtml).join('');
+    if (centinela) centinela.insertAdjacentHTML('beforebegin', html);
+    else container.insertAdjacentHTML('beforeend', html);
+
+    if (!inboxCursor && centinela) centinela.remove();
+    applyInboxFilter();
+    updateTotalUnreadBadge();
+  } catch (err) {
+    console.error('No se pudieron cargar más conversaciones:', err);
+  } finally {
+    inboxCargando = false;
+  }
+}
+
+// IntersectionObserver y no un listener de scroll: no corre en cada pixel, solo cuando el final de la
+// lista entra en pantalla.
+let inboxObserver = null;
+function observarFinDeBandeja() {
+  const centinela = document.getElementById('inbox-sentinel');
+  if (inboxObserver) inboxObserver.disconnect();
+  if (!centinela) return;
+  inboxObserver = new IntersectionObserver((entries) => {
+    if (entries.some((e) => e.isIntersecting)) cargarMasClientes();
+  }, { root: document.getElementById('conversations-list'), rootMargin: '200px' });
+  inboxObserver.observe(centinela);
+}
+
+// El filtro corre sobre las filas YA cargadas. Con la lista paginada (2026-09-18) eso significa que
+// filtrar "sin leer" mira lo que bajó hasta ahora; al seguir scrolleando se filtran también las nuevas,
+// porque cargarMasClientes vuelve a llamar a esta función después de pegar cada página.
 function applyInboxFilter() {
   const select = document.getElementById('inbox-filter');
   const list = document.getElementById('conversations-list');
@@ -2385,7 +2480,14 @@ async function openCustomer(customerId) {
   // hilo a pantalla completa, como WhatsApp, sin el chrome de arriba.
   document.body.classList.add('chat-fullscreen');
   document.querySelectorAll('.conv-row').forEach((row) => row.classList.toggle('active', row.dataset.customerId === customerId));
-  thread.innerHTML = '<div style="text-align:center; color:var(--muted); font-size:13px; padding:20px;">Cargando…</div>';
+  // EL HILO YA VISTO SE PINTA DE UNA (2026-09-18). Abrir una conversacion mostraba "Cargando…" y
+  // esperaba al servidor, aunque fuera la misma que se acababa de cerrar. Ahora, si ya se abrio antes en
+  // esta sesion, se pinta lo guardado en el acto y la respuesta del servidor lo reemplaza cuando llega.
+  // El cache es de memoria y de esta pestaña: no sobrevive a un refresh y nunca es la fuente de verdad,
+  // solo evita la pantalla en blanco.
+  const cacheado = hiloCache.get(customerId);
+  if (cacheado) pintarHilo(customerId, cacheado);
+  else thread.innerHTML = '<div style="text-align:center; color:var(--muted); font-size:13px; padding:20px;">Cargando…</div>';
   // Opening it counts as reading it - clear the badge immediately (the server also resets its own
   // counters as a side effect of the fetch below and broadcasts that, this just avoids waiting on the
   // round trip for the person who's looking right at it).
@@ -2394,6 +2496,42 @@ async function openCustomer(customerId) {
   try {
     const res = await apiFetch(`/admin/api/customers/${customerId}/thread`);
     const data = await res.json();
+    // Mientras se esperaba la respuesta el dueño pudo abrir otra conversacion: pintar esta ahora seria
+    // meterle el hilo equivocado.
+    if (currentCustomerId !== customerId) return;
+    recordarHilo(customerId, data);
+    pintarHilo(customerId, data);
+    startConversationPolling();
+  } catch (err) {
+    // Con algo cacheado en pantalla, un fallo de red no borra lo que el dueño esta leyendo.
+    if (!cacheado) {
+      thread.innerHTML = `<div style="text-align:center; color:var(--danger); font-size:13px; padding:20px;">No se pudo cargar: ${escapeHtml(err.message)}</div>`;
+    } else {
+      console.error('No se pudo refrescar el hilo:', err);
+    }
+  }
+}
+
+// CUANTOS HILOS SE RECUERDAN. Cada uno son sus ultimos ~30 mensajes ya formateados; veinte cubren una
+// jornada de ir y venir entre clientes sin que la pestaña acumule memoria sin techo.
+const HILOS_EN_CACHE = 20;
+const hiloCache = new Map();
+
+function recordarHilo(customerId, data) {
+  // Map conserva el orden de insercion: borrar la primera clave saca el hilo mas viejo.
+  hiloCache.delete(customerId);
+  hiloCache.set(customerId, data);
+  while (hiloCache.size > HILOS_EN_CACHE) hiloCache.delete(hiloCache.keys().next().value);
+}
+
+/** Lo guardado de este cliente deja de valer: su hilo cambio (mensaje nuevo, venta cerrada, handoff). */
+function olvidarHilo(customerId) {
+  if (customerId) hiloCache.delete(customerId);
+}
+
+// Todo lo que pinta un hilo en pantalla, con los datos ya en la mano - vengan del servidor o del cache.
+function pintarHilo(customerId, data) {
+  const thread = document.getElementById('modal-thread');
     // Every existing action (composer, handoff, close-sale, extract-sale-details, the 30s poll) keeps
     // targeting currentConversationId exactly as before the grouping change - only what feeds the
     // sidebar/thread rendering changed.
@@ -2454,11 +2592,8 @@ async function openCustomer(customerId) {
     scrollThreadToBottom();
     pinThreadWhileMediaLoads(thread);
     requestAnimationFrame(() => scrollThreadToBottom());
-    startConversationPolling();
-  } catch (err) {
-    thread.innerHTML = `<div style="text-align:center; color:var(--danger); font-size:13px; padding:20px;">No se pudo cargar: ${escapeHtml(err.message)}</div>`;
-  }
 }
+
 
 function closeConversation() {
   // Cerrar el chat con algo escrito lo guarda, no lo tira.
@@ -5153,6 +5288,9 @@ function initRealtime() {
   }, 30000);
 
   socket.on('message:new', ({ conversationId, customerId, message, unreadCount }) => {
+    // Lo guardado de ese cliente quedo viejo en el instante en que llego este mensaje. Si el hilo esta
+    // abierto se repinta por su propio camino; si no, la proxima apertura lo pide fresco.
+    olvidarHilo(customerId);
     if (conversationId === currentConversationId) {
       // Keep the thread DOM current regardless of visibility, so it's already correct whenever they
       // do look - just don't treat it as read yet unless they're actually looking right now.
@@ -5202,6 +5340,7 @@ function initRealtime() {
   });
 
   socket.on('conversation:updated', (c) => {
+    olvidarHilo(c.customer && c.customer.id);
     const row = document.querySelector(`.conv-row[data-customer-id="${c.customer.id}"]`);
     if (row) {
       // Patches in place rather than a full outerHTML replace - most emits of this event (handoff
