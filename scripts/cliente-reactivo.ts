@@ -213,11 +213,12 @@ async function conversar(persona: Persona, indice: number, negocio: { id: string
     if (termina) break;
   }
 
-  const conversacion = await prisma.conversation.findFirst({ where: { customerId: cliente.id }, orderBy: { updatedAt: "desc" }, select: { id: true } });
-  const pedido = conversacion
-    ? await prisma.order.findFirst({ where: { conversationId: conversacion.id }, select: { summary: true, totalAmount: true } })
-    : null;
-  const incidentes = conversacion ? await prisma.agentIncident.findMany({ where: { conversationId: conversacion.id }, select: { kind: true, detail: true } }) : [];
+  // Por CLIENTE, no por la ultima conversacion: al cerrarse una venta la conversacion pasa a SOLD y se
+  // abre una nueva, asi que mirar la mas reciente decia "no hubo pedido" con el pedido ya creado en la
+  // anterior. Paso en la primera corrida.
+  const conversaciones = (await prisma.conversation.findMany({ where: { customerId: cliente.id }, select: { id: true } })).map((c) => c.id);
+  const pedido = await prisma.order.findFirst({ where: { customerId: cliente.id }, select: { summary: true, totalAmount: true } });
+  const incidentes = await prisma.agentIncident.findMany({ where: { conversationId: { in: conversaciones } }, select: { kind: true, detail: true } });
   const fichaFinal = await prisma.customer.findUnique({ where: { id: cliente.id }, select: { name: true, idNumber: true, address: true } });
 
   return { persona, telefono, pedido, incidentes, fichaFinal, mensajes: leidos };
