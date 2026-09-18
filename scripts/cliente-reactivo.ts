@@ -78,7 +78,12 @@ const PERSONAS_POSIBLES: Persona[] = [
 interface Caso {
   persona: Persona;
   /** Que tiene que haber pasado para decir que esta conversacion salio bien. */
-  aprueba: (r: { pedido: unknown; incidentes: { kind: string; detail: string }[]; textoDelBot: string }) => string | null;
+  aprueba: (r: {
+    pedido: unknown;
+    incidentes: { kind: string; detail: string }[];
+    textoDelBot: string;
+    ficha: { name: string | null; idNumber: string | null; deliveryPhone: string | null } | null;
+  }) => string | null;
 }
 
 const CASOS: Record<string, Caso> = {
@@ -121,6 +126,26 @@ const CASOS: Record<string, Caso> = {
         return "dijo que estaba esperando o que ya le confirmaron, sin que nadie confirmara";
       }
       if (!pedido) return "no quedo el pedido";
+      return null;
+    },
+  },
+  // Defecto: la ficha quedaba con el CELULAR guardado como cedula. La clienta da su celular cuando se lo
+  // piden y la cedula recien si se la piden aparte, que es como lo hace la gente.
+  cedula: {
+    persona: {
+      nombre: "Nubia Olarte",
+      cedula: "41223377",
+      celular: "3186669900",
+      direccion: "Carrera 19 #58-14",
+      barrio: "Chapinero",
+      ciudad: "Bogota",
+      intencion: "quiere comprar un smartwatch y pagar cuando le llegue",
+    },
+    aprueba: ({ ficha, pedido }) => {
+      if (!pedido) return "no quedo el pedido";
+      if (!ficha) return "no quedo ficha del cliente";
+      if (ficha.idNumber && ficha.idNumber === ficha.deliveryPhone) return "guardo el celular como cedula";
+      if (ficha.idNumber && ficha.idNumber !== "41223377") return `guardo "${ficha.idNumber}" como cedula, que no es la suya`;
       return null;
     },
   },
@@ -382,7 +407,7 @@ async function conversar(
   const conversaciones = (await prisma.conversation.findMany({ where: { customerId: cliente.id }, select: { id: true } })).map((c) => c.id);
   const pedido = await prisma.order.findFirst({ where: { customerId: cliente.id }, select: { summary: true, totalAmount: true } });
   const incidentes = await prisma.agentIncident.findMany({ where: { conversationId: { in: conversaciones } }, select: { kind: true, detail: true } });
-  const fichaFinal = await prisma.customer.findUnique({ where: { id: cliente.id }, select: { name: true, idNumber: true, address: true } });
+  const fichaFinal = await prisma.customer.findUnique({ where: { id: cliente.id }, select: { name: true, idNumber: true, deliveryPhone: true, address: true } });
 
   const dichoPorElBot = (
     await prisma.message.findMany({
@@ -454,7 +479,7 @@ async function main() {
   }
   if (caso) {
     const veredictos = resultados.map((r) =>
-      caso.aprueba({ pedido: r.pedido, incidentes: r.incidentes, textoDelBot: r.dichoPorElBot }),
+      caso.aprueba({ pedido: r.pedido, incidentes: r.incidentes, textoDelBot: r.dichoPorElBot, ficha: r.fichaFinal }),
     );
     const pasaron = veredictos.filter((v) => v === null).length;
     console.log(`
