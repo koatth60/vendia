@@ -805,6 +805,33 @@ Dos caminos, y los dos están al alcance de esta etapa:
 
 La opción 1 es la garantía; la 2 es la que además le sirve a la clienta. No son excluyentes.
 
+#### Tercer caso, 2026-09-18 ~02:03 UTC — la misma reparación a medias, ahora con el envío
+
+Conversación de Gabriel. Pide envío a **Piedecuesta** y el bot contesta, dos veces:
+
+> 📦 Costo del envío:  *(nada)*
+> … el valor del envío a Piedecuesta es de **COP**  *(sin cifra)*
+
+Misma mecánica que el caso anterior, otra marca: `renderFixedBlocks` borra
+`SHIPPING_BLOCK_MARKER` cuando `data.shippingRate` es `null` (`agent.ts:751`) y **la frase que lo
+anunciaba sobrevive**. Ya van tres marcas distintas —catálogo, envío— con el mismo desenlace, así que
+no es un caso: es la forma en que este guard repara.
+
+**Por qué el dato era `null`:** MAGByLizN tiene **148** reglas por ciudad cargadas y Piedecuesta no es
+ninguna. `resolveShippingRateForCity` devuelve `null` cuando no hay regla
+(`src/catalog/shippingRates.ts:178`), aunque el negocio SÍ tiene cargada una zona que es exactamente la
+respuesta para ese caso: *"Municipal (otros municipios de Colombia)"*, $20.900. La dueña, escribiendo a
+mano, le cobró $18.500 — o sea Nacional.
+
+Dos arreglos, de tamaños muy distintos:
+
+1. **Sin desplegar, hoy:** cargar Piedecuesta en Envíos > reglas por ciudad. Son datos del negocio, y
+   cuál zona le corresponde lo decide la dueña.
+2. **Estructural, con `E10`:** una ciudad sin regla no puede terminar en un mensaje mutilado. O hay zona
+   por defecto configurada —el catálogo de tarifas ya tiene el "otros municipios" que sirve para eso, lo
+   que falta es decir cuál es— o el turno pregunta en vez de afirmar a medias. Lo que no puede seguir
+   pasando es que se borre la cifra y quede la frase.
+
 #### El dato de diseño que le falta a esta ficha, medido el 2026-09-18
 
 Antes de construir `MEDIA_SENT` hay que saber esto, porque decide dónde puede vivir la verificación:
