@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { prisma } from "../src/db/client";
 import { sendToCustomer } from "../src/whatsapp/outbound";
 import { setHumanControl } from "../src/conversation/service";
+import { esDuenoSimulado } from "../src/whatsapp/simulacion";
 
 // EL DUEÑO, VIVO DENTRO DE LA CONVERSACIÓN (2026-09-18).
 //
@@ -122,6 +123,17 @@ export async function atenderComoDueno(
   credenciales: Credenciales,
   telefonoDelDueno: string,
 ): Promise<number> {
+  // SI EL DUEÑO ES UNA PERSONA DE VERDAD, NO SE CONTESTA POR ELLA (2026-09-18).
+  //
+  // El dueño puso su propio numero para atender el las escalaciones, y esto siguio contestando igual:
+  // le quito la conversacion antes de que alcanzara a responder, y al cliente le llego "Hola, soy del
+  // equipo, ya estoy aca" escrito por el simulador. Contestar por una persona de verdad, en su nombre,
+  // sin que lo sepa, no se hace nunca.
+  if (!(await esDuenoSimulado(businessId, telefonoDelDueno))) {
+    console.log(`(el dueño de este negocio es un numero real: ${telefonoDelDueno}. No se contesta por el.)`);
+    return 0;
+  }
+
   let atendidas = 0;
 
   const preguntas = await prisma.pendingOwnerQuestion.findMany({
