@@ -59,14 +59,36 @@ async function main() {
             orderBy: { createdAt: "asc" },
             select: { role: true, content: true, mediaType: true, createdAt: true },
           },
-          agentTurns: { select: { toolsCalled: true, scope: true, effectAuthor: true } },
-          incidents: { select: { kind: true, detail: true } },
           order: { select: { summary: true, totalAmount: true, shippingCost: true, paymentMethodLabel: true, fulfillmentStatus: true } },
           pendingOwnerQuestions: { select: { kind: true, answeredAt: true } },
         },
       },
     },
   });
+
+  // AgentTurn y AgentIncident guardan `conversationId` pero Conversation no tiene la relacion inversa,
+  // asi que no se pueden pedir con un include: se traen de una sola consulta y se reparten por id.
+  const idsDeConversacion = clientes.flatMap((c) => c.conversations.map((v) => v.id));
+  const [turnos, incidentes] = await Promise.all([
+    prisma.agentTurn.findMany({
+      where: { conversationId: { in: idsDeConversacion } },
+      select: { conversationId: true, toolsCalled: true, scope: true, effectAuthor: true },
+    }),
+    prisma.agentIncident.findMany({
+      where: { conversationId: { in: idsDeConversacion } },
+      select: { conversationId: true, kind: true, detail: true },
+    }),
+  ]);
+  const turnosPorConversacion = new Map<string, typeof turnos>();
+  for (const t of turnos) {
+    if (!t.conversationId) continue;
+    turnosPorConversacion.set(t.conversationId, [...(turnosPorConversacion.get(t.conversationId) ?? []), t]);
+  }
+  const incidentesPorConversacion = new Map<string, typeof incidentes>();
+  for (const i of incidentes) {
+    if (!i.conversationId) continue;
+    incidentesPorConversacion.set(i.conversationId, [...(incidentesPorConversacion.get(i.conversationId) ?? []), i]);
+  }
 
   let total = 0;
   let mostradas = 0;
@@ -78,6 +100,9 @@ async function main() {
       const respuestas = conv.messages.filter((m) => m.role === "ASSISTANT");
       const textoDelBot = respuestas.map((m) => m.content).join("\n");
 
+      const turnosDeEsta = turnosPorConversacion.get(conv.id) ?? [];
+      const incidentesDeEsta = incidentesPorConversacion.get(conv.id) ?? [];
+
       const senales = SENALES.filter((s) => s.mira(textoDelBot)).map((s) => s.nombre);
       // "Prometió consultar" sólo es señal si NO hay consulta real que la respalde. Con una
       // PendingOwnerQuestion abierta, la frase es verdad y no hay nada que revisar.
@@ -86,7 +111,7 @@ async function main() {
       if (respuestas.length === 0) senalesReales.push("SIN_RESPUESTA");
       for (const s of senalesReales) conteoDeSenales.set(s, (conteoDeSenales.get(s) ?? 0) + 1);
 
-      const sospechosa = senalesReales.length > 0 || conv.incidents.length > 0;
+      const sospechosa = senalesReales.length > 0 || incidentesDeEsta.length > 0;
       if (process.env.SOSPECHOSAS && !sospechosa) continue;
       if (process.env.GUION && !(cliente.name ?? "").includes(process.env.GUION)) continue;
       mostradas++;
@@ -94,8 +119,8 @@ async function main() {
       console.log(`\n${"=".repeat(100)}`);
       console.log(`${cliente.phoneNumber}  ${cliente.name ?? "(sin nombre)"}  estado=${conv.status}${conv.intent ? ` intent=${conv.intent}` : ""}`);
       if (senalesReales.length > 0) console.log(`SEÑALES: ${senalesReales.join(", ")}`);
-      for (const i of conv.incidents) console.log(`INCIDENTE ${i.kind}: ${i.detail.replace(/\n/g, " ").slice(0, 160)}`);
-      const herramientas = [...new Set(conv.agentTurns.flatMap((t) => t.toolsCalled))];
+      for (const i of incidentesDeEsta) console.log(`INCIDENTE ${i.kind}: ${i.detail.replace(/\n/g, " ").slice(0, 160)}`);
+      const herramientas = [...new Set(turnosDeEsta.flatMap((t) => t.toolsCalled))];
       console.log(`herramientas: ${herramientas.length > 0 ? herramientas.join(", ") : "NINGUNA"}`);
       if (conv.order) {
         console.log(
