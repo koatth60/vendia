@@ -1943,7 +1943,7 @@ recibir un id, no "el último pedido del cliente".
 
 ---
 
-### E35 · El pedido sabe dónde está
+### E35 · El pedido sabe dónde está — **CERRADA el 2026-09-18**, sin desplegar
 
 **Quita:** al dueño, tener que contestar "¿dónde está mi pedido?" a mano.
 **Porque:** no hay `trackingNumber`, `carrier`, `estimatedDelivery`, `paymentStatus`,
@@ -1954,6 +1954,35 @@ misma etapa.
 **Se prueba:** fixture donde el cliente pregunta por su envío y el bot responde con la guía real.
 **Tamaño:** M. **Depende de:** `E31`, `E05`. **Bandera:** no.
 **Vuelta atrás:** revertir; las columnas quedan muertas.
+
+**Estado (2026-09-18): CERRADA, sin desplegar.**
+
+**Medido en la base de producción el mismo día, antes de escribir una línea:** 55 mensajes mencionan
+guía, rastreo o una transportadora (Interrapidísimo, Servientrega), y 6 clientas preguntan "cuándo
+llega". Los 27 pedidos tienen resumen largo y ninguno tenía dónde guardar nada de eso: la dueña lo
+escribía a mano en el chat, pedido por pedido.
+
+- **Columnas**: `carrier`, `trackingNumber`, `estimatedDelivery`, `paymentStatus`
+  (`UNPAID`/`PARTIAL`/`PAID`/`REFUNDED`), `paymentReference`, `taxAmount`, `discountAmount`. Nullable a
+  propósito: null es "todavía no se sabe", que no es lo mismo que vacío.
+- **`paymentStatus` es otra pregunta que `fulfillmentStatus` y que `amountOnDelivery`**: un pedido puede
+  estar `SHIPPED` y sin pagar, o `PAID` y todavía en el depósito.
+- **El impuesto y el descuento entran en el total** con la aritmética exacta de `E33`:
+  `total = items + envío + impuesto − descuento`. Como son null en todos los negocios de hoy, el total
+  da exactamente lo mismo que antes. Lo que `E40` agrega encima es el impuesto **configurado por
+  negocio**, que acá hay que escribir a mano en cada pedido.
+- **`PUT /api/orders/:id/tracking`**, con el mismo criterio de `E46`: cada campo se valida aparte y
+  `undefined` deja la columna como está — un formulario que manda sólo la guía no puede borrar la
+  transportadora. Un campo **vacío** sí borra, que no es lo mismo que no mandarlo. Lo puede cargar un
+  `EMPLOYEE`, igual que marcar enviado (decisión `D5`); cancelar sigue siendo del dueño.
+- **Panel en la misma etapa**: sección "Datos del envío y el pago" en las tarjetas de Pendientes y de
+  Enviados —la guía casi siempre se carga *después* de marcar enviado—, con el resumen en el título
+  cerrado. Y el compositor de envío deja de pedir la guía como texto libre: ahora es un campo.
+  Verificado contra el panel real: cargado desde la pantalla, la base quedó con
+  `carrier=Interrapidisimo`, `trackingNumber=240011223344`, `paymentStatus=PAID`.
+- **El bot lo lee sin herramienta nueva**: las claves se suman a los pedidos que ya viajan como dato
+  del turno (`customerCommerceState`), y **sólo aparecen cuando el dato existe** — un pedido sin guía no
+  manda `guia: null`, no manda nada.
 
 ---
 

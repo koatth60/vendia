@@ -268,6 +268,10 @@ export async function createOrder(params: {
   shippingCost?: number | null;
   /** Ver src/orders/paymentTiming.ts: cuando se paga este pedido. Null = no se pudo resolver sin adivinar. */
   shippingModality?: ShippingPaymentModality | null;
+  // E35: impuesto y descuento del pedido, cuando el negocio los usa. Entran en el total con la misma
+  // aritmetica exacta que el resto (E33). Sin ellos, el total es el de siempre.
+  taxAmount?: number | null;
+  discountAmount?: number | null;
 }) {
   const { businessId, customerId, conversationId, summary, items, shippingAddress, paymentMethodLabel, shippingCost } = params;
   // E33 (2026-09-18). ESTE ERA EL DEFECTO, y no es teorico.
@@ -288,7 +292,11 @@ export async function createOrder(params: {
   );
   const envio = Money.de(shippingCost || 0, currency);
   const itemsTotal = totalDeItems.comoNumeroParaMostrar();
-  const totalAmount = totalDeItems.mas(envio).comoNumeroParaMostrar();
+  // E35: total = items + envio + impuesto - descuento. Los dos ultimos son null en casi todos los
+  // negocios y entonces esto da exactamente lo mismo que antes.
+  const impuesto = Money.de(params.taxAmount || 0, currency);
+  const descuento = Money.de(params.discountAmount || 0, currency);
+  const totalAmount = totalDeItems.mas(envio).mas(impuesto).menos(descuento).comoNumeroParaMostrar();
   // Lo que el mensajero tiene que cobrar. Se guarda calculado y no derivado al leer: el precio de un
   // producto puede cambiar manana, y lo que se acordo en este pedido no.
   const amountOnDelivery = montoACobrarAlEntregar(params.shippingModality ?? null, {
@@ -313,6 +321,8 @@ export async function createOrder(params: {
         totalAmount,
         shippingModality: params.shippingModality ?? null,
         amountOnDelivery,
+        taxAmount: params.taxAmount ?? null,
+        discountAmount: params.discountAmount ?? null,
         currency,
         items: {
           create: items.map((item) => ({

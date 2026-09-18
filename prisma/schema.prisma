@@ -33,6 +33,16 @@ enum OrderFulfillmentStatus {
 // Quien movio el pedido y de donde a donde. Hasta el 2026-09-18 no habia NINGUN campo que registrara
 // quien envio o quien cancelo: el pedido cambiaba de estado y no quedaba rastro de por que ni de mano
 // de quien. Un pedido cancelado y un cliente reclamando eran dos hechos sin forma de cruzarlos.
+// E35: si el pedido esta pagado, a medias, o si se devolvio la plata. Es distinto de
+// `fulfillmentStatus` (donde esta la mercaderia) y de `amountOnDelivery` (cuanto falta cobrar al
+// entregar): un pedido puede estar SHIPPED y sin pagar, o PAID y todavia en el deposito.
+enum OrderPaymentStatus {
+  UNPAID
+  PARTIAL
+  PAID
+  REFUNDED
+}
+
 enum OrderEventActor {
   OWNER
   EMPLOYEE
@@ -420,6 +430,35 @@ model Order {
   shipmentMediaS3Key String?
   shipmentMediaType  String?
   canceledAt         DateTime?
+
+  // E35 (2026-09-18). EL PEDIDO SABE DONDE ESTA.
+  //
+  // Medido en produccion el 2026-09-18: 55 mensajes de esta base mencionan guia, rastreo o una
+  // transportadora, y 6 clientas preguntan "cuando llega". Ninguno de esos datos existia como dato: la
+  // duena los escribia a mano en el chat, uno por uno, y el bot no podia contestar ni el mas simple
+  // porque no habia donde leerlo.
+  //
+  // Son columnas nullable a proposito: null significa "todavia no se sabe", que no es lo mismo que
+  // vacio. Un pedido sin guia no es un pedido con guia en blanco.
+  /** La transportadora, tal como la nombra el negocio: "Interrapidisimo", "Servientrega", "mensajero propio". */
+  carrier            String?
+  /** El numero de guia. Es lo que la clienta pega en la pagina de la transportadora. */
+  trackingNumber     String?
+  /** Cuando se estima la entrega. Solo fecha: la hora no se sabe y prometerla seria inventar. */
+  estimatedDelivery  DateTime?
+
+  // EL PAGO, que hasta hoy tampoco era un dato: `paymentMethodLabel` decia COMO iba a pagar, nunca si
+  // pago. `amountOnDelivery` dice cuanto falta cobrar al entregar, que es otra pregunta.
+  paymentStatus      OrderPaymentStatus     @default(UNPAID)
+  /** La referencia del pago: el numero de la transferencia, el id de Nequi, el recibo. */
+  paymentReference   String?
+
+  // El impuesto y el descuento del pedido, cuando el negocio los usa. Entran en el total (ver
+  // src/orders/service.ts): total = items + envio + impuesto - descuento. Lo que E40 agrega encima es
+  // el impuesto CONFIGURADO por negocio, que hoy hay que escribir a mano en cada pedido.
+  taxAmount          Decimal?               @db.Decimal(12, 2)
+  discountAmount     Decimal?               @db.Decimal(12, 2)
+
   items              OrderItem[]
   createdAt          DateTime               @default(now())
 

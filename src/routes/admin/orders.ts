@@ -136,6 +136,89 @@ ordersRouter.put("/api/orders/:id/ship", adminCostlyLimiter, upload.single("file
   res.json({ ok: true, mediaError });
 });
 
+// E35 (2026-09-18). DONDE ESTA EL PEDIDO Y SI ESTA PAGADO.
+//
+// Medido en produccion el mismo dia: 55 mensajes de esa base mencionan guia, rastreo o una
+// transportadora, y 6 clientas preguntan "cuando llega". Todo eso lo escribia la duena a mano en el
+// chat, uno por uno, porque no existia donde guardarlo -- y el bot no podia contestar ni el mas simple.
+//
+// Lo carga quien despacha, asi que lo puede hacer un EMPLOYEE igual que marcar enviado. Cancelar sigue
+// siendo del dueno.
+//
+// CADA CAMPO SE VALIDA APARTE Y `undefined` DEJA LA COLUMNA COMO ESTA. Es el mismo criterio que
+// `PUT /api/business` (E46) y que las tarifas de envio: un formulario que manda solo la guia no puede
+// borrar la transportadora que ya estaba.
+const ESTADOS_DE_PAGO = ["UNPAID", "PARTIAL", "PAID", "REFUNDED"];
+
+function textoOpcional(valor: unknown, largo: number): string | null | undefined {
+  if (valor === undefined) return undefined;
+  if (valor === null) return null;
+  const texto = String(valor).trim();
+  return texto ? texto.slice(0, largo) : null;
+}
+
+ordersRouter.put("/api/orders/:id/tracking", async (req, res) => {
+  const businessId = businessIdOf(req);
+  const orderId = String(req.params.id);
+  const order = await getOrderForBusiness(businessId, orderId);
+  if (!order) {
+    res.status(404).json({ error: "Pedido no encontrado" });
+    return;
+  }
+
+  const datos: Record<string, unknown> = {};
+
+  const carrier = textoOpcional(req.body?.carrier, 80);
+  if (carrier !== undefined) datos.carrier = carrier;
+
+  const trackingNumber = textoOpcional(req.body?.trackingNumber, 120);
+  if (trackingNumber !== undefined) datos.trackingNumber = trackingNumber;
+
+  const paymentReference = textoOpcional(req.body?.paymentReference, 120);
+  if (paymentReference !== undefined) datos.paymentReference = paymentReference;
+
+  if (req.body?.estimatedDelivery !== undefined) {
+    const crudo = req.body.estimatedDelivery;
+    if (crudo === null || String(crudo).trim() === "") {
+      datos.estimatedDelivery = null;
+    } else {
+      const fecha = new Date(String(crudo));
+      if (Number.isNaN(fecha.getTime())) {
+        res.status(400).json({ error: "La fecha de entrega estimada no es válida" });
+        return;
+      }
+      datos.estimatedDelivery = fecha;
+    }
+  }
+
+  if (req.body?.paymentStatus !== undefined) {
+    const estado = String(req.body.paymentStatus);
+    if (!ESTADOS_DE_PAGO.includes(estado)) {
+      res.status(400).json({ error: "Ese estado de pago no existe" });
+      return;
+    }
+    datos.paymentStatus = estado;
+  }
+
+  if (Object.keys(datos).length === 0) {
+    res.status(400).json({ error: "No mandaste ningún dato para guardar" });
+    return;
+  }
+
+  const actualizado = await prisma.order.update({ where: { id: orderId }, data: datos });
+  res.json({
+    ok: true,
+    order: {
+      id: actualizado.id,
+      carrier: actualizado.carrier,
+      trackingNumber: actualizado.trackingNumber,
+      estimatedDelivery: actualizado.estimatedDelivery,
+      paymentStatus: actualizado.paymentStatus,
+      paymentReference: actualizado.paymentReference,
+    },
+  });
+});
+
 // Fase 8, punto 4 (decision D5): marcar un pedido como enviado es trabajo de bandeja y lo puede hacer
 // un EMPLOYEE. Cancelarlo no: le avisa al cliente por WhatsApp que su pedido se cayo y deja el pedido
 // en CANCELED sin vuelta atras desde el panel. Esa es una decision del dueno.

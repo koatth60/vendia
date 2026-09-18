@@ -4702,6 +4702,67 @@ function orderCardTop(o, actionsHtml = '') {
   `;
 }
 
+// ===========================================================================================
+// DONDE ESTA EL PEDIDO (E35, 2026-09-18)
+// ===========================================================================================
+//
+// Medido en producción el 2026-09-18: 55 mensajes mencionan guía, rastreo o una transportadora, y 6
+// clientas preguntan "cuándo llega". Todo eso lo escribía la dueña a mano, mensaje por mensaje, porque
+// no existía dónde guardarlo. Cargado acá, el bot lo lee del pedido y contesta solo.
+const ORDER_PAYMENT_LABEL = { UNPAID: 'Sin pagar', PARTIAL: 'Pago parcial', PAID: 'Pagado', REFUNDED: 'Devuelto' };
+
+function orderTrackingSection(o) {
+  const fecha = o.estimatedDelivery ? String(o.estimatedDelivery).slice(0, 10) : '';
+  const estado = o.paymentStatus || 'UNPAID';
+  const resumen = [
+    o.carrier ? escapeHtml(o.carrier) : null,
+    o.trackingNumber ? 'guía ' + escapeHtml(o.trackingNumber) : null,
+    fecha ? 'llega ' + escapeHtml(fecha) : null,
+    ORDER_PAYMENT_LABEL[estado],
+  ].filter(Boolean).join(' · ');
+
+  return [
+    '<details class="order-tracking" style="margin-top:10px;">',
+    '<summary style="cursor:pointer; font-size:12.5px; color:var(--onix-muted);">Datos del envío y el pago' + (resumen ? ' — ' + resumen : '') + '</summary>',
+    '<div style="display:flex; flex-wrap:wrap; gap:8px; margin-top:8px;">',
+    '<input id="track-carrier-' + o.id + '" placeholder="Transportadora" value="' + escapeHtml(o.carrier || '') + '" style="flex:1 1 150px;" />',
+    '<input id="track-number-' + o.id + '" placeholder="Número de guía" value="' + escapeHtml(o.trackingNumber || '') + '" style="flex:1 1 150px;" />',
+    '<input id="track-date-' + o.id + '" type="date" value="' + fecha + '" style="flex:0 0 150px;" />',
+    '<select id="track-payment-' + o.id + '" style="flex:0 0 150px;">',
+    Object.keys(ORDER_PAYMENT_LABEL).map((k) => '<option value="' + k + '"' + (k === estado ? ' selected' : '') + '>' + ORDER_PAYMENT_LABEL[k] + '</option>').join(''),
+    '</select>',
+    '<input id="track-reference-' + o.id + '" placeholder="Referencia del pago" value="' + escapeHtml(o.paymentReference || '') + '" style="flex:1 1 150px;" />',
+    '<button class="btn-secondary" type="button" onclick="saveOrderTracking(\'' + o.id + '\')">Guardar</button>',
+    '</div>',
+    '</details>',
+  ].join('');
+}
+
+async function saveOrderTracking(id) {
+  try {
+    const res = await apiFetch('/admin/api/orders/' + id + '/tracking', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        carrier: document.getElementById('track-carrier-' + id).value,
+        trackingNumber: document.getElementById('track-number-' + id).value,
+        estimatedDelivery: document.getElementById('track-date-' + id).value,
+        paymentStatus: document.getElementById('track-payment-' + id).value,
+        paymentReference: document.getElementById('track-reference-' + id).value,
+      }),
+    });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({}));
+      setStatus(error.error || 'No se pudieron guardar los datos del envío', true);
+      return;
+    }
+    setStatus('Datos del envío guardados: el bot ya los puede contestar');
+    await loadOrders(true);
+  } catch (err) {
+    setStatus(err.message, true);
+  }
+}
+
 function pendingOrderCard(o) {
   const actions = `
     <button class="btn-primary" type="button" onclick="openShipComposer('${o.id}')">
@@ -4712,8 +4773,9 @@ function pendingOrderCard(o) {
   return `
     <div class="order-card" data-order-id="${o.id}">
       ${orderCardTop(o, actions)}
+      ${orderTrackingSection(o)}
       <div class="ship-composer" id="ship-composer-${o.id}" style="display:none;">
-        <textarea id="ship-note-${o.id}" placeholder="Mensaje para el cliente (opcional) - ej: número de guía, transportadora..."></textarea>
+        <textarea id="ship-note-${o.id}" placeholder="Mensaje para el cliente (opcional). La guía y la transportadora van en los campos de arriba: así el bot las puede contestar solo."></textarea>
         <div class="ship-composer-row">
           <input type="file" id="ship-file-${o.id}" accept="image/jpeg,image/png,video/*" style="display:none;" onchange="onShipFileChange('${o.id}', this)" />
           <button class="btn-secondary" type="button" onclick="document.getElementById('ship-file-${o.id}').click()">
@@ -4739,6 +4801,7 @@ function shippedOrderCard(o) {
   return `
     <div class="order-card" data-order-id="${o.id}">
       ${orderCardTop(o)}
+      ${orderTrackingSection(o)}
       <div class="order-card-shipment">
         <div class="order-meta-item">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 7.5 12 3.5l8.5 4v9L12 20.5l-8.5-4z"/><path d="M3.5 7.5 12 11.5l8.5-4M12 11.5v9"/></svg>

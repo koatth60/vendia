@@ -41,6 +41,17 @@ export interface OrderFact {
   creado: string;
   /** El punto de toda la pieza: false = el pedido se abrio en OTRA conversacion de este mismo cliente. */
   enEstaConversacion: boolean;
+  // E35 (2026-09-18). DONDE ESTA EL PEDIDO.
+  //
+  // Las claves solo aparecen cuando el dato existe: un pedido sin guia no manda `guia: null`, no manda
+  // nada. Es la misma regla que el resto de las piezas -- lo que no se sabe no ocupa tokens y, sobre
+  // todo, no le da al modelo un hueco que rellenar.
+  transportadora?: string;
+  guia?: string;
+  /** YYYY-MM-DD. Solo fecha: la hora no se sabe y prometerla seria inventar. */
+  entregaEstimada?: string;
+  /** "pagado", "parcial" o "devuelto". Sin pagar no se anota: es lo que se asume de un pedido abierto. */
+  pago?: "pagado" | "parcial" | "devuelto";
 }
 
 export interface SaleInProgressFact {
@@ -71,6 +82,11 @@ export interface CommerceOrderRow {
   currency: string;
   fulfillmentStatus: string;
   createdAt: Date;
+  // E35. Opcionales para que las pruebas viejas y cualquier otro llamador sigan armando filas sin esto.
+  carrier?: string | null;
+  trackingNumber?: string | null;
+  estimatedDelivery?: Date | null;
+  paymentStatus?: string | null;
 }
 
 export interface CommerceConversationRow {
@@ -137,6 +153,17 @@ export function buildCustomerCommerceState(
     estado: orderStateLabel(o.fulfillmentStatus),
     creado: o.createdAt.toISOString().slice(0, 10),
     enEstaConversacion: o.conversationId === currentConversationId,
+    // E35: donde esta y si esta pagado. Solo lo que existe (ver OrderFact).
+    ...(o.carrier ? { transportadora: o.carrier } : {}),
+    ...(o.trackingNumber ? { guia: o.trackingNumber } : {}),
+    ...(o.estimatedDelivery ? { entregaEstimada: o.estimatedDelivery.toISOString().slice(0, 10) } : {}),
+    ...(o.paymentStatus === "PAID"
+      ? { pago: "pagado" as const }
+      : o.paymentStatus === "PARTIAL"
+        ? { pago: "parcial" as const }
+        : o.paymentStatus === "REFUNDED"
+          ? { pago: "devuelto" as const }
+          : {}),
   }));
 
   // La conversacion actual gana sobre cualquier otra: lo que el cliente esta haciendo ahora es mas verdad
@@ -195,7 +222,20 @@ export async function getCustomerCommerceState(
           where: { businessId },
           orderBy: { createdAt: "desc" },
           take: ORDER_READ_LIMIT,
-          select: { conversationId: true, summary: true, totalAmount: true, currency: true, fulfillmentStatus: true, createdAt: true },
+          select: {
+            conversationId: true,
+            summary: true,
+            totalAmount: true,
+            currency: true,
+            fulfillmentStatus: true,
+            createdAt: true,
+            // E35: donde esta el pedido. Es la pregunta mas comun despues de la venta y hasta hoy no
+            // habia de donde leerla.
+            carrier: true,
+            trackingNumber: true,
+            estimatedDelivery: true,
+            paymentStatus: true,
+          },
         },
         conversations: {
           orderBy: { updatedAt: "desc" },
