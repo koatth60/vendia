@@ -1,4 +1,5 @@
 import { prisma } from "../db/client";
+import { faltaComprobanteDePago } from "../orders/paymentProof";
 import { getSaleState, getServerSaleEvidence, type SaleStateItem, type SaleStateSnapshot } from "../orders/saleState";
 import { resolveShippingRateForCity } from "../catalog/shippingRates";
 import { runCatalogTool, type ToolContext } from "./tools";
@@ -249,6 +250,7 @@ export function isSaleFullyResolved(saleState: SaleStateSnapshot | null): boolea
  * respuesta: depende de comparar dos fechas.
  */
 async function saleReadyToRegisterSince(
+  businessId: string,
   conversationId: string,
   saleState: SaleStateSnapshot | null
 ): Promise<Date | null> {
@@ -267,6 +269,28 @@ async function saleReadyToRegisterSince(
   // El estado se completo DESPUES del ultimo mensaje del cliente: este es el turno en el que se
   // completo, y el cliente todavia no dijo nada con el pedido armado delante. No se registra nada.
   if (ultimoDelCliente.createdAt <= row.updatedAt) return null;
+
+  // UNA VENTA QUE NO SE PUEDE REGISTRAR NO SE EXIGE (2026-09-18).
+  //
+  // El pedido puede estar completo y aun asi ser imposible de cerrar: si el negocio pide comprobante,
+  // el pago es por adelantado y el cliente todavia no mando la foto, `close_conversation` se niega, y
+  // con razon. Exigir el efecto igual hacia esto, medido en una conversacion de prueba:
+  //
+  //   el modelo no llama close_conversation -> reintento -> reintento -> fallback por codigo, que
+  //   devuelve "este negocio pide ver el comprobante" -> escalacion -> la conversacion se va a control
+  //   humano y el cliente queda esperando a una persona.
+  //
+  // Tres llamadas al modelo y una conversacion muerta por algo que no es culpa de nadie: falta un dato
+  // del cliente. Mientras falte, la venta no esta lista, y lo que hay que hacer es pedir la foto -- no
+  // registrar un pedido que no se puede registrar.
+  //
+  // Es la misma consulta con la que el cierre decide negarse, asi que las dos partes no pueden opinar
+  // distinto.
+  const metodo = saleState.paymentMethodId
+    ? await prisma.paymentMethod.findUnique({ where: { id: saleState.paymentMethodId }, select: { settlement: true } })
+    : null;
+  const pagoPorAdelantado = metodo?.settlement === "PREPAID";
+  if (await faltaComprobanteDePago(businessId, conversationId, { pagoPorAdelantado })) return null;
 
   // El reloj del efecto arranca en el mensaje del cliente: lo que hay que probar es que el pedido existe
   // al terminar ESTE turno.
@@ -298,7 +322,7 @@ export async function computeRequiredEffects(
   const saleState = conversation.saleStateEnabled ? await getSaleState(conversationId) : null;
 
   // DISPARADOR 1: la venta esta lista y nadie la registro.
-  const ventaLista = await saleReadyToRegisterSince(conversationId, saleState);
+  const ventaLista = await saleReadyToRegisterSince(conversation.businessId, conversationId, saleState);
   if (ventaLista) {
     return [
       {

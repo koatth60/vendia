@@ -1,4 +1,5 @@
 import { prisma } from "../db/client";
+import { faltaComprobanteDePago } from "./paymentProof";
 
 // EL BOT NO DECLARA UN PAGO RECIBIDO (2026-09-18).
 //
@@ -95,3 +96,34 @@ export async function comprobanteEsperandoVerificacion(businessId: string, conve
  */
 export const BLOQUE_COMPROBANTE_EN_REVISION =
   "Recibimos tu comprobante. El equipo lo esta verificando y te confirmamos apenas quede validado.";
+
+/**
+ * El pedido está completo y lo único que falta es la foto del comprobante.
+ *
+ * Es el estado en el que la venta no se puede registrar por algo que no es culpa de nadie: falta un dato
+ * del cliente. Antes, exigir el cierre igual gastaba tres llamadas al modelo y terminaba mandando la
+ * conversación a control humano con un "un asesor del equipo va a continuar contigo" -- medido el
+ * 2026-09-18 y visto por el dueño en el panel, con la clienta contestando "ok, quedo pendiente".
+ *
+ * Con esto el servidor pide la foto él mismo, que es lo que había que hacer desde el principio.
+ */
+export async function faltaPedirElComprobante(businessId: string, conversationId: string): Promise<boolean> {
+  const estado = await prisma.saleState.findFirst({
+    where: { conversationId },
+    select: { paymentMethodId: true, items: true, address: true, customerName: true },
+  });
+  if (!estado?.paymentMethodId || !estado.address || !estado.customerName) return false;
+  if (!Array.isArray(estado.items) || estado.items.length === 0) return false;
+
+  const metodo = await prisma.paymentMethod.findUnique({
+    where: { id: estado.paymentMethodId },
+    select: { settlement: true },
+  });
+  if (metodo?.settlement !== "PREPAID") return false;
+
+  return faltaComprobanteDePago(businessId, conversationId, { pagoPorAdelantado: true });
+}
+
+/** Lo que el servidor le pide al cliente cuando el pedido está completo y falta el comprobante. */
+export const BLOQUE_PEDIR_COMPROBANTE =
+  "Para dejar tu pedido confirmado necesito la foto del comprobante de la transferencia. Mandamela por aca y seguimos.";

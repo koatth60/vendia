@@ -80,7 +80,7 @@ import { formatBusinessHours, closedDays } from "../config/businessHours";
 import { formatPaymentExamples } from "../catalog/paymentMethods";
 import { COUNTRIES, type CountryCode } from "../config/countries";
 import type { ShippingPaymentModality } from "@prisma/client";
-import { BLOQUE_COMPROBANTE_EN_REVISION, comprobanteEsperandoVerificacion } from "../orders/comprobanteEnRevision";
+import { BLOQUE_COMPROBANTE_EN_REVISION, BLOQUE_PEDIR_COMPROBANTE, comprobanteEsperandoVerificacion, faltaPedirElComprobante } from "../orders/comprobanteEnRevision";
 import { CLOSING_MESSAGE_PROMPT } from "./prompts/closingMessage";
 import { fillClosingPlaceholders } from "./prompts/closingPlaceholders";
 import {
@@ -1554,6 +1554,29 @@ ${CATALOG_BLOCK_MARKER}` : CATALOG_BLOCK_MARKER;
 
 ${BLOQUE_COMPROBANTE_EN_REVISION}`;
       }
+    }
+
+    // Y LA FOTO LA PIDE EL SERVIDOR (2026-09-18).
+    //
+    // Con el pedido completo y el pago por adelantado, lo unico que falta para registrarlo es la foto del
+    // comprobante. Antes eso terminaba asi, medido y visto por el dueño en el panel:
+    //
+    //   CLIENTE | si, esta bien
+    //     ONIX  | Recibi tu mensaje. Un asesor del equipo va a continuar por aca contigo en un momento.
+    //
+    // El modelo no pedia la foto, el cierre se negaba, se reintentaba dos veces, el fallback por codigo
+    // fallaba por lo mismo, y la conversacion se iba a control humano. Tres llamadas al modelo y un
+    // cliente esperando a una persona, por un dato que bastaba con pedirle.
+    //
+    // Se pide UNA vez por conversacion: repetirlo en cada turno seria acosar por algo que ya se dijo.
+    if (!text.includes(BLOQUE_PEDIR_COMPROBANTE) && (await faltaPedirElComprobante(context.businessId, conversationId))) {
+      const yaSePidio = await prisma.message.findFirst({
+        where: { conversationId, role: "ASSISTANT", content: { contains: BLOQUE_PEDIR_COMPROBANTE } },
+        select: { id: true },
+      });
+      if (!yaSePidio) text = `${text.trimEnd()}
+
+${BLOQUE_PEDIR_COMPROBANTE}`;
     }
 
     if (missingBlocks.length > 0) {
