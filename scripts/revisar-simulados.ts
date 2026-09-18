@@ -60,7 +60,7 @@ async function main() {
             select: { role: true, content: true, mediaType: true, createdAt: true },
           },
           order: { select: { summary: true, totalAmount: true, shippingCost: true, paymentMethodLabel: true, fulfillmentStatus: true } },
-          pendingOwnerQuestions: { select: { kind: true, answeredAt: true } },
+          pendingOwnerQuestions: { select: { kind: true, resolvedAt: true } },
         },
       },
     },
