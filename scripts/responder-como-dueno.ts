@@ -3,7 +3,6 @@ import { randomUUID } from "node:crypto";
 import { prisma } from "../src/db/client";
 import { sendToCustomer } from "../src/whatsapp/outbound";
 import { setHumanControl } from "../src/conversation/service";
-import { getWhatsappCredentials } from "../src/whatsapp/credentials";
 
 // CONTESTAR COMO EL DUEÑO, PARA PROBAR EL CIRCUITO COMPLETO (2026-09-18).
 //
@@ -102,19 +101,22 @@ async function atenderLasQueEsperanUnaPersona(businessId: string) {
     select: { id: true, intent: true, customer: { select: { phoneNumber: true } } },
   });
   if (enEspera.length === 0) {
-    console.log("Ninguna conversacion esperando a una persona.
-");
+    console.log("Ninguna conversacion esperando a una persona.");
     return;
   }
 
-  console.log(`
-${enEspera.length} conversacion(es) esperando a una persona:
-`);
-  const credentials = await getWhatsappCredentials(businessId);
-  if (!credentials) {
+  console.log(`\n${enEspera.length} conversacion(es) esperando a una persona:\n`);
+  // Las credenciales se arman igual que en admin/conversations.ts: salen del propio negocio, y el
+  // cliente de Prisma las descifra al leerlas.
+  const negocio = await prisma.business.findUnique({
+    where: { id: businessId },
+    select: { whatsappPhoneNumberId: true, whatsappAccessToken: true },
+  });
+  if (!negocio?.whatsappPhoneNumberId || !negocio.whatsappAccessToken) {
     console.error("Sin credenciales de WhatsApp no se puede contestar como persona.");
     return;
   }
+  const credentials = { phoneNumberId: negocio.whatsappPhoneNumberId, accessToken: negocio.whatsappAccessToken };
 
   const RESPUESTA: Record<string, string> = {
     PQR: "Hola, soy del equipo. Ya revise tu caso: si el producto llego con algun problema te lo cambiamos sin costo. Contame que paso exactamente y lo resolvemos hoy mismo.",
@@ -139,8 +141,7 @@ ${enEspera.length} conversacion(es) esperando a una persona:
     await setHumanControl(businessId, c.id, false, "RESPUESTA_DEL_DUENO");
     console.log(`--- ${c.intent ?? "sin intent"} ${c.customer.phoneNumber}`);
     console.log(`    conteste como persona: ${enviado.delivered ? "SI" : "NO (" + (enviado.failure?.message ?? "sin detalle") + ")"}`);
-    console.log(`    el bot vuelve a atender: SI
-`);
+    console.log(`    el bot vuelve a atender: SI\n`);
   }
 }
 
