@@ -70,6 +70,21 @@ pm2 startOrRestart ecosystem.config.js --update-env
 systemctl reload nginx
 ```
 
+> **Lo que pasó el 2026-09-18 en el paso 1, para que no vuelva a pasar.** El proceso `vendia` de
+> producción **no se había creado desde `ecosystem.config.js`**: estaba definido como
+> `bash -c "node --import tsx src/index.ts"`. Al correr `pm2 startOrRestart ecosystem.config.js`, pm2
+> le pegó encima el `interpreter: node --import tsx` del archivo **conservando su script**, así que Node
+> intentó ejecutar `/usr/bin/bash` como si fuera JavaScript: `SyntaxError: Invalid or unexpected token`
+> sobre la primera línea de un ELF. El proceso quedó en `errored` unos 4 minutos. Se arregló creando el
+> proceso desde el archivo, que es lo que debió ser siempre:
+>
+> ```bash
+> pm2 delete vendia && pm2 start ecosystem.config.js && pm2 save
+> ```
+>
+> Desde ese `pm2 save`, la definición viva **sí** sale de `ecosystem.config.js`, así que
+> `startOrRestart` es correcto de acá en adelante — incluido el paso 4, que agrega `vendia-worker`.
+
 **`pm2 startOrRestart` y no `pm2 restart vendia`**, sobre todo en el paso 4: es el que agrega
 `vendia-worker`, que no existe todavía en el servidor. Un `restart` a secas lo dejaría sin levantar — y
 el worker es quien contesta: el bot recibiría mensajes y no respondería ninguno. En los pasos 1 a 3 el
