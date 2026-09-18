@@ -636,7 +636,11 @@
     display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 14.5px; flex-shrink: 0;
   }
   .conv-info { flex: 1; min-width: 0; }
-  .conv-name { font-size: 13.5px; font-weight: 700; }
+  /* El nombre en UNA linea. Sin esto, un nombre de tres palabras parte en tres renglones cuando la
+     lista esta angosta y la fila se estira al doble de alto que sus vecinas: la Bandeja deja de
+     leerse de un vistazo, que es para lo unico que sirve una lista. Mismo tratamiento que la
+     vista previa, que ya lo tenia. */
+  .conv-name { font-size: 13.5px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .conv-preview { font-size: 12.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
   /* "Borrador:" en la fila de la lista, como WhatsApp: lo que quedo escrito sin
      mandar se ve sin tener que abrir la conversacion. */
@@ -645,7 +649,10 @@
   .conv-time { font-size: 11px; color: var(--muted-soft); }
   /* Discreet recurring-customer hint next to the time - decision 2026-09-13: text, not another badge. */
   .conv-orders { font-size: 10.5px; color: var(--muted-soft); margin-top: 2px; }
+  /* La etiqueta tampoco parte: con "No recibido" o "Pide agente" se partia en dos renglones y
+     empujaba la fila hacia abajo. */
   .conv-badges { display: flex; justify-content: flex-end; }
+  .conv-badges .status-badge { white-space: nowrap; }
   /* Between two sales cycles in the merged customer thread (see ONIX-CONVERSATIONS-GROUPING-PLAN.md). */
   .cycle-separator { display: flex; align-items: center; gap: 8px; margin: 14px 0; font-size: 11px; color: var(--muted-soft); }
   .cycle-separator::before, .cycle-separator::after { content: ''; flex: 1; height: 1px; background: var(--border-soft); }
