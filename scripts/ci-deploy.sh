@@ -9,6 +9,8 @@
 #   estado            pm2 + version desplegada, sin cambiar nada
 #   logs              ultimas 120 lineas de pm2, sin cambiar nada
 #   rollback          vuelve al commit anterior al ultimo despliegue
+#   volver-a-produccion  vuelve a la version buena de produccion (etiqueta
+#                     produccion-antes-del-plan-completo) y compensa lo que el codigo viejo no sabe leer
 #   diagnostico[:N]   clasifica las respuestas duplicadas de los ultimos N dias (7 por defecto).
 #                     SOLO LEE la base; no cambia nada ni manda ningun mensaje.
 set -euo pipefail
@@ -30,6 +32,11 @@ case "$PEDIDO" in
     ;;
   rollback)
     exec ./scripts/rollback.sh
+    ;;
+  volver-a-produccion)
+    # El "un clic" que pidio el dueno el 2026-09-18: volver a lo que estaba funcionando, sin investigar
+    # nada y sin acordarse de ninguna compensacion. Ver scripts/volver-a-produccion.sh.
+    exec ./scripts/volver-a-produccion.sh
     ;;
   diagnostico|diagnostico:*)
     # Solo lectura. Corre el clasificador de E06 contra la base de produccion y devuelve su salida por

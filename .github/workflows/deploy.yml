@@ -10,6 +10,7 @@ name: Servidor
 #   gh workflow run deploy.yml -f accion=estado              # pm2 + commit desplegado
 #   gh workflow run deploy.yml -f accion=logs                # ultimas 120 lineas
 #   gh workflow run deploy.yml -f accion=rollback            # volver al commit anterior
+#   gh workflow run deploy.yml -f accion=volver-a-produccion # volver a la version buena de produccion
 #   gh workflow run deploy.yml -f accion=diagnostico         # clasifica duplicadas, 7 dias, SOLO LEE
 #   gh workflow run deploy.yml -f accion=diagnostico:14      # lo mismo, 14 dias
 #   gh run watch                                             # seguir la corrida
@@ -18,7 +19,7 @@ on:
   workflow_dispatch:
     inputs:
       accion:
-        description: Nombre de rama a desplegar, o estado / logs / rollback
+        description: Nombre de rama o etiqueta a desplegar, o estado / logs / rollback / volver-a-produccion
         required: true
         default: redesign/completo
         type: string
