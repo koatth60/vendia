@@ -977,6 +977,43 @@ de la herramienta. **−4 líneas.**
 **Tamaño:** M. **Depende de:** `E10`. **Bandera:** no — el lado seguro ya no bloquea.
 **Vuelta atrás:** revertir.
 
+#### Caso real 2026-09-18 01:59 UTC — y por qué esta ficha, sola, NO lo atrapa
+
+Conversación de Gabriel. Manda la foto de un reloj **redondo y compacto** con el texto *"Este por favor
+costo y especificaciones"*. Lo que pasó, con los tiempos de la base:
+
+```
+01:59:48  VISION            deepseek-v4-flash-vision-exp
+01:59:52  VISION_ESCALATION claude-sonnet-5
+02:00:15  turno: search_products, get_product_details, get_product_details
+02:00:01-02:00:12  salen 5 archivos: video + foto del Serie 12 Ultra 3, y 2 fotos del Combo T2000 Ultra
+02:00:17  "Los dos modelos que más se parecen a lo que muestras en la captura son estos"
+02:00:29  turno: ask_owner_about_photo   -> PendingOwnerQuestion PHOTO_PRODUCT
+02:01:00  "Según nuestro equipo, el producto que buscas es: Serie 11 Mini"
+```
+
+Los dos candidatos que eligió son de 49 mm, deportivos y robustos. El real era el **Serie 11 Mini**,
+compacto y elegante — lo dijo la dueña 30 segundos después. **La visión sí corrió**, y sí escaló a
+`claude-sonnet-5`: no falló por falta de modelo, falló el emparejamiento contra el catálogo.
+
+**Lo que esta ficha valida no alcanza.** `E12` compara el `productId` contra el alcance del turno,
+`lastPresentedProductIds` y los ítems del pedido. Acá no había ninguna de las tres cosas — conversación
+recién empezada, nada listado antes — y su propio lado seguro dice, con razón, que sin fuentes **no se
+bloquea nada**. Así que `E12` dejaría pasar exactamente este caso.
+
+**El defecto tiene forma propia: el ORDEN.** El bot mandó cinco archivos de dos productos equivocados
+**antes** de preguntarle a la dueña, y catorce segundos después le preguntó. Hizo lo correcto, tarde y
+después de haber inundado a la clienta con lo que no era.
+
+La garantía que falta es de secuencia, y es verificable: **en un turno que nace de una foto del cliente,
+no sale media hasta que haya UNA coincidencia confiable o hasta que la dueña conteste.** "Los dos que
+más se parecen" no es una identificación: es una duda, y una duda se le pregunta a quien sabe, no se le
+despacha al cliente en cinco mensajes. El disparador es estado puro (`Message.mediaType = IMAGE` en este
+turno, `PendingOwnerQuestion` abierta o no), sin leer una sola palabra de la prosa.
+
+Es la misma familia que el fixture `y1iz5l-foto-no-converge`, que sigue en `knownFailing` con la nota de
+que el defecto real es el emparejamiento semántico y que no tenía fase asignada. Ya la tiene: acá.
+
 ---
 
 ### E13 · Prometer consultar al dueño abre una consulta de verdad
