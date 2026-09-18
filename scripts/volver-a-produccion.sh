@@ -29,7 +29,16 @@ set -euo pipefail
 # (mensajes, pedidos, clientes) y casi nunca hace falta. Esta escrito aparte en docs/ROLLBACK.md.
 
 ETIQUETA="produccion-antes-del-plan-completo"
-cd "$(dirname "$0")/.."
+
+# El repositorio de produccion, o el de esta copia si no estamos en el servidor. Se resuelve asi para
+# que una copia de este script guardada FUERA del repositorio (por ejemplo /root/volver-a-produccion.sh)
+# siga funcionando: ese es el punto de que exista, porque despues de volver a la etiqueta vieja este
+# archivo ya no esta adentro del repositorio.
+REPO="${ONIX_REPO:-}"
+if [ -z "$REPO" ]; then
+  if [ -d /opt/vendia/.git ]; then REPO=/opt/vendia; else REPO="$(cd "$(dirname "$0")/.." && pwd)"; fi
+fi
+cd "$REPO"
 
 echo "==> Volviendo a $ETIQUETA"
 ANTERIOR=$(git rev-parse --short HEAD)
