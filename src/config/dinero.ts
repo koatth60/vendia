@@ -145,3 +145,33 @@ export function sumar(montos: Money[], monedaSiEstaVacio: string): Money {
   if (montos.length === 0) return Money.cero(monedaSiEstaVacio);
   return montos.reduce((acumulado, actual) => acumulado.mas(actual));
 }
+
+/**
+ * La misma suma, para los caminos donde tirar seria peor que sumar mal: el panel, el resumen que ve el
+ * cliente, el CRM.
+ *
+ * La diferencia con `sumar` no es tecnica, es de consecuencia. En `createOrder` hay plata de verdad, y
+ * un pedido con monedas mezcladas tiene que NO crearse. En una pantalla, tumbar la vista entera del
+ * negocio porque un pedido viejo quedo en otra moneda deja a la duena sin poder trabajar -- y el dato
+ * mezclado igual hay que arreglarlo a mano, no lo arregla la excepcion.
+ *
+ * Asi que aca se grita en el log y se sigue, sumando los montos como venian. Sigue siendo exacto: lo
+ * que se pierde es el SIGNIFICADO de la suma, que ya estaba perdido cuando alguien guardo dos monedas
+ * en el mismo negocio.
+ */
+export function sumarParaMostrar(montos: Money[], monedaSiEstaVacio: string, contexto: string): Money {
+  try {
+    return sumar(montos, monedaSiEstaVacio);
+  } catch (error) {
+    if (!(error instanceof MonedasIncompatibles)) throw error;
+    const monedas = [...new Set(montos.map((m) => m.moneda))].join(", ");
+    console.error(`[ZAQI ALERT] Monedas mezcladas en ${contexto}: ${monedas}. Se suma sin convertir.`);
+    const total = montos.reduce((acumulado, actual) => acumulado.mas(Money.de(actual.monto, acumulado.moneda)), Money.cero(montos[0]?.moneda ?? monedaSiEstaVacio));
+    return total;
+  }
+}
+
+/** El total de una linea: precio unitario por cantidad, sin flotante en el medio. */
+export function totalDeLinea(unitPrice: Prisma.Decimal | string | number, quantity: number, moneda: string): Money {
+  return Money.de(unitPrice, moneda).por(quantity);
+}

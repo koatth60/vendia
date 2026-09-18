@@ -1,5 +1,6 @@
 import type { CustomerStage, Prisma } from "@prisma/client";
 import { prisma } from "../db/client";
+import { Money, sumarParaMostrar } from "../config/dinero";
 
 // Capa de lectura/escritura del CRM de clientes (Fase 2, ver ONIX-CRM-REORG-PLAN.md).
 //
@@ -151,9 +152,14 @@ export async function getCustomerProfile(businessId: string, customerId: string)
   if (!customer) return null;
 
   const paidOrders = customer.orders.filter((o) => o.fulfillmentStatus !== "CANCELED");
-  const totalSpent = paidOrders.reduce((sum, o) => sum + Number(o.totalAmount), 0);
   const orderCount = paidOrders.length;
   const currency = paidOrders[0]?.currency ?? "COP";
+  // E33: lo que un cliente gasto es plata, y sumarla en flotante es lo que esta etapa vino a sacar.
+  const totalSpent = sumarParaMostrar(
+    paidOrders.map((o) => Money.de(o.totalAmount, o.currency)),
+    currency,
+    "el total gastado por un cliente",
+  ).comoNumeroParaMostrar();
   const purchaseDates = paidOrders.map((o) => o.createdAt).sort((a, b) => a.getTime() - b.getTime());
   const daysSinceContact = customer.lastContactAt
     ? Math.floor((Date.now() - customer.lastContactAt.getTime()) / (24 * 60 * 60 * 1000))

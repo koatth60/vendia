@@ -5,6 +5,7 @@ import { runCatalogTool, type ToolContext } from "./tools";
 import { recordOwnerMessage } from "../delivery/ownerLog";
 import { sendAlertToOwner, isBsuid } from "../whatsapp/outbound";
 import { formatPrice } from "../config/money";
+import { totalDeLinea } from "../config/dinero";
 
 // EFECTOS REQUERIDOS (2026-09-15).
 //
@@ -430,7 +431,7 @@ function buildSaleSummaryFromDb(saleState: SaleStateSnapshot | null, locale: str
   const currency = saleState.items[0].currency;
   const lineas = saleState.items.map((item) => {
     const nombre = item.variantLabel ? `${item.productName} (${item.variantLabel})` : item.productName;
-    return `${item.quantity}x ${nombre} - ${formatPrice(item.unitPrice * item.quantity, currency, locale)}`;
+    return `${item.quantity}x ${nombre} - ${formatPrice(totalDeLinea(item.unitPrice, item.quantity, item.currency).comoNumeroParaMostrar(), currency, locale)}`;
   });
   if (saleState.shippingCost) lineas.push(`Envio: ${formatPrice(saleState.shippingCost, currency, locale)}`);
   lineas.push(`TOTAL: ${formatPrice(saleState.total, currency, locale)}`);
@@ -500,7 +501,7 @@ async function notifyOwnerAboutImage(context: ToolContext, evidence: ServerSaleE
     const currency = evidence.items[0].currency;
     const lineas = evidence.items.map((i) => {
       const nombre = i.variantLabel ? `${i.productName} (${i.variantLabel})` : i.productName;
-      return `${i.quantity}x ${nombre} - ${formatPrice(i.unitPrice * i.quantity, currency, locale)}`;
+      return `${i.quantity}x ${nombre} - ${formatPrice(totalDeLinea(i.unitPrice, i.quantity, i.currency).comoNumeroParaMostrar(), currency, locale)}`;
     });
     datos.push(`Ultimo resumen de pedido mostrado: ${lineas.join("; ")}.`);
   }

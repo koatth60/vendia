@@ -27,6 +27,7 @@ import { faltaComprobanteDePago, FALTA_COMPROBANTE_NOTE } from "../orders/paymen
 import { resolverModalidadDelPedido, filtrarMetodosPorZona } from "../orders/paymentTiming";
 import { listShippingRates, resolveShippingRateForCity } from "../catalog/shippingRates";
 import { recordAgentIncident } from "./incidents";
+import { Money, sumarParaMostrar, totalDeLinea } from "../config/dinero";
 import { getSaleGate } from "./configHealth";
 import { normalizeForMatch } from "../search/text";
 import { totalStock } from "../catalog/stock";
@@ -641,16 +642,21 @@ function lineaDePagoEsperado(
   shippingCost: number | null | undefined,
   negocio: { currency: string; locale: string }
 ): string {
-  const itemsTotal = items.reduce((sum, i) => sum + i.unitPrice * i.quantity, 0);
-  const envio = shippingCost || 0;
+  // E33: la cifra que la duena lee para ir a buscar una transferencia no puede salir de punto flotante.
   const moneda = items[0]?.currency || negocio.currency;
+  const itemsTotal = sumarParaMostrar(
+    items.map((i) => totalDeLinea(i.unitPrice, i.quantity, i.currency || moneda)),
+    moneda,
+    "el pago esperado de una confirmacion de venta",
+  );
+  const envio = Money.de(shippingCost || 0, moneda);
   if (modality === "PREPAID_ALL") {
-    return `Tenia que llegarte $${formatPrice(itemsTotal + envio, moneda, negocio.locale)} (producto + envio).
+    return `Tenia que llegarte $${formatPrice(itemsTotal.mas(envio).comoNumeroParaMostrar(), moneda, negocio.locale)} (producto + envio).
 
 `;
   }
   if (modality === "PREPAID_PRODUCT_COD_SHIPPING") {
-    return `Tenia que llegarte $${formatPrice(itemsTotal, moneda, negocio.locale)}, solo el producto: el envio de $${formatPrice(envio, moneda, negocio.locale)} se cobra al entregar.
+    return `Tenia que llegarte $${formatPrice(itemsTotal.comoNumeroParaMostrar(), moneda, negocio.locale)}, solo el producto: el envio de $${formatPrice(envio.comoNumeroParaMostrar(), moneda, negocio.locale)} se cobra al entregar.
 
 `;
   }
@@ -1698,7 +1704,7 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
             variantLabel: item.variantLabel,
             quantity: item.quantity,
             unitPrice: item.unitPrice,
-            lineTotal: item.unitPrice * item.quantity,
+            lineTotal: totalDeLinea(item.unitPrice, item.quantity, item.currency).comoNumeroParaMostrar(),
           })),
           subtotal: state.subtotal,
           shippingCost: state.shippingCost ?? 0,
@@ -1739,8 +1745,16 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
         return { ready: false, note: "No se dio ningun item valido." };
       }
 
-      const subtotal = items.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
-      const total = subtotal + shippingCost;
+      // E33: este es el resumen que el cliente LEE antes de comprar. Si no cuadra con el pedido que se
+      // guarda despues, la clienta ve un precio y le cobran otro.
+      const monedaDelPedido = items[0].currency;
+      const subtotalExacto = sumarParaMostrar(
+        items.map((item) => totalDeLinea(item.unitPrice, item.quantity, item.currency)),
+        monedaDelPedido,
+        "el resumen de pedido que se le muestra al cliente",
+      );
+      const subtotal = subtotalExacto.comoNumeroParaMostrar();
+      const total = subtotalExacto.mas(Money.de(shippingCost, monedaDelPedido)).comoNumeroParaMostrar();
       // Espejo hacia SaleState de lo que el servidor ya resolvio contra el catalogo. No cambia nada de lo
       // que ve el cliente ni de lo que ve el modelo (sin la bandera, nadie lee SaleState.items en el
       // turno): deja el rastro del que se alimenta el disparador de efectos requeridos.
@@ -1763,7 +1777,7 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
           variantLabel: item.variantLabel ?? null,
           quantity: item.quantity,
           unitPrice: item.unitPrice,
-          lineTotal: item.unitPrice * item.quantity,
+          lineTotal: totalDeLinea(item.unitPrice, item.quantity, item.currency).comoNumeroParaMostrar(),
         })),
         subtotal,
         shippingCost,

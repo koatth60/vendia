@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { Money, sumar, MonedasIncompatibles } from "./dinero";
+import { Money, sumar, sumarParaMostrar, totalDeLinea, MonedasIncompatibles } from "./dinero";
 
 // E33 (2026-09-18).
 //
@@ -101,4 +101,56 @@ test("ARQUITECTURA: el total de un pedido no se calcula con punto flotante", () 
   // prueba de arriba en verde con el defecto de vuelta por otra via.
   assert.match(fuente, /from "\.\.\/config\/dinero"/, "service.ts tiene que seguir usando Money");
   assert.match(fuente, /sumar\(/, "el total tiene que armarse con sumar(), que es lo que rechaza monedas mezcladas");
+});
+
+// E33, segunda parte (2026-09-18). LOS DEMAS CAMINOS DE PRECIO.
+//
+// El primer commit de E33 cerro `createOrder`. Pero el numero que la clienta LEE antes de comprar no
+// sale de ahi: sale de `show_order_summary` (ai/tools.ts), del resumen que arma el servidor cuando el
+// modelo no colabora (ai/requiredEffects.ts) y del pedido en curso (orders/saleState.ts). Y lo que la
+// duena lee en el panel sale del CRM. Todos esos sumaban en flotante.
+//
+// Esta prueba no mira comportamiento: mira que el defecto no pueda volver a entrar sin que se vea.
+test("ARQUITECTURA: ningun camino de precio vuelve a multiplicar ni sumar en flotante", () => {
+  const archivos = {
+    "ai/tools.ts": ["ai", "tools.ts"],
+    "ai/requiredEffects.ts": ["ai", "requiredEffects.ts"],
+    "orders/saleState.ts": ["orders", "saleState.ts"],
+    "crm/customers.ts": ["crm", "customers.ts"],
+    "crm/dashboard.ts": ["crm", "dashboard.ts"],
+  };
+
+  for (const [nombre, partes] of Object.entries(archivos)) {
+    const fuente = readFileSync(join(__dirname, "..", ...partes), "utf8");
+
+    assert.doesNotMatch(
+      fuente,
+      /unitPrice\s*\*\s*\w+\.quantity/,
+      `${nombre}: el total de una linea volvio a calcularse en flotante; va por totalDeLinea()`,
+    );
+    assert.doesNotMatch(
+      fuente,
+      /sum\s*\+\s*Number\(\s*\w+\.totalAmount/,
+      `${nombre}: volvio a sumarse plata con reduce sobre numbers; va por sumarParaMostrar()`,
+    );
+    assert.match(fuente, /from "\.\.\/config\/dinero"/, `${nombre} tiene que usar el modulo de dinero`);
+  }
+});
+
+test("sumarParaMostrar no tumba una pantalla por un dato viejo con otra moneda", () => {
+  // En createOrder, monedas mezcladas TIENEN que tirar: ahi hay plata de verdad. En una pantalla no:
+  // dejar a la duena sin tablero no arregla el dato mezclado, y el dato igual hay que corregirlo a mano.
+  const total = sumarParaMostrar([Money.de(1000, "COP"), Money.de(20, "USD")], "COP", "una prueba");
+  assert.equal(total.moneda, "COP");
+  assert.equal(total.toString(), "1020");
+
+  // Y con una sola moneda es exactamente lo mismo que sumar().
+  const limpio = sumarParaMostrar([Money.de("0.1", "USD"), Money.de("0.2", "USD")], "USD", "una prueba");
+  assert.equal(limpio.toString(), "0.3");
+});
+
+test("totalDeLinea multiplica sin flotante", () => {
+  // 1234.56 * 3 en punto flotante da 3703.6800000000003.
+  assert.equal(totalDeLinea("1234.56", 3, "USD").toString(), "3703.68");
+  assert.throws(() => totalDeLinea("10", 1.5, "USD"), /cantidad de producto tiene que ser entera/);
 });

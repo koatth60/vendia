@@ -5,7 +5,7 @@ import { resolveShippingRateForCity } from "../catalog/shippingRates";
 import { computeCheckoutState, type CheckoutFacts, type CheckoutState } from "./checkoutState";
 import { getBusinessLocale } from "../config/businessConfig";
 import { getAgreedPrices, applyAgreedPrices } from "./agreedPrices";
-import { Money, sumar } from "../config/dinero";
+import { Money, sumarParaMostrar, totalDeLinea } from "../config/dinero";
 import { precioDeVenta } from "../catalog/precioDeVenta";
 
 // Fase 2 del plan maestro (2026-09-15), causa raiz C1. Unico dueno de lectura/escritura de SaleState -
@@ -156,21 +156,13 @@ export async function getSaleState(conversationId: string): Promise<SaleStateSna
   // total viejo y se grita en los logs. En createOrder SI se deja explotar, porque ahi hay plata de
   // verdad y un pedido mal sumado es peor que un pedido que no se crea.
   const moneda = items[0]?.currency ?? "COP";
-  let subtotal: number;
-  try {
-    subtotal = sumar(
-      items.map((i) => Money.de(i.unitPrice, i.currency).por(i.quantity)),
-      moneda,
-    ).comoNumeroParaMostrar();
-  } catch (error) {
-    console.error(
-      `[ZAQI ALERT] Pedido en curso con monedas mezcladas en la conversacion ${conversationId}: ` +
-        `${items.map((i) => i.currency).join(", ")}. Se muestra el total sin convertir.`,
-      error,
-    );
-    subtotal = items.reduce((sum, i) => sum + i.unitPrice * i.quantity, 0);
-  }
-  const total = Money.de(subtotal, moneda).mas(Money.de(shippingCost ?? 0, moneda)).comoNumeroParaMostrar();
+  const subtotalExacto = sumarParaMostrar(
+    items.map((i) => totalDeLinea(i.unitPrice, i.quantity, i.currency)),
+    moneda,
+    `el pedido en curso de la conversacion ${conversationId}`,
+  );
+  const subtotal = subtotalExacto.comoNumeroParaMostrar();
+  const total = subtotalExacto.mas(Money.de(shippingCost ?? 0, moneda)).comoNumeroParaMostrar();
 
   return {
     conversationId,

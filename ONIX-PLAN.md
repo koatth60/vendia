@@ -1843,7 +1843,7 @@ una bandera por negocio y esta ficha dice **Bandera: no**.
 
 ---
 
-### E33 · La plata es `Decimal` de punta a punta — **CERRADA EN PARTE el 2026-09-18**, sin desplegar
+### E33 · La plata es `Decimal` de punta a punta — **CERRADA el 2026-09-18**, sin desplegar
 
 **Quita:** al código, mezclar punto flotante con dinero.
 **Porque:** es `Decimal` en Postgres y punto flotante en todos los caminos de código. Además
@@ -1882,8 +1882,28 @@ que un producto dado de alta sin moneda explícita quedaba en dólares dentro de
 - La **prueba de arquitectura** que pide la etapa existe, y se verificó que marca el código viejo — si
   no fallara con el defecto puesto, no probaría nada.
 
-**Lo que falta:** los `Number(` de los demás caminos de precio (`saleState`, `agreedPrices`, el CRM,
-`fixtureCatalog`). **`E36` depende de esto**, así que sigue bloqueada.
+**Segunda parte (2026-09-18): los demás caminos de precio.** El primer commit cerró `createOrder`,
+que es donde se GUARDA la plata. Pero la cifra que la clienta **lee antes de comprar** no sale de ahí:
+sale de `show_order_summary` (`src/ai/tools.ts`), del resumen que arma el servidor cuando el modelo no
+colabora (`src/ai/requiredEffects.ts`) y del pedido en curso (`src/orders/saleState.ts`). Y lo que la
+dueña lee en el panel sale del CRM. Los cuatro sumaban y multiplicaban en flotante, así que el total
+mostrado podía no ser el total cobrado — que es exactamente el error que E33 vino a sacar, un paso
+antes.
+
+- `totalDeLinea(precio, cantidad, moneda)` en `src/config/dinero.ts`: una línea nunca más se calcula
+  con `unitPrice * quantity`.
+- `sumarParaMostrar(montos, moneda, contexto)`: la misma suma exacta que `sumar`, pero para los
+  caminos donde **tirar sería peor que sumar mal**. En `createOrder` monedas mezcladas tienen que
+  hacer fallar el pedido; en una pantalla, tumbarle el tablero a la dueña no arregla el dato mezclado
+  —que igual hay que corregir a mano— y encima la deja sin trabajar. Grita en el log y sigue.
+- El `try/catch` que `saleState` tenía escrito a mano para eso desaparece: la política vive en un solo
+  lugar.
+- La prueba de arquitectura ahora cubre los cinco archivos (`tools`, `requiredEffects`, `saleState`,
+  `crm/customers`, `crm/dashboard`), y se verificó que sus dos expresiones marcan el código viejo.
+
+Queda **a propósito** un `Number(tarifa.cost)` en `saleState.ts:81`: es una conversión de frontera
+—`Decimal(12,2)` a `number`— que no entra en ningún cálculo, y `Decimal(12,2)` va y vuelve exacto por
+`double`. Reescribirlo sería ruido sin defecto detrás.
 
 8 pruebas nuevas. Suite completa: 1015, 1001 pasan, 0 fallan.
 

@@ -1,4 +1,5 @@
 import { prisma } from "../db/client";
+import { Money, sumarParaMostrar } from "../config/dinero";
 import { getConfigHealth } from "../ai/configHealth";
 import { getAgentIncidentSummary } from "../ai/incidents";
 
@@ -104,7 +105,12 @@ export async function getDashboardSummary(businessId: string) {
       prisma.learnedFaqCandidate.count({ where: { businessId, status: "PENDING" } }),
     ]);
 
-  const monthSales = monthOrders.reduce((sum, o) => sum + Number(o.totalAmount), 0);
+  // E33: las ventas del mes son plata; se suman con Decimal y una sola conversion al final.
+  const monthSales = sumarParaMostrar(
+    monthOrders.map((o) => Money.de(o.totalAmount, o.currency)),
+    monthOrders[0]?.currency ?? "COP",
+    "las ventas del mes del tablero",
+  ).comoNumeroParaMostrar();
   const sold = conversations30.filter((c) => c.status === "SOLD").length;
   const lost = conversations30.filter((c) => c.status === "LOST").length;
   const closed = sold + lost;
