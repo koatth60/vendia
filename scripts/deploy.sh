@@ -47,7 +47,11 @@ esta_arriba() {
 }
 
 echo "==> Reiniciando"
-pm2 restart vendia --update-env >/dev/null
+# E23 (2026-09-18): son DOS procesos, `vendia` (web) y `vendia-worker`. `startOrRestart` sobre el
+# ecosystem reinicia los que ya existen y ARRANCA los que no -- que es lo que hace falta la primera vez
+# que este commit llega al servidor, donde `vendia-worker` todavia no existe. Un `pm2 restart vendia`
+# suelto dejaria al worker sin levantar: el bot recibiria mensajes y no contestaria ninguno.
+pm2 startOrRestart ecosystem.config.js --update-env >/dev/null
 systemctl reload nginx
 
 # Verificacion real, no un "exit 0" optimista: si el proceso no levanto, el despliegue fallo y hay que

@@ -19,14 +19,14 @@ PEDIDO="${SSH_ORIGINAL_COMMAND:-estado}"
 
 case "$PEDIDO" in
   estado)
-    pm2 describe vendia | grep -Ei 'status|uptime|restarts|exec mode' || true
+    pm2 list | grep -E 'vendia|name|status' || true
     echo "commit: $(git rev-parse --short HEAD) ($(git log -1 --format=%s))"
     echo "anterior: $(cat .deploy-previous 2>/dev/null || echo 'sin registro')"
     df -h / | tail -1
     exit 0
     ;;
   logs)
-    exec pm2 logs vendia --lines 120 --nostream
+    exec pm2 logs --lines 120 --nostream
     ;;
   rollback)
     exec ./scripts/rollback.sh

@@ -1,6 +1,6 @@
 import { prisma } from "../db/client";
 import { todasLasGuardias } from "../jobs/sinSolape";
-import { modelFailoverState } from "../ai/modelFailover";
+import { modelFailoverState, refreshModelFailoverState } from "../ai/modelFailover";
 import { MINUTOS_SIN_RESPUESTA } from "../jobs/reconciliacion";
 
 // E24 (2026-09-18). `/health` DEJA DE MENTIR.
@@ -125,7 +125,11 @@ function jobs(): Componente {
   };
 }
 
-function proveedorDeIa(): Componente {
+async function proveedorDeIa(): Promise<Componente> {
+  // E23: el breaker vive en una fila, compartida por `web` y `worker`. Sin este refresco, `/health`
+  // contestaria con lo que sepa el proceso que atendio la peticion -- y el que corre los turnos es el
+  // otro, asi que el `web` diria "ok" con el modelo caido.
+  await refreshModelFailoverState();
   const breaker = modelFailoverState();
   if (!breaker.enRespaldo) {
     return { nombre: "proveedor-de-ia", estado: "ok", detalle: `usando ${breaker.modelo}`, valores: { enRespaldo: 0 } };

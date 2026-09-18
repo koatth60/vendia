@@ -1,7 +1,14 @@
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { deepseek, DEEPSEEK_MODEL, DEEPSEEK_FALLBACK_MODEL } from "./client";
-import { createChatCompletion, currentChatModel, resetModelFailoverState } from "./modelFailover";
+import {
+  createChatCompletion,
+  currentChatModel,
+  resetModelFailoverState,
+  refreshModelFailoverState,
+  modelFailoverState,
+  olvidarLoQueSabeEsteProceso,
+} from "./modelFailover";
 
 // Incidente real (2026-09-14): DeepSeek retiro "deepseek-v4-flash" sin aviso. Pedir un modelo
 // inexistente no da error - la peticion se cuelga - y el bot quedo mudo horas. Estas pruebas fijan el
@@ -27,14 +34,14 @@ const okResponse = (model: string) => ({
   usage: { completion_tokens: 3 },
 });
 
-beforeEach(() => {
+beforeEach(async () => {
   originalCreate = deepseek.chat.completions.create.bind(deepseek.chat.completions);
-  resetModelFailoverState();
+  await resetModelFailoverState();
 });
 
-afterEach(() => {
+afterEach(async () => {
   deepseek.chat.completions.create = originalCreate;
-  resetModelFailoverState();
+  await resetModelFailoverState();
 });
 
 test("usa el modelo barato mientras responde, sin tocar el de respaldo", async () => {
@@ -84,10 +91,38 @@ test("vuelve solo al modelo barato cuando el proveedor se recupera", async () =>
   assert.equal(currentChatModel(), DEEPSEEK_FALLBACK_MODEL);
 
   // El breaker es por tiempo: se simula que ya paso la ventana de reintento.
-  resetModelFailoverState();
+  await resetModelFailoverState();
   stubDeepSeek((model) => okResponse(model));
 
   const response = await createChatCompletion({ max_tokens: 10, messages: [{ role: "user", content: "hola" }] });
   assert.deepEqual(modelsTried, [DEEPSEEK_MODEL], "sin desplegar nada, vuelve al barato");
   assert.equal(response.model, DEEPSEEK_MODEL);
+});
+
+// E23, segunda parte (2026-09-18). El breaker es del SISTEMA, no del proceso.
+test("un segundo proceso no vuelve a pagar el timeout del modelo caido", async () => {
+  stubDeepSeek((model) => (model === DEEPSEEK_MODEL ? new Error("model not found") : okResponse(model)));
+  await createChatCompletion({ max_tokens: 10, messages: [{ role: "user", content: "hola" }] });
+
+  // Esto es lo que ve un proceso RECIEN ARRANCADO: la fila esta, su memoria no sabe nada. Antes de E23
+  // ese proceso volvia a intentar el modelo caido y colgaba a un cliente el timeout entero.
+  olvidarLoQueSabeEsteProceso();
+  stubDeepSeek((model) => (model === DEEPSEEK_MODEL ? new Error("model not found") : okResponse(model)));
+
+  const respuesta = await createChatCompletion({ max_tokens: 10, messages: [{ role: "user", content: "dos" }] });
+
+  assert.deepEqual(modelsTried, [DEEPSEEK_FALLBACK_MODEL], "el proceso nuevo tiene que aprenderlo de la base");
+  assert.equal(respuesta.model, DEEPSEEK_FALLBACK_MODEL);
+});
+
+test("/health lo ve aunque el modelo lo haya tumbado el otro proceso", async () => {
+  stubDeepSeek((model) => (model === DEEPSEEK_MODEL ? new Error("model not found") : okResponse(model)));
+  await createChatCompletion({ max_tokens: 10, messages: [{ role: "user", content: "hola" }] });
+
+  olvidarLoQueSabeEsteProceso();
+  assert.equal(modelFailoverState().enRespaldo, false, "sin refrescar, el espejo del proceso no sabe nada");
+
+  await refreshModelFailoverState();
+  assert.equal(modelFailoverState().enRespaldo, true);
+  assert.equal(modelFailoverState().modelo, DEEPSEEK_FALLBACK_MODEL);
 });

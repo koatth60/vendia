@@ -1459,3 +1459,45 @@ model InboundEvent {
   @@index([processedAt, nextAttemptAt])
   @@index([failedAt])
 }
+
+// E23 (2026-09-18). EL ARRIENDO DE UN JOB, PARA QUE DOS `worker` NO HAGAN EL MISMO TRABAJO.
+//
+// `sinSolape` (src/jobs/sinSolape.ts) impide que un job se pise A SI MISMO dentro de un proceso. No
+// puede ver al OTRO proceso. Con `web` y `worker` separados eso ya importa: el dia que haya dos
+// `worker` -- por carga o por un despliegue que solapa el viejo con el nuevo -- los dos correrian
+// `saleConfirmationChaser` a la vez y a la duena le llegarian dos confirmaciones del mismo pedido.
+//
+// Una fila por job. Quien la toma la marca hasta cuando; si el proceso muere, el arriendo vence solo y
+// el siguiente lo agarra. Es el mismo patron que `InboundEvent.lockedUntil`, que es el que ya usa la
+// cola de entrada.
+model JobLease {
+  // El nombre del job, tal como lo registra `sinSolape`.
+  name String @id
+
+  // Hasta cuando esta tomado. Nulo o vencido = libre.
+  lockedUntil DateTime?
+  // Quien lo tomo: `<host>:<pid>`. Solo para poder mirar quien esta corriendo que cosa.
+  holder      String?
+  // Cuando termino la ultima pasada que lo solto bien. Un job que no aparece aca hace rato es un job
+  // que se esta muriendo a la mitad todas las veces.
+  lastRunAt   DateTime?
+}
+
+// E23 (2026-09-18). EL BREAKER DEL MODELO, COMPARTIDO ENTRE PROCESOS.
+//
+// Cuando DeepSeek retira o cuelga un modelo (paso de verdad el 2026-09-14), la primera peticion que
+// falla marca el modelo como caido y las siguientes van directo al de respaldo, sin volver a pagar el
+// timeout. Mientras eso vivio en memoria, cada proceso tenia que aprenderlo por su cuenta: con `web` y
+// `worker` separados (y manana con dos `worker`), el segundo proceso volvia a colgar a un cliente
+// durante el timeout entero para enterarse de algo que el primero ya sabia. Y `/health` mostraba el
+// breaker del proceso que atendio la peticion, no el del sistema.
+model ModelBreaker {
+  // El id del modelo que fallo, tal como se le pide al proveedor.
+  model String @id
+
+  failedAt DateTime @default(now())
+  // Hasta cuando no se lo vuelve a intentar. Vencido = se reintenta, y si anda, vuelve solo.
+  until    DateTime
+  // El error, para poder mirar por que se cayo sin tener que buscar en los logs.
+  detail   String?
+}

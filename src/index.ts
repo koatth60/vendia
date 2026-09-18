@@ -30,6 +30,8 @@ import { runReconciliacionJob, RECONCILIACION_INTERVAL_MS } from "./jobs/reconci
 import { runStartupJobs } from "./jobs/startup";
 import { sinSolape } from "./jobs/sinSolape";
 import { runBackupJob, BACKUP_CHECK_INTERVAL_MS } from "./jobs/backup";
+import { correTrabajos, correWeb } from "./config/rol";
+import { conArriendo } from "./jobs/arriendo";
 
 const app = express();
 app.set("trust proxy", 1);
@@ -153,113 +155,166 @@ app.use(express.static(path.join(__dirname, "..", "public"), staticOptions));
 const server = http.createServer(app);
 setupRealtime(server);
 
-server.listen(env.port, () => {
-  console.log(`Server listening on port ${env.port}`);
-});
+// El rol `worker` no escucha en ningun puerto: sin esto, dos procesos sobre el mismo PORT se pelean
+// (EADDRINUSE) y pm2 reinicia uno de los dos para siempre.
+if (correWeb(env.rol)) {
+  server.listen(env.port, () => {
+    console.log(`Server listening on port ${env.port} (rol ${env.rol})`);
+  });
+}
 
-// setInterval no dispara al arrancar, solo despues del primer intervalo completo, asi que cada reinicio
-// empujaba todo lo pendiente un intervalo entero mas adelante (medido el 2026-09-16: reinicio 16:32 UTC,
-// confirmacion vencida 16:34, primera pasada 17:02). Los siete jobs se apoyan en fechas guardadas en la
-// base para decidir a quien tocar, asi que una pasada de mas no manda nada que no estuviera vencido
-// igual - el razonamiento, job por job, esta en src/jobs/startup.ts.
-runStartupJobs().catch((error) => console.error("Error corriendo los jobs al arranque:", error));
-
-
-// E23, primera parte (2026-09-18). Cada job lleva su guardia contra solaparse CONSIGO MISMO.
+// E23, segunda parte (2026-09-18). TODO EL TRABAJO DE FONDO VIVE EN EL ROL `worker`.
 //
-// setInterval no espera a que la pasada anterior termine: si una tarda mas que su intervalo, arranca
-// otra encima. El perseguidor de confirmaciones corre cada 60 SEGUNDOS mandando WhatsApps en un bucle
-// secuencial - una pasada lenta se solapaba con la siguiente, las dos encontraban la misma conversacion
-// vencida, y al cliente le llegaban dos mensajes identicos.
+// El proceso `web` atiende HTTP, el WebSocket y el webhook de Meta -- que solo ENCOLA (E20). No corre
+// ningun job, asi que levantar dos `web` para aguantar mas trafico ya no puede mandarle dos mensajes a
+// la misma clienta. Lo que manda hacia afuera corre en `worker`, y lo que impide que dos `worker` se
+// pisen ya no es `instances: 1`: es la base (FOR UPDATE SKIP LOCKED + lockedUntil en la cola de
+// entrada, el lock consultivo por conversacion de E07, y la guardia de solape de cada job).
 //
-// Esto NO reemplaza el reparto por base con FOR UPDATE SKIP LOCKED (resto de E23, depende de E21): la
-// guardia es por proceso. Lo unico que impide dos procesos sigue siendo `instances: 1`.
-const guardiaSeguimientoPostventa = sinSolape("seguimiento post-venta", runFollowUpJob);
-const guardiaRecordatorioDeEscalaciones = sinSolape("recordatorio de escalaciones", runEscalationReminderJob);
-const guardiaChequeoDeConversaciones = sinSolape("chequeo de conversaciones", runConversationHealthJob);
-const guardiaColaDeSalida = sinSolape("cola de salida", runOutboundQueueJob);
-const guardiaVencimientoDeToken = sinSolape("vencimiento de token", runTokenExpiryJob);
-const guardiaRafagasPendientes = sinSolape("rafagas pendientes", runPendingBurstJob);
-const guardiaReconciliacion = sinSolape("reconciliacion de turnos perdidos", async () => {
-  await runReconciliacionJob();
-});
-const guardiaAbandonoDeConversaciones = sinSolape("abandono de conversaciones", runAbandonmentJob);
-const guardiaRespaldoDeLaBase = sinSolape("respaldo de la base", runBackupJob);
-const guardiaPerseguidorDeVentas = sinSolape("perseguidor de confirmaciones de venta", runSaleConfirmationChaserJob);
+// Sin ONIX_ROL el proceso hace las dos cosas, que es el comportamiento de siempre.
+function arrancarTrabajosDeFondo(): void {
+  // setInterval no dispara al arrancar, solo despues del primer intervalo completo, asi que cada reinicio
+  // empujaba todo lo pendiente un intervalo entero mas adelante (medido el 2026-09-16: reinicio 16:32 UTC,
+  // confirmacion vencida 16:34, primera pasada 17:02). Los siete jobs se apoyan en fechas guardadas en la
+  // base para decidir a quien tocar, asi que una pasada de mas no manda nada que no estuviera vencido
+  // igual - el razonamiento, job por job, esta en src/jobs/startup.ts.
+  runStartupJobs().catch((error) => console.error("Error corriendo los jobs al arranque:", error));
 
-const FOLLOW_UP_INTERVAL_MS = 60 * 60 * 1000;
-setInterval(() => {
-  guardiaSeguimientoPostventa.correr().catch((error) => console.error("Error corriendo el job de seguimiento post-venta:", error));
-}, FOLLOW_UP_INTERVAL_MS);
 
-const ESCALATION_REMINDER_INTERVAL_MS = 30 * 60 * 1000;
-setInterval(() => {
-  guardiaRecordatorioDeEscalaciones.correr().catch((error) => console.error("Error corriendo el job de recordatorio de escalaciones:", error));
-}, ESCALATION_REMINDER_INTERVAL_MS);
+  // E23, primera parte (2026-09-18). Cada job lleva su guardia contra solaparse CONSIGO MISMO.
+  //
+  // setInterval no espera a que la pasada anterior termine: si una tarda mas que su intervalo, arranca
+  // otra encima. El perseguidor de confirmaciones corre cada 60 SEGUNDOS mandando WhatsApps en un bucle
+  // secuencial - una pasada lenta se solapaba con la siguiente, las dos encontraban la misma conversacion
+  // vencida, y al cliente le llegaban dos mensajes identicos.
+  //
+  // Esto NO reemplaza el reparto por base con FOR UPDATE SKIP LOCKED (resto de E23, depende de E21): la
+  // guardia es por proceso. Lo unico que impide dos procesos sigue siendo `instances: 1`.
+  //
+  // E23, segunda parte (2026-09-18): y ademas, contra el OTRO proceso. `conArriendo` toma una fila en
+  // JobLease antes de correr, asi que dos `worker` no pueden hacer la misma pasada. El arriendo dura
+  // mas que una pasada lenta a proposito: si venciera antes, el segundo proceso arrancaria encima del
+  // primero y volveria el mensaje duplicado.
+  //
+  // Quedan SIN arriendo dos jobs, y es a proposito: el consumidor de la cola de entrada y el drenaje de
+  // rafagas ya reparten su trabajo fila por fila (FOR UPDATE SKIP LOCKED y `claimedAt`), asi que dos
+  // procesos se ayudan en vez de pisarse. Ponerles arriendo los volveria secuenciales sin ganar nada.
+  const MINUTO = 60 * 1000;
+  const guardiaSeguimientoPostventa = sinSolape(
+    "seguimiento post-venta",
+    conArriendo("seguimiento post-venta", 10 * MINUTO, runFollowUpJob),
+  );
+  const guardiaRecordatorioDeEscalaciones = sinSolape(
+    "recordatorio de escalaciones",
+    conArriendo("recordatorio de escalaciones", 5 * MINUTO, runEscalationReminderJob),
+  );
+  const guardiaChequeoDeConversaciones = sinSolape(
+    "chequeo de conversaciones",
+    conArriendo("chequeo de conversaciones", 5 * MINUTO, runConversationHealthJob),
+  );
+  const guardiaColaDeSalida = sinSolape("cola de salida", conArriendo("cola de salida", 5 * MINUTO, runOutboundQueueJob));
+  const guardiaVencimientoDeToken = sinSolape(
+    "vencimiento de token",
+    conArriendo("vencimiento de token", 5 * MINUTO, runTokenExpiryJob),
+  );
+  const guardiaRafagasPendientes = sinSolape("rafagas pendientes", runPendingBurstJob);
+  const guardiaReconciliacion = sinSolape(
+    "reconciliacion de turnos perdidos",
+    conArriendo("reconciliacion de turnos perdidos", 5 * MINUTO, async () => {
+      await runReconciliacionJob();
+    }),
+  );
+  const guardiaAbandonoDeConversaciones = sinSolape(
+    "abandono de conversaciones",
+    conArriendo("abandono de conversaciones", 10 * MINUTO, runAbandonmentJob),
+  );
+  // El volcado de la base es el mas lento de todos: su arriendo dura mucho mas que los demas.
+  const guardiaRespaldoDeLaBase = sinSolape(
+    "respaldo de la base",
+    conArriendo("respaldo de la base", 30 * MINUTO, runBackupJob),
+  );
+  const guardiaPerseguidorDeVentas = sinSolape(
+    "perseguidor de confirmaciones de venta",
+    conArriendo("perseguidor de confirmaciones de venta", 5 * MINUTO, runSaleConfirmationChaserJob),
+  );
 
-// El perseguidor de confirmaciones de venta tiene reloj propio y mucho mas fino (ver
-// SALE_CONFIRMATION_CHASER_INTERVAL_MS). Con los 30 minutos del job de escalaciones,
-// Business.ownerReminderMinutes no se podia cumplir: el panel deja poner 5 y el piso real era 30.
-setInterval(() => {
-  guardiaPerseguidorDeVentas
-    .correr()
-    .catch((error) => console.error("Error corriendo el perseguidor de confirmaciones de venta:", error));
-}, SALE_CONFIRMATION_CHASER_INTERVAL_MS);
+  const FOLLOW_UP_INTERVAL_MS = 60 * 60 * 1000;
+  setInterval(() => {
+    guardiaSeguimientoPostventa.correr().catch((error) => console.error("Error corriendo el job de seguimiento post-venta:", error));
+  }, FOLLOW_UP_INTERVAL_MS);
 
-// Fase 0: el chequeo de conversaciones corre solo. Ver src/jobs/conversationHealth.ts.
-setInterval(() => {
-  guardiaChequeoDeConversaciones.correr().catch((error) => console.error("Error corriendo el job de chequeo de conversaciones:", error));
-}, HEALTH_CHECK_INTERVAL_MS);
+  const ESCALATION_REMINDER_INTERVAL_MS = 30 * 60 * 1000;
+  setInterval(() => {
+    guardiaRecordatorioDeEscalaciones.correr().catch((error) => console.error("Error corriendo el job de recordatorio de escalaciones:", error));
+  }, ESCALATION_REMINDER_INTERVAL_MS);
 
-// Fase 7: la cola de salida deja de depender de que el cliente escriba. Ver src/jobs/outboundQueue.ts.
-setInterval(() => {
-  guardiaColaDeSalida.correr().catch((error) => console.error("Error corriendo el job de cola de salida:", error));
-}, OUTBOUND_QUEUE_INTERVAL_MS);
+  // El perseguidor de confirmaciones de venta tiene reloj propio y mucho mas fino (ver
+  // SALE_CONFIRMATION_CHASER_INTERVAL_MS). Con los 30 minutos del job de escalaciones,
+  // Business.ownerReminderMinutes no se podia cumplir: el panel deja poner 5 y el piso real era 30.
+  setInterval(() => {
+    guardiaPerseguidorDeVentas
+      .correr()
+      .catch((error) => console.error("Error corriendo el perseguidor de confirmaciones de venta:", error));
+  }, SALE_CONFIRMATION_CHASER_INTERVAL_MS);
 
-// Fase 7: aviso de vencimiento de token de WhatsApp. Ver src/jobs/tokenExpiry.ts.
-setInterval(() => {
-  guardiaVencimientoDeToken.correr().catch((error) => console.error("Error corriendo el job de vencimiento de token:", error));
-}, TOKEN_EXPIRY_CHECK_INTERVAL_MS);
+  // Fase 0: el chequeo de conversaciones corre solo. Ver src/jobs/conversationHealth.ts.
+  setInterval(() => {
+    guardiaChequeoDeConversaciones.correr().catch((error) => console.error("Error corriendo el job de chequeo de conversaciones:", error));
+  }, HEALTH_CHECK_INTERVAL_MS);
 
-// E08: el reloj de las rafagas de mensajes. Antes era un setTimeout por rafaga dentro del proceso, asi
-// que un reinicio se llevaba la rafaga; ahora las rafagas son filas y este job las drena cuando vencen.
-// Corre cada segundo: la ventana de silencio es de 8 s, asi que esta resolucion no agrega latencia.
-setInterval(() => {
-  guardiaRafagasPendientes.correr().catch((error) => console.error("Error corriendo el job de rafagas pendientes:", error));
-}, PENDING_BURST_INTERVAL_MS);
+  // Fase 7: la cola de salida deja de depender de que el cliente escriba. Ver src/jobs/outboundQueue.ts.
+  setInterval(() => {
+    guardiaColaDeSalida.correr().catch((error) => console.error("Error corriendo el job de cola de salida:", error));
+  }, OUTBOUND_QUEUE_INTERVAL_MS);
 
-// E21: el consumidor de la cola de entrada. Corre cada segundo igual que las rafagas, y por el mismo
-// motivo: es latencia que ve la clienta entre que escribe y que el bot empieza a pensar.
-//
-// El webhook ademas lo despierta apenas encola, asi que este intervalo es la RED, no el camino normal:
-// existe para los eventos que quedaron de un reinicio, para los reintentos con espera, y para el dia
-// que el despertar falle. Sin el, un mensaje que fallo una vez esperaria a que escriba otra clienta.
-//
-// runInboundEventsJob ya trae su propio guard de solape adentro (inboundEventsGuard), asi que no se
-// envuelve de nuevo: dos guards sobre la misma tarea contarian las salteadas dos veces.
-setInterval(() => {
-  runInboundEventsJob().catch((error) => console.error("Error corriendo el job de la cola de entrada:", error));
-}, INBOUND_EVENTS_INTERVAL_MS);
+  // Fase 7: aviso de vencimiento de token de WhatsApp. Ver src/jobs/tokenExpiry.ts.
+  setInterval(() => {
+    guardiaVencimientoDeToken.correr().catch((error) => console.error("Error corriendo el job de vencimiento de token:", error));
+  }, TOKEN_EXPIRY_CHECK_INTERVAL_MS);
 
-// E22: la reconciliacion. La cola de entrada cubre los fallos que VE; esto cubre la ausencia -- la
-// clienta escribio, el mensaje se registro, y la respuesta nunca salio. Hasta hoy eso no lo detectaba
-// nada: el unico numero que existia salio de una consulta escrita a mano para el plan.
-setInterval(() => {
-  guardiaReconciliacion.correr().catch((error) => console.error("Error corriendo el job de reconciliacion:", error));
-}, RECONCILIACION_INTERVAL_MS);
+  // E08: el reloj de las rafagas de mensajes. Antes era un setTimeout por rafaga dentro del proceso, asi
+  // que un reinicio se llevaba la rafaga; ahora las rafagas son filas y este job las drena cuando vencen.
+  // Corre cada segundo: la ventana de silencio es de 8 s, asi que esta resolucion no agrega latencia.
+  setInterval(() => {
+    guardiaRafagasPendientes.correr().catch((error) => console.error("Error corriendo el job de rafagas pendientes:", error));
+  }, PENDING_BURST_INTERVAL_MS);
 
-// Fase 9: conversaciones inactivas pasan a ABANDONED y su carrito (si tenia) recibe la plantilla de
-// recuperacion. Ver src/jobs/abandonment.ts.
-setInterval(() => {
-  guardiaAbandonoDeConversaciones.correr().catch((error) => console.error("Error corriendo el job de abandono de conversaciones:", error));
-}, ABANDONMENT_CHECK_INTERVAL_MS);
+  // E21: el consumidor de la cola de entrada. Corre cada segundo igual que las rafagas, y por el mismo
+  // motivo: es latencia que ve la clienta entre que escribe y que el bot empieza a pensar.
+  //
+  // El webhook ademas lo despierta apenas encola, asi que este intervalo es la RED, no el camino normal:
+  // existe para los eventos que quedaron de un reinicio, para los reintentos con espera, y para el dia
+  // que el despertar falle. Sin el, un mensaje que fallo una vez esperaria a que escriba otra clienta.
+  //
+  // runInboundEventsJob ya trae su propio guard de solape adentro (inboundEventsGuard), asi que no se
+  // envuelve de nuevo: dos guards sobre la misma tarea contarian las salteadas dos veces.
+  setInterval(() => {
+    runInboundEventsJob().catch((error) => console.error("Error corriendo el job de la cola de entrada:", error));
+  }, INBOUND_EVENTS_INTERVAL_MS);
 
-// Respaldo de la base. Se revisa cada hora y se vuelca si el ultimo tiene mas de 20h - o sea, uno por
-// dia sin depender de que el proceso viva 24h seguidas. Ver src/jobs/backup.ts: hasta el 2026-09-18
-// existia el script del volcado y NO LO LLAMABA NADIE.
-setInterval(() => {
-  guardiaRespaldoDeLaBase.correr().catch((error) => console.error("Error corriendo el job de respaldo de la base:", error));
-}, BACKUP_CHECK_INTERVAL_MS);
+  // E22: la reconciliacion. La cola de entrada cubre los fallos que VE; esto cubre la ausencia -- la
+  // clienta escribio, el mensaje se registro, y la respuesta nunca salio. Hasta hoy eso no lo detectaba
+  // nada: el unico numero que existia salio de una consulta escrita a mano para el plan.
+  setInterval(() => {
+    guardiaReconciliacion.correr().catch((error) => console.error("Error corriendo el job de reconciliacion:", error));
+  }, RECONCILIACION_INTERVAL_MS);
+
+  // Fase 9: conversaciones inactivas pasan a ABANDONED y su carrito (si tenia) recibe la plantilla de
+  // recuperacion. Ver src/jobs/abandonment.ts.
+  setInterval(() => {
+    guardiaAbandonoDeConversaciones.correr().catch((error) => console.error("Error corriendo el job de abandono de conversaciones:", error));
+  }, ABANDONMENT_CHECK_INTERVAL_MS);
+
+  // Respaldo de la base. Se revisa cada hora y se vuelca si el ultimo tiene mas de 20h - o sea, uno por
+  // dia sin depender de que el proceso viva 24h seguidas. Ver src/jobs/backup.ts: hasta el 2026-09-18
+  // existia el script del volcado y NO LO LLAMABA NADIE.
+  setInterval(() => {
+    guardiaRespaldoDeLaBase.correr().catch((error) => console.error("Error corriendo el job de respaldo de la base:", error));
+  }, BACKUP_CHECK_INTERVAL_MS);
+}
+
+if (correTrabajos(env.rol)) arrancarTrabajosDeFondo();
+else console.log(`Rol ${env.rol}: los jobs y el consumidor de la cola de entrada corren en el proceso worker.`);
 
 // Fase 7 del plan maestro (2026-09-15): sin esto, cada `pm2 restart` mataba el proceso a mitad de un
 // turno (webhook -> generateReply -> envio) sin ningun registro - y como el webhook ya habia respondido

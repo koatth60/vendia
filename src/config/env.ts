@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { parsearRol } from "./rol";
 
 function required(name: string): string {
   const value = process.env[name];
@@ -8,6 +9,8 @@ function required(name: string): string {
 
 export const env = {
   port: Number(process.env.PORT ?? 3000),
+  // E23: que hace ESTE proceso. Ver src/config/rol.ts.
+  rol: parsearRol(process.env.ONIX_ROL),
   databaseUrl: required("DATABASE_URL"),
   deepseekApiKey: process.env.DEEPSEEK_API_KEY ?? "",
   // El default es el de siempre: en produccion nadie define esta variable y no cambia nada. Existe para

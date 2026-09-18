@@ -16,7 +16,7 @@ cd "$(dirname "$0")/.."
 if [ ! -f "$ANTERIOR_FILE" ]; then
   echo "No hay $ANTERIOR_FILE: este servidor todavia no desplego con scripts/deploy.sh." >&2
   echo "Version actual: $(git rev-parse --short HEAD)" >&2
-  echo "Para volver a mano: git reset --hard <commit> && pm2 restart vendia" >&2
+  echo "Para volver a mano: git reset --hard <commit> && pm2 startOrRestart ecosystem.config.js" >&2
   exit 1
 fi
 
@@ -46,7 +46,7 @@ echo "==> Volviendo de $ACTUAL a $DESTINO"
 git reset --hard "$DESTINO"
 npx prisma generate >/dev/null
 
-pm2 restart vendia --update-env >/dev/null
+pm2 startOrRestart ecosystem.config.js --update-env >/dev/null
 systemctl reload nginx
 
 if esta_arriba; then

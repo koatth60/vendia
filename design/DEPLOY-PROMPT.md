@@ -73,7 +73,8 @@ rediseño tocó contratos con el JavaScript. Contame el resultado de cada una:
 **5.** Si los seis pasan, desplegá a producción como está documentado en el
 README: empaquetar el proyecto sin `node_modules`, `.env` ni `dist`, subirlo por
 SSH al droplet de DigitalOcean, y en el servidor correr `npm ci`,
-`npx prisma migrate deploy`, `npm run build` y `pm2 restart vendia --update-env`.
+`npx prisma migrate deploy`, `npm run build` y `pm2 startOrRestart ecosystem.config.js --update-env`
+(son dos procesos desde E23: `vendia` y `vendia-worker`).
 Si no encontrás el host o la clave SSH configurados, **pará y preguntame**; no
 adivines credenciales.
 

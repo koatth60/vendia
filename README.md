@@ -109,4 +109,9 @@ app es multi-tenant: un mismo servidor atiende a todos los negocios.
 Corre en un droplet de DigitalOcean con Nginx como proxy reverso y SSL de Let's Encrypt, gestionado con
 PM2. El flujo de despliegue usado durante el desarrollo: empaquetar el proyecto (sin `node_modules`,
 `.env` ni `dist`) y enviarlo por SSH al servidor, correr las migraciones, y reiniciar con
-`pm2 restart vendia --update-env`.
+`pm2 startOrRestart ecosystem.config.js --update-env`.
+
+Desde `E23` (2026-09-18) son **dos procesos** sobre el mismo codigo: `vendia` (rol `web`: HTTP,
+WebSocket y el webhook, que solo encola) y `vendia-worker` (rol `worker`: el consumidor de la cola de
+entrada y todos los jobs). Por eso el reinicio va sobre el ecosystem y no sobre un nombre: un
+`pm2 restart vendia` suelto deja al worker sin levantar y el bot no contesta nada.

@@ -1275,7 +1275,7 @@ reintenta.
 
 ---
 
-### E16 · El webhook recorre el lote completo
+### E16 · El webhook recorre el lote completo — **CERRADA el 2026-09-18** (commit `eac27c9`), sin desplegar
 
 **Quita:** al sistema, descartar mensajes sin dejar rastro.
 **Porque:** `src/routes/whatsapp.ts` lee solamente `entry[0]`, `changes[0]`, `messages[0]` y
@@ -1535,7 +1535,7 @@ sin él, y además permite reconciliar un negocio puntual a mano.
 
 ---
 
-### E23 · Dos procesos: `web` y `worker`
+### E23 · Dos procesos: `web` y `worker` — **CERRADA el 2026-09-18**, sin desplegar
 
 **Quita:** al operador, que escalar el proceso duplique mensajes a clientes reales.
 **Porque:** hoy `instances: 1` es lo único que lo impide. Además, `saleConfirmationChaser` corre cada
@@ -1550,6 +1550,39 @@ que hoy no existen en ninguna parte.
 exactamente una confirmación.
 **Tamaño:** L. **Depende de:** `E07`, `E21`. **Bandera:** no.
 **Vuelta atrás:** volver a una sola entrada en `ecosystem.config.js`.
+
+**Estado (2026-09-18): CERRADA, sin desplegar.** Dos partes, las dos hechas.
+
+*Primera parte* (commit `cbf8ea0`): `sinSolape` por job y los manejadores `uncaughtException` /
+`unhandledRejection`, que no existían en ninguna parte.
+
+*Segunda parte* (esta):
+
+- **El rol** — `src/config/rol.ts` + `ONIX_ROL`. `web` atiende HTTP, WebSocket y el webhook (que solo
+  **encola**, E20) y no corre ningún job; `worker` corre el consumidor de la cola de entrada y todos
+  los jobs. Sin la variable, el proceso hace las dos cosas, que es el comportamiento de siempre. Un
+  valor escrito mal **revienta al arrancar** en vez de caer en el default: un `ONIX_ROL=Worker` que
+  cayera en "todo" dejaría dos procesos corriendo todos los jobs, que es justo el mensaje duplicado
+  que esta etapa viene a hacer imposible. Tres pruebas en `src/config/rol.test.ts`.
+- **`ecosystem.config.js`** — dos entradas sobre el mismo código: `vendia` (web, el nombre no cambia
+  porque los scripts de despliegue lo usan) y `vendia-worker`. `scripts/deploy.sh` y
+  `scripts/rollback.sh` pasan a `pm2 startOrRestart ecosystem.config.js`: un `pm2 restart vendia`
+  suelto dejaría al worker sin levantar la primera vez, y el bot recibiría mensajes sin contestar
+  ninguno.
+- **El arriendo de jobs** — tabla `JobLease` y `src/jobs/arriendo.ts`. `sinSolape` protege contra que
+  un proceso se pise a sí mismo; no puede ver al otro proceso. Ahora cada job toma una fila antes de
+  correr, con vencimiento, así que dos `worker` —por carga o por un despliegue que solapa el viejo con
+  el nuevo— no pueden mandarle a la dueña dos confirmaciones del mismo pedido. Cinco pruebas en
+  `src/jobs/arriendo.test.ts`, incluida la del proceso muerto que deja el arriendo tomado. **Quedan
+  sin arriendo a propósito** la cola de entrada y el drenaje de ráfagas: ya reparten fila por fila
+  (`FOR UPDATE SKIP LOCKED`, `claimedAt`), así que dos procesos se ayudan en vez de pisarse.
+- **El breaker del modelo sale de memoria** — tabla `ModelBreaker`. Antes cada proceso tenía que
+  aprender por su cuenta que DeepSeek tiene un modelo caído, colgando a un cliente el timeout entero
+  para enterarse de algo que el otro ya sabía; y `/health` reportaba el breaker del proceso que
+  atendió la petición, no el del sistema. Dos pruebas nuevas en `src/ai/modelFailover.test.ts`.
+
+**Lo que esta etapa le quita al sistema:** que `instances: 1` sea lo único que impide el mensaje
+duplicado. Ahora lo impide la base.
 
 ---
 
@@ -1668,7 +1701,7 @@ recibiendo `businessId`, y `requireOwner` donde corresponda.
 
 ---
 
-### E28 · Borrar un miembro le cierra la sesión
+### E28 · Borrar un miembro le cierra la sesión — **CERRADA el 2026-09-18** (commit `3e06081`), sin desplegar
 
 **Quita:** al operador, que quitarle el acceso a alguien no surta efecto hasta que expire su sesión.
 **Porque:** hoy no existe `sessionVersion` en ningún modelo. Borrar o desactivar un `TeamMember` no
@@ -1768,7 +1801,7 @@ panel.
 
 ---
 
-### E31 · Estados reales y transiciones permitidas
+### E31 · Estados reales y transiciones permitidas — **CERRADA el 2026-09-18** (commit `6297182`), sin desplegar
 
 **Quita:** al panel y a las rutas, poder sobrescribir el estado de un pedido desde cualquier lado.
 **Porque:** hoy son tres estados, y `ConversationIntent` ya tiene `DEVOLUCION` y `NO_RECIBIDO` sin
@@ -1786,7 +1819,7 @@ existentes se mapean al estado equivalente.
 
 ---
 
-### E32 · Cancelar devuelve el stock
+### E32 · Cancelar devuelve el stock — **CERRADA EN PARTE el 2026-09-18** (commit `206d1ae`), sin desplegar
 
 **Quita:** al inventario, perder unidades para siempre.
 **Porque:** el stock se descuenta en la venta pero **no vuelve al cancelar**: cada cancelación
@@ -1797,6 +1830,16 @@ vencimiento mientras la venta está en curso; devolución automática al cancela
 **Se prueba:** cancelar un pedido devuelve exactamente las unidades que descontó.
 **Tamaño:** M. **Depende de:** `E31`. **Bandera:** no.
 **Vuelta atrás:** revertir.
+
+**Estado (2026-09-18): CERRADA EN PARTE, sin desplegar.** Hecho: el descuento es `{ decrement }`
+dentro de la misma transacción que crea el pedido (antes era leer-restar-escribir, con carrera real
+entre dos ventas simultáneas), se quitó el `Math.max(0, …)` que tapaba la sobreventa, y cancelar
+devuelve las unidades con `{ increment }` (`src/orders/service.ts:531`, pruebas en
+`src/orders/stockReturn.test.ts`). **Falta `StockReservation` con vencimiento** mientras la venta
+está en curso: hoy el stock se mueve recién al crear el pedido, así que dos clientas pueden estar
+cerrando la última unidad a la vez y las dos llegan. Rechazar la venta por falta de stock queda
+fuera a propósito: `Product.stock` arranca en 0 y hay negocios que no llevan inventario, así que es
+una bandera por negocio y esta ficha dice **Bandera: no**.
 
 ---
 
@@ -1983,7 +2026,7 @@ por negocio. Panel en la misma etapa.
 
 ---
 
-### E41 · `CustomerStage` la calcula el servidor
+### E41 · `CustomerStage` la calcula el servidor — **CERRADA el 2026-09-18** (commit `1f0cce5`), sin desplegar
 
 **Quita:** a la configuración, un campo que nadie escribe.
 **Porque:** `CustomerStage` está prácticamente muerto: nada escribe jamás `COMPRADOR` ni
