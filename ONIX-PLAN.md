@@ -685,7 +685,7 @@ Va cuando haya 48 h de pedidos creados bien, no antes: hoy esa plantilla es el r
 
 ---
 
-### E09b · La FAQ entra al turno como dato
+### E09b · La FAQ entra al turno como dato — **CERRADA el 2026-09-17** (commit `cf23211`), desplegada
 
 **Quita:** al modelo, decidir si va a mirar lo que el negocio ya respondió.
 **Porque:** medido el 2026-09-17 sobre 14 días: **`get_faq` se llamó 0 veces en 179 turnos.**
@@ -1415,7 +1415,7 @@ descartes. Y es el diferenciador que ningún competidor tiene. Está a mitad de 
 
 ---
 
-### E56 · Lo que el dueño contesta a mano deja de tirarse
+### E56 · Lo que el dueño contesta a mano deja de tirarse — **CERRADA el 2026-09-17** (commit `7803a93`), sin desplegar
 
 **Quita:** al sistema, destruir la evidencia más valiosa que produce.
 **Porque:** cuando el dueño responde a mano desde el panel, ese par pregunta/respuesta se pierde: no
@@ -1448,6 +1448,26 @@ pregunta del dueño, un turno posterior **no** vuelve a exigir el efecto ni a re
 **Tamaño:** S. **Depende de:** nada. **Es el ítem de mejor relación valor/tamaño de todo el plan**, y
 desde el 2026-09-17 además corrige un defecto visible.
 **Vuelta atrás:** revertir.
+
+**Lo que quedó.** Columna `resolvedAt` en `PendingOwnerQuestion` (migración
+`20260917235030_pregunta_resuelta_no_borrada`, aditiva). Resolver marca y ya no borra:
+`clearPendingOwnerQuestion` pasó a `markPendingOwnerQuestionResolved` y
+`clearPendingOwnerQuestionsForConversation` a `markConversationOwnerQuestionsResolved`, porque los
+nombres viejos ya no dirían la verdad. El panel, al mandarle un mensaje de **texto** al cliente,
+llama `recordAskOwnerResolution` con ese texto como respuesta; una plantilla no, porque una plantilla
+no es la respuesta del dueño a nada y ensuciaría la FAQ.
+
+**La parte peligrosa no es marcar: es que "abierta" siga significando abierta** ahora que las filas
+no desaparecen. Llevan `resolvedAt: null` las cinco consultas que lo significan (preguntas abiertas
+por conversación y por negocio, el recordatorio, el timeout, y la que matchea la respuesta citada del
+dueño) y el conteo que libera `blockedBy`. **La única que no filtra es `ownerWasNotifiedSince`, a
+propósito**: ahí la pregunta no es "¿sigue abierta?" sino "¿se le avisó al dueño?", y avisado sigue
+avisado después de contestar. Esa distinción es toda la corrección del defecto visible.
+
+**Se probó** con 6 pruebas nuevas, incluida la que pedía la ficha (contestada la pregunta, un turno
+posterior ya no vuelve a exigir el aviso por la imagen ni a reenviar la respuesta) y la del panel
+dejando un candidato de FAQ. Cuatro pruebas existentes afirmaban que la fila **se borraba**: es el
+contrato que esta etapa cambia a propósito, y pasaron a afirmar `resolvedAt`.
 
 ---
 
