@@ -2,9 +2,10 @@
 
 Rama: `redesign/completo-gto08b`. Escrito el 2026-09-18.
 
-Lo que hay acá es **un solo despliegue grande** con 15 migraciones y 16 etapas del plan, contra un
-servidor que hoy corre `b7ec408`. Volver atrás está escrito en [`ROLLBACK.md`](ROLLBACK.md) y el
-respaldo ya está tomado.
+16 etapas del plan y 15 migraciones contra un servidor que hoy corre `b7ec408`. **No van de una sola
+vez**: se despliegan en cuatro pasos, cada uno con su etiqueta y su ventana de observación, para que un
+problema tenga tres o cuatro sospechosos y no dieciséis. Volver atrás está escrito en
+[`ROLLBACK.md`](ROLLBACK.md) y el respaldo ya está tomado.
 
 ---
 
@@ -69,8 +70,11 @@ pm2 startOrRestart ecosystem.config.js --update-env
 systemctl reload nginx
 ```
 
-**Ojo con el paso 4**: es el que agrega `vendia-worker`. En los pasos 1 a 3 el `ecosystem.config.js`
-todavía tiene una sola entrada, así que `startOrRestart` se comporta como el `restart` de siempre.
+**`pm2 startOrRestart` y no `pm2 restart vendia`**, sobre todo en el paso 4: es el que agrega
+`vendia-worker`, que no existe todavía en el servidor. Un `restart` a secas lo dejaría sin levantar — y
+el worker es quien contesta: el bot recibiría mensajes y no respondería ninguno. En los pasos 1 a 3 el
+`ecosystem.config.js` todavía tiene una sola entrada, así que ahí `startOrRestart` se comporta como el
+`restart` de siempre.
 
 Sin la red del dueño, el workflow acepta la etiqueta igual que una rama:
 `gh workflow run deploy.yml -f accion=paso-1-infra-y-panel` (corre el mismo `scripts/deploy.sh`).
@@ -88,10 +92,6 @@ Siempre hay **dos destinos posibles**: el paso anterior, o producción tal como 
 
 Las tablas y columnas nuevas se quedan donde están en todos los casos: el código viejo las ignora. El
 detalle de cada compensación, con su SQL, está en [`ROLLBACK.md`](ROLLBACK.md).
-
-**`pm2 startOrRestart` y no `pm2 restart vendia`**: desde `E23` son dos procesos, y `vendia-worker` no
-existe todavía en el servidor. Un `restart` a secas deja al worker sin levantar — y el worker es quien
-contesta: el bot recibiría mensajes y no respondería ninguno.
 
 ## Apenas termina
 
