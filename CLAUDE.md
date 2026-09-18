@@ -80,7 +80,7 @@ payload to DeepSeek on every customer message. Keep this lean going forward:
   nadie la define.
   **Por qué no se vio antes:** en la máquina donde se probaba, `api.deepseek.com` está bloqueada por el
   proxy y fallaba en 0,2s sola. En un runner de GitHub no lo está. Una suite que pasa rápido local y
-  tarda media hora en CI es casi siempre esto: I/O de red real que en un lado muere gratis y en el otro
+  tarda el triple en CI es casi siempre esto: I/O de red real que en un lado muere gratis y en el otro
   no. Correr la suite local y darla por buena no alcanza para medir tiempo de CI.
 
 # Rediseño del panel (dirección A) — reglas de estilo
