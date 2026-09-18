@@ -41,7 +41,7 @@ const SOLO = (process.env.PERSONA ?? "").trim().toLowerCase();
 /** El CASO a reproducir: una clienta escrita para llegar hasta un defecto concreto. Ver CASOS. */
 const CASO = (process.env.CASO ?? "").trim();
 const PARALELO = Number(process.env.PARALELO ?? 3);
-const MAX_TURNOS = Number(process.env.MAX_TURNOS ?? 14);
+const MAX_TURNOS = Number(process.env.MAX_TURNOS ?? 24);
 const ESPERA_MAXIMA_MS = 90_000;
 
 const DEEPSEEK_URL = (process.env.DEEPSEEK_BASE_URL ?? "https://api.deepseek.com").replace(/\/$/, "");
