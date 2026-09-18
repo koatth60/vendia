@@ -41,9 +41,16 @@ teamRouter.put("/api/team/:id", requireOwner, async (req, res) => {
     res.status(404).json({ error: "Miembro no encontrado" });
     return;
   }
+  const activo = Boolean(req.body?.active);
   const updated = await prisma.teamMember.update({
     where: { id: member.id },
-    data: { active: Boolean(req.body?.active) },
+    data: {
+      active: activo,
+      // E28: desactivarlo le corta las sesiones abiertas EN EL ACTO. Sin esto seguia entrando al panel
+      // hasta que su cookie expirara sola. Reactivarlo no sube la version: no hay nada que cortar, y
+      // subirla echaria a alguien que quedo trabajando entre medio.
+      ...(activo ? {} : { sessionVersion: { increment: 1 } }),
+    },
     select: { id: true, email: true, name: true, role: true, active: true, createdAt: true },
   });
   res.json(updated);
@@ -55,6 +62,10 @@ teamRouter.delete("/api/team/:id", requireOwner, async (req, res) => {
     res.status(404).json({ error: "Miembro no encontrado" });
     return;
   }
+  // E28: se sube la version ANTES de borrar. La fila desaparece, asi que la sesion del borrado ya no
+  // valida contra nada y cae igual; el increment esta para que, si el borrado falla a mitad de camino,
+  // el acceso quede cortado lo mismo. Cortar primero y borrar despues, nunca al reves.
+  await prisma.teamMember.update({ where: { id: member.id }, data: { sessionVersion: { increment: 1 } } });
   await prisma.teamMember.delete({ where: { id: member.id } });
   res.status(204).send();
 });

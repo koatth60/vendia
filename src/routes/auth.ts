@@ -24,6 +24,29 @@ const PLAN_TIERS = ["BASICO", "EMPRENDEDOR", "NEGOCIO"] as const;
 // Business con active=false. La bandeja del panel de plataforma sale de un SELECT sobre ese campo,
 // asi que no existe el estado intermedio donde la cuenta esta inactiva y su solicitud se perdio, ni
 // al reves.
+/**
+ * E28 (2026-09-18). Se REGENERA el identificador de sesion en cada login, antes de escribir nada en
+ * ella. Sin esto, quien ya tenia una cookie en ese navegador (una sesion anonima, o la del usuario
+ * anterior en una maquina compartida) se queda con el MISMO identificador despues de que otro entra:
+ * es fijacion de sesion de manual.
+ *
+ * Tambien guarda de que version de la fila se emitio esta sesion, que es lo que requireAuth compara
+ * despues para poder cortarla.
+ */
+async function abrirSesion(
+  req: { session: import("express-session").Session & Partial<import("express-session").SessionData> },
+  datos: { businessId: string; role: "OWNER" | "EMPLOYEE"; email: string; sessionVersion: number; teamMemberId?: string },
+): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    req.session.regenerate((err) => (err ? reject(err) : resolve()));
+  });
+  req.session.businessId = datos.businessId;
+  req.session.role = datos.role;
+  req.session.email = datos.email;
+  req.session.sessionVersion = datos.sessionVersion;
+  if (datos.teamMemberId) req.session.teamMemberId = datos.teamMemberId;
+}
+
 authRouter.post("/signup", authLimiter, async (req, res) => {
   const { businessName, email, password, contactPhone, activationKey, planTier } = req.body;
 
@@ -74,9 +97,12 @@ authRouter.post("/signup", authLimiter, async (req, res) => {
     });
   }
 
-  req.session.businessId = business.id;
-  req.session.role = "OWNER";
-  req.session.email = business.email;
+  await abrirSesion(req, {
+    businessId: business.id,
+    role: "OWNER",
+    email: business.email,
+    sessionVersion: business.sessionVersion,
+  });
   res.status(201).json({
     id: business.id,
     name: business.name,
@@ -125,9 +151,12 @@ authRouter.post("/login", authLimiter, async (req, res) => {
       res.status(401).json({ error: "Credenciales inválidas" });
       return;
     }
-    req.session.businessId = business.id;
-    req.session.role = "OWNER";
-    req.session.email = business.email;
+    await abrirSesion(req, {
+      businessId: business.id,
+      role: "OWNER",
+      email: business.email,
+      sessionVersion: business.sessionVersion,
+    });
     res.json({
       id: business.id,
       name: business.name,
@@ -150,9 +179,13 @@ authRouter.post("/login", authLimiter, async (req, res) => {
     res.status(401).json({ error: "Credenciales inválidas" });
     return;
   }
-  req.session.businessId = member.business.id;
-  req.session.role = "EMPLOYEE";
-  req.session.email = member.email;
+  await abrirSesion(req, {
+    businessId: member.business.id,
+    role: "EMPLOYEE",
+    email: member.email,
+    sessionVersion: member.sessionVersion,
+    teamMemberId: member.id,
+  });
   res.json({
     id: member.business.id,
     name: member.business.name,

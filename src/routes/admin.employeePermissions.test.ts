@@ -17,17 +17,27 @@ let server: import("node:http").Server;
 let baseUrl: string;
 let businessId: string;
 let sessionRole: "OWNER" | "EMPLOYEE";
+// E28 (2026-09-18): la sesion de un empleado ahora se valida contra SU fila, asi que el harness deja de
+// inventar un empleado que no existe y crea uno de verdad.
+let teamMemberId: string;
 
 before(async () => {
   const business = await prisma.business.create({
     data: { name: `Test ${randomUUID()}`, email: `test-${randomUUID()}@example.com`, passwordHash: "x" },
   });
   businessId = business.id;
+  const member = await prisma.teamMember.create({
+    data: { businessId, email: `emp-${randomUUID()}@example.com`, name: "Empleado", passwordHash: "x" },
+  });
+  teamMemberId = member.id;
 
   const app = express();
   app.use(express.json());
   app.use((req, _res, next) => {
-    (req as unknown as { session: { businessId: string; role: string } }).session = { businessId, role: sessionRole };
+    (req as unknown as { session: Record<string, unknown> }).session =
+      sessionRole === "EMPLOYEE"
+        ? { businessId, role: sessionRole, teamMemberId, sessionVersion: 0 }
+        : { businessId, role: sessionRole, sessionVersion: 0 };
     next();
   });
   app.use("/admin", adminRouter);
@@ -40,6 +50,7 @@ before(async () => {
 after(async () => {
   await new Promise<void>((resolve) => server.close(() => resolve()));
   await prisma.product.deleteMany({ where: { businessId } });
+  await prisma.teamMember.deleteMany({ where: { businessId } });
   await prisma.business.deleteMany({ where: { id: businessId } });
 });
 

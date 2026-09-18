@@ -72,6 +72,11 @@ model Business {
   // conecto WhatsApp: sin la marca, "roto" y "nunca conectado" se ven identicos en el panel y el dueño
   // no sabe que tiene que reconectar. La escribe la extension de lectura de src/db/client.ts.
   secretsBroken                 Boolean   @default(false)
+  // E28 (2026-09-18): sube de a uno cada vez que hay que invalidar TODAS las sesiones vivas de este
+  // negocio. requireAuth compara la version guardada en la cookie contra esta; si no coinciden, la
+  // sesion se destruye. Sin esto, quitarle el acceso a alguien no surtia efecto hasta que su cookie
+  // expirara sola.
+  sessionVersion                Int       @default(0)
   // Error 190 de Meta (token vencido o revocado) marca la conexion como caida - src/whatsapp/outbound.ts
   // la setea al clasificar ese error, whatsappConnect.ts la limpia al reconectar. Distinto de un token
   // que todavia no vencio pero que Meta igual rechazo (revocado a mano, WABA desconectada).
@@ -521,6 +526,8 @@ model TeamMember {
   name         String
   role         TeamRole @default(EMPLOYEE)
   active       Boolean  @default(true)
+  // E28: sube de a uno al desactivar o borrar a este miembro, para cortarle las sesiones abiertas.
+  sessionVersion Int      @default(0)
   createdAt    DateTime @default(now())
 }
 

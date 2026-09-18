@@ -1556,6 +1556,16 @@ recibiendo `businessId`, y `requireOwner` donde corresponda.
 **Se prueba:** leer desde el negocio A una conversación del negocio B devuelve 404.
 **Tamaño:** S. **Depende de:** **`D5`** — dónde va `requireOwner` depende de qué puede hacer el rol
 `EMPLOYEE`. La parte del IDOR no depende de nada y puede salir sola.
+
+> **La mitad del IDOR ya está hecha (auditado el 2026-09-18, ruta por ruta).** Entró con la Fase 8,
+> punto 3, y el propio `conversations.ts` lo explica en un comentario. Verificado ahora: las **once**
+> rutas de `conversations.ts` pasan por `getConversationForBusiness`, `listQueuedOutbound` ya recibe
+> `businessId`, y en `catalog.ts`, `orders.ts` y `whatsappConnect.ts` todas las rutas pasan
+> `businessIdOf(req)` al servicio, que es donde se filtra. Ya hay cobertura en
+> `src/routes/admin.conversationsIdor.test.ts`.
+>
+> **Lo único que queda de esta etapa es dónde va `requireOwner`, y eso espera a `D5`.** O sea que E27
+> no está "sin empezar": está a la mitad, y la mitad que falta es una decisión tuya, no código.
 **Vuelta atrás:** revertir.
 
 ---
