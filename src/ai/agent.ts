@@ -80,6 +80,7 @@ import { formatBusinessHours, closedDays } from "../config/businessHours";
 import { formatPaymentExamples } from "../catalog/paymentMethods";
 import { COUNTRIES, type CountryCode } from "../config/countries";
 import type { ShippingPaymentModality } from "@prisma/client";
+import { quitarSintaxisDeHerramienta } from "./sintaxisDeHerramienta";
 import { BLOQUE_COMPROBANTE_EN_REVISION, BLOQUE_PEDIR_COMPROBANTE, comprobanteEsperandoVerificacion, faltaPedirElComprobante } from "../orders/comprobanteEnRevision";
 import { CLOSING_MESSAGE_PROMPT } from "./prompts/closingMessage";
 import { fillClosingPlaceholders } from "./prompts/closingPlaceholders";
@@ -1538,6 +1539,24 @@ ${CATALOG_BLOCK_MARKER}` : CATALOG_BLOCK_MARKER;
       saleBlocked: saleBlockedThisTurn,
     });
     text = renderedText;
+
+    // LA SINTAXIS DE UNA HERRAMIENTA NUNCA SALE AL CLIENTE (2026-09-18).
+    //
+    // Dos veces medido, y una la vio el dueño en su panel: el modelo escribio la llamada como TEXTO en
+    // vez de emitirla, y salio tal cual al chat. Que el modelo lo genere se ataca cambiando de modelo;
+    // que el servidor se lo MANDE es nuestro, y se tapa aca con cualquier modelo. Misma familia que el
+    // bloque fijo sin respaldo: lo que el cliente no tiene por que ver se borra y queda el incidente.
+    const sinSintaxis = quitarSintaxisDeHerramienta(text);
+    if (sinSintaxis.habia) {
+      text = sinSintaxis.limpio;
+      await recordAgentIncident(
+        context.businessId,
+        "BACKSTOP_INTERVENTION",
+        `El modelo escribio una llamada a herramienta como texto y se borro antes de enviar. Quedo ${text.length} caracteres de mensaje real.`,
+        conversationId,
+        "sintaxis_de_herramienta_en_el_texto",
+      );
+    }
 
     // EL PAGO RECIBIDO LO DICE EL SERVIDOR, NO EL MODELO (2026-09-18).
     //

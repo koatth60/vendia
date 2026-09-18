@@ -33,8 +33,12 @@ export const deepseek = new OpenAI({
 // El preferido es el barato: medido sobre trafico real de produccion, flash sale ~4.4x mas barato que pro
 // (USD 1.64 vs 7.28 al mes para el negocio piloto). Con el plan Emprendedor a ~USD 15/mes, eso es 11% del
 // ingreso contra 48% - pro no se sostiene como default, solo como red de seguridad.
-export const DEEPSEEK_MODEL = "deepseek-flash";
-export const DEEPSEEK_FALLBACK_MODEL = "deepseek-v4-pro";
+//
+// Se puede apuntar a otro con DEEPSEEK_MODEL, y existe SOLO para poder comparar: correr la misma
+// bateria de conversaciones con un modelo y con otro, sobre la misma infraestructura, y ver si los
+// errores son del modelo o de la estructura. En produccion nadie define la variable y queda el barato.
+export const DEEPSEEK_MODEL = process.env.DEEPSEEK_MODEL?.trim() || "deepseek-flash";
+export const DEEPSEEK_FALLBACK_MODEL = process.env.DEEPSEEK_FALLBACK_MODEL?.trim() || "deepseek-v4-pro";
 
 // Modelo experimental separado, unico que acepta imagenes (deepseek-v4-flash no tiene vision).
 export const DEEPSEEK_VISION_MODEL = "deepseek-v4-flash-vision-exp";
