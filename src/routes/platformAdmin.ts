@@ -122,6 +122,12 @@ platformAdminRouter.patch("/businesses/:id/whatsapp", async (req, res) => {
     return;
   }
 
+  // Conectarle el WhatsApp a un negocio ES activarlo, y por eso se escribe aqui y no queda a que
+  // alguien se acuerde de pasar despues por la bandeja. Sin esta linea existia un estado que no
+  // deberia poder existir: un negocio con numero, token y panel funcionando pero active=false, o
+  // sea con el cartel de "tu cuenta todavia no esta activada" puesto Y con el bot mudo, porque el
+  // webhook (whatsapp.ts) descarta los mensajes entrantes de un negocio inactivo. Paso en
+  // produccion el 2026-09-18. La migracion 20260918100000 arregla las filas que quedaron asi.
   await prisma.business.update({
     where: { id: business.id },
     data: {
@@ -129,6 +135,7 @@ platformAdminRouter.patch("/businesses/:id/whatsapp", async (req, res) => {
       whatsappPhoneNumber: phoneNumber,
       whatsappAccessToken: accessToken,
       whatsappBusinessAccountId: businessAccountId || null,
+      active: true,
     },
   });
 
