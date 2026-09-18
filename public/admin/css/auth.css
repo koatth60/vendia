@@ -61,9 +61,9 @@ body {
 .brand-mark {
   width: 34px; height: 34px; flex-shrink: 0;
   display: grid; place-items: center;
-  background: #FFFFFF; border-radius: 10px; padding: 3px;
-  --onix-logo-leaf-dark: #08321A;
-  --onix-logo-leaf-light: #73916B;
+  background: var(--onix-brand-pill); border-radius: 10px; padding: 3px;
+  --onix-logo-leaf-dark: var(--onix-brand-pill-leaf-dark);
+  --onix-logo-leaf-light: var(--onix-brand-pill-leaf-light);
 }
 .brand-mark svg, .brand-mark img { width: 100%; height: auto; display: block; }
 .brand-name {

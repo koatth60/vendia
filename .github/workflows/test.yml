@@ -59,4 +59,19 @@ jobs:
       - run: npm ci
       - run: npx prisma generate
       - run: npx prisma migrate deploy
+      # E48. Los dos pasos van ANTES de npm test a proposito: tardan segundos y la suite tarda cuatro
+      # minutos y medio, asi que un color literal o un error de tipos se ve enseguida y no al final.
+      - name: Sin colores literales fuera de tokens.css
+        # La regla del rediseño (CLAUDE.md) es que el unico archivo con colores escritos a mano sea
+        # tokens.css: es lo que hace que claro y oscuro sean la MISMA hoja de estilo y no dos. Hasta
+        # hoy dependia de que el revisor se acordara de correr este grep antes de cada commit de CSS,
+        # y no se acordo: habia 7 literales adentro (la pastilla del emblema en admin y auth, y un
+        # #fff sobre fondo de peligro que en tema oscuro quedaba ilegible).
+        # grep sale 0 cuando ENCUENTRA algo, que aca es exactamente lo que no queremos.
+        run: |
+          if grep -nEi '#[0-9a-f]{3,8}\b|rgba?\(' public/admin/css/admin.css public/admin/css/auth.css; then
+            echo "::error::Color literal fuera de tokens.css (las lineas de arriba). Agrega el token en public/admin/css/tokens.css y usa var(--onix-*)."
+            exit 1
+          fi
+      - run: npx tsc --noEmit
       - run: npm test

@@ -129,9 +129,9 @@
   .brand-mark {
     width: 32px; height: 32px; flex-shrink: 0;
     display: grid; place-items: center;
-    background: #FFFFFF; border-radius: 9px; padding: 3px;
-    --onix-logo-leaf-dark: #08321A;
-    --onix-logo-leaf-light: #73916B;
+    background: var(--onix-brand-pill); border-radius: 9px; padding: 3px;
+    --onix-logo-leaf-dark: var(--onix-brand-pill-leaf-dark);
+    --onix-logo-leaf-light: var(--onix-brand-pill-leaf-light);
   }
   .brand-mark svg { display: block; width: 100%; height: auto; }
   .brand-name { font-size: 15px; font-weight: 600; letter-spacing: -0.015em; line-height: 1.1; }
@@ -563,7 +563,7 @@
      sobre la miniatura misma porque el problema es de ESE archivo, no del producto. */
   .thumb-wrap.is-unsendable .thumb { border: 2px solid var(--danger); opacity: 0.6; }
   .thumb-warning {
-    position: absolute; top: 40px; left: 0; right: 0; background: var(--danger); color: #fff;
+    position: absolute; top: 40px; left: 0; right: 0; background: var(--danger); color: var(--onix-danger-ink);
     font-size: 8.5px; font-weight: 700; text-align: center; padding: 1px 0; border-radius: 0 0 7px 7px;
   }
   .thumb-alert {

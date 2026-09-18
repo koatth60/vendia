@@ -130,6 +130,18 @@
   --onix-logo-leaf-dark: #08321A;
   --onix-logo-leaf-light: #73916B;
 
+  /* La pastilla blanca donde va el emblema en la barra lateral y en las pantallas de acceso. NO sigue
+     al tema, igual que los --onix-invert-* de arriba y por un motivo parecido: el fondo de abajo es
+     blanco siempre, asi que los dos verdes de adentro se quedan en sus valores de tema claro. Si
+     siguieran al tema, en oscuro tendrian que aclararse tanto que dejan de ser los verdes de la marca.
+     Por eso estos tres tokens no se redefinen en ningun bloque de tema, a proposito: son la version
+     "sobre blanco" del emblema, no la version "del tema actual".
+     Existen (2026-09-18) porque estos mismos valores estaban escritos a mano en admin.css y auth.css,
+     que es justo lo que la regla de color literal prohibe - y lo que el grep de CI ahora corta. */
+  --onix-brand-pill: #FFFFFF;
+  --onix-brand-pill-leaf-dark: #08321A;
+  --onix-brand-pill-leaf-light: #73916B;
+
   /* Sombra: en claro hay elevación, en oscuro el borde hace ese trabajo */
   --onix-shadow-sm: 0 1px 2px rgba(15, 26, 21, 0.05);
   --onix-shadow-md: 0 8px 24px rgba(15, 26, 21, 0.07);
