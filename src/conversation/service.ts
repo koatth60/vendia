@@ -4,6 +4,7 @@ import { touchCustomerLastContact } from "../crm/customers";
 import { getPresignedMediaUrl } from "../media/s3";
 import { emitNewMessage, emitNewConversation, emitConversationUpdated, type ConversationRow, type CustomerRow } from "../realtime/events";
 import { clearBlockedByIfNoPendingQuestions } from "../orders/saleState";
+import { recordAskOwnerResolution } from "../catalog/learnedFaq";
 import { getBusinessLocale } from "../config/businessConfig";
 
 // WhatsApp only allows free-form text/media within 24h of the customer's last message (Meta's
@@ -597,7 +598,9 @@ export async function findConversationByPendingOwnerQuestion(wamid: string) {
     where: { wamid },
     include: { conversation: { include: { customer: true } } },
   });
-  if (!pending) return null;
+  // Resuelta es resuelta: si el dueno vuelve a citar un aviso viejo que ya contesto, no se reabre ni
+  // se le reenvia nada al cliente. Antes esto no hacia falta porque la fila ya no existia.
+  if (!pending || pending.resolvedAt) return null;
   return {
     questionId: pending.id,
     question: pending.question,
@@ -608,24 +611,31 @@ export async function findConversationByPendingOwnerQuestion(wamid: string) {
   };
 }
 
-export async function clearPendingOwnerQuestion(questionId: string) {
-  const pending = await prisma.pendingOwnerQuestion.delete({ where: { id: questionId } });
+// E56 (2026-09-17): resolver ya NO es borrar. La fila se queda con `resolvedAt` puesto. Ver el
+// comentario del modelo en schema.prisma: borrarla tiraba el par pregunta/respuesta del que vive el
+// ciclo de aprendizaje de la FAQ, y ademas dejaba a `ownerWasNotifiedSince` sin la prueba de que al
+// dueno se le habia avisado, con lo que el bot reenviaba la misma respuesta turno tras turno.
+export async function markPendingOwnerQuestionResolved(questionId: string) {
+  const pending = await prisma.pendingOwnerQuestion.update({
+    where: { id: questionId },
+    data: { resolvedAt: new Date() },
+  });
   await clearBlockedByIfNoPendingQuestions(pending.conversationId);
 }
 
-// Marcar resuelta a mano desde el panel (Bot > Salud), para el caso que clearPendingOwnerQuestion
+// Marcar resuelta a mano desde el panel (Bot > Salud), para el caso que markPendingOwnerQuestionResolved
 // no cubre: el dueño ya resolvió la pregunta por fuera del panel (por telefono, en persona) y solo
 // quiere sacarla de la lista, sin tener que escribirle algo al cliente para que se limpie sola.
-// Scoped por businessId - a diferencia de clearPendingOwnerQuestion (uso interno, ya confia en el
+// Scoped por businessId - a diferencia de markPendingOwnerQuestionResolved (uso interno, ya confia en el
 // llamador), este lo expone un endpoint HTTP y necesita el chequeo de que la pregunta es de este
 // negocio antes de borrarla.
 export async function resolvePendingOwnerQuestion(businessId: string, questionId: string): Promise<boolean> {
   const pending = await prisma.pendingOwnerQuestion.findFirst({
-    where: { id: questionId, conversation: { customer: { businessId } } },
+    where: { id: questionId, conversation: { customer: { businessId } }, resolvedAt: null },
     select: { id: true, conversationId: true },
   });
   if (!pending) return false;
-  await prisma.pendingOwnerQuestion.delete({ where: { id: pending.id } });
+  await prisma.pendingOwnerQuestion.update({ where: { id: pending.id }, data: { resolvedAt: new Date() } });
   await clearBlockedByIfNoPendingQuestions(pending.conversationId);
   return true;
 }
@@ -637,9 +647,43 @@ export async function resolvePendingOwnerQuestion(businessId: string, questionId
 // fixed (2026-09-12) this orphaned row was exactly what let a real, already-resolved conversation get a
 // confusing "seguimos revisando" follow-up hours later. Called wherever the owner addresses a conversation
 // through the admin panel instead of WhatsApp.
-export async function clearPendingOwnerQuestionsForConversation(conversationId: string) {
-  await prisma.pendingOwnerQuestion.deleteMany({ where: { conversationId } });
+//
+// E56 (2026-09-17): dos cambios. Las filas se marcan resueltas en vez de borrarse (ver
+// markPendingOwnerQuestionResolved), y cuando el dueno resolvio la pregunta ESCRIBIENDOLE al cliente
+// desde el panel, ese par pregunta/respuesta entra al ciclo de aprendizaje igual que si hubiera
+// contestado por WhatsApp. Era el agujero que nombra la ficha: el camino del panel es mas volumen y
+// mejor contexto que la escalacion por WhatsApp, y era el unico que no aprendia nada.
+//
+// `aprendizaje` es opcional a proposito: mandar una plantilla tambien cierra la pregunta, pero una
+// plantilla no es la respuesta del dueno a nada, y guardarla como tal ensuciaria la FAQ.
+export async function markConversationOwnerQuestionsResolved(
+  conversationId: string,
+  aprendizaje?: { businessId: string; answer: string }
+): Promise<number> {
+  const abiertas = await prisma.pendingOwnerQuestion.findMany({
+    where: { conversationId, resolvedAt: null },
+    select: { id: true, question: true },
+  });
+  if (abiertas.length === 0) return 0;
+
+  await prisma.pendingOwnerQuestion.updateMany({
+    where: { conversationId, resolvedAt: null },
+    data: { resolvedAt: new Date() },
+  });
   await clearBlockedByIfNoPendingQuestions(conversationId);
+
+  if (aprendizaje && aprendizaje.answer.trim()) {
+    for (const pregunta of abiertas) {
+      // Nunca puede tumbar el envio que ya salio: el mensaje al cliente es lo que importa, la
+      // sugerencia de FAQ es una consecuencia.
+      try {
+        await recordAskOwnerResolution(aprendizaje.businessId, pregunta.question, aprendizaje.answer, conversationId);
+      } catch (error) {
+        console.error("No se pudo registrar la resolucion del dueno para aprender de ella:", error);
+      }
+    }
+  }
+  return abiertas.length;
 }
 
 // Used when the owner replies WITHOUT quoting a specific message (common on mobile, where long-pressing
@@ -648,7 +692,7 @@ export async function clearPendingOwnerQuestionsForConversation(conversationId: 
 // disambiguate.
 export async function findOpenPendingOwnerQuestionsForBusiness(businessId: string) {
   const pending = await prisma.pendingOwnerQuestion.findMany({
-    where: { conversation: { customer: { businessId } } },
+    where: { conversation: { customer: { businessId } }, resolvedAt: null },
     include: { conversation: { include: { customer: true } } },
     orderBy: { createdAt: "desc" },
   });
@@ -668,7 +712,7 @@ export async function findOpenPendingOwnerQuestionsForBusiness(businessId: strin
 // esta siga sin respuesta.
 export async function findOpenPendingOwnerQuestionsForConversation(conversationId: string) {
   return prisma.pendingOwnerQuestion.findMany({
-    where: { conversationId },
+    where: { conversationId, resolvedAt: null },
     select: { question: true },
     orderBy: { createdAt: "asc" },
   });
@@ -717,6 +761,7 @@ export async function findPendingOwnerQuestionsPastTimeout(businessId: string, o
   const pending = await prisma.pendingOwnerQuestion.findMany({
     where: {
       conversation: { customer: { businessId }, status: { notIn: ["SOLD", "LOST", "ABANDONED"] } },
+      resolvedAt: null,
       createdAt: { lte: olderThan },
     },
     include: { conversation: { include: { customer: true } } },
@@ -746,6 +791,7 @@ export async function findPendingOwnerQuestionsDueForReminder(businessId: string
       // ask_owner_about_photo (the one case that does set humanControl). status is the real "still open"
       // signal regardless of which escalation path set it.
       conversation: { customer: { businessId }, status: { notIn: ["SOLD", "LOST", "ABANDONED"] } },
+      resolvedAt: null,
       remindedAt: null,
       createdAt: { lte: olderThan },
     },

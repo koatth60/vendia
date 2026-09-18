@@ -372,6 +372,14 @@ export async function verifyRequiredEffects(conversationId: string, effects: Req
  *  - OwnerMessageLog con success y conversationId: el aviso del fallback de este mismo modulo.
  *
  * El corte por `since` no es cosmetico: sin el, un aviso viejo probaria un efecto de hoy.
+ *
+ * E56 (2026-09-17): el conteo de PendingOwnerQuestion NO filtra por `resolvedAt`, y esa es la
+ * diferencia con todas las demas consultas de este repositorio. Acá la pregunta no es "¿sigue
+ * abierta?" sino "¿se le aviso al dueno?", y avisado sigue avisado despues de que conteste. Mientras
+ * resolver era BORRAR la fila, la respuesta del dueno hacia desaparecer la prueba del aviso: la imagen
+ * quedaba sin atender para siempre y cada turno volvia a forzar ask_owner_about_photo y a reenviar la
+ * misma identificacion de producto (conversacion cmu4xfymx00bxq92kb1aj3iil, el mismo mensaje dos veces
+ * con cuatro minutos de diferencia).
  */
 async function ownerWasNotifiedSince(conversationId: string, since: Date): Promise<boolean> {
   const pregunta = await prisma.pendingOwnerQuestion.count({ where: { conversationId, createdAt: { gte: since } } });

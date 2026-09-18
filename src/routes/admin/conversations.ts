@@ -6,7 +6,7 @@ import {
   setHumanControl,
   clearAgentRequestFlag,
   clearConversationIntent,
-  clearPendingOwnerQuestionsForConversation,
+  markConversationOwnerQuestionsResolved,
   recordMessage,
   saveCustomerContactInfo,
   updateConversationStatus,
@@ -277,7 +277,14 @@ conversationsRouter.post("/api/conversations/:id/messages", upload.array("files"
     });
     if (!sent.delivered) throw new Error(sent.failure?.message ?? "No se pudo enviar el mensaje");
   }
-  await clearPendingOwnerQuestionsForConversation(String(req.params.id));
+  // E56: si habia una pregunta escalada esperando y la duena la contesto ESCRIBIENDOLE al cliente
+  // desde el panel, ese par pregunta/respuesta entra al ciclo de aprendizaje, igual que cuando
+  // contesta por WhatsApp. Antes este camino -- el de mas volumen y mejor contexto -- tiraba el dato.
+  // Solo con texto real: un envio que fue puro archivo no responde nada que se pueda guardar.
+  await markConversationOwnerQuestionsResolved(
+    String(req.params.id),
+    formattedText.trim() ? { businessId, answer: formattedText } : undefined
+  );
 
   res.status(201).json({ ok: true });
 });
@@ -359,7 +366,8 @@ conversationsRouter.post("/api/conversations/:id/send-template", async (req, res
   await recordMessage(businessId, String(req.params.id), "ASSISTANT", template.bodyText || `[Plantilla: ${templateName}]`, sent.wamid || undefined);
   await setHumanControl(businessId, String(req.params.id), true, "PANEL_TEMPLATE");
   await clearAgentRequestFlag(businessId, String(req.params.id));
-  await clearPendingOwnerQuestionsForConversation(String(req.params.id));
+  // Una plantilla no es la respuesta del dueno a nada: cierra la pregunta, pero no se aprende de ella.
+  await markConversationOwnerQuestionsResolved(String(req.params.id));
 
   res.status(201).json({ ok: true });
 });
@@ -642,7 +650,7 @@ conversationsRouter.post("/api/conversations/:id/close-sale", async (req, res) =
     console.error("No se pudo entregar el mensaje de cierre de la venta manual:", sent.failure?.message);
   }
   await askForCsat(credentials, order.id, conversation.customer.phoneNumber);
-  await clearPendingOwnerQuestionsForConversation(conversation.id);
+  await markConversationOwnerQuestionsResolved(conversation.id);
 
   res.json({ ok: true, orderId: order.id });
 });

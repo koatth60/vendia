@@ -995,8 +995,22 @@ model PendingOwnerQuestion {
   payload        Json?
   createdAt      DateTime                 @default(now())
   remindedAt     DateTime?
+  // E56 de ONIX-PLAN.md (2026-09-17): la fila se marca resuelta en vez de borrarse.
+  //
+  // Borrarla tiraba la evidencia mas valiosa que produce el sistema (el par pregunta real del cliente /
+  // respuesta real del dueno, que alimenta el ciclo de aprendizaje de la FAQ), y ademas producia un
+  // defecto que el cliente veia: `ownerWasNotifiedSince` (src/ai/requiredEffects.ts) prueba que una
+  // imagen quedo atendida contando filas POSTERIORES a ella. Sin fila, la imagen quedaba "sin atender"
+  // para siempre y cada turno volvia a forzar ask_owner_about_photo y a reenviar la misma respuesta
+  // guardada - conversacion cmu4xfymx00bxq92kb1aj3iil, la misma identificacion de producto mandada dos
+  // veces con cuatro minutos de diferencia.
+  //
+  // Toda consulta que signifique "pregunta abierta" filtra por `resolvedAt: null`. La unica que NO
+  // filtra es a proposito: la que cuenta si al dueno se le aviso, porque avisado sigue avisado.
+  resolvedAt     DateTime?
 
   @@index([conversationId])
+  @@index([conversationId, resolvedAt])
 }
 
 // PHOTO_PRODUCT: the owner was sent the customer's actual photo/video to identify (ask_owner_about_photo

@@ -198,7 +198,12 @@ test("el caso real, de punta a punta: los precios de la duena quedan escritos tr
   const acordados = await getAgreedPrices(conversationId);
   assert.equal(acordados.get(agreedKey(airpodsId, null))?.unitPrice, 70000);
   assert.equal(acordados.get(agreedKey(alexaId, null))?.unitPrice, 65000);
-  assert.equal(await prisma.pendingOwnerQuestion.count({ where: { conversationId } }), 0, "la pregunta queda resuelta");
+  // E56: resuelta = resolvedAt puesto, no la fila borrada.
+  assert.equal(
+    await prisma.pendingOwnerQuestion.count({ where: { conversationId, resolvedAt: null } }),
+    0,
+    "la pregunta queda resuelta"
+  );
 
   // El aviso al cliente lo compone el SERVIDOR con las cifras que acaba de escribir: el fallback sin
   // modelo adentro, que es lo que hace de esto una garantia y no una mitigacion.

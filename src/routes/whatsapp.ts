@@ -33,7 +33,7 @@ import {
   findConversationByPendingConfirmation,
   clearPendingConfirmation,
   findConversationByPendingOwnerQuestion,
-  clearPendingOwnerQuestion,
+  markPendingOwnerQuestionResolved,
   updatePendingOwnerQuestion,
   findOpenPendingOwnerQuestionsForBusiness,
   findOpenPendingConfirmationsForBusiness,
@@ -309,7 +309,7 @@ export async function handleOwnerReply(
       if (slots.length === 0) {
         // Fila sin ranuras (solo posible si alguien la escribio a mano): no hay formulario que llenar, y
         // adivinar a que se referia seria justo lo que esta fase vino a borrar. Se cierra y se avisa.
-        await clearPendingOwnerQuestion(pendingQuestion.questionId);
+        await markPendingOwnerQuestionResolved(pendingQuestion.questionId);
         await replyToOwner(businessId, credentials, ownerPhone, "Esa consulta de precio ya no tiene los productos asociados - vuelve a abrirla desde el panel.");
         return;
       }
@@ -329,7 +329,7 @@ export async function handleOwnerReply(
             })),
             "OWNER_REPLY"
           );
-          await clearPendingOwnerQuestion(pendingQuestion.questionId);
+          await markPendingOwnerQuestionResolved(pendingQuestion.questionId);
           // El aviso al cliente lo compone el SERVIDOR con las cifras que acaba de escribir en la base.
           // Es el fallback sin modelo adentro: el precio existe y el cliente se entera aunque el turno
           // siguiente del agente falle.
@@ -354,7 +354,7 @@ export async function handleOwnerReply(
       }
 
       if (DENY_WORDS.includes(answerNorm)) {
-        await clearPendingOwnerQuestion(pendingQuestion.questionId);
+        await markPendingOwnerQuestionResolved(pendingQuestion.questionId);
         const noDiscountText = formatForWhatsapp("Consulté con el equipo y por ahora el precio publicado es el que aplica.");
         const noDiscountOutcome = await deliverOwnerAnswerToCustomer(businessId, pendingQuestion.conversationId, credentials, pendingQuestion.customer.phoneNumber, noDiscountText);
         await recordMessage(businessId, pendingQuestion.conversationId, "ASSISTANT", noDiscountText);
@@ -436,7 +436,7 @@ export async function handleOwnerReply(
         outcome = await deliverOwnerAnswerToCustomer(businessId, pendingQuestion.conversationId, credentials, pendingQuestion.customer.phoneNumber, fallbackText);
         await recordMessage(businessId, pendingQuestion.conversationId, "ASSISTANT", fallbackText);
       }
-      await clearPendingOwnerQuestion(pendingQuestion.questionId);
+      await markPendingOwnerQuestionResolved(pendingQuestion.questionId);
       await setHumanControl(businessId, pendingQuestion.conversationId, false);
       const confirmedProductText = ownerConfirmationText(outcome, "Listo, le confirme el producto al cliente ✅");
       await replyToOwner(businessId, credentials, ownerPhone, confirmedProductText);
@@ -446,7 +446,7 @@ export async function handleOwnerReply(
     const formattedAnswer = formatForWhatsapp(answerText);
     const answerOutcome = await deliverOwnerAnswerToCustomer(businessId, pendingQuestion.conversationId, credentials, pendingQuestion.customer.phoneNumber, formattedAnswer);
     await recordMessage(businessId, pendingQuestion.conversationId, "ASSISTANT", formattedAnswer);
-    await clearPendingOwnerQuestion(pendingQuestion.questionId);
+    await markPendingOwnerQuestionResolved(pendingQuestion.questionId);
     await setHumanControl(businessId, pendingQuestion.conversationId, false);
     // The owner just answered a real customer question for the first time - surface it as a suggested
     // FAQ entry instead of discarding it after this one use (never auto-published, just queued for

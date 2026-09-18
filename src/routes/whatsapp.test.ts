@@ -78,8 +78,12 @@ test("handleOwnerReply auto-resolves an unquoted reply when exactly one owner qu
     assert.ok(sentToCustomer, "expected the answer to be forwarded to the customer without a quote");
     assert.match(sentToCustomer!.body, /20 mil/);
 
+    // E56 (2026-09-17): resolver es MARCAR, no borrar. La fila se queda con resolvedAt puesto - es la
+    // prueba de que al dueño se le aviso (ownerWasNotifiedSince) y el par pregunta/respuesta del que
+    // aprende la FAQ. Lo que tiene que dejar de ser cierto es que siga ABIERTA.
     const stillPending = await prisma.pendingOwnerQuestion.findUnique({ where: { id: pending.id } });
-    assert.equal(stillPending, null, "the question should be cleared once auto-resolved");
+    assert.ok(stillPending, "the question row must survive, only marked resolved");
+    assert.ok(stillPending!.resolvedAt, "the question should be marked resolved once auto-resolved");
 
     const freshConversation = await prisma.conversation.findUniqueOrThrow({ where: { id: conversation.id } });
     assert.equal(freshConversation.humanControl, false);
@@ -219,8 +223,11 @@ test("handleOwnerReply (PHOTO_PRODUCT) resolves the owner's answer to a real cat
     const photoSent = sentMedia.find((m) => m.to === customer.phoneNumber && m.type === "image");
     assert.ok(photoSent, "expected the real catalog photo to be sent, not just text");
 
+    // E56: marcada resuelta, no borrada (ver la nota mas arriba). Para ask_owner_about_photo esto
+    // ademas es lo que impide que el turno siguiente vuelva a exigir el aviso y a reenviar la misma
+    // identificacion de producto al cliente.
     const stillPending = await prisma.pendingOwnerQuestion.findFirst({ where: { conversationId: conversation.id } });
-    assert.equal(stillPending, null);
+    assert.ok(stillPending?.resolvedAt, "the photo question should be marked resolved, and its row kept");
 
     const freshConversation = await prisma.conversation.findUniqueOrThrow({ where: { id: conversation.id } });
     assert.equal(freshConversation.humanControl, false);
@@ -393,9 +400,10 @@ test("handleOwnerReply tells the owner the truth and nudges via template when th
     assert.match(sentToOwner!.body, /24h|aviso/i);
 
     // Despite the delivery failure, the owner's side of the job is done - the question must not stay
-    // stuck open forever (that would just create ANOTHER permanently-muted conversation).
+    // stuck open forever (that would just create ANOTHER permanently-muted conversation). E56: cerrada
+    // quiere decir resolvedAt puesto; la fila se conserva.
     const stillPending = await prisma.pendingOwnerQuestion.findUnique({ where: { id: pending.id } });
-    assert.equal(stillPending, null);
+    assert.ok(stillPending?.resolvedAt, "the question must be marked resolved even when delivery failed");
     const freshConversation = await prisma.conversation.findUniqueOrThrow({ where: { id: conversation.id } });
     assert.equal(freshConversation.humanControl, false);
 

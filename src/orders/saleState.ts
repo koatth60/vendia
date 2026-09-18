@@ -382,7 +382,9 @@ export async function setBlockedBy(conversationId: string, reason: string): Prom
 // dueno por WhatsApp, resolucion manual desde el panel, o limpieza masiva) - solo desbloquea si no queda
 // ninguna otra pregunta pendiente en la misma conversacion.
 export async function clearBlockedByIfNoPendingQuestions(conversationId: string): Promise<void> {
-  const stillPending = await prisma.pendingOwnerQuestion.count({ where: { conversationId } });
+  // E56: solo las ABIERTAS. Desde que resolver es marcar y no borrar, contar todas dejaria la
+  // conversacion bloqueada para siempre por una pregunta que el dueno ya contesto.
+  const stillPending = await prisma.pendingOwnerQuestion.count({ where: { conversationId, resolvedAt: null } });
   if (stillPending > 0) return;
   await prisma.saleState.updateMany({ where: { conversationId, blockedBy: { not: null } }, data: { blockedBy: null } });
 }
