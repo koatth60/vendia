@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { tokenize } from "../search/text";
+import { canonicalColors } from "./attributeTaxonomy";
 import { renderCatalog } from "./presenter";
 import type { ProductScope, ScopeProduct } from "./scope";
 import {
@@ -35,6 +36,8 @@ const ENVIOS = [12000];
 const FACTS: CatalogFacts = {
   priceDigits: new Set([...CATALOGO.map((p) => String(p.price)), ...ENVIOS.map(String)]),
   productNameTokens: CATALOGO.map((p) => new Set(tokenize(p.name))),
+  productColors: CATALOGO.map((p) => ({ nameTokens: new Set(tokenize(p.name)), colors: new Set<string>() })),
+  allColors: new Set<string>(),
 };
 
 test("marca los tres cargadores inventados del caso real de produccion", () => {
@@ -140,6 +143,8 @@ test("no marca los bloques que compuso el servidor: las dos lineas reales del 20
       new Set(tokenize("Reloj Inteligente Smartwatch Serie 11 Mini (Edición Compacta y Elegante)")),
       new Set(tokenize("Smartwatch hello plum")),
     ],
+    productColors: [],
+    allColors: new Set<string>(),
   };
 
   const lineas = [
@@ -154,6 +159,8 @@ test("sacarle la decoracion a un nombre inventado no lo vuelve real", () => {
   const facts: CatalogFacts = {
     priceDigits: new Set(["145000"]),
     productNameTokens: [new Set(tokenize("Reloj Inteligente Smartwatch Serie 11 Mini"))],
+    productColors: [],
+    allColors: new Set<string>(),
   };
 
   const findings = validateAgainstCatalog(["*5. Cargador iPhone Magnetico (Negro)* — $145.000"], facts);
@@ -222,4 +229,67 @@ test("collectCatalogClaims con everyPrice toma la linea de prosa que sin la opci
   const linea = "sale $99.000 con envío incluido";
   assert.equal(collectCatalogClaims(linea).length, 0);
   assert.equal(collectCatalogClaims(linea, { everyPrice: true }).length, 1);
+});
+
+// E11 (2026-09-18): un color que no existe no sale. El caso historico es "Serie 12 Ultra 3 en naranja".
+// Todo lo que sigue corre sobre el nucleo puro: mismo texto, mismo catalogo en memoria, mismos hallazgos.
+
+function factsConColores(productos: { name: string; colors: string[] }[]): CatalogFacts {
+  const productColors = productos.map((p) => ({
+    nameTokens: new Set(tokenize(p.name)),
+    colors: new Set(p.colors.flatMap((c) => canonicalColors(c))),
+  }));
+  return {
+    priceDigits: new Set(["145000"]),
+    productNameTokens: productos.map((p) => new Set(tokenize(p.name))),
+    productColors,
+    allColors: new Set(productColors.flatMap((p) => [...p.colors])),
+  };
+}
+
+const RELOJES = factsConColores([
+  { name: "Serie 12 Ultra 3", colors: ["negro", "dorado"] },
+  { name: "Smartwatch hello plum", colors: ["rosado"] },
+]);
+
+test("marca el color que el negocio no maneja en ESE producto", () => {
+  const findings = validateAgainstCatalog(["Si, el Serie 12 Ultra 3 lo tenemos en naranja"], RELOJES, { attributes: true });
+  assert.equal(findings.length, 1);
+  assert.equal(findings[0].kind, "atributo_inexistente");
+  assert.equal(findings[0].value, "naranja");
+});
+
+test("no marca un color real de ese producto", () => {
+  assert.deepEqual(validateAgainstCatalog(["El Serie 12 Ultra 3 viene en negro y en dorado"], RELOJES, { attributes: true }), []);
+});
+
+test("una linea que no nombra ningun producto se compara contra los colores de TODO el negocio", () => {
+  // El lado conservador: un color que el negocio si maneja en otro producto no se marca. Una venta no se
+  // frena por una duda nuestra.
+  assert.deepEqual(validateAgainstCatalog(["Si, lo tenemos en rosado"], RELOJES, { attributes: true }), []);
+  const inventado = validateAgainstCatalog(["Si, lo tenemos en verde"], RELOJES, { attributes: true });
+  assert.equal(inventado.length, 1);
+  assert.equal(inventado[0].value, "verde");
+});
+
+test("sin la opcion encendida no se mira ningun color: la bandera es de verdad", () => {
+  assert.deepEqual(validateAgainstCatalog(["El Serie 12 Ultra 3 lo tenemos en naranja"], RELOJES), []);
+});
+
+test("un producto sin colores cargados no marca nada", () => {
+  // Decir "lo tenemos en negro" de un producto al que nadie le cargo colores es un hueco del catalogo,
+  // no una invencion comprobable. Marcarlo seria castigar al negocio por no haber llenado una columna.
+  const sinColores = factsConColores([{ name: "Parlante Tipo Alexa", colors: [] }]);
+  assert.deepEqual(validateAgainstCatalog(["El Parlante Tipo Alexa lo tenemos en negro"], sinColores, { attributes: true }), []);
+});
+
+test("el color que el servidor mismo escribe en el nombre no se marca", () => {
+  // renderCatalog escribe "Smartwatch hello plum (Negro)". Si ese negro no contara como real, el
+  // validador marcaria los bloques del propio servidor - el mismo falso positivo que ya paso con los
+  // nombres decorados en produccion el 2026-09-16.
+  const conNombreDeColor = factsConColores([{ name: "Smartwatch hello plum Negro", colors: [] }]);
+  assert.deepEqual(
+    validateAgainstCatalog(["2. *Smartwatch hello plum (Negro)* — $145.000"], conNombreDeColor, { attributes: true }),
+    []
+  );
 });

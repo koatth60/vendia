@@ -2036,7 +2036,14 @@ ${CATALOG_BLOCK_MARKER}` : CATALOG_BLOCK_MARKER;
     // conversationId: el precio acordado con la duena para ESTA venta es un dato real de la base y tiene
     // que pasar la verificacion igual que un precio de catalogo. Sin esto un descuento legitimo caia al
     // fallback y el cliente recibia la ficha del servidor con el precio de lista.
-    const opts = { locale: negocio.locale, currency: negocio.currency, conversationId };
+    const opts = {
+      locale: negocio.locale,
+      currency: negocio.currency,
+      conversationId,
+      // E11: los colores inventados frenan el mensaje solo donde el negocio ya lo activo. En todos los
+      // demas quedan registrados en sombra (findShadowCatalogFindings), que es como se mide si se puede.
+      attributes: personality?.attributeCheckEnabled ?? false,
+    };
     let text = firstAttempt;
     let check = await verifyAgainstCatalog(context.businessId, [text], opts);
     if (check.verificado && check.findings.length === 0) return { text, author: "modelo" };

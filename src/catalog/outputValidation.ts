@@ -2,6 +2,7 @@ import { prisma } from "../db/client";
 import { formatPrice } from "../config/money";
 import { tokenize } from "../search/text";
 import { startsAsNumberedItem, stripPresentationDecorations } from "./presenter";
+import { canonicalColors } from "./attributeTaxonomy";
 import { getAgreedPrices } from "../orders/agreedPrices";
 
 // Pieza 5 del plan de catalogo y medios (ONIX-PLAN-CATALOGO-Y-MEDIOS.md), EN MODO SOMBRA.
@@ -27,7 +28,7 @@ import { getAgreedPrices } from "../orders/agreedPrices";
 // compone el y la lista del modelo se borra. Lo que queda sin cubrir es el turno con alcance "none",
 // donde el modelo sigue redactando libre.
 
-export type CatalogFindingKind = "precio_inexistente" | "producto_inexistente";
+export type CatalogFindingKind = "precio_inexistente" | "producto_inexistente" | "atributo_inexistente";
 
 export interface CatalogFinding {
   kind: CatalogFindingKind;
@@ -50,6 +51,15 @@ export interface CatalogFacts {
   priceDigits: Set<string>;
   /** Un set de tokens por producto activo, sacado de su nombre con tokenize. */
   productNameTokens: Set<string>[];
+  /**
+   * E11: los colores REALES de cada producto activo, en cubetas canonicas (ver canonicalColors). Salen de
+   * tres lugares, porque en los tres el color es un dato de la base: las variantes del producto,
+   * Product.color de los productos de un solo color, y el nombre del producto - el servidor mismo escribe
+   * "Smartwatch hello plum (Negro)", asi que ese negro es tan real como el de la columna.
+   */
+  productColors: { nameTokens: Set<string>; colors: Set<string> }[];
+  /** La union de todos los colores del negocio. Es contra lo que se compara una linea que no nombra ningun producto. */
+  allColors: Set<string>;
 }
 
 /**
@@ -65,6 +75,10 @@ const MAX_FINDINGS_PER_TURN = 10;
  * chequeo de precio, que es independiente de este.
  */
 const MIN_NAME_TOKENS = 2;
+
+// El separador de lineas como constante y no como literal: este archivo se edita con herramientas que
+// pelean con el escape dentro de una cadena, y una barra invertida perdida acá rompe el modulo entero.
+const SALTO_DE_LINEA = String.fromCharCode(10);
 
 function isDigit(char: string): boolean {
   return char >= "0" && char <= "9";
@@ -178,6 +192,12 @@ function claimedNames(line: string): string[] {
  */
 export interface ClaimOptions {
   everyPrice?: boolean;
+  /**
+   * E11: tambien comparar los colores que nombra el texto contra los del catalogo. Va aparte del resto
+   * porque su activacion es aparte: se mide en sombra primero y se enciende por negocio, ya que un color
+   * legitimo marcado por error le llega al cliente.
+   */
+  attributes?: boolean;
 }
 
 export function collectCatalogClaims(text: string, opts: ClaimOptions = {}): CatalogClaim[] {
@@ -214,6 +234,46 @@ function nameExists(name: string, facts: CatalogFacts): boolean {
   return facts.productNameTokens.some((real) => tokens.every((token) => real.has(token)));
 }
 
+/**
+ * E11: los colores que nombra una linea y que el negocio NO tiene.
+ *
+ * Como se decide contra que se compara: si la linea nombra un producto real, contra los colores de ESE
+ * producto ("el Serie 12 Ultra 3 en naranja" se compara contra los colores del Serie 12 Ultra 3). Si no
+ * nombra ninguno, contra todos los colores del negocio, que es el lado conservador: un color que el
+ * negocio si maneja en otro producto no se marca. Una venta no se frena por una duda nuestra.
+ *
+ * Cero expresiones regulares: canonicalColors tokeniza y busca en un diccionario de colores fijo, el
+ * mismo que ya usa la busqueda por atributos para entenderle al cliente. Si una palabra no esta en ese
+ * diccionario, no es un color para nadie en este repositorio.
+ *
+ * LAS TALLAS NO ENTRAN. No existe taxonomia de tallas y escribir una seria exactamente el error contra el
+ * que advierte attributeTaxonomy.ts: un vocabulario fijo que solo le sirve a una vertical. Queda anotado
+ * en E11 como lo que falta.
+ */
+function colorFindings(line: string, facts: CatalogFacts): CatalogFinding[] {
+  const mencionados = canonicalColors(line);
+  if (mencionados.length === 0) return [];
+
+  const nombreEscrito = claimedNames(line).find((name) => productOf(name, facts) !== null);
+  const producto = nombreEscrito ? productOf(nombreEscrito, facts) : null;
+  const reales = producto ? producto.colors : facts.allColors;
+  // Un producto real sin ningun color cargado no tiene contra que comparar: no se marca nada. Decir "lo
+  // tenemos en negro" de un producto al que nadie le cargo colores es un hueco de catalogo, no una
+  // invencion comprobable.
+  if (reales.size === 0) return [];
+
+  return mencionados
+    .filter((color) => !reales.has(color))
+    .map((color) => ({ kind: "atributo_inexistente" as const, value: color, line }));
+}
+
+/** El producto real al que corresponde un nombre escrito, o null. Misma comparacion que nameExists. */
+function productOf(name: string, facts: CatalogFacts): { nameTokens: Set<string>; colors: Set<string> } | null {
+  const tokens = tokenize(stripPresentationDecorations(name));
+  if (tokens.length < MIN_NAME_TOKENS) return null;
+  return facts.productColors.find((real) => tokens.every((token) => real.nameTokens.has(token))) ?? null;
+}
+
 /** El nucleo PURO: mismos textos, mismo catalogo en memoria, mismos hallazgos. Sin base, sin red, sin modelo. */
 export function validateAgainstCatalog(
   texts: readonly string[],
@@ -240,6 +300,17 @@ export function validateAgainstCatalog(
         if (!nameExists(name, facts)) {
           add({ kind: "producto_inexistente", value: name, line: claim.line });
         }
+      }
+    }
+
+    // Los colores se buscan en TODAS las lineas, no solo en las que llevan precio: "si, lo tenemos en
+    // naranja" no lleva ninguna cifra y es justo la frase del caso historico. Es una pasada mas sobre el
+    // mismo texto, sin ninguna consulta extra.
+    if (opts.attributes) {
+      for (const raw of text.split(SALTO_DE_LINEA)) {
+        const line = raw.trim();
+        if (line.length === 0) continue;
+        for (const finding of colorFindings(line, facts)) add(finding);
       }
     }
   }
@@ -271,7 +342,15 @@ export async function loadCatalogFacts(
   const [products, shippingRates] = await Promise.all([
     prisma.product.findMany({
       where: { businessId, active: true },
-      select: { name: true, price: true, currency: true },
+      select: {
+        name: true,
+        price: true,
+        currency: true,
+        // E11: el color vive en tres lugares y los tres son la base. Un producto de un solo color lo lleva
+        // en su propia columna; uno con variantes, en cada variante; y el nombre muchas veces ya lo dice.
+        color: true,
+        variants: { where: { active: true }, select: { color: true } },
+      },
     }),
     prisma.shippingRate.findMany({ where: { businessId }, select: { cost: true } }),
   ]);
@@ -292,9 +371,20 @@ export async function loadCatalogFacts(
     for (const agreed of (await getAgreedPrices(conversationId)).values()) addPrice(agreed.unitPrice, agreed.currency || currency);
   }
 
+  const productColors = products.map((product) => {
+    const colors = new Set<string>([
+      ...canonicalColors(product.name),
+      ...canonicalColors(product.color ?? ""),
+      ...product.variants.flatMap((variant) => canonicalColors(variant.color ?? "")),
+    ]);
+    return { nameTokens: new Set(tokenize(product.name)), colors };
+  });
+
   return {
     priceDigits,
     productNameTokens: products.map((product) => new Set(tokenize(product.name))),
+    productColors,
+    allColors: new Set(productColors.flatMap((product) => [...product.colors])),
   };
 }
 
@@ -313,7 +403,9 @@ export async function findShadowCatalogFindings(
   try {
     if (!texts.some((text) => collectCatalogClaims(text).length > 0)) return [];
     const facts = await loadCatalogFacts(businessId, opts.locale, opts.currency, opts.conversationId);
-    return validateAgainstCatalog(texts, facts);
+    // La comparacion de colores va SIEMPRE en sombra, sin bandera: es justamente el dato que hace falta
+    // para decidir si se puede encender (E11).
+    return validateAgainstCatalog(texts, facts, { attributes: true });
   } catch (error) {
     // Best-effort igual que recordAgentTurn: en modo sombra esta pieza no puede romper un turno que ya
     // esta respondido. Un turno sin auditar es un problema de observabilidad; un turno sin respuesta es
@@ -335,16 +427,20 @@ export async function findShadowCatalogFindings(
 export async function verifyAgainstCatalog(
   businessId: string,
   texts: readonly string[],
-  opts: { locale: string; currency: string; conversationId?: string }
+  // `attributes` es Business.attributeCheckEnabled: con la bandera apagada, un color inventado se sigue
+  // registrando en sombra pero no frena el mensaje (E11).
+  opts: { locale: string; currency: string; conversationId?: string; attributes?: boolean }
 ): Promise<{ verificado: boolean; findings: CatalogFinding[] }> {
   try {
     // Un texto sin una sola cifra con "$" no afirma ningun precio y no tiene nombre en posicion de
     // lista: no hay nada que comparar, asi que tampoco se paga la consulta.
-    if (!texts.some((text) => collectCatalogClaims(text, { everyPrice: true }).length > 0)) {
+    // Con la verificacion de color encendida, un texto sin ninguna cifra tambien puede afirmar algo
+    // comprobable ("si, lo tenemos en naranja"), asi que ahi no se puede salir temprano.
+    if (!opts.attributes && !texts.some((text) => collectCatalogClaims(text, { everyPrice: true }).length > 0)) {
       return { verificado: true, findings: [] };
     }
     const facts = await loadCatalogFacts(businessId, opts.locale, opts.currency, opts.conversationId);
-    return { verificado: true, findings: validateAgainstCatalog(texts, facts, { everyPrice: true }) };
+    return { verificado: true, findings: validateAgainstCatalog(texts, facts, { everyPrice: true, attributes: opts.attributes }) };
   } catch (error) {
     console.error("No se pudo verificar la salida contra el catalogo:", error);
     return { verificado: false, findings: [] };

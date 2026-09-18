@@ -48,6 +48,7 @@ businessRouter.put("/api/business", requireOwner, async (req, res) => {
     offerPhotosBeforeSending,
     requirePaymentProof,
     interactiveListsEnabled,
+    attributeCheckEnabled,
     catalogPhotoScope,
     businessCategory,
     contactPhone,
@@ -97,6 +98,7 @@ businessRouter.put("/api/business", requireOwner, async (req, res) => {
       // su propia respuesta dice haber hecho dejo de ser una opcion del panel, asi que tampoco puede
       // apagarse por esta ruta: un PUT con el campo en false no lo toca. Se cambia por SQL, a sabiendas.
       interactiveListsEnabled: interactiveListsEnabled !== undefined ? Boolean(interactiveListsEnabled) : undefined,
+      attributeCheckEnabled: attributeCheckEnabled !== undefined ? Boolean(attributeCheckEnabled) : undefined,
       // Hasta donde llegan las fotos (2026-09-17). Un valor que no sea uno de los tres se ignora en vez
       // de guardarse: la columna es un enum, y un PUT viejo o un formulario a medias no puede dejar el
       // negocio con un alcance que el codigo no sabe leer.

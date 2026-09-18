@@ -1,0 +1,13 @@
+-- Un color que no existe no sale (2026-09-18, etapa E11).
+--
+-- verifyAgainstCatalog tenia exactamente dos tipos de hallazgo: precio_inexistente y
+-- producto_inexistente. Ningun color, ninguna variante. El agente podia escribir "lo tenemos en
+-- naranja" y el mensaje salia sin que nada lo mirara; el caso historico es "Serie 12 Ultra 3 en
+-- naranja".
+--
+-- La comparacion de colores se registra SIEMPRE en modo sombra (AgentTurn.shadowFindings), sin tocar
+-- ningun mensaje. Esta columna decide si ademas BLOQUEA, y arranca apagada en todos los negocios: un
+-- color legitimo marcado por error le llega al cliente, asi que primero se miden 48 h de datos reales.
+--
+-- Aditiva, con default: ninguna fila existente cambia de comportamiento.
+ALTER TABLE "Business" ADD COLUMN "attributeCheckEnabled" BOOLEAN NOT NULL DEFAULT false;

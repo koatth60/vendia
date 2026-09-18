@@ -136,6 +136,11 @@ model Business {
   // Off por defecto y con su interruptor en el panel: cambia la FORMA de un mensaje que ve el cliente, y
   // eso no se puede validar sin una conversacion real. Apagada, sale el texto numerado de siempre.
   interactiveListsEnabled   Boolean                   @default(false)
+  // E11 (2026-09-18). Compara contra el catalogo los COLORES que escribe el agente, no solo los precios
+  // y los nombres. Apagada por defecto y encendida negocio por negocio a proposito: un color legitimo
+  // marcado por error le llega al cliente, asi que primero se mide la tasa de falsos positivos en modo
+  // sombra (AgentTurn.shadowFindings la registra siempre, este campo solo decide si ADEMAS bloquea).
+  attributeCheckEnabled     Boolean                   @default(false)
   // HASTA DONDE LLEGAN LAS FOTOS (2026-09-17). Lo elige el dueno en el panel, y es la unica cosa que lo
   // decide: ni el modelo ni una lectura del mensaje del cliente.
   //

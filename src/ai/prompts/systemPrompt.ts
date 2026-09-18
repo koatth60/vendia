@@ -383,6 +383,10 @@ export interface BotPersonality {
   // Business.interactiveListsEnabled. Tampoco entra al prompt: decide la FORMA del mensaje del servidor
   // y la linea de cierre que escribe renderCatalog.
   interactiveListsEnabled?: boolean;
+  // Business.attributeCheckEnabled (E11). NO entra al prompt a proposito: no es una instruccion para el
+  // modelo, es lo que decide si un color que no existe en el catalogo frena el mensaje o solo se anota.
+  // Pedirle al modelo que no invente colores es justamente el parche que esta verificacion reemplaza.
+  attributeCheckEnabled?: boolean;
   requirePaymentProof?: boolean;
   category?: string | null;
   // Opt-in, off by default - see Business.genderedAddressEnabled in schema.prisma for why this stays

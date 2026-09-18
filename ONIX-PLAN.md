@@ -866,6 +866,31 @@ los colores reales.
 de falsos positivos medida 48 h. Un color legítimo marcado por error le llega al cliente.
 **Vuelta atrás:** apagar la bandera.
 
+**Estado (2026-09-18): implementada, sin desplegar, y APAGADA en los tres negocios.**
+
+- Tercer tipo de hallazgo, `atributo_inexistente`, en `src/catalog/outputValidation.ts`. La comparación
+  reusa `canonicalColors`: cero expresiones regulares nuevas, como pedía la ficha. Si una palabra no está
+  en ese diccionario, no es un color para nadie en este repositorio.
+- Los colores reales de un producto salen de **tres** lugares, los tres de la base: sus variantes,
+  `Product.color`, y su propio nombre — el servidor mismo escribe "Smartwatch hello plum (Negro)", así
+  que ese negro es tan real como el de la columna. Sin esa tercera fuente, el validador marcaría los
+  bloques del propio servidor, que es el falso positivo que ya pasó con los nombres decorados el
+  2026-09-16.
+- Los colores se buscan en **todas** las líneas, no solo en las que llevan precio: *"sí, lo tenemos en
+  naranja"* no lleva ninguna cifra y es justo la frase del caso histórico.
+- Lados conservadores, explícitos: una línea que no nombra ningún producto se compara contra los colores
+  de TODO el negocio (un color que sí maneja en otro producto no se marca), y un producto sin colores
+  cargados no marca nada — eso es un hueco de catálogo, no una invención comprobable.
+- `Business.attributeCheckEnabled`, aditiva y en `false`, con su interruptor en el panel (Bot > ajustes).
+  Con la bandera apagada el hallazgo **igual se registra** en `AgentTurn.shadowFindings`: así es como se
+  miden las 48 h que la ficha exige antes de encenderla en un negocio real.
+- Seis pruebas nuevas en `src/catalog/outputValidation.test.ts`, todas sobre el núcleo puro.
+
+**Lo que NO cubre, y por qué.** Las **tallas** quedan fuera. No existe taxonomía de tallas, y escribir
+una sería exactamente el error contra el que advierte `attributeTaxonomy.ts`: un vocabulario fijo que
+solo le sirve a una vertical. Una talla se vería como un dato por negocio (como `CategoryAlias`), y eso
+es una etapa propia, no un renglón de esta.
+
 ---
 
 ### E12 · La foto es del producto del que se está hablando

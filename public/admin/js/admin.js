@@ -186,6 +186,7 @@ async function loadBusiness() {
     document.getElementById('bot-require-proof').checked = business.requirePaymentProof !== false;
     document.getElementById('bot-category').value = business.businessCategory || '';
     document.getElementById('bot-interactive-lists').checked = Boolean(business.interactiveListsEnabled);
+    document.getElementById('bot-attribute-check').checked = Boolean(business.attributeCheckEnabled);
     setCatalogPhotoScope(business.catalogPhotoScope || 'PRODUCT');
     document.getElementById('bot-gendered-address').checked = Boolean(business.genderedAddressEnabled);
     document.getElementById('bot-female-term').value = business.femaleAddressTerm || '';
@@ -541,6 +542,7 @@ async function saveBusiness() {
   const cartRecoveryTemplateName = document.getElementById('business-cart-recovery-template').value.trim();
   const cartRecoveryTemplateLanguage = document.getElementById('business-cart-recovery-language').value.trim() || 'es';
   const interactiveListsEnabled = document.getElementById('bot-interactive-lists').checked;
+  const attributeCheckEnabled = document.getElementById('bot-attribute-check').checked;
   const catalogPhotoScope = readCatalogPhotoScope();
   const genderedAddressEnabled = document.getElementById('bot-gendered-address').checked;
   const femaleAddressTerm = document.getElementById('bot-female-term').value.trim();
@@ -566,7 +568,7 @@ async function saveBusiness() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         name, description, customInstructions, assistantName, botTone, botDialect, botGreeting, botNeverSay,
-        autoSendPhotoOnQuote, offerPhotosBeforeSending, requirePaymentProof, interactiveListsEnabled, catalogPhotoScope, businessCategory, contactName, contactPhone,
+        autoSendPhotoOnQuote, offerPhotosBeforeSending, requirePaymentProof, interactiveListsEnabled, attributeCheckEnabled, catalogPhotoScope, businessCategory, contactName, contactPhone,
         ownerReminderMinutes, ownerQuestionTimeoutHours, intentEscalationTimeoutHours,
         followUpTemplateName, followUpTemplateLanguage, followUpDelayHours,
         abandonedAfterHours, cartRecoveryTemplateName, cartRecoveryTemplateLanguage,
