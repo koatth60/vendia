@@ -1,5 +1,5 @@
 import { prisma } from "../db/client";
-import { faltaComprobanteDePago } from "../orders/paymentProof";
+import { esLaImagenDelComprobante, faltaComprobanteDePago } from "../orders/paymentProof";
 import { getSaleState, getServerSaleEvidence, type SaleStateItem, type SaleStateSnapshot } from "../orders/saleState";
 import { resolveShippingRateForCity } from "../catalog/shippingRates";
 import { runCatalogTool, type ToolContext } from "./tools";
@@ -349,6 +349,25 @@ export async function computeRequiredEffects(
   // el texto.
   const imagenSinAtender = await findUnattendedCustomerImage(conversationId);
   if (!imagenSinAtender) return [];
+
+  // UN COMPROBANTE NO ES UNA FOTO SIN IDENTIFICAR (2026-09-18).
+  //
+  // Este disparador existe para la foto de un producto que el bot no supo reconocer. Un comprobante de
+  // pago no es eso, y ademas ask_owner_about_photo ahora se NIEGA a escalarlo como producto (E81) -- con
+  // lo cual el efecto quedaba imposible de cumplir: reintento, reintento, el respaldo por codigo tambien
+  // fallaba, y la conversacion terminaba en "un asesor del equipo va a continuar contigo", con el bot
+  // apagado. Medido dos veces seguidas con el comprobante a la vista en el chat.
+  //
+  // El pago tiene su propio camino: el cierre le pregunta al dueno si le llego la plata. Ese es el que
+  // corresponde, y no pasa por identificar ningun producto.
+  const mensajeDeLaImagen = await prisma.message.findFirst({
+    where: { conversationId, role: "CUSTOMER", mediaType: "IMAGE", createdAt: { gte: imagenSinAtender } },
+    orderBy: { createdAt: "asc" },
+    select: { id: true, createdAt: true },
+  });
+  if (mensajeDeLaImagen && (await esLaImagenDelComprobante(conversationId, mensajeDeLaImagen.id, mensajeDeLaImagen.createdAt))) {
+    return [];
+  }
 
   // Hay evidencia de venta en curso ESCRITA POR EL SERVIDOR.
   const evidence = await getServerSaleEvidence(conversationId);
