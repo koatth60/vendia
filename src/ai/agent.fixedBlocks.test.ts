@@ -34,7 +34,11 @@ test("sustituye la marca de pago por los datos reales configurados", () => {
   assert.deepEqual(missingBlocks, []);
 });
 
-test("borra la marca de pago sin dejar rastro si get_payment_methods no corrio este turno", () => {
+// 2026-09-18: este caso dejo de significar "el modelo no llamo la herramienta". Desde el arreglo del
+// bloque de pago, los metodos del negocio los lee el servidor al empezar el turno, asi que `null` aca
+// significa lo unico que todavia puede significar: el negocio NO tiene formas de pago configuradas. Ver
+// src/ai/agent.bloqueDePago.test.ts, que prueba el otro lado desde generateReply.
+test("borra la marca de pago sin dejar rastro si el negocio no tiene formas de pago configuradas", () => {
   const { text, missingBlocks } = renderFixedBlocks(`Aca los datos: ${PAYMENT_BLOCK_MARKER}`, {
     currency: "COP",
     locale: "es-CO",

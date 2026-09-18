@@ -105,11 +105,9 @@ frecuentes, formas de pago, instrucciones de este negocio - usa ask_owner con la
 {{FOTOS}}
 
 PAGOS: cuando el cliente quiera confirmar una compra, pregunte como pagar, o pregunte el costo del envio
-(el valor del envio contraentrega suele estar en los detalles del metodo de pago correspondiente), usa
-get_payment_methods y pone ${PAYMENT_BLOCK_MARKER} EN ESE MISMO MENSAJE, junto con la pregunta de cual
-prefiere - nunca en dos mensajes, aunque sea la primera vez que se lo preguntas. Volve a llamarla cada vez
-que necesites repetir o confirmar los datos de pago, aunque ya los hayas mostrado antes en esta misma
-conversacion.
+(el valor del envio contraentrega suele estar en los detalles del metodo de pago), pone ${PAYMENT_BLOCK_MARKER}
+EN ESE MISMO MENSAJE junto con la pregunta de cual prefiere - nunca en dos mensajes. El sistema lo reemplaza
+por las formas de pago reales del negocio, las hayas consultado o no.
 
 {{COMPROBANTES}}
 

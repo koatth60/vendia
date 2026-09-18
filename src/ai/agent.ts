@@ -9,6 +9,7 @@ import { sendAlertToOwner } from "../whatsapp/outbound";
 import { recordOwnerMessage } from "../delivery/ownerLog";
 import { recordAgentIncident } from "./incidents";
 import { textMentionsConfiguredCategory, getProductById } from "../catalog/products";
+import { filtrarMetodosPorZona } from "../orders/paymentTiming";
 import {
   resolveProductScope,
   withSignedMedia,
@@ -1120,6 +1121,30 @@ export async function generateReply(
     currency: negocio.currency,
     locale: negocio.locale,
   });
+  // LOS METODOS DE PAGO DEL NEGOCIO, LEIDOS DE LA BASE Y NO DE UNA HERRAMIENTA (2026-09-18).
+  //
+  // Caso real, conversacion cmu73u9u8002mx22kwxptqie8, turnos 15:21, 15:23 y 15:27. Dennis pidio el
+  // numero de Nequi tres veces. El modelo puso la marca del bloque de pago las tres, sin llamar
+  // `get_payment_methods` en ninguna (`toolsCalled: []`), asi que `renderFixedBlocks` se quedaba sin
+  // dato, borraba la marca y el mensaje salia con la frase y un hueco: "Aqui te van los datos:" y
+  // nada. A la duena le toco entrar a mano y escribir el numero. El negocio LO TENIA configurado.
+  //
+  // Esto es exactamente lo que la Parte I del plan llama parche de clase D al reves: la garantia
+  // dependia de que el modelo se acordara de llamar una herramienta. Ahora no depende: los metodos
+  // activos del negocio -- ya filtrados por zona, con la MISMA funcion que usa la herramienta -- estan
+  // en la mano antes del primer token. La marca se llena igual, la llame o no.
+  //
+  // El resultado de la herramienta sigue ganando cuando corre: es el mismo dato leido en el mismo
+  // turno, y asi un cambio hecho a mitad de conversacion se refleja.
+  const metodosDePagoDelNegocio = await filtrarMetodosPorZona(
+    context.businessId,
+    await listActivePaymentMethods(context.businessId),
+    conversationId,
+  ).catch((error) => {
+    console.error("No se pudieron leer los metodos de pago del negocio:", error);
+    return [] as Awaited<ReturnType<typeof listActivePaymentMethods>>;
+  });
+
   // Herramientas nuevas solo visibles (y llamables) para un negocio con la bandera activa - el resto no
   // paga el costo de tokens de un tool que no puede usar. Fase 11: los ejemplos de canal de pago que
   // traen cuatro de sus descripciones son los metodos reales de ESTE negocio, no "Nequi" para todos.
@@ -1420,7 +1445,13 @@ ${CATALOG_BLOCK_MARKER}` : CATALOG_BLOCK_MARKER;
     const { text: renderedText, missingBlocks } = renderFixedBlocks(text, {
       currency: negocio.currency,
       locale: negocio.locale,
-      paymentMethods: paymentMethodsThisTurn,
+      // El resultado de la herramienta si corrio; si no, los metodos que el servidor ya tenia. Antes de
+      // hoy esto era solo lo primero, y un turno sin herramienta mandaba el mensaje con un hueco.
+      paymentMethods:
+        paymentMethodsThisTurn ??
+        (metodosDePagoDelNegocio.length > 0
+          ? metodosDePagoDelNegocio.map((m) => ({ label: m.label, details: m.details }))
+          : null),
       shippingRate: resolvedShippingRate,
       orderSummary: orderSummaryThisTurn,
       // Solo como camino de respaldo para los turnos SIN alcance resuelto (kind "none"): ahi nada
