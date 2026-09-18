@@ -206,6 +206,7 @@ model Business {
   idDocumentExemptZones     String[]                  @default([])
   products                  Product[]
   promotions                Promotion[]
+  bundles                   Bundle[]
   customers                 Customer[]
   paymentMethods            PaymentMethod[]
   shippingRates             ShippingRate[]
@@ -547,6 +548,10 @@ model OrderItem {
   // or deleted.
   variantId    String?
   variantLabel String?
+  // E38: la linea de un COMBO. productId queda null (un combo no es un producto del catalogo) y el
+  // nombre se guarda igual que siempre. Se denormaliza por el mismo motivo que productId: el pedido
+  // tiene que seguir diciendo que se vendio aunque despues borren el combo.
+  bundleId     String?
   quantity     Int
   unitPrice    Decimal @db.Decimal(12, 2)
   // El precio que se le cobro de verdad a este cliente por esta linea, cuando NO es el del catalogo -
@@ -796,6 +801,7 @@ model Product {
   media        ProductMedia[]
   variants     ProductVariant[]
   promotions   Promotion[]
+  bundleItems  BundleItem[]
   createdAt    DateTime         @default(now())
   updatedAt    DateTime         @updatedAt
 }
@@ -1566,5 +1572,55 @@ model Promotion {
   updatedAt DateTime @updatedAt
 
   @@index([businessId, active])
+  @@index([productId])
+}
+
+// E38 (2026-09-18). UN COMBO ES UN PRODUCTO COMPUESTO, NO PROSA EN UNA DESCRIPCION.
+//
+// Hasta hoy un combo se cargaba como un Product mas, con su contenido escrito en `description`
+// ("incluye pulsos en Metalico Plateado, Cuero Marron, Silicona Azul..."). Eso ya rompio la busqueda por
+// color en produccion el 2026-09-13: esa prosa hacia que UN producto coincidiera con casi cualquier
+// consulta de color (ver el comentario en src/catalog/products.ts, cerca de canonicalColors).
+//
+// El arreglo de entonces fue dejar de escanear la descripcion. El arreglo de verdad es este: el
+// contenido del combo deja de ser texto y pasa a ser filas que apuntan a productos reales. Con eso, el
+// stock de un combo se CALCULA (lo que alcance el componente mas escaso) en vez de ser un numero que
+// alguien mantiene a mano, y la busqueda por color no tiene nada que malinterpretar.
+model Bundle {
+  id         String   @id @default(cuid())
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  businessId String
+
+  name        String
+  // Para que sirve el combo, con las palabras de la duena. NO es donde vive su contenido: eso son las
+  // filas de BundleItem. Esa diferencia es la etapa entera.
+  description String?
+  // Su propio precio, que es el motivo por el que un combo existe: no es la suma de sus partes.
+  price       Decimal  @db.Decimal(12, 2)
+  currency    String
+  active      Boolean  @default(true)
+
+  items     BundleItem[]
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  @@index([businessId, active])
+}
+
+model BundleItem {
+  id       String @id @default(cuid())
+  bundle   Bundle @relation(fields: [bundleId], references: [id], onDelete: Cascade)
+  bundleId String
+
+  // Productos REALES del catalogo. Si el producto se borra, la fila se va con el: un combo que promete
+  // algo que ya no existe es peor que un combo que desaparece.
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  productId String
+  // La variante puntual, cuando el combo trae una talla o color concreto.
+  variantId String?
+
+  quantity Int @default(1)
+
+  @@index([bundleId])
   @@index([productId])
 }

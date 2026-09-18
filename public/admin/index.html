@@ -117,6 +117,7 @@
       <div class="subnav" data-section-group="catalogo">
         <button class="tab-btn" data-tab="catalog" onclick="switchTab('catalog')">Productos</button>
         <button class="tab-btn" data-tab="promotions" onclick="switchTab('promotions')">Promociones</button>
+        <button class="tab-btn" data-tab="bundles" onclick="switchTab('bundles')">Combos</button>
       </div>
       <div class="subnav" data-section-group="bot">
         <button class="tab-btn" data-tab="business" onclick="switchTab('business')">Personalidad</button>
@@ -577,6 +578,51 @@
         </div>
       </div>
       <div id="health-container"></div>
+    </div>
+
+    <!-- E38 (2026-09-18). El combo, con su contenido en filas y no en prosa.
+         Antes un combo se cargaba como un producto mas, con lo que traía adentro escrito en la
+         descripción. Eso rompió la búsqueda por color en producción. Acá el contenido son productos
+         reales, así que "quedan 3" lo calcula el sistema: lo que alcance el componente más escaso. -->
+    <div class="tab-panel" data-tab-panel="bundles">
+      <div class="panel-header">
+        <div>
+          <div class="panel-title">Combos</div>
+          <div class="panel-subtitle">Varios productos vendidos juntos, con su propio precio. Cuántos quedan lo calcula el sistema con el stock de cada producto: no hay un número que mantener a mano.</div>
+        </div>
+      </div>
+
+      <div class="section-title">Nuevo combo</div>
+      <div class="card" id="new-bundle-card">
+        <div class="grid-2">
+          <div>
+            <label>Nombre</label>
+            <input id="bundle-name" placeholder="Ej: Combo Pareja" />
+          </div>
+          <div>
+            <label>Precio del combo</label>
+            <input id="bundle-price" type="number" min="0" step="0.01" placeholder="Ej: 50000" />
+          </div>
+        </div>
+        <div>
+          <label>Para qué sirve (opcional)</label>
+          <input id="bundle-description" placeholder="Ej: El regalo perfecto para aniversario" />
+        </div>
+        <div class="section-title">Qué trae adentro<span class="section-count">productos reales del catálogo</span></div>
+        <div id="bundle-items" style="display:flex; flex-direction:column; gap:8px;"></div>
+        <div class="actions-row">
+          <button class="btn-secondary" type="button" onclick="addBundleItemRow()">+ Agregar producto al combo</button>
+        </div>
+        <div class="actions-row">
+          <button class="btn-secondary" id="bundle-cancel-btn" style="display:none;" onclick="cancelEditBundle()">Cancelar</button>
+          <button class="btn-primary" id="bundle-submit-btn" onclick="saveBundle()">+ Agregar combo</button>
+        </div>
+      </div>
+
+      <div class="section-title">Combos cargados</div>
+      <div class="card">
+        <div id="bundles-list" style="display:flex; flex-direction:column; gap:8px;">Cargando…</div>
+      </div>
     </div>
 
     <!-- E37 (2026-09-18). Las promociones del negocio, como dato.

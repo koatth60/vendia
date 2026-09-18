@@ -63,7 +63,7 @@ window.addEventListener('resize', () => {
 const PANEL_SECTION = {
   inicio: 'inicio',
   conversations: 'crm', customers: 'crm', orders: 'crm',
-  catalog: 'catalogo', promotions: 'catalogo',
+  catalog: 'catalogo', promotions: 'catalogo', bundles: 'catalogo',
   business: 'bot', rules: 'bot', faq: 'bot', payments: 'bot', shipping: 'bot', whatsapp: 'bot', health: 'bot',
   negocio: 'negocio', team: 'negocio', 'ai-usage': 'negocio', analytics: 'negocio', configuracion: 'negocio',
 };
@@ -298,6 +298,7 @@ function switchTab(name) {
   if (name === 'health') cargarSeccion('health', loadHealth);
   if (name === 'shipping') cargarSeccion('shipping', loadShipping);
   if (name === 'promotions') cargarSeccion('promotions', loadPromotions);
+  if (name === 'bundles') cargarSeccion('bundles', loadBundles);
   if (name === 'whatsapp') cargarSeccion('whatsapp', loadWhatsappConnection);
   if (name === 'configuracion') pintarEstadoPwa();
   // Sin boton "Actualizar": la vista se refresca sola mientras está abierta (ver AUTO_REFRESH). Se
@@ -6376,6 +6377,173 @@ boot();
 // get_shipping_rates y get_shipping_rate_for_city, pero no había ninguna pantalla para cargarlas
 // (ver P8 en ONIX-CRM-REORG-PLAN.md) - hasta ahora solo existía scripts/seed-magimp-shipping.ts.
 // ==============================================================================================
+
+// ===========================================================================================
+// COMBOS (E38, 2026-09-18)
+// ===========================================================================================
+//
+// El contenido del combo son PRODUCTOS, no una frase. Por eso el formulario no tiene un campo de texto
+// para "qué trae": tiene filas que apuntan al catálogo. Y por eso no hay campo de stock: cuántos combos
+// quedan lo calcula el servidor con el stock de cada componente.
+let bundlesCache = [];
+let bundleProductsCache = [];
+let editingBundleId = null;
+
+function bundleItemRowHtml(item) {
+  const opciones = bundleProductsCache.length === 0
+    ? '<option value="">Primero carga un producto</option>'
+    : bundleProductsCache.map((prod) =>
+        '<option value="' + escapeHtml(prod.id) + '"' + (item && item.productId === prod.id ? ' selected' : '') + '>' + escapeHtml(prod.name) + '</option>'
+      ).join('');
+  return [
+    '<div class="bundle-item-row" style="display:flex; gap:8px; align-items:center;">',
+    '<select class="bundle-item-product" style="flex:1 1 auto;">' + opciones + '</select>',
+    '<input class="bundle-item-quantity" type="number" min="1" step="1" value="' + (item ? item.quantity : 1) + '" style="flex:0 0 90px;" />',
+    '<button class="btn-secondary" type="button" onclick="this.closest(\'.bundle-item-row\').remove()">Quitar</button>',
+    '</div>',
+  ].join('');
+}
+
+function addBundleItemRow(item) {
+  document.getElementById('bundle-items').insertAdjacentHTML('beforeend', bundleItemRowHtml(item));
+}
+
+function readBundleItems() {
+  return [...document.querySelectorAll('#bundle-items .bundle-item-row')]
+    .map((row) => ({
+      productId: row.querySelector('.bundle-item-product').value,
+      quantity: Number(row.querySelector('.bundle-item-quantity').value || 1),
+    }))
+    .filter((item) => item.productId);
+}
+
+async function loadBundles() {
+  const container = document.getElementById('bundles-list');
+  try {
+    const [combos, productos] = await Promise.all([
+      apiFetch('/admin/api/bundles').then((r) => r.json()),
+      apiFetch('/admin/api/products/for-order-picker').then((r) => r.json()).catch(() => ({ items: [] })),
+    ]);
+    bundlesCache = combos;
+    bundleProductsCache = Array.isArray(productos) ? productos : (productos.items || []);
+    if (document.querySelectorAll('#bundle-items .bundle-item-row').length === 0) addBundleItemRow();
+
+    container.innerHTML = combos.length === 0
+      ? '<div style="font-size:13px; color:var(--onix-muted);">Todavía no cargaste ningún combo.</div>'
+      : combos.map((combo) => [
+          '<div style="display:flex; flex-wrap:wrap; align-items:flex-start; justify-content:space-between; gap:10px; padding:10px 12px; border:1px solid var(--onix-border); border-radius:var(--onix-radius-card);">',
+          '<div style="flex:1 1 220px; min-width:0;">',
+          '<strong style="font-size:13.5px;">' + escapeHtml(combo.name) + '</strong>',
+          '<span class="onix-num" style="margin-left:6px;">' + escapeHtml(formatMoney(combo.price, combo.currency)) + '</span>',
+          '<div style="font-size:12px; color:var(--onix-muted); margin-top:2px;">' + escapeHtml(combo.contenido.map((c) => c.quantity + 'x ' + c.productName).join(' · ')) + '</div>',
+          '<div style="font-size:12px; color:' + (combo.disponibles > 0 ? 'var(--onix-accent)' : 'var(--onix-danger)') + '; margin-top:2px;">' + (combo.disponibles > 0 ? 'Alcanza para ' + combo.disponibles : 'Sin stock para armarlo') + (combo.active ? '' : ' · apagado') + '</div>',
+          '</div>',
+          '<div style="display:flex; flex-wrap:wrap; gap:6px; flex-shrink:0;">',
+          '<button class="btn-secondary" onclick="toggleBundleActive(\'' + combo.id + '\')">' + (combo.active ? 'Apagar' : 'Encender') + '</button>',
+          '<button class="btn-secondary" onclick="editBundle(\'' + combo.id + '\')">Editar</button>',
+          '<button class="btn-danger" onclick="deleteBundle(\'' + combo.id + '\')">Eliminar</button>',
+          '</div></div>',
+        ].join('')).join('');
+  } catch (err) {
+    container.innerHTML = '<div style="font-size:13px; color:var(--onix-danger);">No se pudieron cargar: ' + escapeHtml(err.message) + '</div>';
+  }
+}
+
+function bundleFormBody(active) {
+  return {
+    name: document.getElementById('bundle-name').value.trim(),
+    description: document.getElementById('bundle-description').value.trim() || null,
+    price: Number(document.getElementById('bundle-price').value),
+    items: readBundleItems(),
+    active: active,
+  };
+}
+
+async function saveBundle() {
+  const editando = editingBundleId;
+  const anterior = bundlesCache.find((b) => b.id === editando);
+  try {
+    const res = await apiFetch(editando ? '/admin/api/bundles/' + editando : '/admin/api/bundles', {
+      method: editando ? 'PUT' : 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(bundleFormBody(anterior ? anterior.active : true)),
+    });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({}));
+      setStatus(error.error || 'No se pudo guardar el combo', true);
+      return;
+    }
+    cancelEditBundle();
+    await loadBundles();
+    setStatus(editando ? 'Combo actualizado' : 'Combo creado');
+  } catch (err) {
+    setStatus(err.message, true);
+  }
+}
+
+function editBundle(id) {
+  const combo = bundlesCache.find((b) => b.id === id);
+  if (!combo) return;
+  editingBundleId = id;
+  document.getElementById('bundle-name').value = combo.name;
+  document.getElementById('bundle-description').value = combo.description || '';
+  document.getElementById('bundle-price').value = combo.price;
+  document.getElementById('bundle-items').innerHTML = '';
+  combo.contenido.forEach((item) => addBundleItemRow(item));
+  document.getElementById('bundle-submit-btn').textContent = 'Guardar cambios';
+  document.getElementById('bundle-cancel-btn').style.display = 'inline-block';
+  document.getElementById('bundle-name').scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+function cancelEditBundle() {
+  editingBundleId = null;
+  ['bundle-name', 'bundle-description', 'bundle-price'].forEach((id) => { document.getElementById(id).value = ''; });
+  document.getElementById('bundle-items').innerHTML = '';
+  addBundleItemRow();
+  document.getElementById('bundle-submit-btn').textContent = '+ Agregar combo';
+  document.getElementById('bundle-cancel-btn').style.display = 'none';
+}
+
+async function toggleBundleActive(id) {
+  const combo = bundlesCache.find((b) => b.id === id);
+  if (!combo) return;
+  try {
+    const res = await apiFetch('/admin/api/bundles/' + id, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: combo.name,
+        description: combo.description,
+        price: combo.price,
+        items: combo.contenido.map((c) => ({ productId: c.productId, variantId: c.variantId, quantity: c.quantity })),
+        active: !combo.active,
+      }),
+    });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({}));
+      setStatus(error.error || 'No se pudo cambiar', true);
+      return;
+    }
+    await loadBundles();
+  } catch (err) {
+    setStatus(err.message, true);
+  }
+}
+
+async function deleteBundle(id) {
+  if (!confirm('¿Eliminar este combo? Los pedidos que ya se cerraron con él no cambian.')) return;
+  try {
+    const res = await apiFetch('/admin/api/bundles/' + id, { method: 'DELETE' });
+    if (!res.ok && res.status !== 204) {
+      setStatus('No se pudo eliminar', true);
+      return;
+    }
+    await loadBundles();
+    setStatus('Combo eliminado');
+  } catch (err) {
+    setStatus(err.message, true);
+  }
+}
 
 // ===========================================================================================
 // PROMOCIONES (E37, 2026-09-18)

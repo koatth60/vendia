@@ -14,10 +14,15 @@ import { transicionarPedido, TransicionNoPermitida, type Actor, type TxCliente }
 import { Money, sumar } from "../config/dinero";
 import { precioDeVenta, precioDeVentaConPromocion } from "../catalog/precioDeVenta";
 import { promocionesVigentes } from "../catalog/promotions";
+import { obtenerCombo, buscarComboPorNombre, listarCombos } from "../catalog/bundles";
 
 export interface ResolvedOrderItem {
+  // E38: en la linea de un COMBO esto va vacio y `bundleId` trae el combo. Un combo no es un producto
+  // del catalogo: no tiene stock propio ni precio por variante, y su contenido son otras filas.
   productId: string;
   productName: string;
+  /** E38: el combo que se vendio en esta linea, cuando la linea es un combo. */
+  bundleId?: string | null;
   variantId?: string | null;
   variantLabel?: string | null;
   quantity: number;
@@ -43,6 +48,9 @@ export interface OrderItemInput {
   // Igual que productId pero para la variante (color/talla) - se valida que pertenezca a ese producto y
   // este activa. Si se da, reemplaza el matching por variantLabel de abajo.
   variantId?: string;
+  // E38: el id real de un combo (tabla Bundle). Cuando viene, la linea es el combo entero: su precio es
+  // el del combo, no la suma de sus partes, y el stock que se mueve es el de cada componente.
+  bundleId?: string;
   quantity: number;
   // Free text describing which color/size the customer picked (e.g. "rojo", "rojo talla M") - solo se usa
   // cuando no vino variantId. Matched by the same color-synonym canonicalization used for catalog search,
@@ -135,6 +143,42 @@ export async function resolveOrderItems(
   for (const item of items) {
     const quantity = Math.max(1, Math.floor(Number(item.quantity) || 1));
     const rawName = String(item.productName ?? "").trim();
+
+    // E38: LA LINEA DE UN COMBO.
+    //
+    // Se resuelve ANTES que el producto y por id o por nombre exacto: un combo mal identificado no es un
+    // producto de mas en una lista, es una venta con el precio de otro combo. Si no resuelve, cae a
+    // `unresolved` igual que un producto que no existe -- nunca a "algo parecido".
+    if (item.bundleId || (!item.productId && rawName)) {
+      const combo = item.bundleId
+        ? await obtenerCombo(businessId, item.bundleId)
+        : await buscarComboPorNombre(businessId, rawName);
+      if (item.bundleId && (!combo || !combo.active)) {
+        unresolved.push(rawName || item.bundleId);
+        continue;
+      }
+      if (combo && combo.active) {
+        const clave = `bundle:${combo.id}`;
+        const yaEsta = byKey.get(clave);
+        if (yaEsta) {
+          yaEsta.quantity += quantity;
+        } else {
+          byKey.set(clave, {
+            productId: "",
+            bundleId: combo.id,
+            productName: combo.name,
+            variantId: null,
+            variantLabel: null,
+            quantity,
+            // El precio del combo es SU precio, no la suma de sus partes: es el motivo por el que un
+            // combo existe. Las promociones no se le aplican encima -- un combo ya es el descuento.
+            unitPrice: combo.price.comoNumeroParaMostrar(),
+            currency: combo.currency,
+          });
+        }
+        continue;
+      }
+    }
 
     let product: Awaited<ReturnType<typeof getProductById>> | null = null;
     if (item.productId) {
@@ -272,7 +316,9 @@ export async function createOrder(params: {
         currency,
         items: {
           create: items.map((item) => ({
-            productId: item.productId,
+            // E38: la linea de un combo no tiene producto. La columna ya era nullable.
+            productId: item.bundleId ? null : item.productId,
+            bundleId: item.bundleId ?? null,
             productName: item.productName,
             variantId: item.variantId || null,
             variantLabel: item.variantLabel || null,
@@ -303,7 +349,32 @@ export async function createOrder(params: {
     // negocios que no llevan inventario: hacerlo fallar dejaria al bot sin poder cerrar NINGUNA venta
     // en esos negocios. Rechazar es una politica por negocio - o sea una bandera - y esta etapa dice
     // "Bandera: no". Queda propuesto aparte.
+    // E38: vender un combo mueve el stock de CADA componente, multiplicado por cuantos combos se
+    // vendieron. Sin esto, un combo seria la unica forma de sacar mercaderia del deposito sin que el
+    // inventario se entere -- y el combo existe justamente para vender varias cosas juntas.
+    const combosVendidos = items.filter((item) => item.bundleId);
+    if (combosVendidos.length > 0) {
+      const combos = await listarCombos(businessId, { soloActivos: false });
+      for (const linea of combosVendidos) {
+        const combo = combos.find((c) => c.id === linea.bundleId);
+        if (!combo) continue;
+        for (const componente of combo.contenido) {
+          const cuantos = componente.quantity * linea.quantity;
+          if (componente.variantId) {
+            await tx.productVariant.updateMany({
+              where: { id: componente.variantId },
+              data: { stock: { decrement: cuantos } },
+            });
+            continue;
+          }
+          await tx.product.updateMany({ where: { id: componente.productId }, data: { stock: { decrement: cuantos } } });
+        }
+      }
+    }
+
     for (const item of items) {
+      // La linea de un combo ya movio el stock de sus componentes arriba.
+      if (item.bundleId) continue;
       // A variant sale decrements that variant's own stock, not the parent product's (which a
       // multi-variant product doesn't meaningfully track - see ProductVariant in schema.prisma).
       if (item.variantId) {
@@ -529,9 +600,34 @@ export async function markOrderShipped(
 async function devolverStockDelPedido(tx: TxCliente, orderId: string): Promise<void> {
   const items = await tx.orderItem.findMany({
     where: { orderId },
-    select: { productId: true, variantId: true, quantity: true },
+    select: { productId: true, variantId: true, quantity: true, bundleId: true },
   });
+
+  // E38: la linea de un combo devuelve el stock de CADA componente, igual que lo descontio al venderse.
+  // Se lee el contenido ACTUAL del combo, y eso es lo correcto aunque el combo haya cambiado desde la
+  // venta: lo que se devuelve al deposito es lo que hoy significa ese combo. Un combo borrado no
+  // devuelve nada -- no queda de donde saber que tenia adentro, e inventarlo seria peor.
+  const lineasDeCombo = items.filter((item) => item.bundleId);
+  if (lineasDeCombo.length > 0) {
+    const contenidos = await tx.bundleItem.findMany({
+      where: { bundleId: { in: [...new Set(lineasDeCombo.map((l) => l.bundleId as string))] } },
+      select: { bundleId: true, productId: true, variantId: true, quantity: true },
+    });
+    for (const linea of lineasDeCombo) {
+      for (const componente of contenidos.filter((c) => c.bundleId === linea.bundleId)) {
+        const cuantos = componente.quantity * linea.quantity;
+        if (componente.variantId) {
+          await tx.productVariant.updateMany({ where: { id: componente.variantId }, data: { stock: { increment: cuantos } } });
+          continue;
+        }
+        await tx.product.updateMany({ where: { id: componente.productId }, data: { stock: { increment: cuantos } } });
+      }
+    }
+  }
+
   for (const item of items) {
+    // La linea de un combo ya devolvio el stock de sus componentes arriba.
+    if (item.bundleId) continue;
     if (item.variantId) {
       await tx.productVariant.updateMany({
         where: { id: item.variantId },

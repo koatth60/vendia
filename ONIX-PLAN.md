@@ -2030,7 +2030,7 @@ es texto del dueño, no del prompt base.
 
 ---
 
-### E38 · Un combo es un producto, no prosa en una descripción
+### E38 · Un combo es un producto, no prosa en una descripción — **CERRADA el 2026-09-18**, sin desplegar
 
 **Quita:** al catálogo, esconder un combo dentro de un campo de texto.
 **Porque:** hoy un combo es prosa en `description`, y el propio código documenta que eso ya rompió la
@@ -2039,6 +2039,31 @@ búsqueda por color.
 **Se prueba:** la búsqueda por color deja de devolver el combo por las palabras de su descripción.
 **Tamaño:** M. **Depende de:** `E37`. **Bandera:** no.
 **Vuelta atrás:** revertir.
+
+**Estado (2026-09-18): CERRADA, sin desplegar.**
+
+- **`Bundle` + `BundleItem`**: el contenido del combo son filas que apuntan a productos reales, no
+  texto. La `description` queda para el marketing, que es lo único que siempre fue.
+- **La decisión que se le quita a alguien: el stock del combo.** Ya no es un número que la dueña
+  mantiene a mano —y que miente apenas se vende un componente suelto—, sino lo que alcance el
+  componente más escaso. Un combo sin componentes da 0, no infinito.
+- **Se puede vender**, que es lo que hace que la tabla sirva: `resolveOrderItems` acepta `bundleId` (y
+  el nombre exacto normalizado), la línea se cobra al precio del combo —no a la suma de sus partes— y
+  `OrderItem.bundleId` deja dicho qué se vendió. Vender mueve el stock de **cada** componente y
+  cancelar lo devuelve, dentro de la misma transacción que ya tenía `E32`.
+- **Un combo mal identificado sería una venta con el precio de otro combo**, así que la búsqueda por
+  nombre es exacta (normalizada) y nada más. Lo que no coincide cae en `unresolved`, igual que un
+  producto que no existe.
+- **Sin herramienta nueva ni prompt nuevo**: los combos entran como dato del turno, igual que las
+  promociones de `E37`. Un negocio sin combos no paga un solo token.
+- **Panel en la misma etapa**: Catálogo > Combos, con filas de producto + cantidad en vez de un campo
+  de texto, y sin campo de stock — porque el stock del combo no se escribe, se calcula. Verificado
+  contra el panel real: combo creado desde la pantalla, "Alcanza para 4" con 4 y 10 unidades de sus dos
+  componentes.
+
+**La prueba que pide la ficha está**, y es la que documenta el defecto de producción del 2026-09-13:
+`find_products_by_attributes` con color "plateado" devuelve el producto plateado y **no** el combo,
+aunque la descripción del combo diga "metálico plateado".
 
 ---
 

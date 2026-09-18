@@ -10,6 +10,7 @@ import { recordOwnerMessage } from "../delivery/ownerLog";
 import { recordAgentIncident } from "./incidents";
 import { textMentionsConfiguredCategory, getProductById } from "../catalog/products";
 import { promocionesParaElModelo } from "../catalog/promotions";
+import { combosParaElModelo } from "../catalog/bundles";
 import {
   resolveProductScope,
   withSignedMedia,
@@ -1133,6 +1134,13 @@ export async function generateReply(
     timezone: negocio.timezone,
   });
 
+  // E38 (2026-09-18). LOS COMBOS, con su contenido en filas y su disponibilidad calculada.
+  //
+  // Antes un combo era un Product con el contenido escrito en la descripcion, asi que ni el stock ni lo
+  // que trae adentro eran datos: eran prosa. Ahora "quedan 3" sale de cuantos alcanza el componente mas
+  // escaso, no de un numero que alguien mantiene a mano. Un negocio sin combos no paga un solo token.
+  const combosDelNegocio = await combosParaElModelo(context.businessId, negocio.locale);
+
   // Herramientas nuevas solo visibles (y llamables) para un negocio con la bandera activa - el resto no
   // paga el costo de tokens de un tool que no puede usar. Fase 11: los ejemplos de canal de pago que
   // traen cuatro de sus descripciones son los metodos reales de ESTE negocio, no "Nequi" para todos.
@@ -1233,6 +1241,21 @@ export async function generateReply(
 
 ` +
               JSON.stringify(promocionesDelNegocio),
+          },
+        ]
+      : []),
+    // LOS COMBOS DEL NEGOCIO. `disponibles` es cuantos se pueden armar hoy con el stock que hay: en 0
+    // el combo existe pero no se puede prometer.
+    ...(combosDelNegocio.length > 0
+      ? [
+          {
+            role: "system" as const,
+            content:
+              `COMBOS DE ESTE NEGOCIO, leidos de la base. El precio es el del combo, no la suma de sus ` +
+              `partes, y "disponibles" es cuantos se pueden armar hoy con el stock que hay:
+
+` +
+              JSON.stringify(combosDelNegocio),
           },
         ]
       : []),
