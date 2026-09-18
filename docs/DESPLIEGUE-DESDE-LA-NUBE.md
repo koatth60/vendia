@@ -63,3 +63,29 @@ intacto porque es otra llave y otra linea.
 | `DEPLOY_HOST` | `64.227.8.255`, la IP publica del droplet. No la de Tailscale, que el runner no ve. |
 | `DEPLOY_SSH_KEY` | la clave privada ed25519 exclusiva de CI |
 | `DEPLOY_KNOWN_HOSTS` | las claves de host del droplet, para que el runner no acepte cualquier servidor |
+
+## Que etapas del plan quedan bloqueadas por esto (verificado el 2026-09-18)
+
+Se midio desde una sesion en la nube, no se supuso: el puerto 22 del droplet **no responde**, `vendia`
+no resuelve (es una IP de Tailscale, existe solo en la red del dueno) y no hay ninguna variable de
+produccion en el entorno de la sesion. O sea que desde la nube se puede desplegar y mirar `estado` y
+`logs`, pero **no consultar la base de produccion**.
+
+Cinco etapas del plan dependen justamente de eso y no se pueden cerrar sin la maquina del dueno:
+
+| etapa | que necesita de produccion |
+| --- | --- |
+| `E06` | correr `scripts/e06-clasificar-duplicadas.ts` contra la base y leer `~/.pm2/pm2.log` entero |
+| `E11` | 48 h de `shadowFindings` reales antes de encender la bandera |
+| `E17` | 48 h de errores 131053 para comparar contra la linea base |
+| `E26` | 48 h de log de firma invalida, y despues tocar `.env` |
+| `E64` | 48 h de trafico y la decision de encender el validador que puede BLOQUEAR un mensaje |
+
+**Propuesta, sin implementar:** agregarle a `ci-deploy.sh` una accion de **solo lectura** (por ejemplo
+`diagnostico`) que corra un script del repositorio contra la base y devuelva su salida por el log del
+workflow. Destrabaria `E06` sin darle a CI ninguna capacidad de escritura. No se hizo porque amplia el
+alcance de CI sobre produccion y esa decision es del dueno.
+
+**Regla que no se negocia, anotada el 2026-09-18 a pedido del dueno:** ningun agente borra nada en
+produccion. Ni catalogos, ni pedidos, ni clientes, ni conversaciones. Si algo pareciera necesitar un
+borrado, se anota y se espera.

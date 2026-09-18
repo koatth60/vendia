@@ -1146,7 +1146,7 @@ salida que se envenena sin avisar. El bloque termina con "turnos perdidos = 0, y
 
 ---
 
-### E13b · Una pregunta que ya no hace falta no se hace, y una respuesta vieja no se despacha
+### E13b · Una pregunta que ya no hace falta no se hace, y una respuesta vieja no se despacha — **CERRADA el 2026-09-18** (commit `5fd3bf6`), sin desplegar
 
 **Quita:** al sistema, molestar a la dueña por algo ya resuelto, y tirarle al cliente una respuesta que
 perdió su contexto.
@@ -1248,7 +1248,7 @@ minutos después de que le pasara a este cliente.
 
 ---
 
-### E14 · Un job que revienta no deja sin atender a los demás negocios
+### E14 · Un job que revienta no deja sin atender a los demás negocios — **CERRADA el 2026-09-18** (commits `e3063f2`, `0c9940d`), sin desplegar
 
 **Quita:** al operador, tener que descubrir a mano que un job dejó de correr.
 **Porque:** `escalationReminder`, `saleConfirmationChaser`, `tokenExpiry` y `conversationHealth`
@@ -1261,7 +1261,7 @@ atender a todos los negocios restantes. Son justo los cuatro que manejan plata y
 
 ---
 
-### E15 · Reservar, enviar, confirmar
+### E15 · Reservar, enviar, confirmar — **CERRADA el 2026-09-18** (commit `0c9940d`), sin desplegar
 
 **Quita:** al sistema, poder marcar como avisado algo que no se avisó.
 **Porque:** `tokenExpiry.ts` marca "ya avisé" aunque el aviso haya fallado, y es la compuerta de un
@@ -1591,7 +1591,7 @@ existente deje de bloquear a esa persona para siempre.
 
 ---
 
-### E30 · Un secreto corrupto no tumba la plataforma
+### E30 · Un secreto corrupto no tumba la plataforma — **CERRADA el 2026-09-18** (commit `347e223`), sin desplegar
 
 **Quita:** al sistema, que una fila mala deje sin servicio a todos los inquilinos.
 **Porque:** `decryptSecret` en `src/db/client.ts` no está dentro de `try/catch`. Una fila con texto
@@ -1826,7 +1826,7 @@ decidir qué pasa cuando la fila que cambió no está en la página cargada — 
 
 ---
 
-### E46 · `PUT /api/business` admite payloads parciales
+### E46 · `PUT /api/business` admite payloads parciales — **CERRADA el 2026-09-18** (commit `eb3b3cf`), sin desplegar
 
 **Quita:** al frontend, tener que mandar el objeto entero para cambiar un campo.
 **Porque:** varios campos usan `x || null` y `Boolean(x)`: con un payload parcial, omitir un campo lo
@@ -2374,25 +2374,35 @@ hasta que la etapa que lo arregla lo ponga en verde de verdad.
 
 | Tema | Etapas |
 |---|---|
-| **Lo que más duele hoy** | `E01`–`E05c`, `E09` y `E09b` desplegadas; sigue `E56`, después `E06` |
-| **El bot dice cosas falsas** | `E09`, `E09b`, `E10`, `E11`, `E12`, `E13` |
+| **Lo que más duele hoy** | `E01`–`E05c`, `E09` y `E09b` desplegadas; `E56` y `E13b` cerradas; sigue `E06`, **que necesita la base de producción** |
+| **El bot dice cosas falsas** | `E13b` hecha; quedan `E10`, `E11`, `E12`, `E13` (las cuatro tocan el prompt: **son pagas**) |
 | **Respuestas duplicadas** | `E06`, `E07`, `E08` |
 | **Fechas y tiempos de entrega** | `E01` y `E05` hechas; queda `E35` |
-| **Nada se pierde** | `E14`, `E15`, `E16`, `E20`, `E21`, `E22` |
+| **Nada se pierde** | `E14`, `E15` y `E16` hechas; quedan `E20`, `E21`, `E22` |
 | **Envíos que fallan** | `E17`, `E18`, `E19` |
-| **Seguridad** | `E26`, `E27`, `E28`, `E29`, `E30` |
+| **Seguridad** | `E30` hecha; quedan `E26` (**necesita producción**), `E27`, `E28`, `E29` |
 | **Pedidos** | `E31`, `E32`, `E33`, `E34`, `E35` |
 | **Catálogo** | `E36`, `E37`, `E38`, `E39`, `E40`, `E61` |
-| **CRM** | `E02` hecha; quedan `E41`, `E42`, `E43`, `E44`, `E45`, `E46`, `E68` |
+| **CRM** | `E02` y `E46` hechas; quedan `E41`, `E42`–`E44` (**`D1`**), `E45` y `E68` (**`D7`**) |
 | **Panel (rediseño)** | `E48` y `E49` hechas; quedan `E47`, `E50`, `E51`, `E52`, `E53`, `E54`, `E55` |
 | **FAQ que aprende** | `E09b` (que la lea), `E56`, `E57`, `E58`, `E59` |
 | **Observabilidad** | `E24`, `E25`, `E62`, `E63`, `E65` |
 | **Vender más** | `E68`, `E69`, `E70`, `E71`, `E72`, `E73` |
 
-**Lo siguiente: `E56`.** Es de una tarde, y desde el 2026-09-17 se sabe que no es solo aprendizaje: la
-fila que se borra al contestar es la prueba con la que el motor de efectos sabe que una imagen ya fue
-atendida, así que borrarla hace que el bot **repita mensajes** (caso Maira, en su ficha). Después `E06`,
-el diagnóstico de `RESPUESTA_DUPLICADA` — y `E56` puede resultar ser parte de su causa.
+**Este párrafo quedó viejo y se reemplaza (2026-09-18):** decía que lo siguiente era `E56`, que se
+cerró el 2026-09-17, y después `E06`. `E06` **no se puede hacer desde una sesión en la nube**: su
+trabajo es correr `scripts/e06-clasificar-duplicadas.ts` contra la base de PRODUCCIÓN y leer
+`~/.pm2/pm2.log`. Desde la nube no hay acceso al droplet (el puerto 22 no responde, `vendia` es una IP
+de Tailscale que sólo existe en la red del dueño) y el workflow `deploy.yml` sólo expone
+`estado`/`logs`/`rollback`, no consultas a la base.
+
+**Lo siguiente que SÍ se puede hacer sin el dueño**, en este orden: `E27` (sólo la mitad del IDOR, que
+no depende de `D5`), `E28`, `E41`, `E29`, `E31` y `E18`. Las dos últimas son las que más destraban:
+`E31` abre `E32`, `E33` y `E35`; `E18` abre `E19`, `E69` y `E75`.
+
+**Lo que está parado esperando al dueño**, y conviene decidir junto: `D1` (bloquea `E42`, `E43` y `E44`
+— el plan dice que es "la que más tiempo lleva parada"), `D7` (bloquea `E45` y `E68`), `D5` (media
+`E27`), y `E47`, que bloquea las cinco fases de rediseño que quedan.
 
 **La más barata con más retorno:** `E56`. Una tarde, y deja de destruirse el dato que alimenta el
 único diferenciador que ningún competidor tiene.
