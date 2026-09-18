@@ -815,6 +815,49 @@ ${identificacion}` : analisis;
   }
 }
 
+/**
+ * TODO EL LOTE, NO EL PRIMERO DE CADA COSA (E16, 2026-09-18).
+ *
+ * Meta manda un webhook con `entry[]`, cada uno con `changes[]`, cada uno con `messages[]` y
+ * `statuses[]`. Hasta hoy se leia `entry[0].changes[0]` y de ahi `messages[0]` y `statuses[0]`: todo lo
+ * demas del lote se descartaba en silencio, sin una linea de log. Dos clientes que escriben en el mismo
+ * instante, o un cliente que manda tres mensajes seguidos y Meta los agrupa, y el bot contesta uno solo.
+ * Los otros no existieron nunca para nadie.
+ *
+ * Y los estados dejan de depender de que el lote NO traiga mensajes: `statuses[0]` solo se miraba cuando
+ * no habia ningun mensaje, asi que un acuse que viajara junto a un mensaje se perdia igual.
+ *
+ * Funcion pura, sin base y sin red: recibe el cuerpo crudo del webhook y devuelve lo que hay que
+ * procesar, en orden. Asi el recorrido del lote se puede probar con un cuerpo real escrito a mano.
+ */
+export function collectWebhookBatch(body: unknown): {
+  statuses: { value: any; status: any; incomingPhoneNumberId?: string }[];
+  messages: { value: any; message: any; incomingPhoneNumberId: string }[];
+} {
+  const statuses: { value: any; status: any; incomingPhoneNumberId?: string }[] = [];
+  const messages: { value: any; message: any; incomingPhoneNumberId: string }[] = [];
+  const entries = Array.isArray((body as any)?.entry) ? (body as any).entry : [];
+
+  for (const entry of entries) {
+    const changes = Array.isArray(entry?.changes) ? entry.changes : [];
+    for (const change of changes) {
+      const value = change?.value;
+      const incomingPhoneNumberId: string | undefined = value?.metadata?.phone_number_id;
+      for (const status of Array.isArray(value?.statuses) ? value.statuses : []) {
+        statuses.push({ value, status, incomingPhoneNumberId });
+      }
+      // Un mensaje sin numero de destino no se puede atribuir a ningun negocio: se descarta aca, igual
+      // que antes, pero sin llevarse por delante al resto del lote.
+      if (!incomingPhoneNumberId) continue;
+      for (const message of Array.isArray(value?.messages) ? value.messages : []) {
+        messages.push({ value, message, incomingPhoneNumberId });
+      }
+    }
+  }
+
+  return { statuses, messages };
+}
+
 whatsappRouter.post("/webhook", async (req, res) => {
   // Fase 8, punto 1: verificacion de la firma de Meta. Arranca en MODO REGISTRO - se anota la firma
   // invalida y la entrega se procesa igual. El rechazo 401 se prende con WEBHOOK_SIGNATURE_ENFORCE
@@ -834,18 +877,19 @@ whatsappRouter.post("/webhook", async (req, res) => {
   res.sendStatus(200);
   const webhookReceivedAt = Date.now();
 
-  try {
-    const entry = req.body?.entry?.[0];
-    const change = entry?.changes?.[0];
-    const value = change?.value;
-    const message = value?.messages?.[0];
-    const incomingPhoneNumberId: string | undefined = value?.metadata?.phone_number_id;
+  // EL LOTE COMPLETO, NO EL PRIMERO DE CADA COSA (E16, 2026-09-18).
+  //
+  // Meta manda un webhook con `entry[]`, cada uno con `changes[]`, cada uno con `messages[]` y
+  // `statuses[]`. Hasta hoy se leia `entry[0].changes[0]` y de ahi `messages[0]` y `statuses[0]`: todo
+  // lo demas del lote se descartaba en silencio, sin una linea de log. Dos clientes que escriben en el
+  // mismo instante, o un cliente que manda tres mensajes seguidos y Meta los agrupa, y el bot contesta
+  // uno solo: los otros no existieron nunca para nadie.
+  //
+  // Ademas los estados ya no dependen de que el lote NO traiga mensajes: antes `statuses[0]` solo se
+  // miraba si no habia ningun mensaje, asi que un acuse que viajara junto a un mensaje se perdia.
 
-    // Meta sends delivery receipts (sent/delivered/read/failed) as `statuses`, not `messages` - these
-    // were previously silently dropped, so a media message that Meta accepted but failed to actually
-    // deliver (can't fetch the URL, unsupported format, etc.) left zero trace anywhere in our logs.
-    const status = value?.statuses?.[0];
-    if (status && !message) {
+  // El estado de entrega de UN mensaje del lote.
+  async function procesarEstado(value: any, status: any, incomingPhoneNumberId: string | undefined): Promise<void> {
       if (status.status === "failed") {
         // Fase 8, punto 9: el telefono del cliente va enmascarado. El numero completo sigue quedando
         // en DeliveryFailure.recipientPhone, que es donde tiene que estar: el panel lo necesita para
@@ -881,9 +925,11 @@ whatsappRouter.post("/webhook", async (req, res) => {
         }
       }
       return;
-    }
+  }
 
-    if (!message || !incomingPhoneNumberId) return;
+  // UN mensaje entrante del lote. Todo lo de adentro era el cuerpo del webhook hasta E16: los `return`
+  // que corta cada caso ahora cortan ESE mensaje y el lote sigue, que es justamente lo que faltaba.
+  async function procesarMensaje(value: any, message: any, incomingPhoneNumberId: string): Promise<void> {
     // "reaction" (emoji reacting to a prior message) is intentionally excluded - replying to a 👍 with
     // bot chatter is noise, not a real customer turn. Every other content type below used to fall
     // through this same filter and get silently dropped with zero trace (no reply, nothing recorded) -
@@ -1293,6 +1339,27 @@ whatsappRouter.post("/webhook", async (req, res) => {
         customerSentAt: new Date(customerSentAt),
       });
     });
+  }
+
+  try {
+    const lote = collectWebhookBatch(req.body);
+    // Un fallo procesando un elemento no puede llevarse los que siguen: cada uno se atrapa solo. Antes
+    // no hacia falta porque solo habia un elemento; ahora un mensaje que revienta dejaria sin atender a
+    // los otros dos del mismo lote, que es el defecto que esta etapa cierra, al reves.
+    for (const { value, status, incomingPhoneNumberId } of lote.statuses) {
+      try {
+        await procesarEstado(value, status, incomingPhoneNumberId);
+      } catch (error) {
+        console.error("Error procesando un estado del lote:", error);
+      }
+    }
+    for (const { value, message, incomingPhoneNumberId } of lote.messages) {
+      try {
+        await procesarMensaje(value, message, incomingPhoneNumberId);
+      } catch (error) {
+        console.error("Error procesando un mensaje del lote:", error);
+      }
+    }
   } catch (error) {
     console.error("Error handling WhatsApp webhook:", error);
   }

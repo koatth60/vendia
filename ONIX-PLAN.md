@@ -73,6 +73,16 @@ conversación, PostgreSQL.
 Decisión del dueño, 2026-09-15, después de una semana de "arreglamos un parche y rompimos otro".
 Está por encima de cualquier prisa.
 
+**Por qué, en las palabras del dueño (2026-09-18):**
+
+> Un parche es como en la vida real: tú parchas algo y eventualmente por ahí se daña. Quiero que el
+> cambio sea estructural para que nunca se dañe, y que conserve lo que es.
+
+Eso no es una preferencia de estilo. Es el criterio de aceptación: un arreglo que deja el sistema
+capaz de volver a romperse por el mismo lugar no está terminado, aunque el caso puntual ya no falle.
+Y "que conserve lo que es" es la otra mitad: la estructura no puede salir a costa de volver al agente
+un chatbot con reglas — ver *El norte* arriba.
+
 **Antes de proponer o implementar un arreglo, hay que responder esta pregunta:**
 
 > ¿Después de este cambio, el modelo tiene MENOS decisiones que puede equivocar, o más reglas que
@@ -1220,6 +1230,13 @@ veces la misma palabra y que el sistema se quede con una sola es peor que pregun
 cambio explícito de modalidad, o se le pregunta al cliente cuál de las dos vale. Ninguna de las dos
 puede ser "quedarse con una y no decir nada".
 
+**Cómo NO se implementa, para que no salga un parche.** "Que el bot pregunte cuál vale" no puede ser una
+línea de prompt: eso es una regla más que el modelo puede desobedecer, y la contradicción volvería a
+resolverse sola en silencio cada vez que no la obedezca. La contradicción la detecta el **servidor** con
+una consulta —`PaymentMethod.settlement` contra `SaleState.shippingModality`— y **bloquea el cierre**,
+igual que ya hace la compuerta de `getSaleGate`. Recién ahí el modelo conversa para desempatar, con el
+pedido frenado hasta que el dato quede resuelto.
+
 **Se prueba:** con `COD_ALL` elegido, la lista de métodos no incluye el método `ON_DELIVERY` otra vez; y
 un método que contradice la modalidad no cierra el pedido sin resolver la contradicción.
 **Tamaño:** M. **Depende de:** nada. **Bandera:** no.
@@ -1268,6 +1285,25 @@ no necesita esperar a `E20`.
 **Se prueba:** un lote con tres mensajes produce tres turnos.
 **Tamaño:** S. **Depende de:** nada. **Bandera:** no.
 **Vuelta atrás:** revertir.
+
+**Estado (2026-09-18): HECHA, sin desplegar.**
+
+- `collectWebhookBatch` en `src/routes/whatsapp.ts`: función **pura**, sin base y sin red. Recibe el
+  cuerpo crudo del webhook y devuelve todo lo que hay que procesar, en orden. Recorre
+  `entry[] → changes[] → messages[] + statuses[]`.
+- El cuerpo que antes procesaba *el* mensaje pasó a ser `procesarMensaje`, y el de los estados
+  `procesarEstado`, **sin tocarles una línea adentro**: los `return` que cortaban el webhook entero
+  ahora cortan ese elemento y el lote sigue. Es la mitad del arreglo que no se ve.
+- Los estados dejan de depender de que el lote **no** traiga mensajes. Antes `statuses[0]` solo se
+  miraba cuando no había ningún mensaje, así que un acuse que viajara junto a uno se descartaba entero
+  y un fallo de entrega quedaba sin registrar.
+- Cada elemento va en su propio `try`: un mensaje que revienta ya no se lleva puestos a los otros dos
+  del mismo lote — que sería el mismo defecto de nuevo, al revés.
+
+Cinco pruebas en `src/routes/whatsapp.batch.test.ts`, todas sobre la función pura: tres mensajes en un
+lote, varios `entry`/`changes` a la vez (dos clientes escribiendo en el mismo instante), un acuse
+viajando junto a un mensaje, un `change` sin número de destino que no se lleva al resto, y cuerpos
+vacíos o mal formados que no revientan ni inventan elementos.
 
 ---
 

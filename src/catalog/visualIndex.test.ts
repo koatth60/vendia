@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { bestVisualMatch, visualScore, visualTokens, type VisualCandidate } from "./visualIndex";
+import { describeMatchForTurn } from "../ai/photoIndex";
 
 // El caso real del 2026-09-18 01:59 UTC, con las descripciones que el modelo de vision produce de cada
 // lado. La foto de la clienta era un reloj REDONDO, dorado, de correa de eslabones. El bot le mando dos
@@ -85,16 +86,14 @@ test("el puntaje mide cuanto de lo que muestra la clienta esta en el producto", 
 
 // El dato que el servidor le agrega al turno. Es un HECHO ("corresponde a X"), no una instruccion: que
 // hacer con una duda sigue siendo conversacion, y eso es del modelo.
-test("con un solo ganador, el turno recibe el producto identificado", async () => {
-  const { describeMatchForTurn } = await import("../ai/photoIndex");
+test("con un solo ganador, el turno recibe el producto identificado", () => {
   const texto = describeMatchForTurn(bestVisualMatch(FOTO_DE_LA_CLIENTA, CATALOGO));
   assert.ok(texto);
   assert.match(texto, /Serie 11 Mini/);
   assert.match(texto, /productId: serie-11-mini/);
 });
 
-test("con duda, el turno recibe la duda y los dos candidatos, no un ganador inventado", async () => {
-  const { describeMatchForTurn } = await import("../ai/photoIndex");
+test("con duda, el turno recibe la duda y los dos candidatos, no un ganador inventado", () => {
   const dosIguales: VisualCandidate[] = [
     { productId: "a", productName: "Ultra A", description: "Reloj rectangular negro correa silicona bisel robusto" },
     { productId: "b", productName: "Ultra B", description: "Reloj rectangular negro correa silicona bisel robusto" },
@@ -106,7 +105,6 @@ test("con duda, el turno recibe la duda y los dos candidatos, no un ganador inve
   assert.match(texto, /Ultra B/);
 });
 
-test("sin parecido no se le agrega nada al turno", async () => {
-  const { describeMatchForTurn } = await import("../ai/photoIndex");
+test("sin parecido no se le agrega nada al turno", () => {
   assert.equal(describeMatchForTurn(bestVisualMatch("Licuadora blanca de vidrio", CATALOGO)), null);
 });
