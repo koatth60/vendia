@@ -1016,6 +1016,62 @@ que el defecto real es el emparejamiento semántico y que no tenía fase asignad
 
 ---
 
+### E12b · La foto del cliente se compara contra el catálogo, no contra los nombres
+
+**Quita:** al modelo, tener que adivinar cuál producto es, a partir de una prosa que nadie puede
+verificar.
+
+**Porque:** el caso del reloj redondo (arriba, en `E12`) no falló por falta de modelo — la visión corrió
+y escaló a `claude-sonnet-5`. Falló porque **lo que se compara hoy no tiene con qué acertar**. La cadena
+completa, leída del código el 2026-09-18:
+
+1. `getCatalogHintText` (`catalog/products.ts:435`) le manda a la visión **solo los nombres y las
+   categorías** de hasta 40 productos. Sin descripciones, sin colores, sin forma y **sin las fotos del
+   catálogo**.
+2. La visión devuelve prosa libre: *"reloj inteligente dorado, pantalla redonda, correa de eslabones"*.
+3. Esa prosa la usa el modelo para llamar `search_products`, que puntúa por coincidencia de palabras
+   contra el NOMBRE del producto.
+
+La palabra que importaba —**redondo**— no está en ningún nombre del catálogo. Los nombres dicen "Serie
+12 Ultra 3 (Edición Deportiva / Robusta)" y "Serie 11 Mini (Edición Compacta y Elegante)". Lo único que
+podía enganchar era "reloj/smartwatch", que lo comparten todos. **El dato que distinguía al producto
+nunca participó de la comparación**, en ninguno de los dos lados.
+
+**Se hace,** en tres pasos que se pueden desplegar por separado:
+
+**Paso 1 — la visión ELIGE, no describe.** El contexto que recibe pasa a ser el catálogo con su
+descripción y su id, y la respuesta obligatoria es `PRODUCTO_ID: <id>` o `POCO_CLARO`. El servidor
+verifica que ese id exista antes de usarlo. Desaparece el paso con pérdida —prosa → `search_products`—
+que es donde hoy se rompe. Tamaño S.
+
+**Paso 2 — cada foto del catálogo tiene su ficha visual, hecha por el mismo modelo.** Las fotos ya están
+en S3. Se corre la MISMA visión una vez por foto de producto y se guarda su descripción estructurada en
+la base. A partir de ahí, la foto de una clienta se compara contra descripciones **del mismo modelo y
+del mismo vocabulario**, en vez de contra un nombre comercial: "redondo" contra "redondo". Se recalcula
+solo cuando la foto cambia, así que son unas decenas de llamadas una vez por negocio, no una por
+consulta. Tamaño M.
+
+**Paso 3 — lo que se ve es un dato del catálogo.** Forma, color, correa, tamaño aparente, como atributos
+por negocio (el mismo patrón de `CategoryAlias`: vocabulario del negocio, nunca cableado por vertical —
+ver la advertencia de `attributeTaxonomy.ts`). La visión los devuelve estructurados y el emparejamiento
+pasa a ser una **consulta**: "reloj + redondo" deja un producto, no dos de 49 mm. Tamaño M.
+
+**Las tres reglas de admisión.** (1) Le quita al modelo la decisión de cuál producto es, y se la da a una
+comparación contra la base. (2) Se verifica con una consulta: el `productId` elegido existe y sus
+atributos coinciden con los que devolvió la visión. (3) Si el proceso muere, no se pierde nada: las
+fichas visuales del paso 2 son cache reconstruible, y sin ellas el sistema cae al camino de hoy.
+
+**Lo que no reemplaza:** la garantía de secuencia de `E12` sigue haciendo falta. Un emparejamiento mejor
+va a fallar menos, no cero, y mientras dude la respuesta correcta sigue siendo preguntarle a la dueña
+antes de mandar nada.
+
+**Se prueba:** el fixture `y1iz5l-foto-no-converge` en verde; y una prueba con dos productos que solo se
+distinguen por un atributo visual, donde el emparejamiento devuelve uno solo.
+**Tamaño:** L en total, S + M + M por paso. **Depende de:** nada. **Bandera:** no.
+**Vuelta atrás:** revertir por paso; sin las fichas visuales el sistema vuelve al camino de hoy.
+
+---
+
 ### E13 · Prometer consultar al dueño abre una consulta de verdad
 
 **Quita:** al modelo, poder decir "voy a consultar con el equipo" sin que exista una consulta.
