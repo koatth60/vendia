@@ -752,6 +752,42 @@ ningún envío; fixture donde el envío del bloque falla y su media **no** queda
 **−18 líneas.**
 **Tamaño:** L. **Depende de:** nada. **Bandera:** no.
 **Vuelta atrás:** revertir; el efecto sale de la tabla.
+**Estado (2026-09-18):** primera parte hecha y sin desplegar (ver abajo). Queda el efecto requerido
+`MEDIA_SENT` — con la decisión de arquitectura que también quedó anotada abajo — y el borrado de
+`PHOTO_DIRECTIVE_SHARED_TAIL`, que no se puede tocar hasta que la garantía exista.
+
+#### Primera parte HECHA (2026-09-18) — el fallo que se convertía en dos
+
+`sendCatalogBlocks` ignoraba el resultado del envío del **texto** del bloque (el mensaje que lleva los
+nombres y los precios) y registraba igual sus productos en `Conversation.browsePhotoProductIds` /
+`mediaSentProductIds`. Como `renderCatalog` lee esos campos antes de adjuntar nada, el turno siguiente
+suprimía esas mismas fotos: la clienta se quedaba sin el bloque para siempre.
+
+Ahora un bloque cuenta como visto **solo si su texto llegó** — y en el camino de lista tocable, si llegó
+la lista o su respaldo numerado. `SaleState.mediaSent` se sigue registrando cuando la foto sale de
+verdad, porque es otro hecho: es la evidencia de venta en curso que lee `computeRequiredEffects`, y
+perderla apagaría los efectos requeridos.
+
+Tres pruebas nuevas en `src/whatsapp/catalogBlocks.dedup.test.ts`. La del medio **falla contra el código
+anterior** y pasa contra el nuevo, comprobado cambiando el archivo por el de `HEAD`.
+
+#### El dato de diseño que le falta a esta ficha, medido el 2026-09-18
+
+Antes de construir `MEDIA_SENT` hay que saber esto, porque decide dónde puede vivir la verificación:
+
+**Los medios del catálogo no se envían dentro de `generateReply`.** El alcance se resuelve ANTES de
+llamar al modelo (`agent.ts:983`, `resolveProductScope`), los bloques se componen ahí mismo
+(`renderCatalog`, `agent.ts:1002`), y `generateReply` los **devuelve** — quien los manda es el llamador
+(`routes/whatsapp.ts` → `sendCatalogBlocks`), ya fuera del turno. La escalera de efectos requeridos
+(`runTurnWithRequiredEffects`) corre dentro de `generateReply`, así que **no puede verificar contra la
+base que esos medios salieron: todavía no salieron.**
+
+Solo los medios de `send_product_media` se envían dentro del turno.
+
+O sea que `MEDIA_SENT` no es un efecto más de la misma lista. O la verificación se mueve al llamador
+(después de `sendCatalogBlocks`, que es donde el hecho ya es cierto o falso), o los bloques pasan a
+enviarse dentro del turno. Es una decisión de arquitectura, no un detalle de implementación, y conviene
+tomarla escrita antes de tocar `requiredEffects.ts`.
 
 #### Caso real que le AMPLÍA el disparador (2026-09-18, reportado por el dueño)
 

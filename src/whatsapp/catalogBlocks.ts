@@ -58,10 +58,11 @@ export async function sendCatalogBlocks(args: SendCatalogBlocksArgs): Promise<vo
   const sentProductIds: string[] = [];
   const vitrinaProductIds: string[] = [];
 
-  // Manda los medios de un bloque. Devuelve si mando alguno, para saber si hace falta una pausa antes
-  // del mensaje que sigue.
-  async function enviarMedios(block: CatalogBlock): Promise<boolean> {
-    let alguno = false;
+  // Manda los medios de un bloque. Devuelve los productos cuyos medios SALIERON de verdad - no se
+  // registra nada todavia, porque si el texto del bloque no llego, esas fotos no alcanzan para dar el
+  // producto por visto (ver el registro por bloque mas abajo).
+  async function enviarMedios(block: CatalogBlock): Promise<string[]> {
+    const enviados: string[] = [];
     for (const media of block.media) {
       // Un fallo de envio de medios no puede dejar al cliente sin el resto de los bloques: el texto ya
       // salio (o esta por salir) y es lo que sostiene la conversacion. Se registra y se sigue.
@@ -76,20 +77,40 @@ export async function sendCatalogBlocks(args: SendCatalogBlocksArgs): Promise<vo
           media.items,
           media.caption
         );
-        alguno = true;
-        if (block.kind === "lista") vitrinaProductIds.push(media.productId);
-        else sentProductIds.push(media.productId);
+        enviados.push(media.productId);
+        // SaleState.mediaSent es otra cosa que el dedup: es "el servidor mando esta media de verdad", y
+        // eso es cierto aunque el texto del bloque falle. De ahi sale la evidencia de venta en curso que
+        // lee computeRequiredEffects, asi que no se toca.
         await recordMediaSent(conversationId, media.productName);
       } catch (error) {
         console.error(`No se pudieron enviar los medios de "${media.productName}" (no bloqueante):`, error);
       }
     }
-    return alguno;
+    return enviados;
   }
 
-  async function enviarTexto(block: CatalogBlock): Promise<void> {
-    if (!block.text.trim()) return;
-    await sendToCustomer({
+  // Un bloque cuenta como visto solo si su TEXTO llego: es el que lleva los nombres y los precios. Las
+  // fotos solas no son el catalogo.
+  function registrar(block: CatalogBlock, productIds: string[], textoEntregado: boolean): void {
+    if (!textoEntregado) {
+      // Antes se registraba igual, y el dedup del turno siguiente suprimia esas mismas fotos: la clienta
+      // se quedaba sin el bloque para siempre y un fallo se convertia en dos (E10). Sin el registro,
+      // el proximo turno lo vuelve a componer entero. Puede repetir una foto que si habia salido; ver una
+      // foto dos veces es mejor que no ver nunca el producto ni su precio.
+      if (productIds.length > 0) {
+        console.error(`El texto del bloque no llego: no se marcan como vistos ${productIds.length} producto(s), para que el turno siguiente los vuelva a mandar`);
+      }
+      return;
+    }
+    if (block.kind === "lista") vitrinaProductIds.push(...productIds);
+    else sentProductIds.push(...productIds);
+  }
+
+  // Devuelve si el texto llego de verdad. Un bloque sin texto cuenta como entregado: no hay nada que
+  // mandar y sus fotos no dependen de ningun mensaje que haya fallado.
+  async function enviarTexto(block: CatalogBlock): Promise<boolean> {
+    if (!block.text.trim()) return true;
+    const enviado = await sendToCustomer({
       businessId,
       conversationId,
       credentials,
@@ -97,6 +118,10 @@ export async function sendCatalogBlocks(args: SendCatalogBlocksArgs): Promise<vo
       content: { kind: "text", text: block.text },
       recordAs: { text: block.text },
     });
+    if (!enviado.delivered) {
+      console.error(`No salio el texto del bloque del catalogo: ${enviado.failure?.message ?? "sin detalle"}`);
+    }
+    return enviado.delivered;
   }
 
   for (let i = 0; i < blocks.length; i++) {
@@ -106,8 +131,8 @@ export async function sendCatalogBlocks(args: SendCatalogBlocksArgs): Promise<vo
 
     if (!rows) {
       // Camino de siempre: el texto numerado y despues sus fotos.
-      await enviarTexto(block);
-      await enviarMedios(block);
+      const textoEntregado = await enviarTexto(block);
+      registrar(block, await enviarMedios(block), textoEntregado);
       continue;
     }
 
@@ -117,8 +142,8 @@ export async function sendCatalogBlocks(args: SendCatalogBlocksArgs): Promise<vo
     // siete fotos de la vitrina empujan "Ver opciones" siete mensajes hacia arriba y el cliente termina
     // escribiendo un numero, que es justo el camino que la lista tocable vino a eliminar. Cada foto
     // lleva su pie con el numero y el precio, asi que no llegan sin contexto.
-    const huboMedios = await enviarMedios(block);
-    if (huboMedios) await sleep(BLOCK_GAP_MS);
+    const mediosEnviados = await enviarMedios(block);
+    if (mediosEnviados.length > 0) await sleep(BLOCK_GAP_MS);
 
     // El cuerpo NO repite los productos: eso ya son las filas, y ademas Meta rechaza un cuerpo de mas de
     // 1024 caracteres (ver listBodyText). El titulo de la seccion es el nombre real de la categoria
@@ -137,10 +162,14 @@ export async function sendCatalogBlocks(args: SendCatalogBlocksArgs): Promise<vo
       },
       recordAs: { text: block.text },
     });
+    // La lista tocable ES el texto de este bloque: si no sale, el respaldo es el texto numerado, y el
+    // bloque cuenta como entregado solo si alguno de los dos llego.
+    let textoEntregado = sent.delivered;
     if (!sent.delivered) {
       console.error("La lista interactiva no salio, se manda el texto numerado:", sent.failure?.message);
-      await enviarTexto(block);
+      textoEntregado = await enviarTexto(block);
     }
+    registrar(block, mediosEnviados, textoEntregado);
   }
 
   if (sentProductIds.length === 0 && vitrinaProductIds.length === 0) return;
