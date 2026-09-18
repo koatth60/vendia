@@ -36,6 +36,8 @@ const PERSONAS = Number(process.env.PERSONAS ?? 1);
  * dan resultados distintos. Con una sola no se sabe si un defecto ocurre el 50% de las veces o el 10%.
  */
 const CONVERSACIONES = Number(process.env.CONVERSACIONES ?? PERSONAS);
+/** Repetir SOLO a esta persona, por nombre o por un pedazo. Para reproducir un caso hasta que salga bien. */
+const SOLO = (process.env.PERSONA ?? "").trim().toLowerCase();
 const PARALELO = Number(process.env.PARALELO ?? 3);
 const MAX_TURNOS = Number(process.env.MAX_TURNOS ?? 14);
 const ESPERA_MAXIMA_MS = 90_000;
@@ -263,6 +265,25 @@ async function conversar(
   // Por CLIENTE, no por la ultima conversacion: al cerrarse una venta la conversacion pasa a SOLD y se
   // abre una nueva, asi que mirar la mas reciente decia "no hubo pedido" con el pedido ya creado en la
   // anterior. Paso en la primera corrida.
+  // SI LA CONVERSACION TERMINA CON ALGO ESPERANDO, SE ATIENDE IGUAL (2026-09-18).
+  //
+  // La clienta se despide y el bucle se acaba, pero la venta puede haber quedado esperando que el dueño
+  // confirme el pago -- y en prepago el pedido NO EXISTE hasta ese si. Medido: Liliana Pardo se despidio,
+  // la confirmacion quedo colgada, y la venta figuraba como perdida cuando en la realidad se resuelve en
+  // un minuto. El dueño contesta aunque la clienta ya no escriba.
+  if (negocio.contactPhone) {
+    const ultima = await prisma.conversation.findFirst({ where: { customerId: cliente.id }, orderBy: { updatedAt: "desc" }, select: { id: true } });
+    if (ultima) {
+      await atenderComoDueno(
+        negocio.id,
+        ultima.id,
+        { phoneNumberId: negocio.whatsappPhoneNumberId, accessToken: negocio.whatsappAccessToken },
+        negocio.contactPhone.replace(/[^0-9]/g, ""),
+      );
+      await new Promise((r) => setTimeout(r, 5000));
+    }
+  }
+
   const conversaciones = (await prisma.conversation.findMany({ where: { customerId: cliente.id }, select: { id: true } })).map((c) => c.id);
   const pedido = await prisma.order.findFirst({ where: { customerId: cliente.id }, select: { summary: true, totalAmount: true } });
   const incidentes = await prisma.agentIncident.findMany({ where: { conversationId: { in: conversaciones } }, select: { kind: true, detail: true } });
@@ -287,7 +308,14 @@ async function main() {
   }
 
   const cuantas = Math.max(1, CONVERSACIONES);
-  const elegidas = Array.from({ length: cuantas }, (_, i) => PERSONAS_POSIBLES[i % PERSONAS_POSIBLES.length]);
+  const disponibles = SOLO
+    ? PERSONAS_POSIBLES.filter((p) => p.nombre.toLowerCase().includes(SOLO))
+    : PERSONAS_POSIBLES;
+  if (disponibles.length === 0) {
+    console.error(`Ninguna persona coincide con "${SOLO}". Hay: ${PERSONAS_POSIBLES.map((p) => p.nombre).join(", ")}`);
+    process.exit(64);
+  }
+  const elegidas = Array.from({ length: cuantas }, (_, i) => disponibles[i % disponibles.length]);
   console.log(`${negocio.name}: ${cuantas} conversacion(es), hasta ${MAX_TURNOS} turnos cada una, ${PARALELO} a la vez.
 `);
 
