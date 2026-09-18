@@ -246,3 +246,20 @@ cerrarlo, **eso es el hallazgo** — no se tapa escribiéndolo en el guion.
 
 Se encontró así: los guiones de compra decían "listo, cierra el pedido por favor" y "registralo", y con
 eso se estaban contando como éxitos cierres que el bot no habría hecho solo.
+
+## Y no se adelanta: los datos se dan cuando los piden
+
+Misma decisión, mismo día, al ver un guion que decía *"soy Carlos Perez, cedula 1020304050, celular
+3001112233, Calle 10 #5-20, barrio Chapinero, Bogota"* en un solo mensaje.
+
+**Un cliente simulado nunca entrega datos que nadie le pidió.** No sabe que este negocio pide cédula, ni
+barrio, ni un celular distinto del que está usando para escribir. Los datos se dan cuando los preguntan,
+de a uno o de a dos, como los da la gente.
+
+**Por qué importa:** entregándole todo junto, el guion le ahorra al bot exactamente el trabajo que se
+quería medir — si sabe pedir lo que le falta, en qué orden, y si se acuerda de lo que ya le dieron. Un
+cierre que ocurre porque el guion adivinó los campos no demuestra nada.
+
+**Consecuencia práctica:** un guion de secuencia fija no puede cumplir esto del todo, porque no sabe qué
+le van a preguntar ni en qué orden. La forma correcta es un cliente que RESPONDA a lo que el bot dice,
+con una identidad y unos datos en el bolsillo que sólo suelta cuando se los piden.

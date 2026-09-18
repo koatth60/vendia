@@ -45,6 +45,21 @@ import { prisma } from "../src/db/client";
 // Si el bot necesita que le digan que cierre para cerrar, ESO es el hallazgo. No se tapa escribiendolo
 // en el guion.
 //
+// REGLA 2, DE LA MISMA FAMILIA: LA CLIENTA NO SE ADELANTA.
+//
+// Decision del dueño, 2026-09-18, al ver este mensaje en un guion de compra:
+//
+//   "soy Carlos Perez, cedula 1020304050, celular 3001112233, Calle 10 #5-20, barrio Chapinero, Bogota"
+//
+// Nadie escribe eso. Una persona no sabe que este negocio pide cedula, ni barrio, ni que necesita el
+// celular aparte del que esta usando para escribir. Los datos se dan CUANDO LOS PIDEN, de a uno o de a
+// dos, como los da la gente.
+//
+// Y el daño es el mismo que el de la regla de arriba: entregandole todo junto, el guion le ahorra al bot
+// exactamente el trabajo que se queria medir -- si sabe pedir lo que le falta, en que orden, y si se
+// acuerda de lo que ya le dieron. Un cierre que ocurre porque el guion adivino los campos no demuestra
+// nada.
+//
 // COSTO: cada mensaje es un turno real contra DeepSeek. CANTIDAD=100 son unos 400 turnos.
 
 const URL_BASE = process.env.URL ?? "http://localhost:3000";
