@@ -555,6 +555,16 @@ model SaleState {
   // getSaleState (ciudad/costo se siguen derivando de `address`): es evidencia de lo que el servidor
   // sabe, no un dato de entrega. Independiente de Business.saleStateEnabled, igual que mediaSent.
   shippingCity   String?
+  // Momento en que el CLIENTE VIO los datos de pago (Nequi/Bancolombia/etc), escrito por el servidor en
+  // agent.ts cuando renderFixedBlocks rellena {{METODOS_PAGO}} con datos reales - pase o no por
+  // get_payment_methods. Antes de esto (2026-09-18), momentoEnQueSePasaronLosDatosDePago en
+  // orders/paymentProof.ts dependia SOLO de que el modelo hubiera llamado get_payment_methods o
+  // set_payment_method (AgentTurn.toolsCalled); el fix de 73dd8aa que saco la directiva de llamar esa
+  // herramienta del prompt (el bloque ya se llena solo desde la base) le quito a este campo su unica
+  // fuente en los negocios sin saleStateEnabled, y el comprobante que el cliente mandaba despues volvia
+  // a leerse como "foto de producto sin identificar". Independiente de Business.saleStateEnabled, igual
+  // que shippingCity y mediaSent. Se escribe una sola vez - ver recordPaymentDataShown en saleState.ts.
+  paymentDataShownAt DateTime?
   // Cuantas veces seguidas el cliente mando una foto/video para identificar un producto sin que el turno
   // lo resolviera (ni un envio real ni una escalacion al dueno) - ver shouldForcePhotoEscalation en
   // agent.ts. Se resetea a 0 apenas se resuelve; nunca se lee de texto.

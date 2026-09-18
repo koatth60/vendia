@@ -59,6 +59,7 @@ import {
   getPhotoIdStreak,
   bumpPhotoIdStreak,
   resetPhotoIdStreak,
+  recordPaymentDataShown,
 } from "../orders/saleState";
 import {
   computeRequiredEffects,
@@ -1513,6 +1514,11 @@ ${CATALOG_BLOCK_MARKER}` : CATALOG_BLOCK_MARKER;
       cityShippingRateThisTurn ??
       (shippingRatesListThisTurn?.length === 1 ? shippingRatesListThisTurn[0] : null) ??
       (zonaDeEnvio ? { label: zonaDeEnvio.label, cost: String(zonaDeEnvio.cost) } : null);
+    // Se captura ANTES de renderFixedBlocks porque la funcion muta `text` en el momento (borra la marca
+    // haya o no dato). Junto con "pago" ausente de `missingBlocks` es como se sabe, sin adivinar, que el
+    // bloque de pago salio de verdad hacia el cliente este turno - ver el comentario de
+    // recordPaymentDataShown mas abajo.
+    const pagoMarcaPresenteAntesDeRenderizar = text.includes(PAYMENT_BLOCK_MARKER);
     const { text: renderedText, missingBlocks } = renderFixedBlocks(text, {
       currency: negocio.currency,
       locale: negocio.locale,
@@ -1539,6 +1545,18 @@ ${CATALOG_BLOCK_MARKER}` : CATALOG_BLOCK_MARKER;
       saleBlocked: saleBlockedThisTurn,
     });
     text = renderedText;
+
+    // EL CLIENTE VIO LOS DATOS DE PAGO, INDEPENDIENTE DE LA HERRAMIENTA (2026-09-18, segunda pasada).
+    //
+    // "pago" ausente de missingBlocks + la marca presente antes de renderizar = el bloque tenia dato
+    // real y salio de verdad hacia el cliente este turno (mismo par de condiciones que usa
+    // renderFixedBlocks por dentro). Es el unico momento del turno en que ese hecho existe; por eso se
+    // escribe aca y no en otro lado. Ver el comentario de SaleState.paymentDataShownAt en schema.prisma.
+    if (pagoMarcaPresenteAntesDeRenderizar && !missingBlocks.includes("pago")) {
+      await recordPaymentDataShown(conversationId).catch((error) =>
+        console.error("No se pudo registrar que el cliente vio los datos de pago:", error)
+      );
+    }
 
     // LA SINTAXIS DE UNA HERRAMIENTA NUNCA SALE AL CLIENTE (2026-09-18).
     //

@@ -489,6 +489,21 @@ export async function recordMediaSent(conversationId: string, label: string): Pr
   });
 }
 
+// EL SERVIDOR REGISTRA CUANDO EL CLIENTE VIO LOS DATOS DE PAGO (2026-09-18), independiente de que el
+// modelo haya llamado get_payment_methods. Ver el comentario de SaleState.paymentDataShownAt en
+// schema.prisma y momentoEnQueSePasaronLosDatosDePago en orders/paymentProof.ts, que es quien lo lee.
+// Se escribe una sola vez: la primera vez que el bloque salio es el momento real, y sobreescribirlo en
+// cada turno siguiente correria la fecha hacia adelante sin motivo.
+export async function recordPaymentDataShown(conversationId: string): Promise<void> {
+  const state = await prisma.saleState.findUnique({ where: { conversationId }, select: { paymentDataShownAt: true } });
+  if (state?.paymentDataShownAt) return;
+  await prisma.saleState.upsert({
+    where: { conversationId },
+    create: { conversationId, paymentDataShownAt: new Date() },
+    update: { paymentDataShownAt: new Date() },
+  });
+}
+
 // Fase 5 del plan maestro (2026-09-15): reemplazo del contador de rondas de identificacion por foto que
 // antes se calculaba escaneando el historial con PHOTO_ID_CLARIFY_PATTERN (una frase del modelo). Ahora
 // es un contador de verdad: agent.ts lo sube cuando el cliente manda una foto/video y el turno no la

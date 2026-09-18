@@ -23,29 +23,41 @@ import { prisma } from "../db/client";
  * una lectura de lo que el bot escribio, es el registro de lo que el servidor hizo.
  */
 export async function momentoEnQueSePasaronLosDatosDePago(conversationId: string): Promise<Date | null> {
-  // DOS CAMINOS, NO UNO (2026-09-18).
+  // TRES CAMINOS, NO DOS (2026-09-18, segunda pasada el mismo dia).
   //
-  // Hasta hoy esto era solo `get_payment_methods`. Y el 2026-09-18, por la manana, se arreglo que el
-  // numero de Nequi saliera SIEMPRE -- el bloque de pago se arma leyendo la base al empezar el turno,
-  // llame el modelo a la herramienta o no (commit 73dd8aa). Nadie actualizo esta definicion.
+  // Hasta la manana esto era solo `get_payment_methods`. Con el commit 73dd8aa el bloque de pago se arma
+  // leyendo la base al empezar el turno, llame el modelo a la herramienta o no -- y de paso el prompt
+  // perdio la directiva de llamarla, asi que dejo de llamarse. Se agrego `set_payment_method` como
+  // segundo camino esa misma manana, pero esa herramienta solo existe con Business.saleStateEnabled: en
+  // un negocio sin la bandera (Boutique Alondra, Aurora Joyas, MAGByLizN) ningun camino podia ocurrir
+  // nunca, y la funcion volvia a null aunque el cliente tuviera el numero de Nequi a la vista.
   //
-  // Desde entonces, en las ventas donde el modelo no llama la herramienta, el cliente recibe los datos
-  // de pago, manda el pantallazo, y el sistema cree que nunca se le paso nada: la imagen entra como foto
-  // de producto, se escala al dueno y el bot se apaga. Medido en la conversacion de Rocio Bermudez, con
-  // el numero de Nequi y el de Bancolombia a la vista en su chat.
+  // Medido en la conversacion de Paula (Boutique Alondra, 2026-09-18 18:03): el bloque de pago salio
+  // completo en su chat sin que ninguna herramienta corriera (toolsCalled: [] es la norma ahora, no la
+  // excepcion), mando el comprobante, y como para el sistema nunca se le habian pasado datos de pago la
+  // imagen se escalo al dueno como "pregunta por este producto y no lo pude identificar".
   //
-  // `set_payment_method` sirve igual de bien y no depende de por donde salio el bloque: si el cliente ya
-  // ELIGIO como paga, los datos de pago ya los tuvo delante. Se toma el primero de los dos que haya
-  // ocurrido.
-  const turno = await prisma.agentTurn.findFirst({
-    where: {
-      conversationId,
-      OR: [{ toolsCalled: { has: "get_payment_methods" } }, { toolsCalled: { has: "set_payment_method" } }],
-    },
-    orderBy: { createdAt: "asc" },
-    select: { createdAt: true },
-  });
-  return turno?.createdAt ?? null;
+  // El tercer camino es el hecho que de verdad importa y que los otros dos aproximaban indirectamente:
+  // SaleState.paymentDataShownAt, que el servidor escribe en el momento exacto en que renderFixedBlocks
+  // rellena la marca con datos reales (ver recordPaymentDataShown en orders/saleState.ts) -- sin pasar
+  // por ninguna herramienta ni por saleStateEnabled. Se toma el MAS TEMPRANO de los tres: cualquiera que
+  // haya ocurrido primero es cuando el cliente vio el dato.
+  const [turno, saleState] = await Promise.all([
+    prisma.agentTurn.findFirst({
+      where: {
+        conversationId,
+        OR: [{ toolsCalled: { has: "get_payment_methods" } }, { toolsCalled: { has: "set_payment_method" } }],
+      },
+      orderBy: { createdAt: "asc" },
+      select: { createdAt: true },
+    }),
+    prisma.saleState.findUnique({ where: { conversationId }, select: { paymentDataShownAt: true } }),
+  ]);
+  const candidatos = [turno?.createdAt, saleState?.paymentDataShownAt ?? undefined].filter(
+    (d): d is Date => d instanceof Date
+  );
+  if (candidatos.length === 0) return null;
+  return candidatos.reduce((antes, actual) => (actual < antes ? actual : antes));
 }
 
 /**
@@ -83,21 +95,51 @@ export async function faltaComprobanteDePago(
 /**
  * True cuando esa imagen del cliente es, para el sistema, el comprobante de pago de esta conversación.
  *
- * Es la MISMA definición que usa `faltaComprobanteDePago` para no cerrar a ciegas: una imagen que el
- * cliente manda después de que se le pasaron los datos de pago. No mira la imagen ni lee prosa; es el
- * único hecho verificable que hay, y si alcanza para frenar un cierre alcanza para no reenviársela al
- * dueño como si fuera la foto de un producto.
+ * DOS SEÑALES, EN ESTE ORDEN (2026-09-18, segunda pasada del día):
+ *
+ * 1. LO QUE EL SERVIDOR YA VIO EN LA IMAGEN. `Message.imageAnalysis` lo escribe el servidor en
+ *    routes/whatsapp.ts ANTES de que el turno del modelo empiece: toda imagen entrante pasa por
+ *    `analyzeCustomerImage`, cuyo prompt obliga a que la respuesta empiece con `COMPROBANTE:`,
+ *    `PRODUCTO:`, `PRODUCTO_POCO_CLARO:` u `OTRO:` (ver ai/visionPrompt.ts). Eso NO es prosa del
+ *    modelo del turno: es una clasificación estructurada, guardada, que se responde con un SELECT.
+ *    La primera versión de esta función la descartó por miedo a caer en un guard de clase D y quedó
+ *    apoyada solo en (2) -- con lo cual el sistema tenía la respuesta escrita en su propia base y no
+ *    la miraba.
+ *
+ * 2. CUÁNDO LLEGÓ, como respaldo. Una imagen mandada después de que se le pasaron los datos de pago
+ *    es la misma definición que usa `faltaComprobanteDePago` para no cerrar a ciegas. Cubre el caso
+ *    en que la visión no corrió (error de red, key sin configurar, video sin frame legible) o dijo
+ *    algo que no arranca con ningún prefijo conocido.
+ *
+ * Por qué el orden es ése y no al revés: (1) distingue una captura de la lista del mercado de un
+ * comprobante de Nequi, y (2) no -- para (2) cualquier imagen posterior al bloque de pago es "el
+ * comprobante". Cuando la visión habla, sabe más.
  *
  * Defecto real (2026-09-18): una clienta mandó su comprobante de Nequi y `ask_owner_about_photo` se lo
  * reenvió al dueño con el texto "pregunta por este producto y no lo pude identificar en el catálogo.
  * ¿Cuál es?". El dueño vio una transferencia y una pregunta sobre qué producto era.
  */
 export async function esLaImagenDelComprobante(conversationId: string, mensajeId: string, creadoEn: Date): Promise<boolean> {
+  const mensaje = await prisma.message.findFirst({
+    where: { id: mensajeId, conversationId, role: "CUSTOMER" },
+    select: { id: true, imageAnalysis: true },
+  });
+  if (!mensaje) return false;
+
+  // (1) El veredicto que el servidor ya guardó sobre ESTA imagen. `COMPROBANTE:` es el prefijo exacto
+  // que impone buildVisionPrompt, y conIdentificacionDelServidor solo le agrega texto a `PRODUCTO:`,
+  // así que este prefijo llega intacto a la base.
+  const analisis = (mensaje.imageAnalysis ?? "").trimStart();
+  if (analisis.startsWith("COMPROBANTE:")) return true;
+  // Un `PRODUCTO:` explícito es lo contrario de un comprobante, y decirlo acá es lo que permite que la
+  // foto de un producto mandada DESPUÉS del bloque de pago siga escalándose para identificarla, en vez
+  // de desaparecer tragada por (2).
+  if (analisis.startsWith("PRODUCTO:") || analisis.startsWith("PRODUCTO_POCO_CLARO:")) return false;
+
+  // (2) Respaldo por tiempo, para cuando no hay veredicto utilizable.
   const desde = await momentoEnQueSePasaronLosDatosDePago(conversationId);
   if (!desde) return false;
-  if (creadoEn < desde) return false;
-  const existe = await prisma.message.findFirst({ where: { id: mensajeId, conversationId, role: "CUSTOMER" }, select: { id: true } });
-  return Boolean(existe);
+  return creadoEn >= desde;
 }
 
 /** Lo que se le devuelve al modelo cuando el cierre se frena por esto. Dice que falta y que hacer. */
