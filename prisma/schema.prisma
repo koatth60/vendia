@@ -205,6 +205,7 @@ model Business {
   // todos los negocios del producto. La migracion la copia tal cual a los negocios que ya existian.
   idDocumentExemptZones     String[]                  @default([])
   products                  Product[]
+  promotions                Promotion[]
   customers                 Customer[]
   paymentMethods            PaymentMethod[]
   shippingRates             ShippingRate[]
@@ -794,6 +795,7 @@ model Product {
   inquiryCount Int              @default(0)
   media        ProductMedia[]
   variants     ProductVariant[]
+  promotions   Promotion[]
   createdAt    DateTime         @default(now())
   updatedAt    DateTime         @updatedAt
 }
@@ -1500,4 +1502,69 @@ model ModelBreaker {
   until    DateTime
   // El error, para poder mirar por que se cayo sin tener que buscar en los logs.
   detail   String?
+}
+
+// E37 (2026-09-18). UNA PROMOCION ES UN DATO, NO UNA FRASE.
+//
+// Hasta hoy un descuento del negocio no existia como dato: la duena se lo escribia al bot en
+// `customInstructions` ("esta semana 20% en relojes") y el modelo tenia que acordarse. Acordarse es
+// justo lo que el modelo no garantiza: lo aplicaba a veces si y a veces no, y cuando lo aplicaba
+// calculaba el numero el mismo.
+//
+// `AgreedPrice` NO es esto y se queda como esta: es un acuerdo puntual con UNA clienta ("te lo dejo en
+// 45"), autorizado por la duena en esa conversacion. Una promocion es del negocio y vale para todas.
+//
+// El descuento se aplica en `precioDeVenta` (src/catalog/precioDeVenta.ts), que es el unico lugar que
+// le pone precio a una linea -- asi lo que el bot DICE y lo que se COBRA no pueden separarse.
+enum PromotionKind {
+  // Un porcentaje sobre el precio de lista.
+  PERCENT
+  // Un monto fijo de descuento, en la moneda del negocio.
+  AMOUNT
+}
+
+enum PromotionScope {
+  // Todo el catalogo del negocio.
+  GLOBAL
+  // Una categoria, por nombre (Product.category es un string, no hay tabla de categorias).
+  CATEGORY
+  // Un producto puntual.
+  PRODUCT
+}
+
+model Promotion {
+  id         String   @id @default(cuid())
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  businessId String
+
+  // Como la llama la duena. Es lo que el bot le dice a la clienta: "Promo de aniversario".
+  name  String
+  kind  PromotionKind
+  // Porcentaje (0-100) o monto, segun `kind`. Decimal por lo mismo que el resto de la plata (E33).
+  value Decimal       @db.Decimal(12, 2)
+
+  scope PromotionScope
+  // Solo con scope CATEGORY. Se guarda normalizado para poder comparar sin acentos ni mayusculas.
+  categoryNormalized String?
+  // Como la escribio la duena, para mostrarla igual en el panel.
+  categoryLabel      String?
+  // Solo con scope PRODUCT.
+  product   Product? @relation(fields: [productId], references: [id], onDelete: Cascade)
+  productId String?
+
+  // Cuantas unidades hacen falta para que aplique. 1 = siempre.
+  minQuantity Int @default(1)
+
+  // Vigencia. Null de los dos lados = vigente mientras `active` sea true.
+  startsAt DateTime?
+  endsAt   DateTime?
+
+  // El apagado a mano, sin tener que borrarla ni tocar las fechas.
+  active Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([businessId, active])
+  @@index([productId])
 }

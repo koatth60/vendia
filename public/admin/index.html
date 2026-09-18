@@ -111,6 +111,13 @@
              Pedidos, y estaba repetido en las dos. Aca se escribe una vez y se ve en las tres. -->
         <div class="realtime-indicator" id="realtime-indicator-crm"><span class="realtime-dot"></span><span class="realtime-indicator-text">Conectando…</span></div>
       </div>
+      <!-- El catalogo pasa a tener subnavegacion propia con E37: los productos y las promociones son
+           dos cosas del mismo catalogo, y una promocion no es "configuracion del bot". Mismo chrome que
+           los otros grupos, sin una sola regla nueva. -->
+      <div class="subnav" data-section-group="catalogo">
+        <button class="tab-btn" data-tab="catalog" onclick="switchTab('catalog')">Productos</button>
+        <button class="tab-btn" data-tab="promotions" onclick="switchTab('promotions')">Promociones</button>
+      </div>
       <div class="subnav" data-section-group="bot">
         <button class="tab-btn" data-tab="business" onclick="switchTab('business')">Personalidad</button>
         <button class="tab-btn" data-tab="rules" onclick="switchTab('rules')">Reglas</button>
@@ -570,6 +577,79 @@
         </div>
       </div>
       <div id="health-container"></div>
+    </div>
+
+    <!-- E37 (2026-09-18). Las promociones del negocio, como dato.
+         Antes esto se escribia como frase en Bot > Personalidad ("esta semana 20% en relojes") y el bot
+         tenia que acordarse de aplicarlo. Lo que se carga aca entra en el precio que el bot cotiza Y en
+         el que se guarda en el pedido, por el mismo camino. -->
+    <div class="tab-panel" data-tab-panel="promotions">
+      <div class="panel-header">
+        <div>
+          <div class="panel-title">Promociones</div>
+          <div class="panel-subtitle">Un descuento cargado acá ya viene aplicado en el precio que cotiza el bot y en el que se cobra. No hace falta pedírselo en las instrucciones.</div>
+        </div>
+      </div>
+
+      <div class="section-title">Nueva promoción</div>
+      <div class="card" id="new-promotion-card">
+        <div class="grid-2">
+          <div>
+            <label>Nombre</label>
+            <input id="promo-name" placeholder="Ej: Aniversario" />
+          </div>
+          <div>
+            <label>Descuento</label>
+            <div style="display:flex; gap:8px;">
+              <select id="promo-kind" style="flex:0 0 130px;">
+                <option value="PERCENT">Porcentaje</option>
+                <option value="AMOUNT">Monto fijo</option>
+              </select>
+              <input id="promo-value" type="number" min="0" step="0.01" placeholder="Ej: 20" style="flex:1 1 auto;" />
+            </div>
+          </div>
+        </div>
+        <div class="grid-2">
+          <div>
+            <label>Aplica a</label>
+            <select id="promo-scope" onchange="onPromotionScopeChange()">
+              <option value="GLOBAL">Todo el catálogo</option>
+              <option value="CATEGORY">Una categoría</option>
+              <option value="PRODUCT">Un producto</option>
+            </select>
+          </div>
+          <div id="promo-category-field" hidden>
+            <label>Categoría</label>
+            <input id="promo-category" placeholder="Ej: Relojes" />
+          </div>
+          <div id="promo-product-field" hidden>
+            <label>Producto</label>
+            <select id="promo-product"></select>
+          </div>
+        </div>
+        <div class="grid-2">
+          <div>
+            <label>Mínimo de unidades</label>
+            <input id="promo-min-quantity" type="number" min="1" step="1" placeholder="1" />
+          </div>
+          <div>
+            <label>Vigencia</label>
+            <div style="display:flex; gap:8px;">
+              <input id="promo-starts-at" type="date" style="flex:1 1 auto;" />
+              <input id="promo-ends-at" type="date" style="flex:1 1 auto;" />
+            </div>
+          </div>
+        </div>
+        <div class="actions-row">
+          <button class="btn-secondary" id="promo-cancel-btn" style="display:none;" onclick="cancelEditPromotion()">Cancelar</button>
+          <button class="btn-primary" id="promo-submit-btn" onclick="savePromotion()">+ Agregar promoción</button>
+        </div>
+      </div>
+
+      <div class="section-title">Promociones cargadas</div>
+      <div class="card">
+        <div id="promotions-list" style="display:flex; flex-direction:column; gap:8px;">Cargando…</div>
+      </div>
     </div>
 
     <div class="tab-panel" data-tab-panel="catalog">

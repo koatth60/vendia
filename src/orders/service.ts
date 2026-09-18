@@ -12,7 +12,8 @@ import { getAgreedPrices, applyAgreedPrices, agreedUnitPriceOf } from "./agreedP
 import { recalcularEtapaDelCliente } from "../crm/customers";
 import { transicionarPedido, TransicionNoPermitida, type Actor, type TxCliente } from "./stateMachine";
 import { Money, sumar } from "../config/dinero";
-import { precioDeVenta } from "../catalog/precioDeVenta";
+import { precioDeVenta, precioDeVentaConPromocion } from "../catalog/precioDeVenta";
+import { promocionesVigentes } from "../catalog/promotions";
 
 export interface ResolvedOrderItem {
   productId: string;
@@ -124,6 +125,9 @@ export async function resolveOrderItems(
 ): Promise<ResolveOrderItemsResult> {
   if (!items || items.length === 0) return { items: [], unresolved: [], needsAttribute: [] };
 
+  // E37: una sola consulta para todo el lote. Las promociones vigentes son del negocio, no de la linea.
+  const promociones = await promocionesVigentes(businessId);
+
   const byKey = new Map<string, ResolvedOrderItem>();
   const unresolved: string[] = [];
   const needsAttribute: string[] = [];
@@ -190,7 +194,10 @@ export async function resolveOrderItems(
         variantId,
         variantLabel,
         quantity,
-        unitPrice: precioDeVenta(product, varianteElegida).comoNumeroParaMostrar(),
+        // E37: la promocion vigente del negocio entra aca, en el mismo lugar que el precio por
+        // variante. Lo que se GUARDA y lo que el bot DIJO salen del mismo calculo.
+        unitPrice: precioDeVentaConPromocion(product, varianteElegida, { promociones, cantidad: quantity })
+          .precio.comoNumeroParaMostrar(),
         currency: product.currency,
       });
     }

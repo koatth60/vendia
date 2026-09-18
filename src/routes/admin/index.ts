@@ -12,6 +12,7 @@ import { ordersRouter } from "./orders";
 import { conversationsRouter } from "./conversations";
 import { dashboardRouter } from "./dashboard";
 import { shippingRouter } from "./shipping";
+import { promotionsRouter } from "./promotions";
 import { searchRouter } from "./search";
 import { whatsappConnectRouter } from "./whatsappConnect";
 
@@ -30,6 +31,7 @@ adminRouter.use(ordersRouter);
 adminRouter.use(conversationsRouter);
 adminRouter.use(dashboardRouter);
 adminRouter.use(shippingRouter);
+adminRouter.use(promotionsRouter);
 adminRouter.use(searchRouter);
 adminRouter.use(whatsappConnectRouter);
 

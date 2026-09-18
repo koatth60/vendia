@@ -63,7 +63,7 @@ window.addEventListener('resize', () => {
 const PANEL_SECTION = {
   inicio: 'inicio',
   conversations: 'crm', customers: 'crm', orders: 'crm',
-  catalog: 'catalogo',
+  catalog: 'catalogo', promotions: 'catalogo',
   business: 'bot', rules: 'bot', faq: 'bot', payments: 'bot', shipping: 'bot', whatsapp: 'bot', health: 'bot',
   negocio: 'negocio', team: 'negocio', 'ai-usage': 'negocio', analytics: 'negocio', configuracion: 'negocio',
 };
@@ -297,6 +297,7 @@ function switchTab(name) {
   if (name === 'inicio') cargarSeccion('inicio', loadDashboard);
   if (name === 'health') cargarSeccion('health', loadHealth);
   if (name === 'shipping') cargarSeccion('shipping', loadShipping);
+  if (name === 'promotions') cargarSeccion('promotions', loadPromotions);
   if (name === 'whatsapp') cargarSeccion('whatsapp', loadWhatsappConnection);
   if (name === 'configuracion') pintarEstadoPwa();
   // Sin boton "Actualizar": la vista se refresca sola mientras está abierta (ver AUTO_REFRESH). Se
@@ -6375,6 +6376,206 @@ boot();
 // get_shipping_rates y get_shipping_rate_for_city, pero no había ninguna pantalla para cargarlas
 // (ver P8 en ONIX-CRM-REORG-PLAN.md) - hasta ahora solo existía scripts/seed-magimp-shipping.ts.
 // ==============================================================================================
+
+// ===========================================================================================
+// PROMOCIONES (E37, 2026-09-18)
+// ===========================================================================================
+//
+// Lo que se carga aca NO es un texto que el bot tenga que recordar: entra en el precio por el mismo
+// camino que el precio por variante (src/catalog/precioDeVenta.ts), asi que lo que el bot cotiza y lo
+// que se cobra no pueden separarse.
+let promotionsCache = [];
+let editingPromotionId = null;
+
+function onPromotionScopeChange() {
+  const scope = document.getElementById('promo-scope').value;
+  document.getElementById('promo-category-field').hidden = scope !== 'CATEGORY';
+  document.getElementById('promo-product-field').hidden = scope !== 'PRODUCT';
+}
+
+function promotionDiscountLabel(promo) {
+  return promo.kind === 'PERCENT' ? Number(promo.value) + '%' : formatMoney(Number(promo.value), 'COP');
+}
+
+function promotionScopeLabel(promo) {
+  if (promo.scope === 'CATEGORY') return 'Categoría: ' + (promo.categoryLabel || '');
+  if (promo.scope === 'PRODUCT') return 'Producto: ' + (promo.product ? promo.product.name : '(borrado)');
+  return 'Todo el catálogo';
+}
+
+// Vigente se calcula igual que en el servidor (src/catalog/promotions.ts): activa y dentro de fechas.
+// Si el panel dijera "vigente" y el precio no la aplicara, la dueña no tendría cómo darse cuenta.
+function promotionIsLive(promo) {
+  if (!promo.active) return false;
+  const ahora = Date.now();
+  if (promo.startsAt && new Date(promo.startsAt).getTime() > ahora) return false;
+  if (promo.endsAt && new Date(promo.endsAt).getTime() < ahora) return false;
+  return true;
+}
+
+function promotionDatesLabel(promo) {
+  const fmt = (v) => new Date(v).toLocaleDateString('es-CO', { day: 'numeric', month: 'short' });
+  const desde = promo.startsAt ? fmt(promo.startsAt) : null;
+  const hasta = promo.endsAt ? fmt(promo.endsAt) : null;
+  if (desde && hasta) return 'Del ' + desde + ' al ' + hasta;
+  if (hasta) return 'Hasta el ' + hasta;
+  if (desde) return 'Desde el ' + desde;
+  return 'Sin fecha de fin';
+}
+
+async function loadPromotions() {
+  const container = document.getElementById('promotions-list');
+  try {
+    const [promos, productos] = await Promise.all([
+      apiFetch('/admin/api/promotions').then((r) => r.json()),
+      // El mismo endpoint que usa el selector de productos del panel: solo activos y ya ordenado.
+      apiFetch('/admin/api/products/for-order-picker').then((r) => r.json()).catch(() => []),
+    ]);
+    promotionsCache = promos;
+
+    const select = document.getElementById('promo-product');
+    const lista = Array.isArray(productos) ? productos : (productos.items || []);
+    select.innerHTML = lista.length === 0
+      ? '<option value="">Primero carga un producto</option>'
+      : lista.map((prod) => '<option value="' + escapeHtml(prod.id) + '">' + escapeHtml(prod.name) + '</option>').join('');
+
+    container.innerHTML = promos.length === 0
+      ? '<div style="font-size:13px; color:var(--onix-muted);">Todavía no cargaste ninguna promoción.</div>'
+      : promos.map((promo) => [
+          '<div style="display:flex; flex-wrap:wrap; align-items:flex-start; justify-content:space-between; gap:10px; padding:10px 12px; border:1px solid var(--onix-border); border-radius:var(--onix-radius-card);">',
+          '<div style="flex:1 1 220px; min-width:0;">',
+          '<strong style="font-size:13.5px;">' + escapeHtml(promo.name) + '</strong>',
+          '<span class="onix-num" style="margin-left:6px;">' + escapeHtml(promotionDiscountLabel(promo)) + '</span>',
+          '<div style="font-size:12px; color:var(--onix-muted); margin-top:2px;">' + escapeHtml(promotionScopeLabel(promo)) + '</div>',
+          '<div style="font-size:12px; color:var(--onix-muted); margin-top:2px;">' + escapeHtml(promotionDatesLabel(promo)) + (promo.minQuantity > 1 ? ' · desde ' + promo.minQuantity + ' unidades' : '') + '</div>',
+          '<div style="font-size:12px; color:' + (promotionIsLive(promo) ? 'var(--onix-accent)' : 'var(--onix-muted)') + '; margin-top:2px;">' + (promotionIsLive(promo) ? 'Vigente ahora' : 'No se está aplicando') + '</div>',
+          '</div>',
+          '<div style="display:flex; flex-wrap:wrap; gap:6px; flex-shrink:0;">',
+          '<button class="btn-secondary" onclick="togglePromotionActive(\'' + promo.id + '\')">' + (promo.active ? 'Apagar' : 'Encender') + '</button>',
+          '<button class="btn-secondary" onclick="editPromotion(\'' + promo.id + '\')">Editar</button>',
+          '<button class="btn-danger" onclick="deletePromotion(\'' + promo.id + '\')">Eliminar</button>',
+          '</div></div>',
+        ].join('')).join('');
+  } catch (err) {
+    container.innerHTML = '<div style="font-size:13px; color:var(--onix-danger);">No se pudieron cargar: ' + escapeHtml(err.message) + '</div>';
+  }
+}
+
+function readPromotionForm() {
+  const soloFecha = (id) => document.getElementById(id).value || null;
+  return {
+    name: document.getElementById('promo-name').value.trim(),
+    kind: document.getElementById('promo-kind').value,
+    value: Number(document.getElementById('promo-value').value),
+    scope: document.getElementById('promo-scope').value,
+    categoryLabel: document.getElementById('promo-category').value.trim() || null,
+    productId: document.getElementById('promo-product').value || null,
+    minQuantity: Number(document.getElementById('promo-min-quantity').value || 1),
+    startsAt: soloFecha('promo-starts-at'),
+    endsAt: soloFecha('promo-ends-at'),
+  };
+}
+
+async function savePromotion() {
+  const cuerpo = readPromotionForm();
+  const editando = editingPromotionId;
+  const anterior = promotionsCache.find((p) => p.id === editando);
+  try {
+    const res = await apiFetch(editando ? '/admin/api/promotions/' + editando : '/admin/api/promotions', {
+      method: editando ? 'PUT' : 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(editando ? Object.assign({}, cuerpo, { active: anterior ? anterior.active : true }) : cuerpo),
+    });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({}));
+      setStatus(error.error || 'No se pudo guardar la promoción', true);
+      return;
+    }
+    cancelEditPromotion();
+    await loadPromotions();
+    setStatus(editando ? 'Promoción actualizada' : 'Promoción creada');
+  } catch (err) {
+    setStatus(err.message, true);
+  }
+}
+
+function editPromotion(id) {
+  const promo = promotionsCache.find((p) => p.id === id);
+  if (!promo) return;
+  editingPromotionId = id;
+  document.getElementById('promo-name').value = promo.name;
+  document.getElementById('promo-kind').value = promo.kind;
+  document.getElementById('promo-value').value = Number(promo.value);
+  document.getElementById('promo-scope').value = promo.scope;
+  document.getElementById('promo-category').value = promo.categoryLabel || '';
+  if (promo.productId) document.getElementById('promo-product').value = promo.productId;
+  document.getElementById('promo-min-quantity').value = promo.minQuantity;
+  document.getElementById('promo-starts-at').value = promo.startsAt ? String(promo.startsAt).slice(0, 10) : '';
+  document.getElementById('promo-ends-at').value = promo.endsAt ? String(promo.endsAt).slice(0, 10) : '';
+  onPromotionScopeChange();
+  document.getElementById('promo-submit-btn').textContent = 'Guardar cambios';
+  document.getElementById('promo-cancel-btn').style.display = 'inline-block';
+  document.getElementById('promo-name').scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+function cancelEditPromotion() {
+  editingPromotionId = null;
+  ['promo-name', 'promo-value', 'promo-category', 'promo-min-quantity', 'promo-starts-at', 'promo-ends-at']
+    .forEach((id) => { document.getElementById(id).value = ''; });
+  document.getElementById('promo-kind').value = 'PERCENT';
+  document.getElementById('promo-scope').value = 'GLOBAL';
+  onPromotionScopeChange();
+  document.getElementById('promo-submit-btn').textContent = '+ Agregar promoción';
+  document.getElementById('promo-cancel-btn').style.display = 'none';
+}
+
+// Apagar en vez de borrar: una promoción que ya se aplicó en pedidos viejos se apaga. Borrarla no
+// cambia lo que se cobró, y deja al panel sin poder explicar por qué ese pedido salió más barato.
+async function togglePromotionActive(id) {
+  const promo = promotionsCache.find((p) => p.id === id);
+  if (!promo) return;
+  try {
+    const res = await apiFetch('/admin/api/promotions/' + id, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: promo.name,
+        kind: promo.kind,
+        value: Number(promo.value),
+        scope: promo.scope,
+        categoryLabel: promo.categoryLabel,
+        productId: promo.productId,
+        minQuantity: promo.minQuantity,
+        startsAt: promo.startsAt,
+        endsAt: promo.endsAt,
+        active: !promo.active,
+      }),
+    });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({}));
+      setStatus(error.error || 'No se pudo cambiar', true);
+      return;
+    }
+    await loadPromotions();
+  } catch (err) {
+    setStatus(err.message, true);
+  }
+}
+
+async function deletePromotion(id) {
+  if (!confirm('¿Eliminar esta promoción? Los pedidos que ya se cerraron con ella no cambian.')) return;
+  try {
+    const res = await apiFetch('/admin/api/promotions/' + id, { method: 'DELETE' });
+    if (!res.ok && res.status !== 204) {
+      setStatus('No se pudo eliminar', true);
+      return;
+    }
+    await loadPromotions();
+    setStatus('Promoción eliminada');
+  } catch (err) {
+    setStatus(err.message, true);
+  }
+}
 
 let shippingRatesCache = [];
 let editingShippingRateId = null;

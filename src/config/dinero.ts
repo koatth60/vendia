@@ -90,6 +90,17 @@ export class Money {
     return new Money(this.monto.times(cantidad), this.moneda);
   }
 
+  /**
+   * Un porcentaje DE este monto. La entrada es 0-100, no una fraccion: `20` es el veinte por ciento.
+   *
+   * Existe para los descuentos (E37). El calculo va por Decimal igual que todo lo demas: `59900 * 0.2`
+   * en flotante da 11980.000000000002, y ese error despues se resta de un precio y se cobra.
+   */
+  porPorcentaje(porcentaje: Prisma.Decimal | string | number): Money {
+    const pct = porcentaje instanceof Prisma.Decimal ? porcentaje : new Prisma.Decimal(porcentaje.toString());
+    return new Money(this.monto.times(pct).dividedBy(100), this.moneda);
+  }
+
   comparar(otro: Money): -1 | 0 | 1 {
     this.mismaMoneda(otro);
     return this.monto.comparedTo(otro.monto) as -1 | 0 | 1;

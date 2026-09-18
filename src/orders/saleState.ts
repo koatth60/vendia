@@ -6,7 +6,8 @@ import { computeCheckoutState, type CheckoutFacts, type CheckoutState } from "./
 import { getBusinessLocale } from "../config/businessConfig";
 import { getAgreedPrices, applyAgreedPrices } from "./agreedPrices";
 import { Money, sumarParaMostrar, totalDeLinea } from "../config/dinero";
-import { precioDeVenta } from "../catalog/precioDeVenta";
+import { precioDeVenta, precioDeVentaConPromocion } from "../catalog/precioDeVenta";
+import { promocionesVigentes } from "../catalog/promotions";
 
 // Fase 2 del plan maestro (2026-09-15), causa raiz C1. Unico dueno de lectura/escritura de SaleState -
 // ver ONIX-PLAN-MAESTRO.md seccion 1.3 y 4 (Fase 2) para el diseno completo. Nada fuera de este archivo
@@ -292,10 +293,14 @@ export async function setOrderItem(
     variantId,
     variantLabel,
     quantity,
-    // E36: el precio de la VARIANTE cuando la tiene; el del producto cuando no. Un solo lugar decide
-    // esto (src/catalog/precioDeVenta.ts), compartido con createOrder: si divergieran, la clienta veria
-    // un precio mientras arma el pedido y le cobrarian otro al cerrarlo.
-    unitPrice: precioDeVenta(product, varianteElegida).comoNumeroParaMostrar(),
+    // E36: el precio de la VARIANTE cuando la tiene; el del producto cuando no. E37: con la promocion
+    // del negocio ya aplicada. Un solo lugar decide esto (src/catalog/precioDeVenta.ts), compartido con
+    // createOrder: si divergieran, la clienta veria un precio mientras arma el pedido y le cobrarian
+    // otro al cerrarlo.
+    unitPrice: precioDeVentaConPromocion(product, varianteElegida, {
+      promociones: await promocionesVigentes(businessId),
+      cantidad: quantity,
+    }).precio.comoNumeroParaMostrar(),
     currency: product.currency,
   };
   const thisKey = `${product.id}|${variantId ?? ""}`;

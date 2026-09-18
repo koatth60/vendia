@@ -1,5 +1,6 @@
 import { Money } from "../config/dinero";
 import type { Prisma } from "@prisma/client";
+import { promocionQueAplica, precioConDescuento, type PromocionAplicable } from "./promotions";
 
 // E36 (2026-09-18). EL PRECIO DE LO QUE SE VENDE, EN UN SOLO LUGAR.
 //
@@ -16,6 +17,10 @@ import type { Prisma } from "@prisma/client";
 export interface ProductoConPrecio {
   price: Prisma.Decimal;
   currency: string;
+  // E37: para decidir si una promocion lo alcanza. Opcionales porque hay llamadores que solo tienen
+  // precio y moneda; sin ellos, una promocion de producto o de categoria simplemente no aplica.
+  id?: string;
+  category?: string | null;
 }
 
 /** Y de la variante elegida, si hubo. `price` null = usa el del producto. */
@@ -37,4 +42,30 @@ export interface VarianteConPrecio {
 export function precioDeVenta(producto: ProductoConPrecio, variante?: VarianteConPrecio | null): Money {
   const precio = variante?.price ?? producto.price;
   return Money.de(precio, producto.currency);
+}
+
+/**
+ * E37 (2026-09-18). EL MISMO PRECIO, CON LA PROMOCION DEL NEGOCIO YA PUESTA.
+ *
+ * Va en ESTA funcion y no en cada llamador por el motivo de siempre: los dos caminos que arman una
+ * linea tienen que dar el mismo numero. Si el descuento se aplicara solo donde el bot cotiza, la
+ * clienta veria el precio con promo y le cobrarian el de lista.
+ *
+ * Devuelve tambien CUAL promocion se aplico, para que el bot pueda contarlo sin tener que deducirlo de
+ * la cifra -- y sobre todo sin tener que calcularla el.
+ */
+export function precioDeVentaConPromocion(
+  producto: ProductoConPrecio,
+  variante: VarianteConPrecio | null | undefined,
+  contexto: { promociones: PromocionAplicable[]; cantidad: number },
+): { precio: Money; precioDeLista: Money; promocion: PromocionAplicable | null } {
+  const precioDeLista = precioDeVenta(producto, variante);
+  if (contexto.promociones.length === 0) return { precio: precioDeLista, precioDeLista, promocion: null };
+
+  const promocion = promocionQueAplica(contexto.promociones, precioDeLista, {
+    productId: producto.id ?? "",
+    category: producto.category ?? null,
+    quantity: contexto.cantidad,
+  });
+  return { precio: precioConDescuento(precioDeLista, promocion), precioDeLista, promocion };
 }

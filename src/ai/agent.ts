@@ -9,6 +9,7 @@ import { sendAlertToOwner } from "../whatsapp/outbound";
 import { recordOwnerMessage } from "../delivery/ownerLog";
 import { recordAgentIncident } from "./incidents";
 import { textMentionsConfiguredCategory, getProductById } from "../catalog/products";
+import { promocionesParaElModelo } from "../catalog/promotions";
 import {
   resolveProductScope,
   withSignedMedia,
@@ -1120,6 +1121,18 @@ export async function generateReply(
     currency: negocio.currency,
     locale: negocio.locale,
   });
+  // E37 (2026-09-18). LAS PROMOCIONES DEL NEGOCIO, como dato y no como frase.
+  //
+  // Antes esto vivia en `customInstructions` ("esta semana 20% en relojes") y el modelo tenia que
+  // acordarse -- y calcular el numero el mismo. Ahora el descuento YA ESTA en el precio que sale de la
+  // base (ver src/catalog/precioDeVenta.ts), asi que esto no decide ninguna cifra: existe para que el
+  // agente pueda contarle a la clienta que hay una promo. Sin promociones vigentes no sale ningun
+  // mensaje, asi que un negocio sin promos no paga un solo token.
+  const promocionesDelNegocio = await promocionesParaElModelo(context.businessId, {
+    locale: negocio.locale,
+    timezone: negocio.timezone,
+  });
+
   // Herramientas nuevas solo visibles (y llamables) para un negocio con la bandera activa - el resto no
   // paga el costo de tokens de un tool que no puede usar. Fase 11: los ejemplos de canal de pago que
   // traen cuatro de sus descripciones son los metodos reales de ESTE negocio, no "Nequi" para todos.
@@ -1205,6 +1218,21 @@ export async function generateReply(
               `PRECIOS ACORDADOS CON EL DUEÑO PARA ESTE CLIENTE, leidos de la base. Para estos productos ` +
               `mandan sobre el precio de lista y son los unicos que valen en esta venta:\n\n` +
               JSON.stringify(agreedPriceFacts),
+          },
+        ]
+      : []),
+    // LAS PROMOCIONES VIGENTES. Dato puro, sin instrucciones: los precios que el modelo ve YA las
+    // tienen aplicadas, asi que no hay ninguna cuenta que pueda equivocar.
+    ...(promocionesDelNegocio.length > 0
+      ? [
+          {
+            role: "system" as const,
+            content:
+              `PROMOCIONES VIGENTES DE ESTE NEGOCIO, leidas de la base. Los precios que ves ya las ` +
+              `tienen aplicadas: no vuelvas a descontar nada ni calcules cifras tú.
+
+` +
+              JSON.stringify(promocionesDelNegocio),
           },
         ]
       : []),

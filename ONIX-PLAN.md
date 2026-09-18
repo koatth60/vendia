@@ -1989,7 +1989,7 @@ tocar ese archivo pide validación con `npm run regression`, que cuesta plata y 
 
 ---
 
-### E37 · Una promoción es un dato, no una frase
+### E37 · Una promoción es un dato, no una frase — **CERRADA el 2026-09-18**, sin desplegar
 
 **Quita:** al modelo, tener que recordar un descuento que alguien mencionó.
 **Porque:** hoy un descuento del negocio no existe como dato. `AgreedPrice` se queda como está: es
@@ -1999,6 +1999,34 @@ cantidad, código opcional) y herramienta `get_active_promotions`. Panel en la m
 **Se prueba:** fixture con una promoción vigente y otra vencida.
 **Tamaño:** M. **Depende de:** `E36`. **Bandera:** no.
 **Vuelta atrás:** revertir; la tabla queda muerta.
+
+**Estado (2026-09-18): CERRADA, sin desplegar.**
+
+- **`Promotion`**: porcentaje o monto, alcance `GLOBAL` / `CATEGORY` / `PRODUCT`, mínimo de unidades,
+  vigencia por fechas y apagado a mano. `AgreedPrice` no se toca: es otra cosa —un acuerdo puntual con
+  una clienta, autorizado por la dueña en esa conversación.
+- **El descuento entra en `precioDeVenta`**, que es el único lugar que le pone precio a una línea. Ahí
+  está la decisión que se le quita al modelo: la cifra con descuento no la escribe él, y lo que el bot
+  **dice** y lo que se **cobra** salen del mismo cálculo. Verificado de punta a punta: promoción creada
+  desde el panel → `resolveOrderItems` devuelve 47.920 sobre un producto de 59.900.
+- **Se elige UNA, nunca se apilan.** Gana la que deja el precio más bajo; si empatan, la más
+  específica; si siguen empatadas, la más vieja. El orden es fijo para que dos turnos con el mismo
+  catálogo den el mismo precio.
+- **Un monto fijo mayor que el precio deja la línea en cero, no en deuda.**
+- **Panel en la misma etapa**, como pide la regla: Catálogo pasa a tener subnavegación (Productos ·
+  Promociones), con el mismo chrome que los otros grupos y sin una regla de CSS nueva. El panel calcula
+  "vigente ahora" con la misma condición que el servidor: si dijera vigente y el precio no la aplicara,
+  la dueña no tendría cómo darse cuenta.
+
+**Una desviación de la ficha, a propósito.** La ficha pedía una herramienta `get_active_promotions`. Se
+implementó como **dato del turno** en su lugar: una herramienta cuesta tokens en cada petición de cada
+negocio —tenga promociones o no— y solo sirve si el modelo se acuerda de llamarla. El dato cuesta cero
+cuando no hay promociones (el caso normal) y no se puede ignorar cuando la hay. La cifra no depende de
+ninguno de los dos caminos: ya viene aplicada en el precio.
+
+**Prompt:** no bajó ninguna línea, y no hay ninguna que borrar — las promociones nunca vivieron en
+`BASE_SYSTEM_PROMPT`, vivían en el `customInstructions` de cada negocio. Lo que esta etapa saca de ahí
+es texto del dueño, no del prompt base.
 
 ---
 
