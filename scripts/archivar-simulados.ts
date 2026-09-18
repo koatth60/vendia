@@ -31,7 +31,7 @@ async function main() {
     select: { id: true, phoneNumber: true, name: true, idNumber: true, deliveryPhone: true, address: true },
   });
 
-  const archivo: unknown[] = [];
+  const archivo: { mensajes: unknown[] }[] = [];
   for (const cliente of clientes) {
     const conversaciones = await prisma.conversation.findMany({
       where: { customerId: cliente.id },
@@ -68,7 +68,7 @@ async function main() {
   const ruta = `${DIRECTORIO}/${sello}.json`;
   writeFileSync(ruta, JSON.stringify({ negocio: negocio.name, guardado: new Date().toISOString(), clientes: archivo }, null, 2));
 
-  const mensajes = archivo.reduce((n, c) => n + (c as { mensajes: unknown[] }).mensajes.length, 0);
+  const mensajes = archivo.reduce((n: number, c) => n + c.mensajes.length, 0);
   console.log(`Archivadas ${archivo.length} conversaciones (${mensajes} mensajes) en ${ruta}`);
   process.exit(0);
 }
