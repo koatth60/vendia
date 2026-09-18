@@ -335,7 +335,8 @@ export interface SendToCustomerParams {
   queueOrigin?: "PANEL" | "OWNER_ANSWER";
   // Guarda el Message en la conversacion cuando el envio sale bien. Los llamadores que ya lo hacen a
   // mano (porque necesitan adjuntar s3Key, producto, etc.) lo dejan sin definir.
-  recordAs?: { text: string } | null;
+  /** `humanAuthor` marca el mensaje como escrito por una persona desde el panel, no por el bot. */
+  recordAs?: { text: string; humanAuthor?: boolean } | null;
 }
 
 async function reengagementTemplate(businessId: string): Promise<{ name: string; language: string } | null> {
@@ -402,7 +403,7 @@ async function sendTextInChunks(params: SendToCustomerParams, chunks: string[]):
     result = await sendSingleContentToCustomer({
       ...params,
       content: { kind: "text", text: chunks[i] },
-      recordAs: params.recordAs ? { text: chunks[i] } : null,
+      recordAs: params.recordAs ? { text: chunks[i], humanAuthor: params.recordAs.humanAuthor } : null,
     });
     totalAttempts += result.attempts;
     if (!result.delivered) break;
@@ -446,7 +447,17 @@ async function sendSingleContentToCustomer(params: SendToCustomerParams): Promis
   }
 
   if (params.recordAs) {
-    await recordMessage(businessId, conversationId, "ASSISTANT", params.recordAs.text, wamid || undefined);
+    await recordMessage(
+      businessId,
+      conversationId,
+      "ASSISTANT",
+      params.recordAs.text,
+      wamid || undefined,
+      undefined,
+      undefined,
+      undefined,
+      { humanAuthor: Boolean(params.recordAs.humanAuthor) },
+    );
   }
   return {
     outcome: "SENT",

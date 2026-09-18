@@ -75,7 +75,7 @@ export interface HealthFinding {
 // razon por la que findMentionedProductsForMediaBackstop y extractDeliveryDataFromAnswer viven aparte.
 export function findHealthIssues(input: {
   conversationId: string;
-  messages: { role: string; content: string; mediaType: string | null; createdAt: Date }[];
+  messages: { role: string; content: string; mediaType: string | null; createdAt: Date; humanAuthor?: boolean }[];
   since: Date;
   customer: { idNumber: string | null; deliveryPhone: string | null };
   hasOrder: boolean;
@@ -89,8 +89,18 @@ export function findHealthIssues(input: {
   turnos?: { createdAt: Date }[];
 }): HealthFinding[] {
   const out: HealthFinding[] = [];
-  const { conversationId, messages, since, customer, hasOrder, turnos } = input;
+  const { conversationId, messages: todos, since, customer, hasOrder, turnos } = input;
   const add = (kind: string, detail: string) => out.push({ kind, conversationId, detail });
+
+  // LO QUE ESCRIBIO UNA PERSONA NO SE LE ATRIBUYE AL BOT (2026-09-18).
+  //
+  // `role: "ASSISTANT"` es el bot Y la duena escribiendo desde el panel. Todos los chequeos de aca
+  // abajo juzgan al bot -- "prometio fotos y no salieron", "dijo que ya tiene la cedula", "contesto dos
+  // veces" -- y hasta hoy le achacaban lo que escribio ella. En la semana del 2026-09-18 eso eran 20 de
+  // los 141 avisos de respuesta duplicada: dos mensajes suyos seguidos.
+  //
+  // Desde Message.humanAuthor esto es un dato de la fila, no una deduccion.
+  const messages = todos.filter((m) => !m.humanAuthor);
   const recent = messages.filter((m) => m.createdAt >= since);
 
   for (const m of recent) {
@@ -213,7 +223,7 @@ export async function runConversationHealthJob(): Promise<void> {
           prisma.message.findMany({
             where: { conversationId },
             orderBy: { createdAt: "asc" },
-            select: { role: true, content: true, mediaType: true, createdAt: true },
+            select: { role: true, content: true, mediaType: true, createdAt: true, humanAuthor: true },
           }),
           // Del CLIENTE, no de esta conversacion: desde que la Bandeja agrupa por cliente, un pedido
           // abierto en otro ciclo suyo es igual de real. Uno de los 8 incidentes de la semana era esto.

@@ -193,7 +193,8 @@ conversationsRouter.post("/api/conversations/:id/messages", adminCostlyLimiter, 
       to: conversation.customer.phoneNumber,
       content: { kind: "text", text: formattedText },
       onWindowClosed: "fail",
-      recordAs: { text: formattedText },
+      // Lo escribio una persona desde el panel, no el bot. Ver Message.humanAuthor.
+      recordAs: { text: formattedText, humanAuthor: true },
     });
     if (!suelto.delivered) {
       res.status(502).json({ error: suelto.failure?.message ?? "No se pudo enviar el mensaje" });
@@ -252,7 +253,10 @@ conversationsRouter.post("/api/conversations/:id/messages", adminCostlyLimiter, 
           "ASSISTANT",
           caption || placeholderForFolder(folder, filename),
           media.wamid || undefined,
-          { s3Key: key, type, filename: type === "DOCUMENT" ? filename : undefined, peaks: picos }
+          { s3Key: key, type, filename: type === "DOCUMENT" ? filename : undefined, peaks: picos },
+          undefined,
+          undefined,
+          { humanAuthor: true },
         );
         enviados += 1;
       } catch (error) {
@@ -278,7 +282,8 @@ conversationsRouter.post("/api/conversations/:id/messages", adminCostlyLimiter, 
       to: conversation.customer.phoneNumber,
       content: { kind: "text", text: formattedText },
       onWindowClosed: "fail",
-      recordAs: { text: formattedText },
+      // Lo escribio una persona desde el panel, no el bot. Ver Message.humanAuthor.
+      recordAs: { text: formattedText, humanAuthor: true },
     });
     if (!sent.delivered) throw new Error(sent.failure?.message ?? "No se pudo enviar el mensaje");
   }
@@ -368,7 +373,17 @@ conversationsRouter.post("/api/conversations/:id/send-template", async (req, res
   if (!sent.delivered) throw new Error(sent.failure?.message ?? "No se pudo enviar la plantilla");
   // Records the template's real wording, not just its name - the thread should read like a normal
   // message the customer actually saw, same as every other outbound bubble.
-  await recordMessage(businessId, String(req.params.id), "ASSISTANT", template.bodyText || `[Plantilla: ${templateName}]`, sent.wamid || undefined);
+  await recordMessage(
+    businessId,
+    String(req.params.id),
+    "ASSISTANT",
+    template.bodyText || `[Plantilla: ${templateName}]`,
+    sent.wamid || undefined,
+    undefined,
+    undefined,
+    undefined,
+    { humanAuthor: true },
+  );
   await setHumanControl(businessId, String(req.params.id), true, "PANEL_TEMPLATE");
   await clearAgentRequestFlag(businessId, String(req.params.id));
   // Una plantilla no es la respuesta del dueno a nada: cierra la pregunta, pero no se aprende de ella.
@@ -649,7 +664,7 @@ conversationsRouter.post("/api/conversations/:id/close-sale", async (req, res) =
     // dueno por WhatsApp. No se pierde el texto.
     onWindowClosed: "queue",
     queueOrigin: "PANEL",
-    recordAs: { text },
+    recordAs: { text, humanAuthor: true },
   });
   if (!sent.delivered) {
     console.error("No se pudo entregar el mensaje de cierre de la venta manual:", sent.failure?.message);

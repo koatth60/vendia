@@ -1212,6 +1212,16 @@ model Message {
   conversation      Conversation @relation(fields: [conversationId], references: [id])
   conversationId    String
   role              MessageRole
+  // QUIEN ESCRIBIO ESTE MENSAJE, cuando el rol es ASSISTANT (2026-09-18).
+  //
+  // `role` no alcanza: ASSISTANT es el bot Y la duena escribiendo desde el panel, y hasta hoy no habia
+  // forma de distinguirlos. Eso hacia que los chequeos de salud le atribuyeran al bot lo que escribio
+  // una persona: 20 de los 141 "respuesta duplicada" de la semana del 2026-09-18 eran ella mandando dos
+  // mensajes seguidos, y el clasificador de E06 tuvo que deducirlo por la AUSENCIA de un AgentTurn.
+  //
+  // Es un dato, no una deduccion: lo escribe el camino del panel, que es el unico que sabe que del otro
+  // lado hay una persona.
+  humanAuthor       Boolean     @default(false)
   content           String
   mediaS3Key        String?
   mediaType         MediaType?

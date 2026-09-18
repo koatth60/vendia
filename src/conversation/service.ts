@@ -196,13 +196,16 @@ export async function recordMessage(
   whatsappMessageId?: string,
   media?: { s3Key: string; type: "IMAGE" | "VIDEO" | "AUDIO" | "DOCUMENT"; filename?: string; peaks?: string | null },
   imageAnalysis?: string,
-  relatedProductId?: string
+  relatedProductId?: string,
+  /** E06 (2026-09-18): `humanAuthor` lo pone el camino del panel. Ver Message.humanAuthor en el esquema. */
+  opts?: { humanAuthor?: boolean }
 ) {
   const message = await prisma.message.create({
     data: {
       conversationId,
       role,
       content,
+      humanAuthor: opts?.humanAuthor ?? false,
       whatsappMessageId,
       mediaS3Key: media?.s3Key,
       mediaType: media?.type,

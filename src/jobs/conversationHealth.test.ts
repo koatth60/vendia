@@ -158,6 +158,25 @@ test("sin el dato de los turnos no se afirma que hubo duplicado", () => {
   assert.deepEqual(found, []);
 });
 
+test("lo que escribio la duena desde el panel no se juzga como si fuera del bot", () => {
+  // 2026-09-18: `role: ASSISTANT` es el bot Y la duena escribiendo desde el panel. Todos estos chequeos
+  // juzgan al bot, y hasta hoy le achacaban lo que escribio ella. Con Message.humanAuthor es un dato de
+  // la fila y no una deduccion.
+  const found = findHealthIssues({
+    conversationId: "c-humano",
+    since,
+    customer: sinDatos,
+    hasOrder: true,
+    messages: [
+      msg("CUSTOMER", "hola", "03:05:00"),
+      { ...msg("ASSISTANT", "ya tengo tu cedula, tranquila", "03:05:05"), humanAuthor: true },
+      { ...msg("ASSISTANT", "aqui te van las fotos", "03:05:07"), humanAuthor: true },
+    ],
+    turnos: [{ createdAt: at("03:05:06") }, { createdAt: at("03:05:08") }],
+  });
+  assert.deepEqual(found, [], "ni duplicado, ni dato no guardado, ni foto prometida: no lo escribio el bot");
+});
+
 test("detecta una venta cerrada que no quedo registrada", () => {
   const found = findHealthIssues({
     conversationId: "c5",
