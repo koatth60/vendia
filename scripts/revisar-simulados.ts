@@ -129,7 +129,7 @@ async function main() {
       }
       console.log("-".repeat(100));
       for (const m of conv.messages) {
-        const quien = m.role === "USER" ? "CLIENTE" : m.role === "ASSISTANT" ? "  ONIX " : `  ${m.role}`;
+        const quien = m.role === "CUSTOMER" ? "CLIENTE" : m.role === "ASSISTANT" ? "  ONIX " : `  ${m.role}`;
         const cuerpo = m.mediaType ? `[${m.mediaType}] ${m.content ?? ""}` : m.content ?? "";
         console.log(`${quien} | ${cuerpo.replace(/\n+/g, " | ").slice(0, LARGO)}`);
       }
