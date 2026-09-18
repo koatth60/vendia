@@ -753,6 +753,61 @@ ningún envío; fixture donde el envío del bloque falla y su media **no** queda
 **Tamaño:** L. **Depende de:** nada. **Bandera:** no.
 **Vuelta atrás:** revertir; el efecto sale de la tabla.
 
+#### Caso real que le AMPLÍA el disparador (2026-09-18, reportado por el dueño)
+
+Conversación `cmu69ybx60001od2kurx01zha`, MAGByLizN, 2026-09-18 01:23 UTC. La clienta escribe, manda
+una foto de un producto que no está en el catálogo, y el bot contesta:
+
+> ¡Con mucho gusto! 😊 Aquí te dejo nuestro catálogo por categorías para que veas las opciones:
+
+Y no llegó nada. Los tres `AgentTurn` de esa conversación, tal cual:
+
+```
+01:23:22  toolsCalled: []  scope: "none"  blocks: []  catalogInlined: false
+01:23:38  toolsCalled: []  scope: "none"  blocks: []  catalogInlined: false
+01:23:43  toolsCalled: []  scope: "none"  blocks: []  catalogInlined: false
+```
+
+No falló ningún envío: **nunca hubo envío**. El modelo no llamó ninguna herramienta y el servidor no
+compuso ningún bloque, así que la frase salió sola. Cero `AgentIncident`: ningún respaldo lo vio.
+
+**Por qué esta ficha, como está escrita, no lo atrapa.** El disparador de `MEDIA_SENT` es "el turno
+llamó `send_product_media`, o el alcance resuelto trae media". Acá `toolsCalled` está vacío y `scope`
+es `none`: no hay disparador, así que el efecto nunca se exige. El agujero es justo el peor caso — el
+modelo que promete **sin llamar nada** es el que ninguna verificación anclada a la llamada puede ver.
+
+**Repro local, determinista, sin red a DeepSeek** (base local, modelo mockeado devolviendo esa misma
+frase y cero `tool_calls`; el único cambio entre los dos turnos es lo que dijo la clienta):
+
+```
+A - la clienta pide el catalogo ("muestrame todo el catalogo completo con precios")
+  toolsCalled: []   scope: all:2   bloques: 2   catalogo real en la salida: SI
+B - caso Viviana (la clienta no pidio nada en ese turno)
+  toolsCalled: []   scope: none    bloques: 0   catalogo real en la salida: NO
+```
+
+O sea: **la garantía existe y funciona, pero cuelga del texto de la clienta, no de lo que el bot
+prometió.** `resolveProductScope` mira lo que ella escribió; si ahí no hay pedido de catálogo, no hay
+bloque, y la prosa del modelo queda sin nadie detrás. El caso B es exactamente la pantalla que reportó
+el dueño.
+
+**Qué implica para el diseño de esta etapa.** El disparador no puede salir de lo que el modelo hizo
+(llamó o no llamó) ni de una expresión regular sobre su prosa — eso último es parche explícito según la
+Parte I. Tiene que salir del estado, que es consulta: *esta conversación no tiene catálogo enviado y la
+clienta preguntó qué venden*. Con eso, el bloque lo compone el servidor tanto en A como en B, y la
+promesa nunca puede quedar sola.
+
+**Y hay un segundo defecto encima, de otra familia.** Ese turno de las 01:23:43 salió **sin ningún
+mensaje nuevo de la clienta**: el último es la imagen de las 01:23:36. El bot le contestó a su propia
+pregunta ("¿Te gustaría que te muestre lo que tenemos?" → "¡Con mucho gusto!"). Dos `ASSISTANT`
+seguidas, 5 s, sin nada de la clienta en medio, ninguna con media: la firma exacta que cuenta el
+detector de `E06`. No hay `AgentIncident` en esa conversación, y falta mirar si el job ya había corrido
+sobre esa ventana antes de darlo por defecto del detector.
+
+Los tres mensajes cortos que se ven después en la pantalla ("hola nena si sra", "35 mil", "pillo
+secador") **no son del bot**: la conversación tiene `humanControl: true` y es la dueña escribiendo desde
+el panel. Eso funcionó como debe.
+
 ---
 
 ### E11 · Un color que no existe no sale
