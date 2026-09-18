@@ -20,6 +20,11 @@ import { setHumanControl } from "../src/conversation/service";
 //     contesta CITANDO el mensaje del bot (context.id con su wamid, ver handleOwnerReply).
 //   flag_conversation_intent -> no crea nada: apaga el bot y espera a que alguien entre al panel. Se
 //     contesta escribiéndole al cliente como persona y devolviendo el control.
+//   la CONFIRMACIÓN DE VENTA -> el bot le manda al dueño "¿te llegó el pago?" y guarda el wamid en
+//     Conversation.pendingConfirmationMessageId. En un pedido prepago el Order NO EXISTE hasta que el
+//     dueño contesta que sí: medido el 2026-09-18, tres conversaciones con el comprobante ya mandado, el
+//     bot diciéndole al cliente "tu pedido está completo y en verificación de pago", y cero pedidos en
+//     la lista. No es que el bot fallara: nadie contestó la confirmación.
 
 const URL_BASE = process.env.URL ?? "http://localhost:3000";
 
@@ -117,6 +122,28 @@ export async function atenderComoDueno(
     });
     atendidas++;
     await new Promise((r) => setTimeout(r, 4000));
+  }
+
+  // La confirmacion de venta: sin esto, un pedido prepago no llega a existir nunca.
+  const esperandoConfirmacion = await prisma.conversation.findUnique({
+    where: { id: conversationId },
+    select: { pendingConfirmationMessageId: true, pendingConfirmationAskedAt: true },
+  });
+  if (esperandoConfirmacion?.pendingConfirmationAskedAt && esperandoConfirmacion.pendingConfirmationMessageId) {
+    await fetch(`${URL_BASE}/webhook`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(
+        cuerpoDeWebhookDelDueno(
+          credenciales.phoneNumberId,
+          telefonoDelDueno,
+          "si, ya me llego el pago",
+          esperandoConfirmacion.pendingConfirmationMessageId,
+        ),
+      ),
+    });
+    atendidas++;
+    await new Promise((r) => setTimeout(r, 5000));
   }
 
   const conversacion = await prisma.conversation.findUnique({
