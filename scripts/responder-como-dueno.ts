@@ -1,6 +1,9 @@
 import "dotenv/config";
 import { randomUUID } from "node:crypto";
 import { prisma } from "../src/db/client";
+import { sendToCustomer } from "../src/whatsapp/outbound";
+import { setHumanControl } from "../src/conversation/service";
+import { getWhatsappCredentials } from "../src/whatsapp/credentials";
 
 // CONTESTAR COMO EL DUEÑO, PARA PROBAR EL CIRCUITO COMPLETO (2026-09-18).
 //
@@ -80,6 +83,65 @@ async function respuestaPara(kind: string, businessId: string, conversationId: s
   }
 
   return "Si, lo manejamos. Decile que si, que no hay problema y seguimos con el pedido.";
+}
+
+/**
+ * Las conversaciones que `flag_conversation_intent` dejo en manos de una persona.
+ *
+ * Son el OTRO camino de escalacion, y no se pueden contestar citando por WhatsApp: ahi no hay ninguna
+ * `PendingOwnerQuestion`, el bot simplemente se calla y espera a que alguien entre al panel. Medido el
+ * 2026-09-18: de 24 conversaciones, 4 quedaron asi, y el cliente que habia preguntado "puedo devolverlo
+ * si no me gusta?" no recibio una sola palabra mas.
+ *
+ * Esto hace lo que haria el dueño desde el panel: escribe la respuesta como persona (`humanAuthor`) y
+ * le devuelve la conversacion al bot.
+ */
+async function atenderLasQueEsperanUnaPersona(businessId: string) {
+  const enEspera = await prisma.conversation.findMany({
+    where: { customer: { businessId, simulated: true }, humanControl: true },
+    select: { id: true, intent: true, customer: { select: { phoneNumber: true } } },
+  });
+  if (enEspera.length === 0) {
+    console.log("Ninguna conversacion esperando a una persona.
+");
+    return;
+  }
+
+  console.log(`
+${enEspera.length} conversacion(es) esperando a una persona:
+`);
+  const credentials = await getWhatsappCredentials(businessId);
+  if (!credentials) {
+    console.error("Sin credenciales de WhatsApp no se puede contestar como persona.");
+    return;
+  }
+
+  const RESPUESTA: Record<string, string> = {
+    PQR: "Hola, soy del equipo. Ya revise tu caso: si el producto llego con algun problema te lo cambiamos sin costo. Contame que paso exactamente y lo resolvemos hoy mismo.",
+    DEVOLUCION: "Hola, soy del equipo. Si tenes cambios de opinion, aceptamos cambios dentro de los 5 dias siguientes a la entrega, con el producto sin usar y en su empaque. Contame cual es el pedido y lo gestiono.",
+    NO_RECIBIDO: "Hola, soy del equipo. Ya estoy revisando tu envio con la transportadora. Pasame por favor tu numero de cedula y te confirmo hoy mismo donde va.",
+    SOLICITA_AGENTE: "Hola, soy del equipo, ya estoy aca. Contame en que te ayudo.",
+  };
+
+  for (const c of enEspera) {
+    const texto = RESPUESTA[c.intent ?? ""] ?? RESPUESTA.SOLICITA_AGENTE;
+    const enviado = await sendToCustomer({
+      businessId,
+      conversationId: c.id,
+      credentials,
+      to: c.customer.phoneNumber,
+      content: { kind: "text", text: texto },
+      onWindowClosed: "fail",
+      recordAs: { text: texto, humanAuthor: true },
+    });
+    // Y se le devuelve la conversacion al bot, que es lo que cierra el circuito: sin esto queda muda
+    // para siempre aunque la persona ya haya contestado.
+    await setHumanControl(businessId, c.id, false, "RESPUESTA_DEL_DUENO");
+    console.log(`--- ${c.intent ?? "sin intent"} ${c.customer.phoneNumber}`);
+    console.log(`    conteste como persona: ${enviado.delivered ? "SI" : "NO (" + (enviado.failure?.message ?? "sin detalle") + ")"}`);
+    console.log(`    el bot vuelve a atender: SI
+`);
+  }
 }
 
 async function main() {
@@ -165,7 +227,9 @@ async function main() {
     console.log(`    ultima al cliente: ${(ultima?.content ?? "(nada)").replace(/\n+/g, " | ").slice(0, 140)}\n`);
   }
 
-  console.log(`${contestadas} contestada(s).`);
+  await atenderLasQueEsperanUnaPersona(negocio.id);
+
+  console.log(`${contestadas} pregunta(s) contestada(s).`);
   process.exit(0);
 }
 

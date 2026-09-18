@@ -61,3 +61,25 @@ export async function descargarMedioSimulado(mediaId: string): Promise<{ buffer:
 
   throw new Error(`Medio simulado desconocido: "${mediaId}". Las formas validas son sim.comprobante:<monto>:<metodo> y sim.producto:<productId>.`);
 }
+
+/**
+ * True cuando el "dueño" de ese negocio es un número de prueba.
+ *
+ * Pedido del dueño el 2026-09-18: poder correr el circuito completo -- incluidas las escalaciones, las
+ * respuestas del dueño y la toma de control humano -- sin que le lleguen cinco notificaciones al
+ * teléfono por cada tanda.
+ *
+ * Es la MISMA marca que ya usan los clientes (`Customer.simulated`), no un interruptor nuevo: se pone
+ * como `contactPhone` del negocio un número que existe como cliente simulado, y los avisos al dueño
+ * dejan de salir a Meta igual que las respuestas a esos clientes. El mensaje se registra igual, así que
+ * el circuito se puede seguir leyendo entero en la base.
+ */
+export async function esDuenoSimulado(businessId: string, telefono: string): Promise<boolean> {
+  const soloDigitos = telefono.replace(/[^0-9]/g, "");
+  if (!soloDigitos) return false;
+  const cliente = await prisma.customer.findFirst({
+    where: { businessId, phoneNumber: soloDigitos, simulated: true },
+    select: { id: true },
+  });
+  return Boolean(cliente);
+}

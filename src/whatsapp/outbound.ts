@@ -13,6 +13,7 @@
 // Reexporta lo que NO es envio (descarga de medios, gestion de plantillas, foto de perfil, formato de
 // texto) para que el resto del codigo tenga un solo import de WhatsApp y la regla "cero llamadas
 // directas a client.ts" sea literal y verificable con un grep, en vez de una lista de excepciones.
+import { esDuenoSimulado } from "./simulacion";
 import { randomUUID } from "node:crypto";
 import { prisma } from "../db/client";
 import {
@@ -595,12 +596,26 @@ async function handleClosedWindow(params: SendToCustomerParams, policy: WindowCl
 // La duena no es un Customer y no tiene Conversation, asi que no hay ventana de 24h que consultar en la
 // base para ella: sendOwnerAlert ya resuelve eso mandando la plantilla aprobada primero y cayendo a
 // texto libre solo si la plantilla no existe todavia. Lo que faltaba era el reintento y el registro.
+/**
+ * Un aviso al dueño cuando el dueño es de prueba: se registra, no se manda.
+ *
+ * Misma idea que `entregaSimulada` para los clientes, y por la misma razón: el circuito completo --
+ * escalación, aviso, respuesta del dueño, vuelta al cliente -- sólo se puede probar de punta a punta si
+ * los avisos no le caen encima a una persona de verdad cada vez.
+ */
+async function avisoSimuladoAlDueno(conQue: string): Promise<OutboundResult> {
+  const wamid = `sim.${randomUUID()}`;
+  console.log(`[SIMULACION] No se llamo a Meta (dueno de prueba): ${conQue}`);
+  return { outcome: "SENT", delivered: true, wamid, attempts: 0, windowOpen: null, queued: false, queuedId: null, failure: null };
+}
+
 export async function sendAlertToOwner(
   businessId: string,
   credentials: WhatsappCredentials,
   ownerPhone: string,
   text: string
 ): Promise<OutboundResult> {
+  if (await esDuenoSimulado(businessId, ownerPhone)) return avisoSimuladoAlDueno("alerta");
   const { wamid, attempts, failure } = await sendWithRetries(() => sendOwnerAlert(credentials, ownerPhone, text));
   if (failure) {
     await noteFailure(businessId, ownerPhone, failure);
@@ -628,6 +643,7 @@ export async function sendToOwner(
   ownerPhone: string,
   content: OutboundContent
 ): Promise<OutboundResult> {
+  if (await esDuenoSimulado(businessId, ownerPhone)) return avisoSimuladoAlDueno(content.kind);
   const { wamid, attempts, failure } = await sendWithRetries(() => dispatch(credentials, ownerPhone, content));
   if (failure) {
     await noteFailure(businessId, ownerPhone, failure);
