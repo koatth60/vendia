@@ -180,6 +180,74 @@ test("con el cliente en post-venta, una categoria nombrada al pasar no dispara l
   assert.equal(suppressBrowsingScope(navegando, texto, false).kind, "group", "sin post-venta no se suprime nada");
 });
 
+// ==============================================================================================
+// Pedir ver una categoria es navegar, aunque la venta anterior siga abierta (2026-09-18)
+// ==============================================================================================
+//
+// Catalogo propio y chico, con las categorias tal como estan cargadas HOY en produccion
+// ("parlantes", "audifonos"). El fixture anonimizado de arriba trae los nombres viejos
+// ("Tecnologia (Audifonos)"), asi que con el ninguna de estas frases resuelve categoria y la prueba
+// no probaria nada.
+const conCategoriasDeHoy: ScopeProduct[] = [
+  producto("Parlante Charge 6", "parlantes"),
+  producto("Parlante Jbl Go4", "parlantes"),
+  producto("Parlante m25 inmantado", "parlantes"),
+  producto("Audifonos Q70 Earcuff", "audifonos"),
+  producto("Audifonos Lenovo LP40", "audifonos"),
+];
+
+function producto(name: string, category: string): ScopeProduct {
+  return {
+    id: `p-${name.toLowerCase().replace(/\s+/g, "-")}`,
+    name,
+    description: "",
+    category,
+    color: null,
+    size: null,
+    price: 70000,
+    currency: "COP",
+    stock: 5,
+    media: [],
+    variants: [],
+  } as unknown as ScopeProduct;
+}
+
+test("en post-venta, PEDIR ver una categoria SI muestra la vitrina", () => {
+  // El turno de produccion 15:06:30 (conversacion cmu651bgz000gu22kd599spx4). Carlos tenia un pedido
+  // PENDING del dia anterior y escribio "Muestrame parlantes": el alcance se apagaba, el servidor no
+  // componia ni lista ni vitrina, y el modelo termino escribiendo los 14 parlantes de su propia mano y
+  // ofreciendo "dime el numero y te mando las fotos". El negocio tiene catalogPhotoScope = CATEGORY,
+  // que dice lo contrario: la lista MAS una foto por producto.
+  const texto = "Muestrame parlantes";
+  const scope = scopeOf(texto, [], conCategoriasDeHoy);
+  assert.equal(scope.kind, "group");
+  assert.equal(suppressBrowsingScope(scope, texto, true).kind, "group", "pedir ver una categoria es navegar");
+});
+
+test("el verbo cuenta antes y despues de la categoria", () => {
+  // "mandame fotos de los audifonos" es el mismo pedido que "mandame audifonos", pero contando palabra
+  // por palabra quedaban cuatro de distancia. Por eso la cercania se mide en palabras CON CONTENIDO.
+  for (const texto of ["que parlantes tienen?", "quiero ver los parlantes", "mandame fotos de los audifonos"]) {
+    const scope = scopeOf(texto, [], conCategoriasDeHoy);
+    assert.equal(scope.kind, "group", `${texto}: sin post-venta tiene que resolver a categoria`);
+    assert.equal(suppressBrowsingScope(scope, texto, true).kind, "group", `${texto}: es un pedido, no una mencion`);
+  }
+});
+
+test("un verbo lejos de la categoria NO alcanza: sigue siendo una mencion al pasar", () => {
+  // Es la diferencia que mantiene cubierto el caso de Andres. El mensaje tiene un verbo de pedir y la
+  // palabra de la categoria, y aun asi no esta pidiendo ver nada.
+  const texto = "quiero saber cuando me llega el parlante gris que compre ayer";
+  const scope = { kind: "group", category: "parlantes", products: conCategoriasDeHoy.slice(0, 3) } as const;
+  assert.equal(suppressBrowsingScope(scope, texto, true).kind, "none");
+});
+
+test("singular y plural son la misma categoria", () => {
+  const texto = "muestrame el parlante";
+  const scope = { kind: "group", category: "parlantes", products: conCategoriasDeHoy.slice(0, 3) } as const;
+  assert.equal(suppressBrowsingScope(scope, texto, true).kind, "group");
+});
+
 test("en post-venta, un pedido explicito de catalogo SI se responde", () => {
   // El error opuesto seria negarle la vidriera a quien la pide con todas las letras.
   const texto = "muéstrame todo el catálogo completo con precios";

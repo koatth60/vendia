@@ -346,8 +346,9 @@ export function resolveProductScopeFrom(
  * entrar a mano.
  *
  * Que se apaga y que no:
- *   - `group` y `all` SI: son alcances de vidriera, y a alguien que ya compro no se le pone la vidriera
- *     adelante porque nombro de pasada lo que compro.
+ *   - `group` y `all` SI, pero solo cuando la categoria aparece AL PASAR: a alguien que ya compro no se
+ *     le pone la vidriera adelante porque nombro lo que compro. Si PIDE ver la categoria ("muestrame
+ *     parlantes", "que parlantes tienen"), no se apaga nada -- ver pideVerLaCategoria.
  *   - `one` y `few` NO: nombrar un producto concreto es una intencion concreta, antes y despues de
  *     comprar. Un cliente que ya compro y pregunta por OTRO producto tiene que poder verlo.
  *   - Un pedido explicito de catalogo ("el catalogo", "que mas tienen") NO: ahi el cliente esta pidiendo
@@ -357,6 +358,105 @@ export function resolveProductScopeFrom(
  * fila de Order dentro de la ventana post-venta, o una confirmacion de pago viva). Ver
  * src/orders/postSale.ts.
  */
+// PEDIR VER UNA CATEGORIA ES NAVEGAR, AUNQUE LA VENTA ANTERIOR SIGA ABIERTA (2026-09-18).
+//
+// Caso real de produccion, conversacion cmu651bgz000gu22kd599spx4, turno 15:06:30. Carlos tenia un
+// pedido PENDING del dia anterior -- o sea, en ventana post-venta -- y escribio "Muestrame parlantes".
+// `suppressBrowsingScope` apagaba el alcance de categoria, asi que el servidor no compuso ni la lista ni
+// la vitrina: el modelo llamo `find_products_by_attributes`, escribio el los 14 parlantes de su propia
+// mano y termino ofreciendo "dime el numero y te mando las fotos". El negocio tiene configurado
+// `catalogPhotoScope = CATEGORY`, que dice exactamente lo contrario: lista MAS una foto por producto.
+//
+// La regla de la vitrina estaba bien; el corte estaba mal puesto. "Nombrar de pasada lo que compro"
+// (Andres: "confirmado lo del reloj, manana a que horas llegaria") y "pedir ver una categoria"
+// (Carlos: "muestrame parlantes") son dos cosas distintas, y lo que las separa no es una opinion: es si
+// la palabra de la categoria viene pegada a un verbo de pedir.
+//
+// POR QUE LA CERCANIA Y NO SOLO "CONTIENE UN VERBO": "quiero saber cuando me llega el parlante" tiene un
+// verbo de pedir Y la categoria, y NO es navegar. Lo que hace la diferencia es que el verbo este junto a
+// la categoria, dentro de dos palabras, en cualquiera de los dos ordenes -- "muestrame parlantes" y
+// "que parlantes tienen" son los dos pedidos.
+const BROWSE_REQUEST_VERBS = new Set([
+  "muestrame", "muestreme", "mostrame", "muestra", "muestre", "muestren", "mostrar", "mostrarme",
+  "ensename", "enseneme", "ensenar", "ver", "veamos", "verlos", "verlas",
+  "mandame", "mandeme", "manda", "mande", "mandas", "enviame", "envieme", "envia", "envie", "envias",
+  "pasame", "paseme", "pasa", "pasas", "tienen", "tienes", "tiene", "tenes", "manejan", "manejas",
+  "hay", "quiero", "busco", "necesito", "dime", "cuales", "cual",
+]);
+// "que" NO entra, aunque "que parlantes tienen" sea un pedido: es tambien el relativo mas comun del
+// idioma. Con el adentro, "cuando me llega el parlante QUE compre ayer" contaba como pedir la vitrina --
+// justo el caso que esta regla existe para no romper. Esa frase igual queda cubierta por "tienen", que
+// viene despues de la categoria.
+
+/** La distancia, en palabras CON CONTENIDO, dentro de la que un verbo de pedir se refiere a la categoria. */
+const CERCANIA_MAXIMA = 2;
+
+/**
+ * Palabras que no cuentan para medir esa distancia.
+ *
+ * "mandame fotos de los combos" y "mandame combos" son el mismo pedido, pero contando palabra por
+ * palabra el primero pone cuatro de distancia y se caia. Sacar los articulos y las preposiciones mide
+ * lo que importa -- cuantas IDEAS hay entre el verbo y la categoria -- en vez de cuantas palabras.
+ */
+const PALABRAS_SIN_CONTENIDO = new Set([
+  "de", "del", "la", "el", "los", "las", "un", "una", "unos", "unas", "al", "a", "en", "por", "para",
+  "con", "y", "o", "mi", "mis", "tu", "tus", "su", "sus", "me", "te", "le", "se", "lo", "les", "nos",
+  "porfa", "porfavor", "favor", "please",
+]);
+
+/**
+ * Las palabras del mensaje, normalizadas y SIN sacar las vacias.
+ *
+ * No se usa `tokenize` a proposito: su lista de vacias incluye "tienen", "quiero", "busco" y "hay", que
+ * son justamente los verbos que aca hay que ver. Para buscar productos esas palabras sobran; para
+ * decidir si el cliente esta pidiendo algo, son el dato.
+ */
+function palabras(texto: string): string[] {
+  return texto
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
+/**
+ * "parlantes" y "parlante" son la misma categoria escrita por dos personas distintas.
+ *
+ * Se prueban las dos formas de plural por separado y no una alternancia `(es|s)$`: esa alternancia
+ * muerde "es" primero, asi que "parlantes" quedaba en "parlant" y dejaba de parecerse a "parlante".
+ * Costo un caso de prueba en rojo antes de verse.
+ */
+function mismaPalabra(una: string, otra: string): boolean {
+  const formas = (palabra: string) => [palabra, palabra.replace(/s$/, ""), palabra.replace(/es$/, "")];
+  const deUna = formas(una);
+  return formas(otra).some((forma) => deUna.includes(forma));
+}
+
+/**
+ * Si el cliente PIDIO ver esta categoria, en vez de nombrarla al pasar.
+ *
+ * Mira solo el texto del CLIENTE, que es lo que el alcance ya hace por definicion. No mira nada que
+ * haya escrito el modelo: deducir de la prosa del modelo lo que quiso hacer es el guard de clase D que
+ * el plan prohibe.
+ */
+export function pideVerLaCategoria(customerText: string, categoria: string): boolean {
+  const dichas = palabras(customerText).filter((palabra) => !PALABRAS_SIN_CONTENIDO.has(palabra));
+  const deLaCategoria = palabras(categoria);
+  if (dichas.length === 0 || deLaCategoria.length === 0) return false;
+
+  for (let i = 0; i < dichas.length; i++) {
+    if (!deLaCategoria.some((palabraDeCategoria) => mismaPalabra(dichas[i], palabraDeCategoria))) continue;
+    const desde = Math.max(0, i - CERCANIA_MAXIMA);
+    const hasta = Math.min(dichas.length - 1, i + CERCANIA_MAXIMA);
+    for (let j = desde; j <= hasta; j++) {
+      if (j !== i && BROWSE_REQUEST_VERBS.has(dichas[j])) return true;
+    }
+  }
+  return false;
+}
+
 export function suppressBrowsingScope(
   scope: ProductScope,
   customerText: string,
@@ -365,6 +465,8 @@ export function suppressBrowsingScope(
   if (!enCierreOPostVenta) return scope;
   if (scope.kind !== "group" && scope.kind !== "all") return scope;
   if (looksLikeCatalogRequest(customerText)) return scope;
+  // Pedir ver ESTA categoria es navegar, y se responde como tal (ver pideVerLaCategoria arriba).
+  if (scope.kind === "group" && pideVerLaCategoria(customerText, scope.category)) return scope;
   return { kind: "none" };
 }
 
