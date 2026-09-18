@@ -478,9 +478,9 @@ en MAGByLizN pesaba más: 84 líneas contra 541. Toda etapa que se lleve un hech
 
 ---
 
-### E06 · De dónde sale la respuesta duplicada — diagnóstico, sin cambio de código
-**Lectura del código HECHA el 2026-09-17** (hallazgos debajo de la ficha). Falta correr la
-clasificación contra producción para cerrarla.
+### E06 · De dónde sale la respuesta duplicada — **CERRADA el 2026-09-18**
+**Lectura del código hecha el 2026-09-17** (hallazgos debajo de la ficha) y **clasificación contra la
+base de producción hecha el 2026-09-18** — el resultado está al final de esta ficha.
 
 **Quita:** nada todavía. Es la única etapa de lectura del plan, y existe porque el incidente número
 uno no tiene causa raíz escrita en ningún lado.
@@ -563,6 +563,39 @@ detector y los reparte en `TROZOS`, `BLOQUE_CATALOGO`, `DOS_TURNOS`, `OTRO_AUTOR
 pm2 no están en la base; el script imprime la marca de hora de cada par para cruzarla a mano con
 `grep -iE "restart|starting" ~/.pm2/pm2.log`. **La tabla que salga va acá abajo, y con eso la etapa
 queda cerrada.**
+
+---
+
+#### El resultado de la clasificación contra producción (2026-09-18)
+
+`scripts/e06-clasificar-duplicadas.ts 7`, corrido contra la base de producción desde la máquina del
+dueño. **141 pares** marcados por el detector en siete días:
+
+| Clase | Casos | % | Qué es |
+|---|---|---|---|
+| `TROZOS` | 58 | 41 % | Un mensaje largo del bot partido por `splitLongMessage` |
+| `BLOQUE_CATALOGO` | 50 | 35 % | La frase del modelo y el bloque que compuso el **servidor** |
+| `OTRO_AUTOR` | 20 | 14 % | Ningún `AgentTurn`: lo escribió la dueña desde el panel |
+| `DOS_TURNOS` | **11** | **8 %** | Dos llamadas a `generateReply` de verdad |
+| `UN_TURNO_OTRO` | 2 | 1 % | Un turno y ninguna de las firmas de arriba |
+
+**La causa raíz del incidente número uno era el detector.** El 92 % de lo que marcaba no era un
+defecto: era un mensaje largo partido, el bloque del catálogo saliendo junto a su frase, o una persona
+escribiendo dos veces seguidas. Ninguna de las tres candidatas de la lectura del código —el lock en
+memoria, el `burstBuffer`, el bloque del servidor— explicaba el volumen, porque el volumen **no
+existía**.
+
+**Y eso costó plata la misma semana.** Con 49 avisos falsos, la lista de incidentes es ruido y nadie la
+mira; los **5 incidentes reales del bloque de pago** (el número de Nequi que nunca salió, la
+conversación de Dennis Vanegas) estuvieron tres días ahí sin que nadie los viera.
+
+**Lo que se hizo con el resultado** (commit `9757579`, fuera del alcance de esta ficha pero anotado
+acá porque es su consecuencia directa): el corte del detector pasa a ser una consulta y no una
+opinión — **dos filas de `AgentTurn`** en la ventana entre los dos mensajes. Un turno partido tiene
+una; lo que escribe una persona no tiene ninguna. De 141 avisos por semana a ~11.
+
+**Quedan los 11 `DOS_TURNOS`**, que son el defecto real y todavía no tienen causa asignada. Ahora son
+visibles: es la primera vez que ese número se puede mirar solo.
 
 ---
 
