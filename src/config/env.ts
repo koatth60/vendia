@@ -10,6 +10,10 @@ export const env = {
   port: Number(process.env.PORT ?? 3000),
   databaseUrl: required("DATABASE_URL"),
   deepseekApiKey: process.env.DEEPSEEK_API_KEY ?? "",
+  // El default es el de siempre: en produccion nadie define esta variable y no cambia nada. Existe para
+  // que las pruebas puedan apuntar el cliente a una direccion muerta y que `npm test` no salga a
+  // internet. Ver el comentario de src/ai/client.ts.
+  deepseekBaseUrl: process.env.DEEPSEEK_BASE_URL ?? "https://api.deepseek.com",
   groqApiKey: process.env.GROQ_API_KEY ?? "",
   anthropicApiKey: process.env.ANTHROPIC_API_KEY ?? "",
   // Fase 8, punto 5: antes caia a "dev-secret-change-me". Ese valor esta en el repositorio, asi que

@@ -52,8 +52,14 @@ payload to DeepSeek on every customer message. Keep this lean going forward:
   tenía una prueba con el comentario `// Real DeepSeek call (no mocking)` escrito arriba, y se llamaba
   `.test.ts` igual: `npm test` la corría y la pagaba en cada push. Estuvo escondida un tiempo porque el
   archivo moría al importar (el cliente de Groq se construía al tope del módulo, ver
-  `src/ai/transcription.ts`) - la falla de CI tapaba el gasto. Al arreglar Groq se destapó y la corrida
-  se colgó 17 minutos facturando antes de que la cancelaran.
+  `src/ai/transcription.ts`) - la falla de CI tapaba el gasto. Al arreglar Groq se destapó: esa corrida
+  llevaba 7 min 50 s de `npm test` cuando se canceló.
+  **Ojo con la lectura fácil de ese número, que en esta misma sesión se escribió mal primero:** esos
+  minutos NO eran "la prueba colgada facturando". La corrida siguiente, ya con la key inválida y sin
+  poder facturar nada, tardó todavía MÁS. El tiempo era de llamadas a DeepSeek que salen a internet y
+  están condenadas a fallar (timeout de 60s + reintento + failover de modelo). Eso se cerró aparte, con
+  `DEEPSEEK_BASE_URL` (ver abajo). El gasto y la lentitud eran dos problemas distintos que se disfrazaban
+  de uno.
   **La lección: las tres veces anteriores se cerraron con una regla de nombres, que es algo que hay que
   acordarse de cumplir. La cuarta se cerró sacando la plata del medio.** El workflow `Tests` ya no
   recibe `secrets.DEEPSEEK_API_KEY`: recibe una key inválida a propósito. No puede facturar porque no
@@ -65,6 +71,17 @@ payload to DeepSeek on every customer message. Keep this lean going forward:
   test:paid`), no la garantía.
   De paso quedó medido cómo se averigua cuál prueba llama de verdad sin adivinar: correr el archivo con
   la key inválida. Las que pasan no llaman; la que falla, sí.
+- **`npm test` no sale a internet, y eso es parte del trato.** Junto con la key inválida, el workflow
+  define `DEEPSEEK_BASE_URL: http://127.0.0.1:9` (puerto discard, nadie escuchando en el runner): la
+  conexión muere en el acto con ECONNREFUSED. Medido el 2026-09-18 sin esa variable: la misma suite
+  tarda **4 min 19 s local y 12 min 49 s en CI**, y esos ~8 minutos de diferencia son espera de llamadas
+  condenadas a fallar. `src/config/env.ts` tiene el default de producción
+  (`https://api.deepseek.com`), así que la variable solo existe para apagarlo en pruebas y en producción
+  nadie la define.
+  **Por qué no se vio antes:** en la máquina donde se probaba, `api.deepseek.com` está bloqueada por el
+  proxy y fallaba en 0,2s sola. En un runner de GitHub no lo está. Una suite que pasa rápido local y
+  tarda media hora en CI es casi siempre esto: I/O de red real que en un lado muere gratis y en el otro
+  no. Correr la suite local y darla por buena no alcanza para medir tiempo de CI.
 
 # Rediseño del panel (dirección A) — reglas de estilo
 

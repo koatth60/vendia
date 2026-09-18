@@ -40,6 +40,13 @@ jobs:
       # Las pruebas que SI tienen que llamar de verdad son las *Paid.ts, y esas no las corre CI: las
       # corre el dueño a mano con `npm run test:paid`.
       DEEPSEEK_API_KEY: ci-test-deepseek-key-invalida-a-proposito
+      # Y ademas, que ni siquiera haya a donde llamar. La key invalida garantiza que no se puede
+      # facturar; esto garantiza que no se pierde tiempo averiguandolo. El puerto 9 (discard) no tiene
+      # a nadie escuchando en el propio runner, asi que la conexion muere en el acto con ECONNREFUSED
+      # en vez de salir a internet. Medido el 2026-09-18 sin esta variable: la misma suite tarda 4 min
+      # 19 s local y 12 min 49 s aca, y esos ~8 minutos son espera de llamadas condenadas a fallar
+      # (timeout de 60s + reintento + failover de modelo).
+      DEEPSEEK_BASE_URL: http://127.0.0.1:9
       SESSION_SECRET: ci-test-secret
       TOKEN_ENCRYPTION_KEY: ci-test-token-encryption-key
       # Firmar una URL de S3 es una cuenta local, no una llamada a AWS: con region y bucket de mentira

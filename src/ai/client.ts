@@ -11,7 +11,15 @@ const REQUEST_TIMEOUT_MS = 60_000;
 
 export const deepseek = new OpenAI({
   apiKey: env.deepseekApiKey,
-  baseURL: "https://api.deepseek.com",
+  // Configurable solo para poder apagarlo en las pruebas; el default es el de siempre y produccion no
+  // define la variable. Medido el 2026-09-18: la misma suite tarda 4 min 19 s local y 12 min 49 s en un
+  // runner de GitHub. Los ~8 minutos de diferencia no son de las pruebas: son de llamadas a DeepSeek
+  // condenadas a fallar que igual salen a internet, con timeout de 60s, reintento y failover de modelo
+  // encima. Apuntando a una direccion donde no escucha nadie, el sistema operativo corta al instante y
+  // la misma prueba pasa igual pero sin esperar.
+  // No se noto antes porque en la maquina donde se probo, api.deepseek.com esta bloqueada y fallaba
+  // rapido sola; en un runner de GitHub no lo esta.
+  baseURL: env.deepseekBaseUrl,
   timeout: REQUEST_TIMEOUT_MS,
   maxRetries: 1,
 });
