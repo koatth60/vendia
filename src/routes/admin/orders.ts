@@ -10,6 +10,7 @@ import {
 import { recordMessage } from "../../conversation/service";
 import { sendToCustomer, formatForWhatsapp, type WhatsappCredentials } from "../../whatsapp/outbound";
 import { uploadMedia } from "../../media/s3";
+import { uploadOnceToWhatsapp } from "../../whatsapp/mediaUpload";
 import { requireOwner } from "../../auth/requireOwner";
 import { upload, businessIdOf, isUnsupportedImageType } from "./shared";
 
@@ -91,12 +92,16 @@ ordersRouter.put("/api/orders/:id/ship", upload.single("file"), async (req, res)
       const type = file.mimetype.startsWith("video") ? "VIDEO" : "IMAGE";
       const folder = type === "VIDEO" ? "videos" : "images";
       const { key, url } = await uploadMedia(file.buffer, file.mimetype, folder);
+      // Igual que en el chat del panel: el archivo viaja hacia Meta y la URL de S3 queda de respaldo,
+      // para que Meta no tenga que descargarla (E17b).
+      const nombre = String(file.originalname || "adjunto").slice(0, 120);
+      const enviable = await uploadOnceToWhatsapp(credentials, file.buffer, file.mimetype, nombre, url);
       const media = await sendToCustomer({
         businessId,
         conversationId: order.conversationId,
         credentials,
         to: order.customer.phoneNumber,
-        content: type === "IMAGE" ? { kind: "image", url } : { kind: "video", url },
+        content: type === "IMAGE" ? { kind: "image", url: enviable } : { kind: "video", url: enviable },
       });
       if (!media.delivered) throw new Error(media.failure?.message ?? "No se pudo enviar el archivo adjunto");
       const wamid = media.wamid;

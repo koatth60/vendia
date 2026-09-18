@@ -121,6 +121,34 @@ export async function resolveSendableMedia(
 }
 
 /**
+ * Lo mismo que resolveSendableMedia, pero para un archivo que se manda UNA vez y no vive en el catalogo:
+ * lo que la duena adjunta desde el panel (una foto suelta en el chat, el comprobante de despacho de un
+ * pedido). Se le sube a Meta y viaja un id, para que Meta no tenga que descargar una URL nuestra - el
+ * paso que producia el 131053 "Downloading media from weblink failed with http code 500" (E17b).
+ *
+ * Sin cache, a proposito: no hay fila de ProductMedia donde guardar el id, y un adjunto del panel no se
+ * repite. Los bytes ya estan en memoria (los acaba de subir la ruta a S3), asi que subirlos no cuesta
+ * ninguna lectura extra.
+ *
+ * Si la subida falla se devuelve `fallbackUrl` y el envio sigue exactamente como antes: este mecanismo
+ * solo puede mejorar la entrega, nunca impedirla.
+ */
+export async function uploadOnceToWhatsapp(
+  credentials: WhatsappCredentials,
+  buffer: Buffer,
+  contentType: string,
+  filename: string,
+  fallbackUrl: string
+): Promise<string> {
+  try {
+    return await uploadMediaToWhatsapp(credentials, buffer, contentType, filename);
+  } catch (error) {
+    console.error(`No se pudo subir a WhatsApp el adjunto "${filename}", se manda por link:`, error);
+    return fallbackUrl;
+  }
+}
+
+/**
  * Invalida el id cacheado de un archivo. Lo llama la capa de salida cuando Meta rechaza un envio por el
  * medio: un id vencido o borrado del lado de Meta se cura solo en el proximo envio, que lo vuelve a subir.
  */

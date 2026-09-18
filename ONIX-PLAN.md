@@ -989,6 +989,33 @@ por tamaño, que tienen que ser cero) antes de darla por cerrada.
 
 ---
 
+### E17b · Lo que manda el panel también viaja hacia Meta
+
+**Quita:** al sistema, depender de que Meta pueda descargar una URL nuestra.
+**Porque:** `E17` y el cambio del 2026-09-17 sacaron el link de S3 del camino del bot, pero no del
+camino del panel. Cuando la dueña adjunta una foto, un video o un documento desde el chat
+(`src/routes/admin/conversations.ts`) o al marcar un pedido como despachado
+(`src/routes/admin/orders.ts`), lo que sale sigue siendo la URL firmada para que Meta la descargue —
+exactamente el paso que producía `131053 Downloading media from weblink failed with http code 500`
+(cinco veces en la línea base). La nota de voz de ese mismo formulario ya viaja como bytes hacia Meta
+desde que existe, así que el camino correcto ya está probado al lado del que falta.
+**Se hace:** el archivo se le sube a Meta y viaja un id, igual que los del catálogo pero **sin caché**:
+un adjunto del panel se manda una sola vez y no tiene fila donde guardar el id. Si la subida falla, se
+cae a la URL de siempre, así que solo puede mejorar la entrega. `sendImageMessage`/`sendVideoMessage`/
+`sendDocumentMessage` ya aceptan id o link y deciden por la forma (`isUploadedMediaId`), así que no
+cambia ninguna firma.
+**Se prueba:** con la subida a Meta mockeada, lo que la ruta le entrega al envío es un id (y por tanto
+sale como `{ id }`, no como `{ link }`); con la subida fallando, sigue siendo la URL de S3.
+**Tamaño:** S. **Depende de:** nada. **Bandera:** no.
+**Vuelta atrás:** revertir; el envío vuelve a mandar el link.
+
+**Estado (2026-09-18): implementada, sin desplegar.** `uploadOnceToWhatsapp` en
+`src/whatsapp/mediaUpload.ts`, usada por los dos adjuntos del panel. La nota de voz no cambió: ya
+viajaba como bytes. Dos pruebas nuevas en `src/whatsapp/mediaUpload.test.ts` (el id, y el respaldo
+cuando Meta rechaza la subida). `npm test` completo antes de desplegar.
+
+---
+
 ### E18 · Fuera de la ventana de 24 h se manda plantilla
 
 **Quita:** al sistema, intentar un envío que Meta va a rechazar.

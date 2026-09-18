@@ -31,6 +31,7 @@ import {
   type OrderItemInput,
 } from "../../orders/service";
 import { uploadMedia } from "../../media/s3";
+import { uploadOnceToWhatsapp } from "../../whatsapp/mediaUpload";
 import { toOggOpus, extractPeaks } from "../../media/voiceNote";
 import { getServerSaleEvidence } from "../../orders/saleState";
 import {
@@ -222,6 +223,9 @@ conversationsRouter.post("/api/conversations/:id/messages", upload.array("files"
         // audio de S3 para dibujarla (ver extractPeaks).
         const picos = folder === "audio" ? await extractPeaks(bytes) : null;
         const { key, url } = await uploadMedia(bytes, declarado, folder);
+        // El archivo se le SUBE a Meta y viaja un id; la URL de S3 queda solo como respaldo si esa
+        // subida falla (E17b). El audio no pasa por aca porque ya viajaba como bytes desde siempre.
+        const enviable = type === "AUDIO" ? url : await uploadOnceToWhatsapp(credentials, bytes, declarado, filename, url);
         const media = await sendToCustomer({
           businessId,
           conversationId: String(req.params.id),
@@ -229,12 +233,12 @@ conversationsRouter.post("/api/conversations/:id/messages", upload.array("files"
           to: conversation.customer.phoneNumber,
           content:
             type === "IMAGE"
-              ? { kind: "image", url, caption }
+              ? { kind: "image", url: enviable, caption }
               : type === "VIDEO"
-                ? { kind: "video", url, caption }
+                ? { kind: "video", url: enviable, caption }
                 : type === "AUDIO"
                   ? { kind: "audio", buffer: bytes, contentType: "audio/ogg" }
-                  : { kind: "document", url, filename, caption },
+                  : { kind: "document", url: enviable, filename, caption },
           // La ventana ya se verifico arriba y la ruta decidio que hacer si estaba cerrada (409 o cola). Si
           // se cerro en el medio, se propaga el error como antes en vez de mandar una plantilla que el dueno
           // no pidio.
