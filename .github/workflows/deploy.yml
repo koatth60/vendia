@@ -10,6 +10,8 @@ name: Servidor
 #   gh workflow run deploy.yml -f accion=estado              # pm2 + commit desplegado
 #   gh workflow run deploy.yml -f accion=logs                # ultimas 120 lineas
 #   gh workflow run deploy.yml -f accion=rollback            # volver al commit anterior
+#   gh workflow run deploy.yml -f accion=diagnostico         # clasifica duplicadas, 7 dias, SOLO LEE
+#   gh workflow run deploy.yml -f accion=diagnostico:14      # lo mismo, 14 dias
 #   gh run watch                                             # seguir la corrida
 #   gh run view --log                                        # leer la salida del servidor
 on:

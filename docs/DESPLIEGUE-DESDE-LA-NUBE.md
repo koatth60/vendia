@@ -89,3 +89,31 @@ alcance de CI sobre produccion y esa decision es del dueno.
 **Regla que no se negocia, anotada el 2026-09-18 a pedido del dueno:** ningun agente borra nada en
 produccion. Ni catalogos, ni pedidos, ni clientes, ni conversaciones. Si algo pareciera necesitar un
 borrado, se anota y se espera.
+
+## `diagnostico`: leer la base de produccion desde la nube (2026-09-18)
+
+La propuesta de la seccion anterior **quedo implementada**. `ci-deploy.sh` acepta una accion mas:
+
+```bash
+gh workflow run deploy.yml -f accion=diagnostico      # ultimos 7 dias
+gh workflow run deploy.yml -f accion=diagnostico:14   # ultimos 14
+gh run watch && gh run view --log                     # aca sale la clasificacion
+```
+
+Corre `scripts/e06-clasificar-duplicadas.ts` contra la base de produccion y devuelve su salida por el
+log del workflow. **Solo lee**: ese script no tiene un INSERT, ni un UPDATE, ni manda ningun mensaje,
+asi que se puede correr con el bot andando.
+
+**La lista es de UN solo script, a proposito.** No es "corre lo que le pasen por SSH": agregar otro
+diagnostico es un cambio al repositorio, que se revisa como cualquier otro. El argumento se valida
+contra `^[0-9]{1,3}$` antes de llegar a ningun lado.
+
+### Como se activa
+
+`ci-deploy.sh` vive en `/opt/vendia/scripts/`, que es el mismo checkout que `deploy.sh` actualiza con
+`git pull`. O sea que **el script se actualiza solo en el proximo despliegue** y no hay que tocar el
+servidor a mano. Como `ci-deploy.sh` termina en `exec`, reemplazarlo mientras corre no rompe nada: el
+proceso ya fue sustituido por `deploy.sh`.
+
+Hasta que se despliegue una rama que lo incluya, `accion=diagnostico` se interpreta como nombre de
+rama y falla — es el comportamiento viejo, no un error nuevo.

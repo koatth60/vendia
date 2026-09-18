@@ -9,6 +9,8 @@
 #   estado            pm2 + version desplegada, sin cambiar nada
 #   logs              ultimas 120 lineas de pm2, sin cambiar nada
 #   rollback          vuelve al commit anterior al ultimo despliegue
+#   diagnostico[:N]   clasifica las respuestas duplicadas de los ultimos N dias (7 por defecto).
+#                     SOLO LEE la base; no cambia nada ni manda ningun mensaje.
 set -euo pipefail
 
 cd /opt/vendia
@@ -28,6 +30,24 @@ case "$PEDIDO" in
     ;;
   rollback)
     exec ./scripts/rollback.sh
+    ;;
+  diagnostico|diagnostico:*)
+    # Solo lectura. Corre el clasificador de E06 contra la base de produccion y devuelve su salida por
+    # el log del workflow. Existe porque cinco etapas del plan (E06, E11, E17, E26, E64) necesitan mirar
+    # datos reales, y desde una sesion en la nube no hay forma de llegar a la base: el puerto 22 del
+    # droplet no responde fuera de la red del dueno.
+    #
+    # La lista es de UN solo script, a proposito. No es "corre lo que le pasen": agregar otro es un
+    # cambio al repositorio, que se revisa. Y ese script no tiene ni un INSERT, ni un UPDATE, ni manda
+    # un mensaje - se puede correr con el bot andando.
+    DIAS="${PEDIDO#diagnostico}"
+    DIAS="${DIAS#:}"
+    DIAS="${DIAS:-7}"
+    if ! printf '%s' "$DIAS" | grep -qE '^[0-9]{1,3}$'; then
+      echo "ci-deploy: diagnostico espera una cantidad de dias, no '$DIAS'" >&2
+      exit 64
+    fi
+    exec npx tsx scripts/e06-clasificar-duplicadas.ts "$DIAS"
     ;;
 esac
 
