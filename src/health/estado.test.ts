@@ -20,13 +20,15 @@ afterEach(async () => {
   if (eventos.length) await prisma.inboundEvent.deleteMany({ where: { id: { in: eventos.splice(0) } } });
 });
 
-test("el reporte nombra SIEMPRE los seis componentes, esten bien o mal", async () => {
+test("el reporte nombra SIEMPRE los siete componentes, esten bien o mal", async () => {
   const salud = await saludDelSistema();
 
   // Un componente que solo aparece cuando falla es un componente que nadie sabe que se esta vigilando.
   assert.deepEqual(
     salud.componentes.map((c) => c.nombre).sort(),
-    ["base", "cola-de-entrada", "credenciales-de-meta", "jobs", "proveedor-de-ia", "turnos-sin-responder"],
+    // "respaldos" entra el 2026-09-18: el job llevaba horas fallando con AccessDenied de S3 y este
+    // reporte decia "ok" igual, porque los respaldos no eran un componente.
+    ["base", "cola-de-entrada", "credenciales-de-meta", "jobs", "proveedor-de-ia", "respaldos", "turnos-sin-responder"],
   );
   assert.equal(salud.componentes.find((c) => c.nombre === "base")?.estado, "ok");
 

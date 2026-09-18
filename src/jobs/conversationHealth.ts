@@ -28,6 +28,15 @@ export const HEALTH_FINDING_PREFIX = "[chequeo]";
 // Ventana de revision: mas ancha que el intervalo del job para que un turno que cae justo en el borde no
 // se pierda entre dos corridas. Repetir un hallazgo es barato (se deduplica abajo); perderlo no.
 const LOOKBACK_MINUTES = 45;
+
+/**
+ * Cuanto se estira la ventana para buscar los turnos del agente alrededor de dos mensajes seguidos.
+ *
+ * Un turno se registra cuando termina, asi que su fila cae DESPUES del primer mensaje que mando. Diez
+ * segundos alcanzan para el turno que ya estaba en vuelo y no tanto como para arrastrar al de la
+ * pregunta siguiente, que llega cuando la clienta escribe de nuevo.
+ */
+const TURNO_MARGEN_MS = 10_000;
 export const HEALTH_CHECK_INTERVAL_MS = 30 * 60 * 1000;
 
 // Guard de agent.ts (detector F1 del diagnostico) que hasta ahora solo dejaba una fila en AgentIncident:
@@ -58,9 +67,17 @@ export function findHealthIssues(input: {
   since: Date;
   customer: { idNumber: string | null; deliveryPhone: string | null };
   hasOrder: boolean;
+  /**
+   * Cuando corrio cada turno del agente en esta conversacion. Es lo que distingue "el bot contesto dos
+   * veces" de "un mensaje largo salio partido en dos": ver RESPUESTA_DUPLICADA abajo.
+   *
+   * Opcional para no romper a ningun llamador viejo; sin turnos, el chequeo de duplicadas no corre --
+   * que es lo correcto: sin el dato no se puede afirmar que hubo dos turnos.
+   */
+  turnos?: { createdAt: Date }[];
 }): HealthFinding[] {
   const out: HealthFinding[] = [];
-  const { conversationId, messages, since, customer, hasOrder } = input;
+  const { conversationId, messages, since, customer, hasOrder, turnos } = input;
   const add = (kind: string, detail: string) => out.push({ kind, conversationId, detail });
   const recent = messages.filter((m) => m.createdAt >= since);
 
@@ -92,14 +109,43 @@ export function findHealthIssues(input: {
     }
   }
 
-  // Dos respuestas del bot con segundos de diferencia: la firma de dos turnos corriendo en paralelo.
-  for (let i = 1; i < messages.length; i++) {
-    const a = messages[i - 1];
-    const b = messages[i];
-    if (a.role !== "ASSISTANT" || b.role !== "ASSISTANT" || a.mediaType || b.mediaType) continue;
-    if (b.createdAt < since) continue;
-    const gap = b.createdAt.getTime() - a.createdAt.getTime();
-    if (gap < 12_000) add("RESPUESTA_DUPLICADA", `dos respuestas con ${Math.round(gap / 1000)}s de diferencia`);
+  // DOS RESPUESTAS DEL BOT CON SEGUNDOS DE DIFERENCIA.
+  //
+  // Medido contra produccion el 2026-09-18 con scripts/e06-clasificar-duplicadas.ts, 7 dias, 141 pares
+  // marcados por esta regla:
+  //
+  //   TROZOS           58  (41%)  un mensaje largo del bot partido por splitLongMessage
+  //   BLOQUE_CATALOGO  50  (35%)  la frase del modelo + el bloque que compuso el servidor
+  //   OTRO_AUTOR       20  (14%)  ningun AgentTurn: lo escribio la duena desde el panel
+  //   DOS_TURNOS       11   (8%)  dos llamadas a generateReply de verdad  <-- el unico defecto
+  //   UN_TURNO_OTRO     2   (1%)
+  //
+  // O sea: el 92% de lo que este chequeo gritaba no era un defecto. Y eso tiene un costo que se pago en
+  // la misma semana -- con 49 avisos falsos, nadie mira la lista, y los 5 incidentes reales del bloque de
+  // pago (el numero de Nequi que nunca salio, 2026-09-18) pasaron desapercibidos tres dias.
+  //
+  // El corte ahora es el mismo que usa el clasificador, y es una consulta y no una opinion: DOS filas de
+  // AgentTurn en la ventana entre los dos mensajes. Un turno que salio partido tiene una sola fila; lo
+  // que escribe la duena no tiene ninguna.
+  if (turnos) {
+    for (let i = 1; i < messages.length; i++) {
+      const a = messages[i - 1];
+      const b = messages[i];
+      if (a.role !== "ASSISTANT" || b.role !== "ASSISTANT" || a.mediaType || b.mediaType) continue;
+      if (b.createdAt < since) continue;
+      const gap = b.createdAt.getTime() - a.createdAt.getTime();
+      if (gap >= 12_000) continue;
+
+      // El margen hacia atras existe porque el turno se registra al TERMINAR: su fila queda despues del
+      // primer mensaje que ya habia mandado. Sin el, un turno legitimo quedaria fuera de la ventana y
+      // volveria a contarse como duplicado.
+      const desde = a.createdAt.getTime() - TURNO_MARGEN_MS;
+      const hasta = b.createdAt.getTime() + TURNO_MARGEN_MS;
+      const enLaVentana = turnos.filter((t) => t.createdAt.getTime() >= desde && t.createdAt.getTime() <= hasta);
+      if (enLaVentana.length < 2) continue;
+
+      add("RESPUESTA_DUPLICADA", `dos respuestas con ${Math.round(gap / 1000)}s de diferencia, y dos turnos del agente detras`);
+    }
   }
 
   // Mando el resumen de cierre y no existe pedido: una venta que no quedo en el sistema.
@@ -153,6 +199,12 @@ export async function runConversationHealthJob(): Promise<void> {
             since,
             customer: conversation.customer,
             hasOrder: Boolean(order),
+            // Los turnos de la ventana, para poder distinguir dos respuestas de un mensaje partido.
+            turnos: await prisma.agentTurn.findMany({
+              where: { conversationId, createdAt: { gte: new Date(since.getTime() - TURNO_MARGEN_MS) } },
+              select: { createdAt: true },
+              orderBy: { createdAt: "asc" },
+            }),
           })
         );
       }

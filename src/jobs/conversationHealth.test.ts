@@ -87,7 +87,11 @@ test("no confunde la foto de la guia con fotos del catalogo", () => {
   assert.equal(found.length, 0);
 });
 
-test("detecta dos respuestas del bot en paralelo", () => {
+// Medido contra produccion el 2026-09-18 (scripts/e06-clasificar-duplicadas.ts, 7 dias): de 141 pares
+// que esta regla marcaba, solo 11 eran dos turnos de verdad. El 92% restante eran un mensaje largo
+// partido, el bloque del catalogo, o la duena escribiendo desde el panel. Lo que separa una cosa de la
+// otra no es el texto: es cuantas filas de AgentTurn hay detras.
+test("dos respuestas del bot CON dos turnos detras si es un duplicado", () => {
   const found = findHealthIssues({
     conversationId: "c4",
     since,
@@ -98,9 +102,60 @@ test("detecta dos respuestas del bot en paralelo", () => {
       msg("ASSISTANT", "¡Perfecto! Tenemos el Serie 11 Mini...", "03:05:05"),
       msg("ASSISTANT", "Ese modelo viene en una sola presentación...", "03:05:09"),
     ],
+    turnos: [{ createdAt: at("03:05:06") }, { createdAt: at("03:05:10") }],
   });
   assert.equal(found.length, 1);
   assert.equal(found[0].kind, "RESPUESTA_DUPLICADA");
+});
+
+test("un mensaje largo partido en dos NO es un duplicado: hay un solo turno", () => {
+  // 41% de lo que este chequeo gritaba en produccion. splitLongMessage parte arriba de 700 caracteres.
+  const found = findHealthIssues({
+    conversationId: "c4b",
+    since,
+    customer: sinDatos,
+    hasOrder: true,
+    messages: [
+      msg("CUSTOMER", "cuentame del serie 11", "03:05:00"),
+      msg("ASSISTANT", "*Smartwatch Serie 11 Mini* — $120.000 ...", "03:05:05"),
+      msg("ASSISTANT", "• Resiste salpicaduras • Carga total en 2h ...", "03:05:06"),
+    ],
+    turnos: [{ createdAt: at("03:05:06") }],
+  });
+  assert.deepEqual(found, []);
+});
+
+test("lo que escribe la duena desde el panel NO es un duplicado: no hay ningun turno", () => {
+  // 14% de los avisos. Dos mensajes seguidos de una persona no son dos turnos del agente.
+  const found = findHealthIssues({
+    conversationId: "c4c",
+    since,
+    customer: sinDatos,
+    hasOrder: true,
+    messages: [
+      msg("CUSTOMER", "hola", "03:05:00"),
+      msg("ASSISTANT", "si sra te la puedo llevar a domicilio", "03:05:05"),
+      msg("ASSISTANT", "el domicilio vale 9 mil", "03:05:09"),
+    ],
+    turnos: [],
+  });
+  assert.deepEqual(found, []);
+});
+
+test("sin el dato de los turnos no se afirma que hubo duplicado", () => {
+  // Un llamador que no pasa `turnos` no puede hacer que este chequeo invente: el dato que decide no esta.
+  const found = findHealthIssues({
+    conversationId: "c4d",
+    since,
+    customer: sinDatos,
+    hasOrder: true,
+    messages: [
+      msg("CUSTOMER", "hola", "03:05:00"),
+      msg("ASSISTANT", "una", "03:05:05"),
+      msg("ASSISTANT", "dos", "03:05:09"),
+    ],
+  });
+  assert.deepEqual(found, []);
 });
 
 test("detecta una venta cerrada que no quedo registrada", () => {
@@ -183,9 +238,12 @@ async function runJobCapturingOwnerAlerts(): Promise<string[]> {
 test("RESPUESTA_DUPLICADA queda registrada pero ya no le avisa al dueno", async () => {
   const { businessId, conversationId } = await seedHealthBusiness();
   try {
-    // Dos respuestas del bot con segundos de diferencia: exactamente lo que produce splitLongMessage.
-    await prisma.message.create({ data: { conversationId, role: "ASSISTANT", content: "Primera parte del mensaje largo." } });
-    await prisma.message.create({ data: { conversationId, role: "ASSISTANT", content: "Segunda parte del mensaje largo." } });
+    // Dos respuestas del bot con segundos de diferencia Y DOS TURNOS detras, que desde el 2026-09-18 es
+    // lo unico que cuenta como duplicado: dos mensajes sueltos son, casi siempre, un mensaje partido.
+    await prisma.message.create({ data: { conversationId, role: "ASSISTANT", content: "Primera respuesta." } });
+    await prisma.message.create({ data: { conversationId, role: "ASSISTANT", content: "Segunda respuesta, del otro turno." } });
+    await prisma.agentTurn.create({ data: { businessId, conversationId, iterations: 1, toolsCalled: [] } });
+    await prisma.agentTurn.create({ data: { businessId, conversationId, iterations: 1, toolsCalled: [] } });
 
     const alerts = await runJobCapturingOwnerAlerts();
 
@@ -195,6 +253,7 @@ test("RESPUESTA_DUPLICADA queda registrada pero ya no le avisa al dueno", async 
     assert.ok(registrado, "el hallazgo se sigue registrando y sigue visible en Bot > Salud");
     assert.equal(alerts.length, 0, "pero no interrumpe a nadie");
   } finally {
+    await prisma.agentTurn.deleteMany({ where: { conversationId } });
     await prisma.ownerMessageLog.deleteMany({ where: { businessId } });
     await teardownReplayBusiness(businessId);
   }

@@ -1,6 +1,7 @@
 import { prisma } from "../db/client";
 import { todasLasGuardias } from "../jobs/sinSolape";
 import { modelFailoverState, refreshModelFailoverState } from "../ai/modelFailover";
+import { ultimoRespaldo } from "../jobs/backup";
 import { MINUTOS_SIN_RESPUESTA } from "../jobs/reconciliacion";
 
 // E24 (2026-09-18). `/health` DEJA DE MENTIR.
@@ -98,15 +99,55 @@ async function colaDeEntrada(): Promise<Componente> {
   };
 }
 
-function jobs(): Componente {
+/**
+ * Cuanto puede pasar sin que NINGUN job haya terminado una pasada antes de sospechar.
+ *
+ * El mas espaciado de los que toman arriendo es el seguimiento post-venta, cada hora. Dos horas dan
+ * margen para una pasada larga sin tapar un worker muerto.
+ */
+const SIN_JOBS_DESDE_HACE_MS = 2 * 60 * 60 * 1000;
+
+async function jobs(): Promise<Componente> {
   const guardias = todasLasGuardias();
   const salteadas = guardias.reduce((suma, g) => suma + g.salteadas, 0);
   const conSalteos = guardias.filter((g) => g.salteadas > 0);
 
   if (guardias.length === 0) {
-    // Pasa en un proceso que no levanta jobs (una prueba, o el proceso `web` cuando exista `E23`). No
-    // es un fallo: es que aca no corren.
-    return { nombre: "jobs", estado: "ok", detalle: "no hay jobs en este proceso", valores: { jobs: 0, salteadas: 0 } };
+    // E23 (2026-09-18): ESTE proceso no tiene jobs -- es el rol `web`. Antes esto devolvia "ok" y
+    // listo, o sea que `/health` daba por sano un sistema donde el worker podia estar muerto: los jobs
+    // son justamente lo que manda mensajes hacia afuera, y el web no los ve.
+    //
+    // La verdad esta en la base, que es lo que E23 dejo: cada job que termina bien anota su `lastRunAt`
+    // en JobLease. Es una consulta, no una opinion, y la puede hacer cualquier proceso.
+    const arriendos = await prisma.jobLease.findMany({ select: { name: true, lastRunAt: true } });
+    const ultimaPasada = arriendos
+      .map((a) => a.lastRunAt)
+      .filter((fecha): fecha is Date => Boolean(fecha))
+      .reduce<Date | null>((masReciente, fecha) => (!masReciente || fecha > masReciente ? fecha : masReciente), null);
+
+    if (!ultimaPasada) {
+      return {
+        nombre: "jobs",
+        estado: "degradado",
+        detalle: "ningun job registro una pasada todavia: el proceso worker puede no estar corriendo",
+        valores: { jobs: arriendos.length, salteadas: 0 },
+      };
+    }
+    const antiguedadMs = Date.now() - ultimaPasada.getTime();
+    if (antiguedadMs > SIN_JOBS_DESDE_HACE_MS) {
+      return {
+        nombre: "jobs",
+        estado: "degradado",
+        detalle: `el ultimo job termino hace ${Math.round(antiguedadMs / 60000)} min: el worker puede estar caido`,
+        valores: { jobs: arriendos.length, salteadas: 0, minutosDesdeLaUltimaPasada: Math.round(antiguedadMs / 60000) },
+      };
+    }
+    return {
+      nombre: "jobs",
+      estado: "ok",
+      detalle: `${arriendos.length} jobs en el worker, ultima pasada hace ${Math.round(antiguedadMs / 60000)} min`,
+      valores: { jobs: arriendos.length, salteadas: 0, minutosDesdeLaUltimaPasada: Math.round(antiguedadMs / 60000) },
+    };
   }
   if (conSalteos.length > 0) {
     return {
@@ -123,6 +164,34 @@ function jobs(): Componente {
     detalle: `${guardias.length} jobs, ninguno se pisa`,
     valores: { jobs: guardias.length, salteadas: 0 },
   };
+}
+
+/**
+ * LOS RESPALDOS, que hasta hoy `/health` no miraba.
+ *
+ * Medido el 2026-09-18: el job de respaldo llevaba horas fallando con `AccessDenied` de S3 y `/health`
+ * respondia "ok" igual, porque los respaldos no eran uno de sus componentes. Un healthcheck que no
+ * mira lo unico que hace que un error sea reversible es exactamente la clase de mentira que E24 vino a
+ * sacar.
+ */
+const RESPALDO_VIEJO_MS = 30 * 60 * 60 * 1000;
+
+async function respaldos(): Promise<Componente> {
+  const { cuando, enS3 } = await ultimoRespaldo();
+  if (!cuando) {
+    return { nombre: "respaldos", estado: "degradado", detalle: "no hay ningun respaldo de la base", valores: { horas: -1, enS3: 0 } };
+  }
+  const horas = Math.round((Date.now() - cuando.getTime()) / (60 * 60 * 1000));
+  const valores = { horas, enS3: enS3 ? 1 : 0 };
+  if (horas > RESPALDO_VIEJO_MS / (60 * 60 * 1000)) {
+    return { nombre: "respaldos", estado: "degradado", detalle: `el ultimo respaldo tiene ${horas} h`, valores };
+  }
+  // Un respaldo que solo esta en el disco del servidor no protege de perder el servidor. Se reporta como
+  // degradado a proposito: es mejor que nada, y no es lo que se prometio.
+  if (!enS3) {
+    return { nombre: "respaldos", estado: "degradado", detalle: `hay respaldo de hace ${horas} h, pero SOLO en el disco del servidor`, valores };
+  }
+  return { nombre: "respaldos", estado: "ok", detalle: `ultimo respaldo hace ${horas} h, en S3`, valores };
 }
 
 async function proveedorDeIa(): Promise<Componente> {
@@ -199,7 +268,7 @@ async function turnosSinResponder(): Promise<Componente> {
  */
 export async function saludDelSistema(): Promise<SaludDelSistema> {
   const partes = await Promise.all(
-    [base, colaDeEntrada, jobs, proveedorDeIa, credencialesDeMeta, turnosSinResponder].map(
+    [base, colaDeEntrada, jobs, proveedorDeIa, credencialesDeMeta, turnosSinResponder, respaldos].map(
       async (f): Promise<Componente> => {
         try {
           return await f();
