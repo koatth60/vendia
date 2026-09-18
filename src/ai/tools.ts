@@ -1419,6 +1419,24 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
         rejected.deliveryPhone = `"${deliveryPhone}" no parece un celular real (solo digitos, 7 a 15).`;
         validDeliveryPhone = undefined;
       }
+      // UN MISMO NUMERO NO ES DOS DOCUMENTOS (2026-09-18).
+      //
+      // Defecto medido: una clienta quedo con idNumber "3008889911" y deliveryPhone "3008889911" -- el
+      // mismo celular en los dos campos. Su cedula era otra y nunca la dio. El pedido salio con una
+      // cedula falsa, que es la que le van a pedir al recibir.
+      //
+      // Los dos pasan la validacion de forma por separado (ambos son digitos de largo razonable), asi que
+      // no alcanza con mirarlos de a uno. La comprobacion es entre ellos, y es una igualdad: no una lista
+      // de prefijos ni una regla sobre como empiezan los celulares en Colombia, que cambiaria con el pais.
+      //
+      // Se descarta la CEDULA y se conserva el celular: el cliente escribio ese numero para que lo
+      // llamen, y la cedula es el dato que el modelo rellenó por su cuenta.
+      const telefonoDelChat = context.recipientPhone?.replace(/\D/g, "") ?? "";
+      if (validIdNumber && (validIdNumber === validDeliveryPhone || validIdNumber === telefonoDelChat)) {
+        rejected.idNumber = `"${validIdNumber}" es el celular del cliente, no su cedula. No lo guardes como cedula: pedile la cedula, que es otro numero.`;
+        validIdNumber = undefined;
+      }
+
       if (!validIdNumber && !validDeliveryPhone && !address) {
         return { saved: false, error: "Ningun dato tiene forma valida.", rejected };
       }

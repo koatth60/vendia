@@ -1900,3 +1900,47 @@ test("un pedido nuevo de un producto con variantes no se cierra sin la variante 
     await cleanup();
   }
 });
+
+// UN MISMO NUMERO NO ES DOS DOCUMENTOS (2026-09-18).
+//
+// Defecto medido con una clienta reactiva: quedo con idNumber "3008889911" y deliveryPhone
+// "3008889911", el mismo celular en los dos campos. Su cedula era otra y nunca la dio, asi que el
+// pedido salio con una cedula falsa -- que es la que le van a pedir al recibir.
+test("save_customer_contact_info no guarda el celular como cedula", async () => {
+  const context = await freshContext();
+  const result = (await runCatalogTool(context, "save_customer_contact_info", {
+    idNumber: "3008889911",
+    deliveryPhone: "3008889911",
+    address: "Calle 9 #6-20, barrio San Antonio, Cali",
+  })) as { saved: boolean; idNumber?: string; deliveryPhone?: string; rejected?: Record<string, string> };
+
+  assert.equal(result.saved, true, "la direccion y el celular si se guardan");
+  assert.equal(result.deliveryPhone, "3008889911", "el celular se conserva: el cliente lo dio para que lo llamen");
+  assert.equal(result.idNumber, undefined, "la cedula no, porque es el mismo numero");
+  assert.match(result.rejected?.idNumber ?? "", /celular/i);
+
+  const customer = await prisma.customer.findUniqueOrThrow({ where: { id: customerId } });
+  assert.equal(customer.idNumber, null, "y no quedo nada guardado como cedula");
+});
+
+test("save_customer_contact_info tampoco toma como cedula el numero desde el que escribe", async () => {
+  const context = await freshContext();
+  const result = (await runCatalogTool(context, "save_customer_contact_info", {
+    idNumber: "573009998877",
+    deliveryPhone: "3151112233",
+  })) as { saved: boolean; idNumber?: string; deliveryPhone?: string };
+
+  assert.equal(result.idNumber, undefined);
+  assert.equal(result.deliveryPhone, "3151112233");
+});
+
+test("una cedula de verdad se sigue guardando igual que siempre", async () => {
+  const context = await freshContext();
+  const result = (await runCatalogTool(context, "save_customer_contact_info", {
+    idNumber: "52887744",
+    deliveryPhone: "3008889911",
+  })) as { saved: boolean; idNumber?: string; deliveryPhone?: string };
+
+  assert.equal(result.idNumber, "52887744");
+  assert.equal(result.deliveryPhone, "3008889911");
+});

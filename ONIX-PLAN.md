@@ -1233,7 +1233,7 @@ mensaje al cliente.
 
 ---
 
-### E15b · La modalidad y el método de pago son dos datos, no dos veces la misma pregunta
+### E15b · La modalidad y el método de pago son dos datos, no dos veces la misma pregunta — **CERRADA el 2026-09-18**, desplegada
 
 **Quita:** al cliente, tener que contestar dos veces lo mismo; y al sistema, descartar en silencio lo
 que el cliente contestó.
@@ -3031,3 +3031,109 @@ sin mirarlos**: un archivo puede estar en verde en CI y no compilar. Medido el 2
 errores, o sea con `npm run build` roto y nadie enterado. Se arregló el archivo (`6a961b1`), no el
 agujero. El agujero se cierra con dos líneas en el workflow — `npx tsc --noEmit` y
 `npm run typecheck:all`, los dos en verde hoy — y va con la primera etapa que toque CI.
+
+
+---
+
+## BLOQUE E80 — Lo que encontró el cliente reactivo (2026-09-18)
+
+Etapas que no estaban en el plan porque **nadie las había visto**: salieron de conversaciones donde la
+clienta es un modelo con una identidad, que contesta lo que el bot acaba de decir y no sabe nada del
+sistema (`scripts/cliente-reactivo.ts`). Todas cumplen la regla de admisión: disparador determinista
+leído de la base, verificable con un `SELECT`, y ninguna es una regla nueva en el prompt.
+
+Cada una dice, como manda la regla, **qué decisión le quita al modelo**.
+
+---
+
+### E80 · Un nombre que el cliente nunca dijo no se guarda — **CERRADA el 2026-09-18**, desplegada
+
+**Quita:** al modelo, inventar el nombre de un cliente.
+**Porque:** de 25 fichas de prueba, 22 estaban mal. Nueve con la manera del propio bot de decir que no
+hay nombre ("No proporcionado", "No especificado", "Sin nombre aún"), una con un producto del catálogo
+("Smartwatch V20 Caballero") y el resto con el mensaje entero, cédula adentro. No se queda en el CRM: al
+dueño le llegó al WhatsApp **"nueva venta de no proporcionado"** en el encabezado, con "Cliente: Carlos
+Perez" tres líneas más abajo.
+**Se hizo:** `src/catalog/nombreDeCliente.ts`, tres propiedades calculadas y ninguna lista de palabras —
+no es del catálogo de ESE negocio, no lleva dígitos ni más de seis palabras, y **lo tiene que haber
+escrito el cliente**. La tercera cierra la clase entera, incluidas las formas que el modelo invente
+mañana.
+**Se probó:** 5 pruebas propias; tres fixtures que llamaban la herramienta sin que el cliente hubiera
+dicho nada se corrigieron al orden real.
+
+---
+
+### E81 · Un comprobante de pago no se escala como foto de producto — **CERRADA el 2026-09-18**, desplegada
+
+**Quita:** al modelo, decidir qué es la imagen que acaba de llegar.
+**Porque:** una clienta mandó su comprobante de Nequi y al dueño le llegó esa transferencia con el texto
+"el cliente pregunta por este producto y no lo pude identificar en el catálogo. ¿Cuál es?". Y la
+pregunta no llevaba la pregunta: era una plantilla fija, sin un dato de la conversación.
+**Se hizo:** `esLaImagenDelComprobante`, que es la MISMA consulta con la que `faltaComprobanteDePago` ya
+decide no cerrar a ciegas — la imagen que llega después de que se pasaron los datos de pago. Si alcanza
+para frenar un cierre, alcanza para no despertar al dueño. Y el texto al dueño lleva lo que el cliente
+escribió, que el servidor tiene.
+
+---
+
+### E82 · El bot no declara un pago recibido — **CERRADA el 2026-09-18**, desplegada
+
+**Quita:** al modelo, afirmar que un pago llegó.
+**Porque:** `CLIENTE | [IMAGE] ya te transferi` → `ONIX | Vale listo, si veo, ya llego, te vamos a
+generar el pedido`. Nadie miró ese comprobante; el pedido quedó `UNPAID` esperando al dueño.
+**Se hizo:** cuatro `SELECT` — el negocio exige comprobante, el pago es por adelantado, la imagen llegó
+después de los datos de pago, el pedido sigue sin marcarse pagado — y el servidor agrega el hecho:
+"Recibimos tu comprobante. El equipo lo está verificando". El disparador del turno tampoco lee texto:
+`mediaType` es metadato.
+**No se hizo:** detectar la frase. Eso es el guard de clase D que las fases anteriores vinieron a borrar.
+
+---
+
+### E83 · Una venta que no se puede registrar no se exige, y la foto la pide el servidor — **CERRADA el 2026-09-18**, desplegada
+
+**Quita:** al modelo, pedir el comprobante que falta.
+**Porque:** con el pedido completo y el pago por adelantado, `close_conversation` se negaba con razón —
+faltaba la foto. Exigir el efecto igual gastaba tres llamadas al modelo y terminaba en
+`setHumanControl`: la clienta confirmaba su pedido y recibía **"Un asesor del equipo va a continuar por
+acá contigo en un momento"**. Visto por el dueño en el panel, con la clienta contestando "ok, quedo
+pendiente".
+**Se hizo:** `saleReadyToRegisterSince` mira `faltaComprobanteDePago`, el mismo `SELECT` con el que el
+cierre ya se negaba, así que las dos partes no pueden opinar distinto. Y el servidor pide la foto él
+mismo, una vez por conversación.
+**Se midió:** de 1 de cada 2 escalaciones por este camino a **0 de 10**.
+
+---
+
+### E84 · Un mismo número no es dos documentos — **CERRADA el 2026-09-18**, desplegada
+
+**Quita:** al modelo, rellenar la cédula por su cuenta.
+**Porque:** una clienta quedó con `idNumber` y `deliveryPhone` iguales, los dos "3008889911". Su cédula
+era otra y nunca la dio. El pedido salió con una cédula falsa, que es la que le van a pedir al recibir.
+Los dos valores pasan la validación de forma por separado, así que mirarlos de a uno no alcanzaba.
+**Se hizo:** una igualdad, no una lista de prefijos ni una regla sobre cómo empiezan los celulares en
+Colombia — que cambiaría con el país. Se descarta la cédula y se conserva el celular: el cliente escribió
+ese número para que lo llamen.
+**Se probó:** 3 pruebas propias, incluida la de que una cédula de verdad se sigue guardando.
+
+---
+
+### E85 · Hasta cuándo puede cancelar el bot lo decide cada negocio — **CERRADA el 2026-09-18**, desplegada
+
+**Quita:** al dueño, tener que intervenir en cada cancelación; y al sistema, un corte escrito a mano
+igual para todos.
+**Se hizo:** `Business.cancelacionPorElBot` con tres valores (`NUNCA`, `ANTES_DE_DESPACHAR` —el de
+siempre y el default—, `ANTES_DE_ENTREGAR`). `estadosQueElBotPuedeCancelar` sale de la MISMA tabla de
+transiciones filtrada por el ajuste, y lo usan tanto la lista como `cancel_order`: antes la rama por id
+miraba la tabla global y la otra la lista, o sea que podían contestar distinto.
+**Efecto que hay que saber:** para que `ANTES_DE_ENTREGAR` sea posible, la tabla admite ahora
+`SHIPPED → CANCELED`, y eso también se lo da al dueño desde el panel, donde antes recibía un 409.
+**Va con su pantalla en el panel**, como manda la regla de los ajustes por negocio.
+
+---
+
+### E86 · El envío en $0 — **ABIERTA**
+
+**Porque:** un pedido quedó con *"solo el producto: el envío de $0 se cobra al entregar"* con la tarifa
+de esa ciudad cargada. Sin diagnosticar todavía: no se sabe si el servidor resolvió 0 o si el modelo lo
+escribió.
+**Antes de tocar nada:** cinco conversaciones que lleguen a ese punto, como manda la regla de las cinco.
