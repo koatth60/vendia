@@ -1496,8 +1496,21 @@ ${CATALOG_BLOCK_MARKER}` : CATALOG_BLOCK_MARKER;
         return null;
       });
 
+    // LA TARIFA DE ENVIO, CON LA MISMA REGLA QUE EL BLOQUE DE PAGO (2026-09-18).
+    //
+    // Tres incidentes en 7 dias de "puso la marca de bloque fijo (envio) sin haber llamado la
+    // herramienta", con el mismo desenlace que el de pago: se borra la cifra y sobrevive la frase que la
+    // anunciaba ("el valor del envio a Piedecuesta es de COP", sin numero). El caso esta escrito en la
+    // ficha de E10 del plan.
+    //
+    // El servidor YA resolvio la zona de este cliente cuando hay direccion: es `zonaDeEnvio`, el mismo
+    // dato con el que se calcula la promesa de despacho. Si la herramienta no corrio, se usa eso. Lo que
+    // NO se hace es adivinar entre varias tarifas sin ciudad resuelta: ahi no hay hecho, y el hueco es
+    // correcto -- ese caso lo cierra E39.
     const resolvedShippingRate =
-      cityShippingRateThisTurn ?? (shippingRatesListThisTurn?.length === 1 ? shippingRatesListThisTurn[0] : null);
+      cityShippingRateThisTurn ??
+      (shippingRatesListThisTurn?.length === 1 ? shippingRatesListThisTurn[0] : null) ??
+      (zonaDeEnvio ? { label: zonaDeEnvio.label, cost: String(zonaDeEnvio.cost) } : null);
     const { text: renderedText, missingBlocks } = renderFixedBlocks(text, {
       currency: negocio.currency,
       locale: negocio.locale,

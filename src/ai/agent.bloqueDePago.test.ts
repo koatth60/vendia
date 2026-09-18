@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { prisma } from "../db/client";
 import { deepseek } from "./client";
-import { generateReply, PAYMENT_BLOCK_MARKER } from "./agent";
+import { generateReply, PAYMENT_BLOCK_MARKER, SHIPPING_BLOCK_MARKER } from "./agent";
 import type { ToolContext } from "./tools";
 
 // EL BLOQUE DE PAGO NO DEPENDE DE QUE EL MODELO LLAME UNA HERRAMIENTA (2026-09-18).
@@ -139,5 +139,39 @@ test("un negocio SIN formas de pago configuradas sigue sin inventar ninguna", as
     await prisma.conversation.deleteMany({ where: { id: conversacion.id } });
     await prisma.customer.deleteMany({ where: { id: cliente.id } });
     await prisma.business.deleteMany({ where: { id: sinMetodos.id } });
+  }
+});
+
+// EL BLOQUE DE ENVIO, MISMO DEFECTO Y MISMO ARREGLO (2026-09-18).
+//
+// Tres incidentes en 7 dias de "puso la marca de bloque fijo (envio) sin haber llamado la herramienta".
+// El desenlace es el de siempre: se borra la cifra y sobrevive la frase. La ficha de E10 tiene el caso
+// textual: "el valor del envio a Piedecuesta es de *COP*", sin numero.
+test("el costo de envio sale de la zona que el servidor ya resolvio, sin herramienta", async () => {
+  const conDireccion = await prisma.customer.create({
+    data: { businessId, phoneNumber: `573096${Date.now()}`, address: "Calle 10 #5-20, Bogota" },
+  });
+  const conversacion = await prisma.conversation.create({ data: { customerId: conDireccion.id } });
+  await prisma.shippingRate.create({ data: { businessId, label: "Bogota", cost: 9000, sortOrder: 0 } });
+  await prisma.shippingCityRule.create({ data: { businessId, city: "Bogota", normalizedCity: "bogota", label: "Bogota" } });
+  try {
+    elModeloResponde(`El envío a tu ciudad cuesta ${SHIPPING_BLOCK_MARKER} y sale mañana.`);
+
+    const { text } = await generateReply(
+      conversacion.id,
+      { ...context, customerId: conDireccion.id, conversationId: conversacion.id },
+      null,
+      "cuanto vale el envio?",
+    );
+
+    assert.match(text, /9\.?000/, `la cifra tiene que estar, y salio: ${JSON.stringify(text)}`);
+    assert.doesNotMatch(text, /BLOQUE_ENVIO/);
+  } finally {
+    await prisma.shippingCityRule.deleteMany({ where: { businessId } });
+    await prisma.shippingRate.deleteMany({ where: { businessId } });
+    await prisma.message.deleteMany({ where: { conversationId: conversacion.id } });
+    await prisma.agentTurn.deleteMany({ where: { conversationId: conversacion.id } });
+    await prisma.conversation.deleteMany({ where: { id: conversacion.id } });
+    await prisma.customer.deleteMany({ where: { id: conDireccion.id } });
   }
 });
