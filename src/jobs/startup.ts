@@ -5,6 +5,7 @@ import { runConversationHealthJob } from "./conversationHealth";
 import { runOutboundQueueJob } from "./outboundQueue";
 import { runTokenExpiryJob } from "./tokenExpiry";
 import { runAbandonmentJob } from "./abandonment";
+import { runBackupJob } from "./backup";
 
 // CORRER LOS JOBS UNA VEZ AL ARRANCAR (2026-09-16).
 //
@@ -27,6 +28,8 @@ import { runAbandonmentJob } from "./abandonment";
 //   tokenExpiry              -> Business.whatsappTokenExpiryNotifiedAt (un aviso por token, nunca dos).
 //   abandonment              -> abandonedAfterHours para el paso 1, Conversation.cartRecoverySentAt para
 //                               la plantilla de recuperacion.
+//   backup                   -> la fecha del ultimo objeto en s3://.../backups/. El respaldo MISMO es el
+//                               registro de que se hizo, asi que no hay estado que se pueda desincronizar.
 //
 // Si alguno dejara de tener esa proteccion, sacarlo de esta lista es el arreglo - no quitar el arranque.
 export interface StartupJob {
@@ -43,6 +46,9 @@ export const STARTUP_JOBS: StartupJob[] = [
   { name: "abandono de conversaciones", run: runAbandonmentJob },
   { name: "chequeo de conversaciones", run: runConversationHealthJob },
   { name: "vencimiento de token de WhatsApp", run: runTokenExpiryJob },
+  // Ultimo: es el mas lento (pg_dump + subida) y ninguno de los otros depende de el. Su proteccion
+  // contra correr de mas no es una fecha en la base: mira si ya hay un respaldo reciente EN S3.
+  { name: "respaldo de la base", run: runBackupJob },
 ];
 
 /**

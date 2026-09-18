@@ -14,7 +14,9 @@
     "start": "node dist/index.js",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
-    "backfill:peaks": "tsx scripts/backfill-voice-peaks.ts"
+    "backfill:peaks": "tsx scripts/backfill-voice-peaks.ts",
+    "backup:db": "tsx scripts/backupDb.ts",
+    "restore:db": "tsx scripts/restoreDb.ts"
   },
   "keywords": [],
   "author": "",

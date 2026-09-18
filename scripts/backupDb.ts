@@ -1,31 +1,15 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
-import { readFile, unlink } from "node:fs/promises";
-import path from "node:path";
-import os from "node:os";
-import { env } from "../src/config/env";
-import { uploadBackup } from "../src/media/s3";
-
-const execFileAsync = promisify(execFile);
+// Respaldo MANUAL de la base. El automatico es src/jobs/backup.ts, que corre solo cada hora y hace un
+// volcado si el ultimo tiene mas de 20 horas.
+//
+// Los dos comparten la MISMA funcion (hacerRespaldo). Antes este script tenia su propia copia de la
+// logica; dos implementaciones del respaldo es la clase de duplicado donde una se arregla y la otra no.
+//
+//   npm run backup:db
+import { hacerRespaldo } from "../src/jobs/backup";
 
 async function main() {
-  const dbUrl = new URL(env.databaseUrl);
-  // Strip Prisma-specific query params (e.g. ?schema=public) - pg_dump doesn't understand them,
-  // schema selection is passed as its own -n flag below instead.
-  const connectionString = `postgresql://${dbUrl.username}:${dbUrl.password}@${dbUrl.hostname}:${dbUrl.port || "5432"}${dbUrl.pathname}`;
-
-  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const filename = `vendia-db-${timestamp}.dump`;
-  const tmpPath = path.join(os.tmpdir(), filename);
-
-  // -F c: pg_dump's own compressed custom format, restorable with pg_restore.
-  await execFileAsync("pg_dump", [connectionString, "-n", "public", "-F", "c", "-f", tmpPath]);
-
-  const buffer = await readFile(tmpPath);
-  await uploadBackup(buffer, filename);
-  await unlink(tmpPath);
-
-  console.log(`Backup subido: ${filename} (${(buffer.length / 1024 / 1024).toFixed(2)} MB)`);
+  const { filename, bytes } = await hacerRespaldo();
+  console.log(`Backup subido: ${filename} (${(bytes / 1024 / 1024).toFixed(2)} MB)`);
 }
 
 main().catch((error) => {

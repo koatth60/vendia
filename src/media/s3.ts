@@ -1,4 +1,4 @@
-import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { randomUUID } from "crypto";
 import { env } from "../config/env";
@@ -165,6 +165,25 @@ export async function uploadBackup(buffer: Buffer, filename: string): Promise<vo
       ContentType: "application/octet-stream",
     })
   );
+}
+
+/**
+ * Cuando se subio el ultimo respaldo, o null si no hay ninguno.
+ *
+ * El respaldo MISMO es el registro de que se hizo: no hay una columna "ultimoBackupAt" que mantener en
+ * sincronia con la realidad, y por lo tanto no hay nada que se pueda desincronizar. Si el objeto esta en
+ * S3, el respaldo existe; si no esta, no existe.
+ *
+ * Lo usa el job diario para no repetir el respaldo en cada reinicio del proceso. Sin esto, un dia con
+ * trece despliegues - que ya paso, el 2026-09-17 - hacia trece respaldos.
+ */
+export async function latestBackupAt(): Promise<Date | null> {
+  const respuesta = await getS3Client().send(
+    new ListObjectsV2Command({ Bucket: env.aws.bucket, Prefix: "backups/" }),
+  );
+  const fechas = (respuesta.Contents ?? []).map((o) => o.LastModified).filter((d): d is Date => Boolean(d));
+  if (fechas.length === 0) return null;
+  return fechas.reduce((masReciente, fecha) => (fecha > masReciente ? fecha : masReciente));
 }
 
 export async function getPresignedMediaUrl(key: string): Promise<string> {

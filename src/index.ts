@@ -23,6 +23,7 @@ import { runAbandonmentJob, ABANDONMENT_CHECK_INTERVAL_MS } from "./jobs/abandon
 import { runSaleConfirmationChaserJob, SALE_CONFIRMATION_CHASER_INTERVAL_MS } from "./jobs/saleConfirmationChaser";
 import { runPendingBurstJob, PENDING_BURST_INTERVAL_MS } from "./jobs/pendingBursts";
 import { runStartupJobs } from "./jobs/startup";
+import { runBackupJob, BACKUP_CHECK_INTERVAL_MS } from "./jobs/backup";
 
 const app = express();
 app.set("trust proxy", 1);
@@ -185,6 +186,13 @@ setInterval(() => {
 setInterval(() => {
   runAbandonmentJob().catch((error) => console.error("Error corriendo el job de abandono de conversaciones:", error));
 }, ABANDONMENT_CHECK_INTERVAL_MS);
+
+// Respaldo de la base. Se revisa cada hora y se vuelca si el ultimo tiene mas de 20h - o sea, uno por
+// dia sin depender de que el proceso viva 24h seguidas. Ver src/jobs/backup.ts: hasta el 2026-09-18
+// existia el script del volcado y NO LO LLAMABA NADIE.
+setInterval(() => {
+  runBackupJob().catch((error) => console.error("[ZAQI ALERT] Error respaldando la base:", error));
+}, BACKUP_CHECK_INTERVAL_MS);
 
 // Fase 7 del plan maestro (2026-09-15): sin esto, cada `pm2 restart` mataba el proceso a mitad de un
 // turno (webhook -> generateReply -> envio) sin ningun registro - y como el webhook ya habia respondido
