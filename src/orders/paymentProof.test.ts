@@ -37,15 +37,35 @@ after(async () => {
   await prisma.business.deleteMany({ where: { id: businessId } });
 });
 
+// EL ORDEN ENTRE LOS DOS HECHOS SE ESCRIBE, NO SE DEJA AL RELOJ (2026-09-18).
+//
+// Las dos funciones de abajo dejaban que `createdAt` saliera de `now()`. Escribir una fila y despues la
+// otra tarda menos de un milisegundo, asi que las dos podian caer en el MISMO instante -- y entonces "la
+// imagen es anterior a los datos de pago" no se cumple y la prueba falla sin que nada este roto.
+// Reproducido: una de cada tres corridas. En una conversacion real hay segundos entre un hecho y el
+// otro; en una prueba, el orden hay que decirlo.
+let reloj = Date.now();
+function instanteSiguiente(): Date {
+  reloj += 1000;
+  return new Date(reloj);
+}
+
 async function sePasaronLosDatosDePago() {
   await prisma.agentTurn.create({
-    data: { businessId, conversationId, iterations: 1, toolsCalled: ["get_payment_methods"] },
+    data: { businessId, conversationId, iterations: 1, toolsCalled: ["get_payment_methods"], createdAt: instanteSiguiente() },
   });
 }
 
 async function clienteMandaImagen() {
   await prisma.message.create({
-    data: { conversationId, role: "CUSTOMER", content: "[imagen]", mediaType: "IMAGE", mediaS3Key: `k-${randomUUID()}` },
+    data: {
+      conversationId,
+      role: "CUSTOMER",
+      content: "[imagen]",
+      mediaType: "IMAGE",
+      mediaS3Key: `k-${randomUUID()}`,
+      createdAt: instanteSiguiente(),
+    },
   });
 }
 

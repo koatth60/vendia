@@ -1085,9 +1085,13 @@ test("la llamada del turno siguiente si cancela, y le avisa al dueno", async () 
     // Turno 1: la clienta pide cancelar, el bot pregunta.
     await runCatalogTool({ ...context, turnStartedAt: new Date(Date.now() - 60_000) }, "cancel_order", {});
 
-    // Turno 2: la clienta contesta que si. Arranca despues, que es lo que prueba que hubo un mensaje suyo
-    // en el medio -- el unico hecho que distingue una confirmacion de una frase suelta.
-    const result = (await runCatalogTool({ ...context, turnStartedAt: new Date() }, "cancel_order", {})) as { canceled: boolean };
+    // Turno 2: la clienta contesta que si. El arranque del turno sale de la marca que quedo en la base,
+    // un milisegundo despues, y no de `new Date()`: con `new Date()` los dos instantes pueden caer en el
+    // MISMO milisegundo y la herramienta -- con razon -- trata la marca como del turno actual. En una
+    // conversacion de verdad hay segundos en el medio; en una prueba, no.
+    const pedido = await prisma.order.findUniqueOrThrow({ where: { id: order.id } });
+    const turnoSiguiente = new Date(pedido.cancelRequestedAt!.getTime() + 1);
+    const result = (await runCatalogTool({ ...context, turnStartedAt: turnoSiguiente }, "cancel_order", {})) as { canceled: boolean };
 
     assert.equal(result.canceled, true);
     const enLaBase = await prisma.order.findUniqueOrThrow({ where: { id: order.id } });
