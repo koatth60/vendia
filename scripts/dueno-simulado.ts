@@ -137,7 +137,10 @@ export async function atenderComoDueno(
         cuerpoDeWebhookDelDueno(
           credenciales.phoneNumberId,
           telefonoDelDueno,
-          "si, ya me llego el pago",
+          // EXACTAMENTE "si": el servidor compara la respuesta entera contra CONFIRM_WORDS
+          // (handleOwnerReply), asi que "si, ya me llego el pago" NO cuenta como confirmacion y deja la
+          // venta esperando. Medido el 2026-09-18: la confirmacion salio y el pedido no se creo.
+          "si",
           esperandoConfirmacion.pendingConfirmationMessageId,
         ),
       ),
