@@ -1357,6 +1357,20 @@ export async function listCustomerThreadsForBusiness(
  */
 const MIN_THREAD_MESSAGES = 30;
 
+/**
+ * E45 (2026-09-18). CUANTOS MENSAJES DE UN CICLO SE TRAEN DE UNA VEZ.
+ *
+ * Hasta hoy se leian TODOS los mensajes de cada ciclo cargado. Con el volumen de hoy no se nota -- el
+ * ciclo mas largo de produccion tiene 139 mensajes y el percentil 90 esta en 68 -- pero es una consulta
+ * sin techo: un cliente que escribe todos los dias durante un ano hace que abrir su chat lea su
+ * historia entera, cada vez, para mostrar la ultima pantalla.
+ *
+ * 80 es holgado sobre ese percentil 90: en la practica casi ningun ciclo real se parte, y el que se
+ * parte trae su boton de "ver mensajes anteriores" -- que es el mismo gesto que ya existe para ver el
+ * ciclo anterior.
+ */
+const MAX_MESSAGES_PER_CYCLE = 80;
+
 /** Un mensaje tal como lo consume el panel: con su media firmada y su estado de entrega. */
 export interface ThreadMessage {
   id: string;
@@ -1370,6 +1384,66 @@ export interface ThreadMessage {
   whatsappMessageId: string | null;
   deliveryFailed: boolean;
   deliveryError: string | null;
+}
+
+/**
+ * E45 (2026-09-18). La pagina anterior de mensajes DENTRO de una conversacion.
+ *
+ * El hilo ya paginaba por ciclo ("ver conversacion anterior"); esto es el nivel de abajo, para el ciclo
+ * que no entra en una pagina. Se pagina por llave (createdAt, id) y no por OFFSET por el mismo motivo
+ * que la Bandeja: mientras alguien lee, entran mensajes nuevos, y con OFFSET una fila se muestra dos
+ * veces o no se muestra nunca.
+ */
+export async function getOlderMessagesOfConversation(
+  businessId: string,
+  conversationId: string,
+  beforeMessageId: string,
+  limit = MAX_MESSAGES_PER_CYCLE,
+): Promise<{ messages: ThreadMessage[]; hasOlderMessages: boolean; oldestMessageId: string | null } | null> {
+  const conversation = await prisma.conversation.findFirst({
+    where: { id: conversationId, customer: { businessId } },
+    select: { id: true },
+  });
+  if (!conversation) return null;
+
+  const ancla = await prisma.message.findFirst({
+    where: { id: beforeMessageId, conversationId },
+    select: { id: true, createdAt: true },
+  });
+  // Ancla desconocida (el mensaje se borro, o el cliente mando un id viejo): se devuelve vacio en vez de
+  // la primera pagina. Devolver "lo mas nuevo" aca duplicaria en pantalla lo que ya se esta viendo.
+  if (!ancla) return { messages: [], hasOlderMessages: false, oldestMessageId: null };
+
+  const filas = await prisma.message.findMany({
+    where: {
+      conversationId,
+      OR: [{ createdAt: { lt: ancla.createdAt } }, { createdAt: ancla.createdAt, id: { lt: ancla.id } }],
+    },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    take: Math.max(1, Math.min(limit, 200)) + 1,
+  });
+  const tope = Math.max(1, Math.min(limit, 200));
+  const hayMas = filas.length > tope;
+  const pagina = (hayMas ? filas.slice(0, tope) : filas).reverse();
+
+  const messages = await attachDeliveryFailures(
+    businessId,
+    await Promise.all(
+      pagina.map(async (m) => ({
+        id: m.id,
+        role: m.role,
+        content: m.content,
+        createdAt: m.createdAt,
+        mediaUrl: m.mediaS3Key ? await getPresignedMediaUrl(m.mediaS3Key) : null,
+        mediaType: m.mediaType,
+        mediaFilename: m.mediaFilename,
+        mediaPeaks: m.mediaPeaks,
+        whatsappMessageId: m.whatsappMessageId,
+      })),
+    ),
+  );
+
+  return { messages, hasOlderMessages: hayMas, oldestMessageId: messages[0]?.id ?? null };
 }
 
 export async function getCustomerThreadForBusiness(businessId: string, customerId: string, before?: string) {
@@ -1490,13 +1564,23 @@ export async function getCustomerThreadForBusiness(businessId: string, customerI
   const cargados: { conversationId: string; status: string; messages: Awaited<ReturnType<typeof prisma.message.findMany>> }[] = [];
   let ultimoIndice = targetIndex;
   let total = 0;
+  // E45: de cada ciclo se traen sus ULTIMOS mensajes, no todos. Se pide uno de mas para saber si quedo
+  // historia atras sin tener que contar la tabla entera.
+  let hayMasEnElCicloMasViejo = false;
   for (let i = targetIndex; i < conversations.length; i++) {
     const ciclo = conversations[i];
-    const filas = await prisma.message.findMany({ where: { conversationId: ciclo.id }, orderBy: { createdAt: "asc" } });
+    const ultimos = await prisma.message.findMany({
+      where: { conversationId: ciclo.id },
+      orderBy: { createdAt: "desc" },
+      take: MAX_MESSAGES_PER_CYCLE + 1,
+    });
+    const hayMas = ultimos.length > MAX_MESSAGES_PER_CYCLE;
+    const filas = (hayMas ? ultimos.slice(0, MAX_MESSAGES_PER_CYCLE) : ultimos).reverse();
     // Un ciclo vacio no cuenta como "ya mostre algo": se salta y se sigue buscando hacia atras.
     if (filas.length === 0 && i !== targetIndex) continue;
     cargados.unshift({ conversationId: ciclo.id, status: ciclo.status, messages: filas });
     ultimoIndice = i;
+    hayMasEnElCicloMasViejo = hayMas;
     total += filas.length;
     if (total >= MIN_THREAD_MESSAGES) break;
   }
@@ -1537,6 +1621,10 @@ export async function getCustomerThreadForBusiness(businessId: string, customerI
     intent: target.intent,
     humanControl: target.humanControl,
     hasMore,
+    // E45: y si ademas quedaron mensajes MAS VIEJOS dentro del ciclo mas viejo que se cargo. Son dos
+    // preguntas distintas: `hasMore` es "hay otro ciclo atras", esto es "este mismo ciclo sigue".
+    hasOlderMessages: hayMasEnElCicloMasViejo,
+    oldestMessageId: bloques[0]?.messages[0]?.id ?? null,
     cycles,
     blocks: bloques,
     windowOpen: windowState.windowOpen,

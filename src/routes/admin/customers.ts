@@ -3,6 +3,7 @@ import {
   listCustomerThreadsForBusiness,
   decodeInboxCursor,
   getCustomerThreadForBusiness,
+  getOlderMessagesOfConversation,
   setCustomerTags,
   saveCustomerName,
 } from "../../conversation/service";
@@ -57,6 +58,23 @@ customersRouter.get("/api/customers", async (req, res) => {
   const cursor = decodeInboxCursor(typeof req.query.cursor === "string" ? req.query.cursor : undefined);
   const page = await listCustomerThreadsForBusiness(businessIdOf(req), { limit, cursor });
   res.json(page);
+});
+
+// E45 (2026-09-18): la pagina anterior de mensajes DENTRO de un ciclo. El boton de "ver conversacion
+// anterior" ya existia para saltar de ciclo; esto es el nivel de abajo, para el ciclo que no entra en
+// una pagina.
+customersRouter.get("/api/conversations/:id/messages", async (req, res) => {
+  const before = typeof req.query.before === "string" ? req.query.before.trim() : "";
+  if (!before) {
+    res.status(400).json({ error: "Falta el mensaje desde el que seguir hacia atrás" });
+    return;
+  }
+  const pagina = await getOlderMessagesOfConversation(businessIdOf(req), String(req.params.id), before);
+  if (!pagina) {
+    res.status(404).json({ error: "Conversación no encontrada" });
+    return;
+  }
+  res.json(pagina);
 });
 
 customersRouter.get("/api/customers/:id/thread", async (req, res) => {

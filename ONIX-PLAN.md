@@ -2220,7 +2220,7 @@ su cuenta.**
 
 ---
 
-### E45 · La Bandeja y el hilo paginan por cursor
+### E45 · La Bandeja y el hilo paginan por cursor — **CERRADA el 2026-09-18**, sin desplegar
 
 **Quita:** al panel, traer todo a memoria en cada carga.
 **Porque:** `GET /admin/api/customers` trae **todas** las conversaciones del negocio con su último
@@ -2233,6 +2233,39 @@ decidir qué pasa cuando la fila que cambió no está en la página cargada — 
 **Se prueba:** con 500 conversaciones sembradas, la primera carga trae una página.
 **Tamaño:** L. **Depende de:** **`D7`**. **Bandera:** no.
 **Vuelta atrás:** revertir.
+
+**Estado (2026-09-18): CERRADA, sin desplegar.** `D7` la decidió el dueño el mismo día: *"sigue con
+E45"*.
+
+**Lo que ya estaba** (venía de la reorganización de la Bandeja): `listCustomerThreadsForBusiness`
+agrupa por cliente en Postgres y pagina por llave `(updatedAt, customerId)`, y el panel la consume con
+scroll infinito.
+
+**Lo que faltaba y se hizo:**
+
+- **Dentro de un ciclo también se pagina.** `getCustomerThreadForBusiness` leía *todos* los mensajes de
+  cada ciclo que cargaba. Ahora trae los últimos 80 y dice si el ciclo sigue hacia atrás
+  (`hasOlderMessages`, `oldestMessageId`). Son dos preguntas distintas y ahora hay dos botones: "ver
+  mensajes anteriores" (mismo chat) y "ver conversación anterior" (chat anterior).
+- **`GET /api/conversations/:id/messages?before=<id>`**, paginado por llave `(createdAt, id)` igual que
+  la Bandeja, y por el mismo motivo: mientras alguien lee entran mensajes nuevos, y con `OFFSET` una
+  fila se muestra dos veces o no se muestra nunca. Un ancla que ya no existe devuelve **vacío**, no la
+  primera página: devolver "lo más nuevo" duplicaría en pantalla lo que ya se está viendo.
+- **`D7` — qué pasa con la fila que cambió y no está en la página cargada.** Los handlers de tiempo
+  real recargaban la Bandeja entera cuando no encontraban la fila; con paginación eso le borra a quien
+  bajó diez páginas las diez y su scroll. La regla nueva: con **una sola página cargada** se recarga
+  (es barato y no se pierde nada); con **más**, no se toca la lista y aparece un aviso *"Hay movimiento
+  en la Bandeja · actualizar"* que recarga cuando la persona lo decide. **Nunca se inserta la fila a
+  mano** en medio de la lista: entraría fuera del orden por actividad y la página siguiente la traería
+  duplicada.
+
+**Medido en producción el 2026-09-18**, que es lo que dice por qué esto es prevención y no urgencia:
+97 conversaciones, 2.966 mensajes, el chat más largo con 139 y el percentil 90 en 68. Por eso el corte
+por ciclo quedó en 80: hoy casi ningún chat real se parte.
+
+**Se probó como pide la ficha**: 500 conversaciones sembradas, la primera carga trae una página de 15,
+la segunda no repite ni saltea ninguna, y un mensaje nuevo en medio del scroll no duplica ni esconde
+una fila. Siete pruebas en `src/conversation/inboxPagination.test.ts`.
 
 ---
 

@@ -1911,10 +1911,45 @@ let inboxCursor = null;
 let inboxCargando = false;
 let inboxTotal = 0;
 
+// E45 / decisión D7 (2026-09-18). QUE PASA CUANDO CAMBIA UNA FILA QUE NO ESTA EN PANTALLA.
+//
+// Los handlers de tiempo real buscan la fila con querySelector y, si no la encuentran, recargaban la
+// Bandeja entera. Con paginación eso es peor que antes: quien bajó diez páginas pierde las diez y su
+// scroll, por un mensaje de alguien que ni siquiera está mirando.
+//
+// La regla, y es de dos casos porque son dos situaciones distintas:
+//
+//   - Si sólo está cargada la primera página, recargar es barato y no se pierde nada: se recarga.
+//   - Si ya se cargaron más páginas, NO se toca la lista. Aparece un aviso arriba —"hay movimiento en
+//     la Bandeja"— que recarga cuando la persona lo decide. La fila igual está bien en la base; lo
+//     único que se pospone es repintarla.
+//
+// Nunca se inserta la fila a mano en medio de la lista: entraría fuera del orden por actividad y la
+// siguiente página la traería de nuevo, duplicada.
+let inboxPaginasCargadas = 0;
+
+function avisarMovimientoEnBandeja() {
+  const container = document.getElementById('conversations-list');
+  if (!container || document.getElementById('inbox-novedades')) return;
+  container.insertAdjacentHTML(
+    'afterbegin',
+    '<button type="button" id="inbox-novedades" class="btn-secondary" style="width:calc(100% - 16px); margin:8px; position:sticky; top:8px; z-index:2;" onclick="loadCustomers()">Hay movimiento en la Bandeja · actualizar</button>'
+  );
+}
+
+function refrescarBandejaOAvisar() {
+  if (inboxPaginasCargadas <= 1) {
+    loadCustomers();
+    return;
+  }
+  avisarMovimientoEnBandeja();
+}
+
 async function loadCustomers() {
   const container = document.getElementById('conversations-list');
   inboxCursor = null;
   inboxCargando = false;
+  inboxPaginasCargadas = 1;
   try {
     const res = await apiFetch('/admin/api/customers');
     const page = await res.json();
@@ -1966,6 +2001,7 @@ async function cargarMasClientes() {
     else container.insertAdjacentHTML('beforeend', html);
 
     if (!inboxCursor && centinela) centinela.remove();
+    inboxPaginasCargadas += 1;
     applyInboxFilter();
     updateTotalUnreadBadge();
   } catch (err) {
@@ -2513,11 +2549,23 @@ function cycleSeparatorHtml(cycle) {
   return `<div class="cycle-separator"><span>${label}</span></div>`;
 }
 
+// E45 (2026-09-18). DENTRO DE UN CICLO TAMBIEN SE PAGINA.
+//
+// El hilo ya paginaba por ciclo; un ciclo largo se leia entero. `threadHasOlderMessages` dice si el
+// ciclo mas viejo cargado sigue hacia atras, y `threadOldestMessageId` es desde donde seguir.
+let threadHasOlderMessages = false;
+let threadOldestMessageId = null;
+
 // Repaints #modal-thread from threadCycleBlocks - called after the initial open AND after loading an
 // older cycle, so both paths share one rendering path instead of drifting apart.
 function renderMergedThread() {
   const thread = document.getElementById('modal-thread');
-  let html = threadHasMore
+  // Dos botones distintos para dos preguntas distintas: "seguir en ESTE chat hacia atrás" y "ver el
+  // chat anterior". El de mensajes va primero porque es lo que sigue inmediatamente hacia arriba.
+  let html = threadHasOlderMessages
+    ? '<div class="cycle-load-more"><button class="btn-secondary" type="button" onclick="loadOlderMessages()">Ver mensajes anteriores ↑</button></div>'
+    : '';
+  html += threadHasMore
     ? '<div class="cycle-load-more"><button class="btn-secondary" type="button" onclick="loadOlderCycle()">Ver conversación anterior ↑</button></div>'
     : '';
   threadCycleBlocks.forEach((block, i) => {
@@ -2534,6 +2582,37 @@ function renderMergedThread() {
 // scroll position (otherwise the view jumps as content is inserted above the visible area) - lazy by
 // design (see plan Fase 2): getCustomerThreadForBusiness would otherwise fire a fresh presigned S3 URL
 // for every photo across every cycle on a single open.
+async function loadOlderMessages() {
+  if (!threadHasOlderMessages || !threadOldestMessageId || threadCycleBlocks.length === 0) return;
+  const bloqueMasViejo = threadCycleBlocks[0];
+  const thread = document.getElementById('modal-thread');
+  const prevScrollHeight = thread.scrollHeight;
+  try {
+    const res = await apiFetch(
+      '/admin/api/conversations/' + bloqueMasViejo.conversationId + '/messages?before=' + encodeURIComponent(threadOldestMessageId)
+    );
+    const data = await res.json();
+    threadHasOlderMessages = data.hasOlderMessages;
+    threadOldestMessageId = data.oldestMessageId || threadOldestMessageId;
+    if (!data.messages || data.messages.length === 0) {
+      renderMergedThread();
+      return;
+    }
+    data.messages.forEach((m) => renderedMessageIds.add(m.id));
+    // Se antepone AL MISMO bloque: son mensajes del mismo ciclo, así que no llevan separador en medio.
+    bloqueMasViejo.html = data.messages.map(messageBubbleHtml).join('') + bloqueMasViejo.html;
+    renderMergedThread();
+    // Se está leyendo hacia arriba: el hilo no debe saltar al final cuando carguen las fotos viejas.
+    threadStickToBottom = false;
+    thread.scrollTop = thread.scrollHeight - prevScrollHeight;
+    pinThreadWhileMediaLoads(thread);
+    if (threadSearchQuery.trim()) applyThreadSearch({ keepIndex: true, silent: true });
+    updateThreadJumpButton();
+  } catch (err) {
+    setStatus('No se pudieron cargar los mensajes anteriores: ' + err.message, true);
+  }
+}
+
 async function loadOlderCycle() {
   if (!threadHasMore || !currentCustomerId || threadCycleBlocks.length === 0) return;
   const oldest = threadCycleBlocks[0];
@@ -2543,6 +2622,8 @@ async function loadOlderCycle() {
     const res = await apiFetch(`/admin/api/customers/${currentCustomerId}/thread?before=${oldest.conversationId}`);
     const data = await res.json();
     threadHasMore = data.hasMore;
+    threadHasOlderMessages = Boolean(data.hasOlderMessages);
+    threadOldestMessageId = data.oldestMessageId || null;
     if (!data.conversationId) {
       renderMergedThread();
       return;
@@ -2666,6 +2747,8 @@ function pintarHilo(customerId, data) {
     currentConversationId = data.activeConversationId;
     threadCyclesMeta = data.cycles;
     threadHasMore = data.hasMore;
+    threadHasOlderMessages = Boolean(data.hasOlderMessages);
+    threadOldestMessageId = data.oldestMessageId || null;
     currentWindowOpen = data.windowOpen;
     currentHoursSinceLastCustomerMessage = data.hoursSinceLastCustomerMessage;
     currentQueuedOutbound = data.queuedOutbound || [];
@@ -5511,7 +5594,7 @@ function initRealtime() {
       : message.mediaType === 'VIDEO' ? (message.content || '🎥 Video')
       : message.content;
     const bumped = bumpCustomerRow(customerId, previewText, message.role === 'ASSISTANT', message.createdAt);
-    if (!bumped) loadCustomers();
+    if (!bumped) refrescarBandejaOAvisar();
   });
 
   socket.on('conversation:new', (c) => {
@@ -5519,7 +5602,7 @@ function initRealtime() {
       // This customer already has a row from an earlier sales cycle - the exact case
       // [[onix-conversations-group-by-customer]] fixes: refresh that row (picks up the new
       // activeConversationId/orderCount) instead of inserting a second, visually-duplicate one.
-      loadCustomers();
+      refrescarBandejaOAvisar();
       return;
     }
     const list = document.getElementById('conversations-list');
@@ -5555,7 +5638,7 @@ function initRealtime() {
       // que en la base tenía cero (2026-09-17).
       if (typeof c.unreadCount === 'number') setRowUnreadCount(c.customer.id, c.unreadCount);
     } else {
-      loadCustomers();
+      refrescarBandejaOAvisar();
     }
     updateTotalUnreadBadge();
     if (c.id === currentConversationId) {
