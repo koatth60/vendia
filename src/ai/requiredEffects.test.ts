@@ -495,6 +495,9 @@ async function armSaleCompleta(): Promise<void> {
   });
   assert.ok((await runCatalogTool(context, "set_order_item", { productId: product.id, quantity: 1 })) as unknown);
   assert.ok((await runCatalogTool(context, "set_payment_method", { paymentMethodId: contraentrega.id })) as unknown);
+  // El cliente dice su nombre y RECIEN ahi el modelo llama la herramienta, que es el orden real: desde
+  // 2026-09-18 no se puede guardar un nombre que el cliente nunca escribio (ver nombreDeCliente.ts).
+  await prisma.message.create({ data: { conversationId, role: "CUSTOMER", content: "soy Carlos Mendoza" } });
   await runCatalogTool(context, "save_customer_name", { name: "Carlos Mendoza" });
   const guardado = (await runCatalogTool(context, "save_customer_contact_info", {
     idNumber: "106484013",

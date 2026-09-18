@@ -23,6 +23,7 @@ import {
   requiresPaymentConfirmation,
   resolveConfiguredPaymentMethod,
 } from "../catalog/paymentMethods";
+import { porQueNoEsUnNombre } from "../catalog/nombreDeCliente";
 import { faltaComprobanteDePago, FALTA_COMPROBANTE_NOTE } from "../orders/paymentProof";
 import { resolverModalidadDelPedido, filtrarMetodosPorZona } from "../orders/paymentTiming";
 import { listShippingRates, resolveShippingRateForCity } from "../catalog/shippingRates";
@@ -1314,6 +1315,19 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
           note: `"${name}" es una de las formas de pago de este negocio, no el nombre de una persona, asi que no se guardo nada. Registra la forma de pago donde va y volve a pedirle el nombre al cliente.`,
         };
       }
+
+      // LAS OTRAS TRES CLASES DE "NOMBRE" QUE NO SON UN NOMBRE (2026-09-18).
+      //
+      // La de arriba tapaba las formas de pago. Medido sobre 25 fichas de prueba, 22 estaban mal, y por
+      // otros tres caminos: el mensaje entero con cedula y celular adentro, un producto del catalogo, y
+      // -- el mas comun, 9 de 25 -- el bot escribiendo su propia manera de decir que no hay nombre
+      // ("No proporcionado", "No especificado", "Sin nombre aun"). Eso le llega al dueño al WhatsApp:
+      // "nueva venta de no proporcionado".
+      //
+      // Ver src/catalog/nombreDeCliente.ts para por que son tres propiedades calculadas y no una lista
+      // de palabras prohibidas.
+      const rechazo = await porQueNoEsUnNombre({ businessId, customerId: context.customerId, nombre: name });
+      if (rechazo) return { saved: false, note: rechazo.detalle };
 
       // Real production incident (2026-09-15): una clienta se presento como "Diana" al saludar, y al
       // final del pedido dio "Sebastián Montealegre Sotelo" como nombre del DESTINATARIO del regalo. Esto

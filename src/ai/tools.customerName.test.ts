@@ -84,6 +84,8 @@ test("el rechazo no depende de mayusculas ni de como se escriba", async () => {
 });
 
 test("un nombre de persona se sigue guardando igual que siempre", async () => {
+  // Lo dice el cliente, que es la unica forma en que un nombre llega a guardarse.
+  await prisma.message.create({ data: { conversationId, role: "CUSTOMER", content: "me llamo Katiuska Peña" } });
   const result = (await runCatalogTool(context(), "save_customer_name", { name: "Katiuska Peña" })) as {
     saved: boolean;
     name?: string;

@@ -108,6 +108,8 @@ async function freshContext(): Promise<ToolContext> {
 
 test("save_customer_name saves a valid name", async () => {
   const context = await freshContext();
+  // El cliente lo escribio primero: desde 2026-09-18 un nombre que nadie dijo no se guarda.
+  await prisma.message.create({ data: { conversationId: context.conversationId, role: "CUSTOMER", content: "hola, soy Deinerin" } });
   const result = await runCatalogTool(context, "save_customer_name", { name: "Deinerin" });
   assert.deepEqual(result, { saved: true, name: "Deinerin" });
   const customer = await prisma.customer.findUniqueOrThrow({ where: { id: customerId } });
