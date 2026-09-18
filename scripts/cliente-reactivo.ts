@@ -157,7 +157,7 @@ Quien eres (esto lo sabes tú, la tienda no):
 - ${p.intencion}
 
 Como escribes:
-- Mensajes cortos, de una o dos lineas, como en WhatsApp. Sin listas ni formato.
+- Una o dos lineas, como en WhatsApp. Sin listas ni formato.
 - Con la ortografia descuidada de alguien que escribe rapido desde el celular. Tildes opcionales.
 - Una cosa a la vez.
 
@@ -177,7 +177,8 @@ reemplazando MONTO por el total que te dijeron, con puntos de miles (por ejemplo
 Cuando ya conseguiste lo que querias, o la tienda no te sirve, te despides y escribes [FIN] al final de
 ese ultimo mensaje.
 
-Responde SOLO con lo que le escribirias a la tienda. Nada de explicaciones.`;
+Responde SOLO con el mensaje que le escribirias a la tienda, tal cual lo enviarias. Nada de
+explicaciones, ni acotaciones, ni notas sobre tu propio mensaje.`;
 }
 
 async function loQueDiriaLaClienta(p: Persona, historia: { role: "user" | "assistant"; content: string }[]): Promise<string> {
@@ -193,7 +194,25 @@ async function loQueDiriaLaClienta(p: Persona, historia: { role: "user" | "assis
   });
   if (!respuesta.ok) throw new Error(`La clienta no pudo pensar (${respuesta.status}): ${(await respuesta.text()).slice(0, 200)}`);
   const cuerpo = (await respuesta.json()) as { choices?: { message?: { content?: string } }[] };
-  return (cuerpo.choices?.[0]?.message?.content ?? "").trim();
+  return limpiarAcotaciones((cuerpo.choices?.[0]?.message?.content ?? "").trim());
+}
+
+/**
+ * Le saca al mensaje las acotaciones que la clienta se escribe a si misma.
+ *
+ * Visto en la Bandeja por el dueño: un mensaje que terminaba con "Mensaje corto." en su propio renglon
+ * -- el modelo repitiendo su instruccion como si fuera parte de lo que le escribe a la tienda. Ensucia
+ * la Bandeja y ademas le da al bot un texto que ninguna persona enviaria, asi que la prueba deja de
+ * medir lo que dice medir.
+ */
+function limpiarAcotaciones(texto: string): string {
+  const renglones = texto.split(String.fromCharCode(10));
+  // Solo la acotacion sobre el propio mensaje. NO se tocan los corchetes en general: [[img:...]] es
+  // como la clienta manda el comprobante, y borrarlo dejaria la prueba del pago sin foto.
+  const esAcotacion = (r: string) =>
+    /^\(?(mensaje|respuesta|nota|tono)\s*(corto|breve|informal|natural|de whatsapp)?\.?\)?$/i.test(r.trim());
+  while (renglones.length > 1 && esAcotacion(renglones[renglones.length - 1])) renglones.pop();
+  return renglones.join(String.fromCharCode(10)).trim();
 }
 
 function comoImagen(mensaje: string): { mediaId: string; pie: string } | null {
