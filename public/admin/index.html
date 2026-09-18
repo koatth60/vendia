@@ -1174,13 +1174,13 @@
 
       <div class="order-subtabs">
         <button class="order-subtab-btn active" data-order-status="PENDING" onclick="switchOrdersTab('PENDING')">
-          Pendientes de envío <span class="status-badge" id="orders-pending-count" style="background:var(--warn-light); color:var(--warn);">0</span>
+          Pendientes de envío <span class="status-badge order-subtab-count-pending onix-num" id="orders-pending-count">0</span>
         </button>
         <button class="order-subtab-btn" data-order-status="SHIPPED" onclick="switchOrdersTab('SHIPPED')">
-          Enviados <span class="status-badge" id="orders-shipped-count" style="background:var(--brand-light); color:var(--brand-dark);">0</span>
+          Enviados <span class="status-badge order-subtab-count-sent onix-num" id="orders-shipped-count">0</span>
         </button>
         <button class="order-subtab-btn" data-order-status="CANCELED" onclick="switchOrdersTab('CANCELED')">
-          Cancelados <span class="status-badge" id="orders-canceled-count" style="background:var(--danger-light); color:var(--danger);">0</span>
+          Cancelados <span class="status-badge order-subtab-count-canceled onix-num" id="orders-canceled-count">0</span>
         </button>
       </div>
       <div class="card" style="padding:0; overflow:hidden;">

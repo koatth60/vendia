@@ -683,14 +683,11 @@
   .order-section-note { font-size: 11.5px; color: var(--muted-soft); text-transform: uppercase; letter-spacing: .04em; }
   .order-card { padding: 14px 16px; border-top: 1px solid var(--border-soft); }
   .order-card:first-child { border-top: none; }
-  .order-card-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
-  .order-card-name { display: flex; align-items: center; gap: 8px; font-size: 13.5px; font-weight: 700; }
   .order-card-date { font-size: 12px; color: var(--muted); white-space: nowrap; }
-  .order-card-items { font-size: 13px; margin-top: 5px; }
+  /* Se borraron .order-card-top/-name/-items/-bottom/-total/-actions: el renderizador dejo de
+     emitirlas cuando la tarjeta paso a .order-head/.order-body/.order-side (bloque de la Fase 3, mas
+     abajo). Quedan .order-card-meta y .order-card-shipment, que si se siguen usando. */
   .order-card-meta { font-size: 12px; color: var(--muted); margin-top: 3px; }
-  .order-card-bottom { display: flex; align-items: center; justify-content: space-between; margin-top: 8px; }
-  .order-card-total { font-size: 14px; font-weight: 700; }
-  .order-card-actions { display: flex; gap: 8px; margin-top: 10px; }
   .order-card-shipment { margin-top: 10px; padding: 10px 12px; background: var(--bg); border-radius: var(--radius-md); font-size: 12.5px; color: var(--ink-soft); }
   .order-card-shipment img { max-width: 160px; border-radius: 8px; display: block; margin-top: 6px; }
   .ship-composer { margin-top: 12px; padding: 12px; background: var(--bg); border-radius: var(--radius-md); border: 1px solid var(--border-soft); }
@@ -1986,6 +1983,14 @@
   }
   .order-status-sent { background: var(--onix-accent-soft); color: var(--onix-accent); }
   .order-status-canceled { background: var(--onix-danger-soft); color: var(--onix-danger); }
+
+  /* Los contadores de las tres solapas. Tenian el color escrito en un style="" con las variables
+     historicas (--warn-light, --brand-light, --danger-light): el ultimo color a mano de esta vista.
+     Usan EL MISMO par de tokens que la pastilla de estado de la tarjeta, asi el mismo estado se ve
+     igual en los dos lugares en vez de parecerse. */
+  .order-subtab-count-pending { background: var(--onix-warn-soft); color: var(--onix-warn); }
+  .order-subtab-count-sent { background: var(--onix-accent-soft); color: var(--onix-accent); }
+  .order-subtab-count-canceled { background: var(--onix-danger-soft); color: var(--onix-danger); }
   .order-head-date {
     font-family: var(--onix-font-mono); font-variant-numeric: tabular-nums;
     font-size: 11.5px; color: var(--onix-muted); white-space: nowrap;
