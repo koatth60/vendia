@@ -282,3 +282,16 @@ Esto salió de tres afirmaciones equivocadas hechas en un solo día, las tres de
 pedido nunca se crea" (se creaba), "no sale el aviso de venta" (salía, se buscó la frase equivocada) y
 "32 incidentes reales" (el detector contaba promesas condicionales y se disparaba antes de que se
 registrara la consulta).
+
+## Cinco conversaciones por cada error, y no se para hasta que las cinco pasen
+
+Decisión del dueño, 2026-09-18, ampliando la regla de arriba.
+
+**Cada vez que se encuentra un error —sea del bot, del banco de pruebas o de una decisión vieja— se
+corren CINCO conversaciones sobre ese error, y no se deja de correrlas hasta que las cinco salgan
+bien.** No importa de qué sea el error ni de cuándo venga.
+
+Cinco, y no una, porque esto es estocástico: una corrida limpia después de un arreglo sale bien la mitad
+de las veces por azar aunque el defecto siga ahí. Cinco seguidas ya no.
+
+`PERSONA=<nombre> CONVERSACIONES=5 npx tsx scripts/cliente-reactivo.ts` repite la misma conversación.

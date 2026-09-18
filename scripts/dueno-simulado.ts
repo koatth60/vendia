@@ -68,12 +68,27 @@ function cuerpoDeWebhookDelDueno(phoneNumberId: string, desde: string, texto: st
  */
 async function respuestaPara(kind: string, businessId: string, conversationId: string): Promise<string> {
   if (kind === "PHOTO_PRODUCT") {
-    const p = await prisma.product.findFirst({
-      where: { businessId, active: true, stock: { gt: 0 } },
-      orderBy: { name: "asc" },
-      select: { name: true },
+    // EL PRODUCTO QUE ESTA EN JUEGO, NO UNO CUALQUIERA (2026-09-18).
+    //
+    // Antes se contestaba con el primero del catalogo con stock, y eso descarrilaba la conversacion: a
+    // una clienta que estaba comprando un parlante le llego "Segun nuestro equipo, el producto que
+    // buscas es: AIRPODS MAX - $95000". La venta se perdia por culpa del banco de pruebas, no del bot.
+    const estado = await prisma.saleState.findFirst({ where: { conversationId }, select: { items: true } });
+    const items = (estado?.items as { productName?: string }[] | null) ?? [];
+    if (items[0]?.productName) return items[0].productName;
+
+    // Sin nada en el pedido todavia, el ultimo producto del que el servidor mando una foto.
+    const conMedia = await prisma.agentTurn.findFirst({
+      where: { conversationId, mediaProductIds: { isEmpty: false } },
+      orderBy: { createdAt: "desc" },
+      select: { mediaProductIds: true },
     });
-    return p?.name ?? "No lo tengo en el catalogo";
+    const ultimoId = conMedia?.mediaProductIds?.[conMedia.mediaProductIds.length - 1];
+    if (ultimoId) {
+      const p = await prisma.product.findUnique({ where: { id: ultimoId }, select: { name: true } });
+      if (p?.name) return p.name;
+    }
+    return "No lo tengo en el catalogo";
   }
   if (kind === "PRICE") {
     const estado = await prisma.saleState.findFirst({ where: { conversationId }, select: { items: true } });
