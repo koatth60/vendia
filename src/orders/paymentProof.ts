@@ -63,6 +63,26 @@ export async function faltaComprobanteDePago(
   return !imagen;
 }
 
+/**
+ * True cuando esa imagen del cliente es, para el sistema, el comprobante de pago de esta conversación.
+ *
+ * Es la MISMA definición que usa `faltaComprobanteDePago` para no cerrar a ciegas: una imagen que el
+ * cliente manda después de que se le pasaron los datos de pago. No mira la imagen ni lee prosa; es el
+ * único hecho verificable que hay, y si alcanza para frenar un cierre alcanza para no reenviársela al
+ * dueño como si fuera la foto de un producto.
+ *
+ * Defecto real (2026-09-18): una clienta mandó su comprobante de Nequi y `ask_owner_about_photo` se lo
+ * reenvió al dueño con el texto "pregunta por este producto y no lo pude identificar en el catálogo.
+ * ¿Cuál es?". El dueño vio una transferencia y una pregunta sobre qué producto era.
+ */
+export async function esLaImagenDelComprobante(conversationId: string, mensajeId: string, creadoEn: Date): Promise<boolean> {
+  const desde = await momentoEnQueSePasaronLosDatosDePago(conversationId);
+  if (!desde) return false;
+  if (creadoEn < desde) return false;
+  const existe = await prisma.message.findFirst({ where: { id: mensajeId, conversationId, role: "CUSTOMER" }, select: { id: true } });
+  return Boolean(existe);
+}
+
 /** Lo que se le devuelve al modelo cuando el cierre se frena por esto. Dice que falta y que hacer. */
 export const FALTA_COMPROBANTE_NOTE =
   "No se cerro nada y no se creo ningun pedido: este negocio pide ver el comprobante antes de cerrar, el pago de este pedido es por adelantado y el cliente todavia no mando ninguna imagen desde que se le pasaron los datos de pago. Pedile la foto del comprobante y volve a cerrar cuando la mande. Si el cliente va a pagar contraentrega, cerra con ese metodo de pago: ahi no hay comprobante que pedir.";

@@ -24,7 +24,7 @@ import {
   resolveConfiguredPaymentMethod,
 } from "../catalog/paymentMethods";
 import { porQueNoEsUnNombre } from "../catalog/nombreDeCliente";
-import { faltaComprobanteDePago, FALTA_COMPROBANTE_NOTE } from "../orders/paymentProof";
+import { esLaImagenDelComprobante, faltaComprobanteDePago, FALTA_COMPROBANTE_NOTE } from "../orders/paymentProof";
 import { resolverModalidadDelPedido, filtrarMetodosPorZona } from "../orders/paymentTiming";
 import { listShippingRates, resolveShippingRateForCity } from "../catalog/shippingRates";
 import { recordAgentIncident } from "./incidents";
@@ -1650,11 +1650,47 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
         };
       }
 
+      // UN COMPROBANTE DE PAGO NO ES LA FOTO DE UN PRODUCTO (2026-09-18).
+      //
+      // Esta herramienta agarra la ULTIMA imagen del cliente, sea la que sea. Defecto real: una clienta
+      // mando su comprobante de Nequi y al dueno le llego esa transferencia con el texto "pregunta por
+      // este producto y no lo pude identificar en el catalogo".
+      //
+      // No hace falta mirar la imagen ni leer prosa para saberlo: el sistema ya define cual imagen es el
+      // comprobante -- la que el cliente manda despues de que se le pasaron los datos de pago -- y usa
+      // esa misma definicion para no cerrar a ciegas (ver faltaComprobanteDePago). Si alcanza para
+      // frenar un cierre, alcanza para no despertar al dueno con la pregunta equivocada.
+      if (await esLaImagenDelComprobante(context.conversationId, lastMedia.id, lastMedia.createdAt)) {
+        return {
+          asked: false,
+          note: "Esa imagen es el comprobante de pago que el cliente mando despues de que se le pasaron los datos de pago, no la foto de un producto. No la escales como producto: si hay que verificar el pago, cerra el pedido con close_conversation y el sistema le avisa al dueno.",
+        };
+      }
+
       const mediaUrl = await getPresignedMediaUrl(lastMedia.mediaS3Key);
       const greeting = business.contactName ? `Hola ${business.contactName}` : "Hola";
       const customerLabel = await describeCustomer(context.customerId, context.recipientPhone);
+
+      // LA PREGUNTA TIENE QUE IR EN LA PREGUNTA (2026-09-18).
+      //
+      // El texto era una plantilla fija sin un solo dato de la conversacion, asi que al dueno le llegaba
+      // una foto y "Cual es?" sin saber que le habia preguntado el cliente. Lo que el cliente escribio lo
+      // tiene el servidor: es el pie de esa misma imagen, o su ultimo mensaje de texto.
+      const pieDeLaFoto = (lastMedia.content ?? "").trim();
+      const ultimoTexto = pieDeLaFoto
+        ? ""
+        : (
+            await prisma.message.findFirst({
+              where: { conversationId: context.conversationId, role: "CUSTOMER", mediaType: null },
+              orderBy: { createdAt: "desc" },
+              select: { content: true },
+            })
+          )?.content?.trim() ?? "";
+      const loQueDijo = pieDeLaFoto || ultimoTexto;
+
       const caption = [
         `${greeting}, el cliente ${customerLabel} pregunta por este producto y no lo pude identificar en el catalogo.`,
+        ...(loQueDijo ? [`Lo que te escribio: "${loQueDijo.replace(/[\r\n\t ]+/g, " ").slice(0, 300)}"`] : []),
         "¿Cual es? Respondeme citando (mantén presionado y \"Responder\") este mismo mensaje con el nombre del producto.",
       ].join("\n\n");
 
