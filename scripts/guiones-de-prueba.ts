@@ -42,7 +42,7 @@ const PARALELO = Number(process.env.PARALELO ?? 4);
  * para después", y sin esto la unica forma de hacerlo era correr todo o nombrar los tipos uno por uno.
  * Los de `pqr` y `cancelacion` son los que le mandan alertas al dueño por WhatsApp.
  */
-type Grupo = "pedido" | "pregunta" | "pqr" | "cancelacion" | "posventa";
+type Grupo = "pedido" | "pregunta" | "pqr" | "cancelacion" | "posventa" | "datos";
 
 interface Guion {
   nombre: string;
@@ -314,6 +314,152 @@ const GUIONES: Guion[] = [
     variantes: [
       compraDe("Monica Salgado", "gracias", "y que combos tienen?"),
       compraDe("Fabio Duarte", "listo", "cuanto vale el Intercomunicador Q58 Max?"),
+    ],
+  },
+  {
+    nombre: "datos-de-a-uno",
+    grupo: "datos",
+    busca: "el cliente suelta un dato por mensaje: que NO vuelva a pedir lo que ya le dieron",
+    variantes: [
+      [
+        "hola quiero el Smartwatch V20 Caballero",
+        "1 unidad",
+        "Camila Torres",
+        "1098765432",
+        "3112223344",
+        "Calle 100 #15-30",
+        "barrio Usaquen",
+        "Bogota",
+        "todo contraentrega",
+        "si, confirmo",
+        "listo, cierralo",
+      ],
+      [
+        "buenas, quiero el Combo Pareja",
+        "1 combo",
+        "me llamo Esteban Valencia",
+        "mi cedula es 80554433",
+        "el celular es 3156667788",
+        "la direccion es Carrera 68 #40-22",
+        "el barrio es Salitre",
+        "en Bogota",
+        "todo contraentrega",
+        "si, confirmo",
+        "dale, registralo",
+      ],
+    ],
+  },
+  {
+    nombre: "datos-a-medias",
+    grupo: "datos",
+    busca: "da dos de cinco datos: tiene que pedir SOLO los tres que faltan, no los cinco",
+    variantes: [
+      [
+        "hola quiero unos AIRPODS SERIE 4",
+        "1 unidad",
+        "soy Ricardo Pena y mi cedula es 72889900",
+        "3005556677",
+        "Carrera 51B #82-30, barrio El Prado, Barranquilla",
+        "todo contraentrega",
+        "si, confirmo",
+        "cierralo",
+      ],
+      [
+        "buenas, quiero el Intercomunicador Q58 Max",
+        "2 unidades",
+        "mi direccion es Calle 5 #38-20, barrio San Fernando, en Cali",
+        "Diana Osorio",
+        "cedula 1038776655 y celular 3021114455",
+        "todo contraentrega",
+        "si, confirmo",
+        "listo",
+      ],
+    ],
+  },
+  {
+    nombre: "datos-desordenados",
+    grupo: "datos",
+    busca: "los datos llegan en otro orden del que pidio: igual tienen que quedar en el lugar correcto",
+    variantes: [
+      [
+        "hola",
+        "vivo en Medellin",
+        "quiero el COMBO SMARTWATCH T2000 ULTRA",
+        "barrio Laureles",
+        "1 combo",
+        "Calle 33 #22-10",
+        "Sandra Ruiz",
+        "43556677",
+        "3016665544",
+        "todo contraentrega",
+        "si, confirmo",
+        "cierra el pedido",
+      ],
+    ],
+  },
+  {
+    nombre: "datos-que-corrige",
+    grupo: "datos",
+    busca: "da un dato y despues lo corrige: tiene que quedar el SEGUNDO, no el primero",
+    variantes: [
+      [
+        "hola quiero el Smartwatch V20 Caballero",
+        "1 unidad",
+        "Juan Marulanda, cedula 71223344, celular 3001112222, Calle 9 #7-30, barrio Centro, Cali",
+        "espera, el celular esta mal, es 3009998888",
+        "y la cedula tambien, es 71223355",
+        "todo contraentrega",
+        "si, confirmo",
+        "cierralo",
+      ],
+      [
+        "buenas quiero el Combo k11 Mini",
+        "1 combo",
+        "Marta Cifuentes, cedula 41556677, celular 3123334455, Calle 72 #10-20, barrio Chapinero, Bogota",
+        "ojo, mejor mandalo a Carrera 11 #93-45, barrio Chico",
+        "todo contraentrega",
+        "si, confirmo",
+        "listo",
+      ],
+    ],
+  },
+  {
+    nombre: "datos-con-formato-raro",
+    grupo: "datos",
+    busca: "el celular con espacios y la cedula con puntos: no puede hacerselo repetir",
+    variantes: [
+      [
+        "hola quiero unos AIRPODS SERIE 4",
+        "1 unidad",
+        "Laura Quintero",
+        "314 863 7722",
+        "1.098.776.655",
+        "Cl 45 # 12 - 30, brr La Soledad, Bta",
+        "todo contraentrega",
+        "si, confirmo",
+        "cierralo",
+      ],
+    ],
+  },
+  {
+    nombre: "datos-a-cuentagotas-con-preguntas",
+    grupo: "datos",
+    busca: "mezcla datos con preguntas: no puede perder lo que ya le dieron al contestar otra cosa",
+    variantes: [
+      [
+        "hola quiero el Smartwatch V20 Caballero",
+        "Gabriel Hoyos",
+        "oye y cuanto vale el envio a Bogota?",
+        "1 unidad",
+        "cedula 79887766",
+        "y cuando me llegaria?",
+        "celular 3187776655",
+        "Calle 63 #24-15, barrio Nicolas de Federman, Bogota",
+        "tienen mas colores?",
+        "todo contraentrega",
+        "si, confirmo",
+        "cierra el pedido",
+      ],
     ],
   },
   {
