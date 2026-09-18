@@ -42,7 +42,7 @@ const PARALELO = Number(process.env.PARALELO ?? 4);
  * para después", y sin esto la unica forma de hacerlo era correr todo o nombrar los tipos uno por uno.
  * Los de `pqr` y `cancelacion` son los que le mandan alertas al dueño por WhatsApp.
  */
-type Grupo = "pedido" | "pregunta" | "pqr" | "cancelacion";
+type Grupo = "pedido" | "pregunta" | "pqr" | "cancelacion" | "posventa";
 
 interface Guion {
   nombre: string;
@@ -58,6 +58,21 @@ interface Guion {
 // Los tipos salen de lo que de verdad pasa en producción: las preguntas más comunes, y los casos que ya
 // rompieron alguna vez (el número de pago que no salía, la vitrina que no aparecía, la ciudad sin
 // tarifa, la cancelación que cancelaba en el mismo turno).
+const COMPRA_BASE = [
+  "hola, quiero comprar",
+  "quiero el Smartwatch V20 Caballero",
+  "1 unidad",
+  "NOMBRE, cedula 1020304050, celular 3001112233, Calle 10 #5-20, barrio Chapinero, Bogota",
+  "todo contraentrega, producto y envio al recibir",
+  "si, confirmo",
+  "listo, cierra el pedido",
+];
+
+/** La misma compra, a nombre de quien sea: asi cada guion de posventa tiene su propia clienta. */
+function compraDe(nombre: string, ...despues: string[]): string[] {
+  return [...COMPRA_BASE.map((m) => m.replace("NOMBRE", nombre)), ...despues];
+}
+
 const GUIONES: Guion[] = [
   {
     nombre: "saludo",
@@ -227,6 +242,78 @@ const GUIONES: Guion[] = [
         "todo contraentrega",
         "si, confirmo", "cierralo", "si, hazlo",
       ],
+    ],
+  },
+  {
+    nombre: "posventa-cuando-llega",
+    grupo: "posventa",
+    busca: "con el pedido ya hecho: que diga la fecha real de la tarifa, no una inventada",
+    variantes: [
+      compraDe("Carlos Perez", "listo gracias", "y para cuando me llega?"),
+      compraDe("Sofia Ramirez", "perfecto", "cuando lo recibo?", "puede ser antes?"),
+    ],
+  },
+  {
+    nombre: "posventa-donde-va",
+    grupo: "posventa",
+    busca: "pregunta por la guia de un pedido recien hecho: NO puede inventar un numero de guia",
+    variantes: [
+      compraDe("Mario Beltran", "gracias", "me pasas el numero de guia?"),
+      compraDe("Elena Vargas", "ok", "ya salio mi pedido?", "en que va?"),
+    ],
+  },
+  {
+    nombre: "posventa-cambiar-direccion",
+    grupo: "posventa",
+    busca: "cambiar la direccion despues de cerrar: el pedido tiene que quedar con la NUEVA",
+    variantes: [
+      compraDe("Tatiana Lopez", "espera", "me equivoque de direccion, es Calle 20 #8-15, barrio Teusaquillo"),
+      compraDe("Hernan Gil", "una cosa", "puedes cambiar la direccion? mandalo mejor a Carrera 15 #93-40, barrio Chico"),
+    ],
+  },
+  {
+    nombre: "posventa-agregar-producto",
+    grupo: "posventa",
+    busca: "agregar algo al pedido ya cerrado: el total tiene que actualizarse de verdad",
+    variantes: [
+      compraDe("Patricia Nino", "oye", "puedo agregar unos AIRPODS SERIE 4 al mismo pedido?", "si, agregalos"),
+      compraDe("Oscar Medina", "espera", "quiero llevar 2 en vez de 1", "si, cambialo"),
+    ],
+  },
+  {
+    nombre: "posventa-cuanto-pago",
+    grupo: "posventa",
+    busca: "cuanto le cobra el mensajero: tiene que ser la cifra del pedido, no otra",
+    variantes: [
+      compraDe("Andrea Castro", "una pregunta", "cuanto le pago al mensajero exactamente?"),
+      compraDe("Nestor Pineda", "ok", "el domiciliario recibe transferencia o solo efectivo?"),
+    ],
+  },
+  {
+    nombre: "posventa-repite-el-pedido",
+    grupo: "posventa",
+    busca: "que repita el pedido sin cambiar ni un dato de lo que ya quedo guardado",
+    variantes: [
+      compraDe("Gloria Suarez", "me repites que fue lo que quedo?"),
+      compraDe("Ivan Rojas", "confirmame los datos del pedido por favor"),
+    ],
+  },
+  {
+    nombre: "posventa-horario-entrega",
+    grupo: "posventa",
+    busca: "pedir una hora puntual: que no prometa una hora que el negocio no maneja",
+    variantes: [
+      compraDe("Lucia Franco", "me lo pueden entregar despues de las 6pm?"),
+      compraDe("Julio Cortes", "solo estoy en la manana, se puede antes de las 10?"),
+    ],
+  },
+  {
+    nombre: "posventa-sigue-comprando",
+    grupo: "posventa",
+    busca: "con un pedido abierto, pregunta por otra cosa: no puede pisarle el pedido que ya tiene",
+    variantes: [
+      compraDe("Monica Salgado", "gracias", "y que combos tienen?"),
+      compraDe("Fabio Duarte", "listo", "cuanto vale el Intercomunicador Q58 Max?"),
     ],
   },
   {
