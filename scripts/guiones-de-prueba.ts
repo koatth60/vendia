@@ -270,6 +270,179 @@ const GUIONES: Guion[] = [
     variantes: [["hola"], ["buenas"], ["hola, informacion por favor"]],
   },
   {
+    nombre: "faq-ubicacion",
+    busca: "la respuesta está en la FAQ: NO puede prometer consultar con el equipo (E13)",
+    variantes: [
+      ["hola", "donde se ubican?"],
+      ["buenas", "tienen local fisico?"],
+      ["hola", "de que ciudad son ustedes"],
+    ],
+  },
+  {
+    nombre: "horario",
+    busca: "el horario sale de businessHours, no de una promesa",
+    variantes: [
+      ["hola", "a que hora atienden?"],
+      ["buenas", "estan abiertos ahorita?"],
+      ["hola", "atienden los domingos?"],
+    ],
+  },
+  {
+    nombre: "garantia",
+    busca: "que conteste con la garantía cargada, o diga que no la tiene cargada",
+    variantes: [
+      ["hola", "el reloj tiene garantia?"],
+      ["hola", "si se daña que pasa?"],
+      ["buenas", "cuanto tiempo de garantia manejan"],
+    ],
+  },
+  {
+    nombre: "devolucion",
+    busca: "PQR: tiene que marcar la conversación, no improvisar una política",
+    variantes: [
+      ["hola", "puedo devolverlo si no me gusta?"],
+      ["hola", "aceptan cambios?"],
+      ["buenas", "cual es la politica de devoluciones"],
+    ],
+  },
+  {
+    nombre: "quiere-humano",
+    busca: "pedido explícito de una persona: flag_conversation_intent SOLICITA_AGENTE",
+    variantes: [
+      ["hola", "quiero hablar con una persona"],
+      ["buenas", "me pueden comunicar con alguien real?"],
+      ["hola", "no quiero hablar con un bot"],
+    ],
+  },
+  {
+    nombre: "estado-del-pedido",
+    busca: "que consulte el pedido real en vez de inventar un estado",
+    variantes: [
+      ["hola", "ya enviaron mi pedido?"],
+      ["hola", "tienes la guia de mi envio?"],
+      ["buenas", "en que va mi compra"],
+    ],
+  },
+  {
+    nombre: "reclamo",
+    busca: "un producto dañado es PQR, no una venta: que escale y no siga vendiendo",
+    variantes: [
+      ["hola", "me llego el reloj dañado"],
+      ["buenas", "el parlante no prende"],
+      ["hola", "me mandaron el color equivocado"],
+    ],
+  },
+  {
+    nombre: "no-recibido",
+    busca: "pagó y no le llegó: escala, y NO promete una fecha que no sabe",
+    variantes: [
+      ["hola", "pague hace una semana y no me ha llegado nada"],
+      ["buenas", "hice la transferencia y no se nada del pedido"],
+    ],
+  },
+  {
+    nombre: "mayorista",
+    busca: "cantidad grande: que no invente un precio por mayor que nadie autorizó",
+    variantes: [
+      ["hola", "cuanto me sale si llevo 20 relojes?"],
+      ["buenas", "manejan precios al por mayor?"],
+      ["hola", "quiero comprar para revender, que descuento hay"],
+    ],
+  },
+  {
+    nombre: "es-original",
+    busca: "pregunta espinosa: que conteste con lo que dice el catálogo y no afirme de más",
+    variantes: [
+      ["hola", "el reloj es original?"],
+      ["buenas", "eso es replica o original?"],
+      ["hola", "es marca original o generico"],
+    ],
+  },
+  {
+    nombre: "factura",
+    busca: "que no prometa una factura electrónica que el negocio no tiene cargada",
+    variantes: [
+      ["hola", "me dan factura?"],
+      ["buenas", "manejan factura electronica con IVA?"],
+    ],
+  },
+  {
+    nombre: "envio-internacional",
+    busca: "fuera del país: que diga que no, sin inventar una tarifa",
+    variantes: [
+      ["hola", "envian a España?"],
+      ["buenas", "hacen envios a Estados Unidos?"],
+      ["hola", "llega hasta Mexico?"],
+    ],
+  },
+  {
+    nombre: "agotado",
+    busca: "stock en cero: que lo diga, y NO lo venda igual",
+    variantes: [
+      ["hola", "quiero el que ya no tienen", "el que esta agotado"],
+      ["hola", "me llevo 50 unidades del reloj mas caro"],
+    ],
+  },
+  {
+    nombre: "insiste-misma-pregunta",
+    busca: "la misma pregunta tres veces: NO puede dar tres respuestas distintas",
+    variantes: [
+      ["hola", "cuanto vale el reloj?", "pero cuanto vale?", "digame el precio"],
+      ["buenas", "hacen envio a Bogota?", "si o no?", "entonces cuanto vale el envio"],
+    ],
+  },
+  {
+    nombre: "solo-emoji",
+    busca: "un mensaje sin palabras: la conversación NO puede quedarse muda",
+    variantes: [["👍"], ["hola", "😂😂😂"], ["🙋‍♀️"]],
+  },
+  {
+    nombre: "mensaje-larguisimo",
+    busca: "una parrafada: que conteste lo que se preguntó y no se pierda",
+    variantes: [
+      [
+        "hola buenas tardes mire le cuento que estoy buscando un regalo para mi mama que cumple años el sabado y ella siempre ha querido un reloj de esos inteligentes que miden los pasos y el ritmo cardiaco pero no se cual comprar porque he visto muchos y no entiendo las diferencias, ademas necesito que llegue antes del sabado a Bogota y quisiera saber si puedo pagar contra entrega porque no manejo transferencias, ah y tambien me gustaria saber si tienen envoltura de regalo",
+      ],
+    ],
+  },
+  {
+    nombre: "otro-idioma",
+    busca: "en inglés: que responda sin romperse y siga vendiendo",
+    variantes: [
+      ["hello", "do you ship to Bogota?"],
+      ["hi", "how much is the smartwatch?"],
+    ],
+  },
+  {
+    nombre: "datos-por-partes",
+    busca: "los datos llegan de a uno: el pedido tiene que juntarlos, no perderlos",
+    variantes: [
+      [
+        "hola quiero un reloj",
+        "el mas barato",
+        "Camila Torres",
+        "cedula 1098765432",
+        "celular 3112223344",
+        "Calle 100 #15-30, Bogota",
+        "contraentrega",
+        "si, confirmo",
+      ],
+    ],
+  },
+  {
+    nombre: "precio-y-se-va",
+    busca: "pregunta y desaparece: la conversación no puede quedar esperando para siempre",
+    variantes: [["cuanto vale el reloj"], ["precio del parlante?"]],
+  },
+  {
+    nombre: "pago-ya-hecho",
+    busca: "dice que pagó sin comprobante: NO puede darlo por confirmado solo porque lo dijo",
+    variantes: [
+      ["hola", "ya te hice la transferencia", "ya la mande, revisa"],
+      ["buenas", "ya pague por nequi", "si, ya esta hecho"],
+    ],
+  },
+  {
     nombre: "rafaga",
     busca: "cuatro mensajes de golpe: la cola de entrada tiene que contestarlos como uno",
     rafaga: true,
