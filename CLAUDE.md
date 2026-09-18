@@ -92,6 +92,17 @@ payload to DeepSeek on every customer message. Keep this lean going forward:
 El sistema vive en `public/admin/css/tokens.css`. Las fases del rediseño que
 faltan son las etapas `E47` a `E55` de `ONIX-PLAN.md`.
 
+**Antes de empezar cualquiera de esas fases, leé esto (verificado el 2026-09-18):** la
+especificación de cada fase en `docs/historico/ONIX-REDESIGN-PLAN.md` es **una oración**. Los
+valores exactos (paddings, anchos, columnas) iban a salir de los 22 PNG que `E47` pide exportar a
+`design/onix-a/`, **y ese directorio no existe**. El lienzo que sí está en el repo,
+`design/vendia-admin-linear/`, **no lo reemplaza**: tiene un solo artboard ("Tu negocio") y es
+anterior a la reorganización del CRM.
+O sea que `E50`–`E54` **están bloqueadas por `E47`, que lo hace el dueño**. Si una sesión "hace" una
+de esas fases sin los PNG, lo que está haciendo es inventar el diseño y llamarlo la fase.
+`E49` se pudo cerrar sin ellos solo porque resultó ser verificación y no construcción: las tres
+vistas ya estaban hechas. Eso fue suerte, no el caso normal.
+
 - **Ningún color literal fuera de `tokens.css`.** Ni un hex, ni un `rgba()`, ni
   `white`. Siempre `var(--onix-*)`. Esta es la regla que hace que claro y oscuro
   sean el mismo CSS y no dos hojas de estilo.

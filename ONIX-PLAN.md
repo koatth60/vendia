@@ -1861,6 +1861,13 @@ de su pantalla, y sin eso ninguna se puede hacer bien.
 `crm-bandeja.png`, …). **Lo hace el dueño, no el código.**
 **Tamaño:** S. **Depende de:** nada — es lo primero de este bloque.
 
+> **Ojo, verificado el 2026-09-18:** el lienzo que está en el repo, `design/vendia-admin-linear/`, **no
+> es el de las 22 pantallas**. Tiene un solo artboard (`Main.dc.html`, "Tu negocio") y es anterior a la
+> reorganización del CRM: su barra de pestañas dice "Conversaciones", no "Bandeja". Buscar "Bandeja" o
+> "Clientes" en sus 2,4 MB da cero. O sea que los PNG tienen que salir del lienzo original, que no está
+> acá. `E49` se pudo cerrar igual porque resultó ser verificación y no construcción (ver su entrada),
+> pero `E50`–`E54` sí necesitan las pantallas: son rediseños de verdad.
+
 ---
 
 ### E48 · El `grep` de color literal entra a CI — **CERRADA el 2026-09-18** (commit `65dfa20`), sin desplegar
@@ -1892,10 +1899,48 @@ tokens antes de prender la vigilancia:
 
 ---
 
-### E49 · Fase CRM del rediseño
+### E49 · Fase CRM del rediseño — **CERRADA el 2026-09-18**, sin desplegar
 
 Bandeja en dos paneles, Clientes como tabla con cabecera, Pedidos con el total a la derecha.
-**Tamaño:** L — es la más larga, y va en tres commits. **Depende de:** `E47`.
+**Tamaño:** L — es la más larga, y va en tres commits. **Dependía de:** `E47`.
+
+**Se hizo SIN `E47`, y hay que saberlo antes de leer los commits.** `design/onix-a/` no existe y el
+lienzo que sí está en el repo (`design/vendia-admin-linear/`) **no sirve de reemplazo**: tiene un solo
+artboard, la pantalla "Tu negocio", y es anterior a la reorganización del CRM — su barra de pestañas
+todavía dice "Conversaciones", no "Bandeja". Cero apariciones de "Bandeja" y "Clientes" en sus 2,4 MB.
+
+Al ir a implementarla apareció que **las tres vistas ya estaban construidas y con tokens**, con la
+forma exacta que pide la fase (los bloques de `admin.css` se llaman literalmente `FASE 3 · Bandeja` y
+`FASE 3 · Pedidos`). Entraron con la reorganización del CRM, no como fase de rediseño, y nunca se
+cerró la etapa. Así que E49 **no fue construir: fue cerrar la diferencia contra la lista de la fase**,
+y ningún valor de diseño se inventó — lo que no estaba especificado, no se tocó.
+
+Lo que faltaba de verdad, por vista:
+
+- **Bandeja** (`45facb4`): el estado "sin leer" no funcionaba. El filtro "Sin leer" no devolvía nunca
+  una conversación y el negrita del nombre no se aplicaba jamás, porque los dos preguntaban por la
+  clase `.conv-row.has-unread` **que nadie escribe** — aparece tres veces en el panel y las tres son
+  lecturas. El dato verdadero ya estaba al lado en `data-unread`. Se borró la clase en vez de agregar
+  código que la sincronice: eran dos copias del mismo hecho y una se quedó atrás. Más dos emoji
+  (`✓`, `🔄`) a SVG inline.
+- **Clientes** (`b1196cf`): la lista ya cumplía; la **ficha del cliente** seguía con marcado viejo,
+  con el estilo escrito a mano dentro de plantillas de JavaScript. Pasó a clases con tokens, las
+  cifras a `.onix-num`, y el `💬` a SVG. Apareció un defecto que no se ve leyendo el código: el aviso
+  de error de la línea de tiempo no salía rojo, porque `.empty-state` tiene la misma especificidad y
+  está más abajo en el archivo.
+- **Pedidos**: los contadores de las tres solapas eran el último color escrito a mano de la sección.
+  Pasan a los **mismos** tokens que la pastilla de estado de la tarjeta, medido idéntico en los dos
+  temas. Se borraron seis reglas `.order-card-*` muertas.
+
+**Cómo se verificó, ya que no había PNG contra el cual comparar:** con Chromium de verdad cargando el
+`admin.css` real y la función real recortada del archivo, en los dos temas, midiendo lo que la lista de
+la fase pide en vez de mirarlo a ojo (alineación, monoespaciada, contraste sobre la superficie que
+corresponde, y que el token cambie de valor entre temas). El `grep` de color y `tsc --noEmit` los corre
+CI desde `E48`.
+
+**Queda pendiente y no es de esta etapa:** `design/audit-responsive.mjs` no corre en ninguna máquina
+que no sea la del dueño — apunta a un Playwright instalado en `/home/claude/...` y lee `../out/`. La
+auditoría responsive de cierre de fase no se pudo pasar por eso, no porque no aplique.
 
 ### E50 · Fase Catálogo
 
@@ -2339,7 +2384,7 @@ hasta que la etapa que lo arregla lo ponga en verde de verdad.
 | **Pedidos** | `E31`, `E32`, `E33`, `E34`, `E35` |
 | **Catálogo** | `E36`, `E37`, `E38`, `E39`, `E40`, `E61` |
 | **CRM** | `E02` hecha; quedan `E41`, `E42`, `E43`, `E44`, `E45`, `E46`, `E68` |
-| **Panel (rediseño)** | `E48` hecha; quedan `E47`, `E49`, `E50`, `E51`, `E52`, `E53`, `E54`, `E55` |
+| **Panel (rediseño)** | `E48` y `E49` hechas; quedan `E47`, `E50`, `E51`, `E52`, `E53`, `E54`, `E55` |
 | **FAQ que aprende** | `E09b` (que la lea), `E56`, `E57`, `E58`, `E59` |
 | **Observabilidad** | `E24`, `E25`, `E62`, `E63`, `E65` |
 | **Vender más** | `E68`, `E69`, `E70`, `E71`, `E72`, `E73` |
