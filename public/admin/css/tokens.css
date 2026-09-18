@@ -123,9 +123,12 @@
   --onix-invert-muted: #9DB3A7;
   --onix-invert-ink: #F2F7F4;
 
-  /* Marca */
+  /* Marca. Los dos verdes del emblema (2026-09-18): el logo se dibuja inline en cada pagina y toma
+     estos tokens, asi que el tema oscuro lo aclara sin necesidad de un segundo archivo. */
   --onix-logo-disc: #1FA855;
   --onix-logo-leaf: #FFFFFF;
+  --onix-logo-leaf-dark: #08321A;
+  --onix-logo-leaf-light: #73916B;
 
   /* Sombra: en claro hay elevación, en oscuro el borde hace ese trabajo */
   --onix-shadow-sm: 0 1px 2px rgba(15, 26, 21, 0.05);
@@ -214,6 +217,10 @@
 
     --onix-logo-disc: #35D07F;
     --onix-logo-leaf: #0B0E0D;
+    /* Sobre fondo oscuro se invierte la jerarquia: el verde que era el mas oscuro pasa a ser el mas
+       claro, porque es el que tiene que leerse primero. */
+    --onix-logo-leaf-dark: #8FBF9F;
+    --onix-logo-leaf-light: #5E7F62;
 
     --onix-shadow-sm: none;
     --onix-shadow-md: none;
@@ -287,6 +294,8 @@
 
   --onix-logo-disc: #35D07F;
   --onix-logo-leaf: #0B0E0D;
+  --onix-logo-leaf-dark: #8FBF9F;
+  --onix-logo-leaf-light: #5E7F62;
 
   --onix-shadow-sm: none;
   --onix-shadow-md: none;
