@@ -1106,6 +1106,12 @@ function renderVariantSection(productId, variants, product) {
         <label>Stock</label>
         <input class="variant-stock-input" type="number" value="${v.stock}" onchange="updateVariant('${v.id}', 'stock', this.value)" />
       </div>
+      <div class="variant-stock-wrap" title="Dejalo vacio para usar el precio del producto">
+        <label>Precio</label>
+        <input class="variant-price-input onix-num" type="text" inputmode="decimal" placeholder="del producto"
+               value="${v.price == null ? '' : escapeHtml(String(v.price))}"
+               onchange="updateVariant('${v.id}', 'price', this.value)" />
+      </div>
       <button class="variant-delete-btn" title="Eliminar variante" onclick="deleteVariant('${v.id}', '${productId}')">×</button>
     </div>
   `).join('');
@@ -1482,15 +1488,20 @@ function addDraftVariant() {
   const color = document.getElementById('p-draft-variant-color').value.trim();
   const size = document.getElementById('p-draft-variant-size').value.trim();
   const stock = Number(document.getElementById('p-draft-variant-stock').value || 0);
+  // E36: vacio se manda como null, que significa "el precio del producto". Mandarlo como 0 pondria esa
+  // talla a cero y el bot la venderia regalada.
+  const precioEscrito = document.getElementById('p-draft-variant-price').value.trim();
+  const price = precioEscrito === '' ? null : Number(precioEscrito);
   const file = document.getElementById('p-draft-variant-photo').files[0] || null;
   if (!color && !size) {
     setStatus('La variante necesita al menos un color o una talla', true);
     return;
   }
-  draftVariants.push({ color, size, stock, file, photoPreviewUrl: file ? URL.createObjectURL(file) : null });
+  draftVariants.push({ color, size, stock, price, file, photoPreviewUrl: file ? URL.createObjectURL(file) : null });
   document.getElementById('p-draft-variant-color').value = '';
   document.getElementById('p-draft-variant-size').value = '';
   document.getElementById('p-draft-variant-stock').value = '0';
+  document.getElementById('p-draft-variant-price').value = '';
   document.getElementById('p-draft-variant-photo').value = '';
   document.getElementById('p-draft-variant-photo-btn').classList.remove('has-photo');
   document.getElementById('p-draft-variant-photo-preview').innerHTML = '+';
@@ -1527,7 +1538,7 @@ async function addProduct() {
       // them, only the plain fields it stores on ProductVariant.
       body: JSON.stringify({
         name, description, price, currency, stock, category, color, size,
-        variants: draftVariants.map(({ color, size, stock }) => ({ color, size, stock })),
+        variants: draftVariants.map(({ color, size, stock, price }) => ({ color, size, stock, price })),
       }),
     });
     created = await res.json();

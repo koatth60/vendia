@@ -1884,7 +1884,7 @@ misma etapa.
 
 ---
 
-### E36 · Una talla XL puede costar más que una S
+### E36 · Una talla XL puede costar más que una S — **CERRADA el 2026-09-18**, sin desplegar
 
 **Quita:** al catálogo, obligar a un precio único por producto.
 **Se hace:** `ProductVariant.price` opcional, con caída al precio del producto. Panel en la misma
@@ -1892,6 +1892,37 @@ etapa.
 **Se prueba:** un pedido de la variante cara cobra el precio de la variante.
 **Tamaño:** M. **Depende de:** `E33`. **Bandera:** no; sin precios por variante se comporta como hoy.
 **Vuelta atrás:** revertir; la columna queda muerta.
+
+**Cómo quedó (2026-09-18).**
+
+- **`ProductVariant.price` es `NULL`, no `0`**, y esa es la decisión que la hace desplegable. Con un
+  default de cero, cada catálogo existente habría pasado a tener todas sus variantes a cero y el bot
+  habría vendido regalado hasta que alguien lo viera. Hay una prueba dedicada a que un catálogo sin
+  precios por variante se comporte **exactamente** igual que antes.
+- Por eso el código usa `??` y no `||`: **un precio de variante en cero es cero de verdad**, no "sin
+  precio". Una dueña tiene que poder regalar una talla que quiere liquidar.
+- **La moneda no se duplica en la variante.** Una variante es el mismo producto en otra talla o color;
+  dos tallas en monedas distintas no es un caso real, sería un producto distinto.
+- **Una sola función decide el precio de una línea** (`src/catalog/precioDeVenta.ts`), compartida por
+  los dos caminos. `saleState` es lo que el bot le **dice** a la clienta mientras arma el pedido;
+  `service` es lo que se **guarda y se cobra**. Si divergen, ve un precio y le cobran otro — y esa
+  diferencia no la encuentra ninguna prueba que mire un solo camino.
+- Panel en la misma etapa, reusando la pastilla de `.variant-stock-wrap` en vez de inventar otra: es el
+  mismo objeto visual. Vacío = "el precio del producto", y el placeholder lo dice en vez de dejarlo
+  adivinar.
+
+**Lo que apareció al hacerlo:** `matchVariant` devolvía un tipo angosto, así que la variante resuelta
+**por texto** — el camino que usa el bot cuando la clienta escribe "la XL" en vez de tocar un botón —
+perdía el precio. Ese camino habría seguido cobrando el del producto con el otro ya arreglado. Se hizo
+genérica y tiene su propia prueba.
+
+**También se completó `E33` en `saleState`**, con una asimetría deliberada: ahí las monedas mezcladas
+**no** explotan hacia la clienta (un pedido a medio armar no puede tumbar la conversación: cae al total
+viejo y grita en los logs), pero en `createOrder` **sí**, porque ahí hay plata de verdad y un pedido mal
+sumado es peor que un pedido que no se crea. Siguen sin migrar los `Number(` de `src/ai/tools.ts`:
+tocar ese archivo pide validación con `npm run regression`, que cuesta plata y decide el dueño.
+
+5 pruebas nuevas. Suite completa: 1020, 1006 pasan, 0 fallan.
 
 ---
 

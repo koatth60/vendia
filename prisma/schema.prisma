@@ -807,6 +807,17 @@ model ProductVariant {
   productId String
   color     String?
   size      String?
+  // E36 (2026-09-18): una talla XL puede costar mas que una S.
+  //
+  // NULL significa "el precio del producto", no "gratis". Es la diferencia entera de esta columna: con
+  // un default de 0, un catalogo existente pasaria a tener todas sus variantes a cero y el bot venderia
+  // regalado hasta que alguien lo viera. Con null, los catalogos de hoy se comportan EXACTAMENTE igual
+  // que antes y solo cambia lo que el dueno decida cambiar.
+  //
+  // No lleva moneda propia a proposito: una variante es el mismo producto en otra talla o color, y dos
+  // tallas del mismo producto en monedas distintas no es un caso real -- seria un producto distinto.
+  // La moneda sigue siendo la del producto.
+  price     Decimal?       @db.Decimal(12, 2)
   stock     Int            @default(0)
   active    Boolean        @default(true)
   media     ProductMedia[]

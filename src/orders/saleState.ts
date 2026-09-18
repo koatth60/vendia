@@ -5,6 +5,8 @@ import { resolveShippingRateForCity } from "../catalog/shippingRates";
 import { computeCheckoutState, type CheckoutFacts, type CheckoutState } from "./checkoutState";
 import { getBusinessLocale } from "../config/businessConfig";
 import { getAgreedPrices, applyAgreedPrices } from "./agreedPrices";
+import { Money, sumar } from "../config/dinero";
+import { precioDeVenta } from "../catalog/precioDeVenta";
 
 // Fase 2 del plan maestro (2026-09-15), causa raiz C1. Unico dueno de lectura/escritura de SaleState -
 // ver ONIX-PLAN-MAESTRO.md seccion 1.3 y 4 (Fase 2) para el diseno completo. Nada fuera de este archivo
@@ -145,8 +147,30 @@ export async function getSaleState(conversationId: string): Promise<SaleStateSna
   };
   const checkout = computeCheckoutState(facts, negocio.requirements);
 
-  const subtotal = items.reduce((sum, i) => sum + i.unitPrice * i.quantity, 0);
-  const total = subtotal + (shippingCost ?? 0);
+  // E33 (2026-09-18): el mismo arreglo que en createOrder, y por el mismo motivo -- este es el total que
+  // el bot le DICE a la clienta antes de comprar. Si difiere del que despues se guarda en el pedido, la
+  // clienta ve un precio y le cobran otro.
+  //
+  // `sumar` tira si las lineas traen monedas distintas. Aca eso no se deja explotar hacia el cliente: un
+  // pedido a medio armar con monedas mezcladas no puede tumbar la conversacion entera, asi que se cae al
+  // total viejo y se grita en los logs. En createOrder SI se deja explotar, porque ahi hay plata de
+  // verdad y un pedido mal sumado es peor que un pedido que no se crea.
+  const moneda = items[0]?.currency ?? "COP";
+  let subtotal: number;
+  try {
+    subtotal = sumar(
+      items.map((i) => Money.de(i.unitPrice, i.currency).por(i.quantity)),
+      moneda,
+    ).comoNumeroParaMostrar();
+  } catch (error) {
+    console.error(
+      `[ZAQI ALERT] Pedido en curso con monedas mezcladas en la conversacion ${conversationId}: ` +
+        `${items.map((i) => i.currency).join(", ")}. Se muestra el total sin convertir.`,
+      error,
+    );
+    subtotal = items.reduce((sum, i) => sum + i.unitPrice * i.quantity, 0);
+  }
+  const total = Money.de(subtotal, moneda).mas(Money.de(shippingCost ?? 0, moneda)).comoNumeroParaMostrar();
 
   return {
     conversationId,
@@ -230,6 +254,7 @@ export async function setOrderItem(
   let variantId: string | null = null;
   let variantLabel: string | null = null;
   let stock = product.stock;
+  let varianteElegida: { price: import("@prisma/client").Prisma.Decimal | null } | null = null;
 
   if (activeVariants.length > 0) {
     if (!input.variantId) {
@@ -252,6 +277,9 @@ export async function setOrderItem(
     variantId = variant.id;
     variantLabel = [variant.color, variant.size].filter(Boolean).join(" / ") || null;
     stock = variant.stock;
+    // E36: la variante elegida se retiene para ponerle precio a la linea. Antes solo se usaba para el
+    // stock y la etiqueta, y el precio salia del producto aunque la XL costara mas que la S.
+    varianteElegida = variant;
   }
 
   if (quantity > stock) {
@@ -272,7 +300,10 @@ export async function setOrderItem(
     variantId,
     variantLabel,
     quantity,
-    unitPrice: Number(product.price),
+    // E36: el precio de la VARIANTE cuando la tiene; el del producto cuando no. Un solo lugar decide
+    // esto (src/catalog/precioDeVenta.ts), compartido con createOrder: si divergieran, la clienta veria
+    // un precio mientras arma el pedido y le cobrarian otro al cerrarlo.
+    unitPrice: precioDeVenta(product, varianteElegida).comoNumeroParaMostrar(),
     currency: product.currency,
   };
   const thisKey = `${product.id}|${variantId ?? ""}`;

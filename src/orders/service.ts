@@ -12,6 +12,7 @@ import { getAgreedPrices, applyAgreedPrices, agreedUnitPriceOf } from "./agreedP
 import { recalcularEtapaDelCliente } from "../crm/customers";
 import { transicionarPedido, TransicionNoPermitida, type Actor, type TxCliente } from "./stateMachine";
 import { Money, sumar } from "../config/dinero";
+import { precioDeVenta } from "../catalog/precioDeVenta";
 
 export interface ResolvedOrderItem {
   productId: string;
@@ -63,7 +64,10 @@ type VariantForMatch = { id: string; color: string | null; size: string | null; 
 // Scored the same way findConfidentProductMatch scores products: a hit on color (2) or size (2), refuse
 // to guess on a tie or on zero evidence - see that function's comment for the "why weak evidence isn't
 // enough to commit to a real order line" rationale, same logic applies here one level down.
-function matchVariant(variants: VariantForMatch[], label: string): { variant: VariantForMatch | null; ambiguous: boolean } {
+// GENERICA desde E36 (2026-09-18): antes devolvia el tipo angosto `VariantForMatch`, asi que la variante
+// que salia de aca perdia el resto de sus campos -- entre ellos el precio, que es justo lo que E36 vino a
+// usar. Generica, devuelve la MISMA fila que entro, con todo lo que traiga.
+function matchVariant<V extends VariantForMatch>(variants: V[], label: string): { variant: V | null; ambiguous: boolean } {
   const active = variants.filter((v) => v.active);
   if (active.length === 0) return { variant: null, ambiguous: false };
   if (active.length === 1) return { variant: active[0], ambiguous: false };
@@ -149,6 +153,9 @@ export async function resolveOrderItems(
 
     let variantId: string | null = null;
     let variantLabel: string | null = null;
+    // E36: la variante elegida, retenida para su precio. Los dos caminos que arman una linea tienen que
+    // dar el MISMO numero: este es el que se guarda y se cobra; saleState es el que se le dice antes.
+    let varianteElegida: { price: import("@prisma/client").Prisma.Decimal | null } | null = null;
 
     if (product.variants.length > 0) {
       if (item.variantId) {
@@ -159,6 +166,7 @@ export async function resolveOrderItems(
         }
         variantId = variant.id;
         variantLabel = formatVariantLabel(variant.color, variant.size);
+        varianteElegida = variant;
       } else {
         const { variant, ambiguous } = matchVariant(product.variants, item.variantLabel ?? "");
         if (!variant) {
@@ -167,6 +175,7 @@ export async function resolveOrderItems(
         }
         variantId = variant.id;
         variantLabel = formatVariantLabel(variant.color, variant.size);
+        varianteElegida = variant;
       }
     }
 
@@ -181,7 +190,7 @@ export async function resolveOrderItems(
         variantId,
         variantLabel,
         quantity,
-        unitPrice: Number(product.price),
+        unitPrice: precioDeVenta(product, varianteElegida).comoNumeroParaMostrar(),
         currency: product.currency,
       });
     }

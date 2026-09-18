@@ -585,17 +585,19 @@ export async function assignProductMedia(businessId: string, mediaId: string, va
 export async function createProductVariant(
   businessId: string,
   productId: string,
-  data: { color?: string; size?: string; stock: number }
+  // E36: `price` opcional. undefined y null son lo MISMO aca -- "usa el precio del producto" -- y es la
+  // unica lectura correcta: una variante sin precio propio no vale cero.
+  data: { color?: string; size?: string; stock: number; price?: number | null }
 ) {
   const product = await prisma.product.findFirst({ where: { id: productId, businessId } });
   if (!product) throw new Error("Producto no encontrado");
-  return prisma.productVariant.create({ data: { ...data, productId } });
+  return prisma.productVariant.create({ data: { ...data, price: data.price ?? null, productId } });
 }
 
 export async function updateProductVariant(
   businessId: string,
   variantId: string,
-  data: Partial<{ color: string | null; size: string | null; stock: number; active: boolean }>
+  data: Partial<{ color: string | null; size: string | null; stock: number; active: boolean; price: number | null }>
 ) {
   const variant = await prisma.productVariant.findFirst({ where: { id: variantId, product: { businessId } } });
   if (!variant) throw new Error("Variante no encontrada");

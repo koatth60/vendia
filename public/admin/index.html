@@ -637,6 +637,8 @@
             <input id="p-draft-variant-color" type="text" placeholder="Color nuevo" style="flex:1; min-width:0;" oninput="updateDraftVariantSwatch()" />
             <input id="p-draft-variant-size" type="text" placeholder="Talla" style="width:60px;" hidden />
             <input id="p-draft-variant-stock" type="number" placeholder="Stock" value="0" style="width:60px;" />
+            <!-- E36: vacio = el precio del producto. El placeholder lo dice en vez de dejarlo adivinar. -->
+            <input id="p-draft-variant-price" type="text" inputmode="decimal" placeholder="Precio" title="Vacio = el precio del producto" class="onix-num" style="width:78px;" />
             <label class="variant-photo-btn" id="p-draft-variant-photo-btn" title="Foto propia de este color (opcional)">
               <span id="p-draft-variant-photo-preview">+</span>
               <input type="file" id="p-draft-variant-photo" accept="image/jpeg,image/png,video/*" onchange="previewDraftVariantPhoto()" />

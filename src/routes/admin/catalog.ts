@@ -85,22 +85,29 @@ catalogRouter.delete("/api/products/:id", async (req, res) => {
 // Variants are optional (see ProductVariant in schema.prisma) - a business whose products don't need
 // per-color/size stock+photos never touches these routes and nothing here affects their catalog.
 catalogRouter.post("/api/products/:id/variants", async (req, res) => {
-  const { color, size, stock } = req.body;
+  const { color, size, stock, price } = req.body;
   const variant = await createProductVariant(businessIdOf(req), String(req.params.id), {
     color: color || undefined,
     size: size || undefined,
     stock: Number(stock ?? 0),
+    // E36: vacio = "el precio del producto", no cero. Por eso se compara contra "" y null en vez de
+    // usar `price || null`, que convertiria un 0 legitimo -- una talla que la duena quiere regalar --
+    // en "sin precio propio".
+    price: price === "" || price === undefined || price === null ? null : Number(price),
   });
   res.status(201).json(variant);
 });
 
 catalogRouter.put("/api/variants/:id", async (req, res) => {
-  const { color, size, stock, active } = req.body;
+  const { color, size, stock, active, price } = req.body;
   const variant = await updateProductVariant(businessIdOf(req), String(req.params.id), {
     color: color === "" ? null : color,
     size: size === "" ? null : size,
     stock: stock !== undefined ? Number(stock) : undefined,
     active,
+    // Vaciar el campo VUELVE al precio del producto, y esa es una accion que la duena tiene que poder
+    // hacer: es como se deshace un precio por variante puesto por error.
+    price: price === undefined ? undefined : price === "" || price === null ? null : Number(price),
   });
   res.json(variant);
 });
