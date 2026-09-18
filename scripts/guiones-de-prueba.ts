@@ -24,6 +24,26 @@ import { prisma } from "../src/db/client";
 //   CLIENTA=573150496302 DUENO_AVISADO=1 npx tsx scripts/guiones-de-prueba.ts   # desde un telefono real
 //   LISTAR=1 npx tsx scripts/guiones-de-prueba.ts             # ver los tipos sin correr nada
 //
+// REGLA, SIN EXCEPCIONES: LA CLIENTA NO SABE NADA DEL SISTEMA.
+//
+// Decision del dueño del proyecto, 2026-09-18, despues de encontrar guiones que decian "listo, cierra el
+// pedido por favor", "registralo", "confirmo el pedido" y "1 unidad".
+//
+// Un cliente de verdad no sabe que existe un "pedido" que alguien "registra", ni que hay herramientas,
+// ni estados, ni modalidades con nombre interno. Escribir eso en un guion no es probar al bot: es
+// manejarlo. Y deja la medicion sucia, porque un pedido que cierra despues de que se le ORDENO cerrar no
+// demuestra que el bot sepa cerrar.
+//
+// Cada mensaje de un guion tiene que poder salir de la boca de alguien que solo quiere comprar algo,
+// devolverlo o cancelarlo:
+//
+//   NO:  "cierra el pedido", "registralo", "confirmo el pedido", "1 unidad", "usa la herramienta X",
+//        "marca el estado", "escalalo al dueño"
+//   SI:  "listo", "si", "dale pues", "uno", "pago cuando me llegue", "ya no lo quiero", "cuando llega?"
+//
+// Si el bot necesita que le digan que cierre para cerrar, ESO es el hallazgo. No se tapa escribiendolo
+// en el guion.
+//
 // COSTO: cada mensaje es un turno real contra DeepSeek. CANTIDAD=100 son unos 400 turnos.
 
 const URL_BASE = process.env.URL ?? "http://localhost:3000";

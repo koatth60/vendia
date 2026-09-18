@@ -226,3 +226,23 @@ gh run watch && gh run view --log
 Corre el mismo `scripts/deploy.sh` de siempre. No prueba nada por su cuenta: mirar que el workflow
 `Tests` este en verde antes de disparar el despliegue. Detalle completo en
 `docs/DESPLIEGUE-DESDE-LA-NUBE.md`.
+
+# Las pruebas simuladas: la clienta no sabe nada del sistema
+
+Decisión del dueño del proyecto, 2026-09-18. Aplica a `scripts/guiones-de-prueba.ts` y a cualquier guion
+de conversación que se escriba de ahora en adelante.
+
+**Ningún mensaje de un cliente simulado puede nombrar algo que solo existe del lado del sistema.** Nada
+de "cierra el pedido", "regístralo", "confirmo el pedido", "1 unidad", "usa tal herramienta", "marca el
+estado", "escálalo al dueño". Un cliente no sabe que existe un pedido que alguien registra.
+
+Se escribe como hablaría alguien que solo quiere comprar algo, devolverlo o cancelarlo: *"listo"*,
+*"sí"*, *"dale pues"*, *"uno"*, *"pago cuando me llegue"*, *"ya no lo quiero"*, *"¿cuándo llega?"*.
+
+**Por qué es una regla y no una preferencia:** decirle al bot lo que tiene que hacer no lo prueba, lo
+maneja. Un pedido que cierra después de que se le ordenó cerrar no demuestra que el bot sepa cerrar, y
+la medición queda sucia sin que se note. Si el bot necesita que le digan "cierra el pedido" para
+cerrarlo, **eso es el hallazgo** — no se tapa escribiéndolo en el guion.
+
+Se encontró así: los guiones de compra decían "listo, cierra el pedido por favor" y "registralo", y con
+eso se estaban contando como éxitos cierres que el bot no habría hecho solo.
