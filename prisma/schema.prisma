@@ -776,6 +776,17 @@ model ProductMedia {
   // igual y fallaba con 131053 despues de que el envio ya habia devuelto un wamid. Null = todavia no se
   // midio; nunca significa que el archivo este bien.
   bytes                  Int?
+  // LA FICHA VISUAL DE ESTA FOTO (E12b, paso 2). La escribe el MISMO modelo de vision que mira la foto
+  // que manda el cliente, con el mismo vocabulario: tipo, forma, color, material y texto visible. Sirve
+  // para que una captura de un live se compare contra lo que se VE en el catalogo y no contra el nombre
+  // comercial del producto - "redondo" contra "redondo", en vez de "redondo" contra "Serie 11 Mini
+  // (Edicion Compacta y Elegante)", que fue lo que fallo el 2026-09-18.
+  //
+  // Se calcula una vez, al subir la foto, y se vuelve a calcular solo si la foto cambia. Null = todavia
+  // no se indexo; el emparejamiento simplemente no cuenta con esa foto y el sistema cae al camino de
+  // antes. Nunca bloquea nada.
+  visionDescription      String?
+  visionDescriptionAt    DateTime?
   createdAt DateTime        @default(now())
 }
 

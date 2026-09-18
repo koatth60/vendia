@@ -49,6 +49,7 @@ import { consumeEscalatedTurn } from "../ai/requiredEffects";
 import { generateReply, generateClosingMessage, extractDeliveryDataFromAnswer, extractAddressFromAnswer } from "../ai/agent";
 import { sendCatalogBlocks } from "../whatsapp/catalogBlocks";
 import { analyzeCustomerImage } from "../ai/vision";
+import { matchCustomerPhoto, describeMatchForTurn } from "../ai/photoIndex";
 import { transcribeAudio } from "../ai/transcription";
 import { recordBillableChat, checkChatOverage, EXTRA_CHAT_PRICE_COP } from "../billing/chats";
 import { checkSpendCeiling } from "../billing/spendCeiling";
@@ -793,6 +794,27 @@ whatsappRouter.get("/webhook", (req, res) => {
   res.sendStatus(403);
 });
 
+// LA FOTO SE COMPARA CONTRA EL CATALOGO, NO CONTRA LOS NOMBRES (E12b paso 2, 2026-09-18).
+//
+// La vision describe lo que ve; aca el SERVIDOR compara esa descripcion contra la ficha visual de cada
+// foto del catalogo y le agrega al turno lo que encontro, como dato. Antes, esa descripcion llegaba
+// sola y el modelo tenia que adivinar cual producto era a partir de nombres comerciales donde la
+// palabra que distinguia -"redondo"- no aparece.
+//
+// No bloqueante por diseño: sin fichas visuales cargadas, o si la comparacion falla, el turno queda
+// exactamente como antes.
+async function conIdentificacionDelServidor(businessId: string, analisis: string | undefined): Promise<string | undefined> {
+  if (!analisis || !analisis.startsWith("PRODUCTO:")) return analisis;
+  try {
+    const identificacion = describeMatchForTurn(await matchCustomerPhoto(businessId, analisis));
+    return identificacion ? `${analisis}
+${identificacion}` : analisis;
+  } catch (error) {
+    console.error("No se pudo comparar la foto contra el catalogo (no bloqueante):", error);
+    return analisis;
+  }
+}
+
 whatsappRouter.post("/webhook", async (req, res) => {
   // Fase 8, punto 1: verificacion de la firma de Meta. Arranca en MODO REGISTRO - se anota la firma
   // invalida y la entrega se procesa igual. El rechazo 401 se prende con WEBHOOK_SIGNATURE_ENFORCE
@@ -1008,6 +1030,7 @@ whatsappRouter.post("/webhook", async (req, res) => {
           text = message.image.caption ?? "";
           const catalogHint = await getCatalogHintText(business.id);
           imageAnalysis = await analyzeCustomerImage(business.id, conversation.id, url, text, catalogHint);
+          imageAnalysis = await conIdentificacionDelServidor(business.id, imageAnalysis);
         } catch (error) {
           console.error("No se pudo procesar la imagen entrante:", error);
           text = "[El cliente envio una imagen, pero hubo un problema tecnico y no se pudo procesar. Pedile que la reenvie.]";
@@ -1022,6 +1045,7 @@ whatsappRouter.post("/webhook", async (req, res) => {
           const { url: frameUrl } = await uploadMedia(frame, "image/jpeg", "receipts");
           const catalogHint = await getCatalogHintText(business.id);
           imageAnalysis = await analyzeCustomerImage(business.id, conversation.id, frameUrl, text, catalogHint);
+          imageAnalysis = await conIdentificacionDelServidor(business.id, imageAnalysis);
         } catch (error) {
           console.error("No se pudo procesar el video entrante:", error);
           text = "[El cliente envio un video, pero hubo un problema tecnico y no se pudo analizar. Pedile que mande una foto del producto en vez de video.]";

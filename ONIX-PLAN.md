@@ -1070,6 +1070,38 @@ distinguen por un atributo visual, donde el emparejamiento devuelve uno solo.
 **Tamaño:** L en total, S + M + M por paso. **Depende de:** nada. **Bandera:** no.
 **Vuelta atrás:** revertir por paso; sin las fichas visuales el sistema vuelve al camino de hoy.
 
+#### Paso 2 HECHO (2026-09-18), sin desplegar
+
+- `ProductMedia.visionDescription` + `visionDescriptionAt`, aditivas y nullable (migración
+  `20260918130000_ficha_visual_de_la_foto`). Una foto sin ficha simplemente no participa del
+  emparejamiento y el turno queda como antes: la etapa no puede quitar nada.
+- `src/ai/photoIndex.ts` describe cada foto del catálogo con el **mismo** modelo de visión que mira la
+  foto del cliente, y con un prompt **paralelo** al de `visionPrompt.ts` — mismas facetas, mismo orden,
+  mismas palabras. Que los dos lados hablen el mismo idioma es la etapa entera; con vocabularios
+  distintos volveríamos a comparar entre idiomas.
+- Se calcula **al subir la foto**, sin `await`: la dueña no espera a un modelo para ver su foto cargada,
+  y si falla la rellena `npx tsx scripts/index-catalog-photos.ts`, que es idempotente y solo toca las que
+  están en null.
+- `src/catalog/visualIndex.ts` es la comparación, **pura**: sin base, sin red, sin modelo. Puntúa sobre
+  los tokens de la foto DEL CLIENTE (no sobre la unión), así que una ficha larga no gana por tener más
+  palabras; se queda con la **mejor foto** de cada producto, así que tener cinco cargadas no es ventaja;
+  y exige piso (`0.34`) **y margen sobre el segundo** (`0.15`).
+- **La duda se devuelve como duda.** Con dos candidatos pegados no elige: marca `ambiguous` y el servidor
+  le pone al turno *"NO pudo distinguir entre X y Y"*. Es literal lo que falló el 2026-09-18, cuando el
+  bot mandó "los dos modelos que más se parecen".
+- Lo que el servidor agrega al turno es un **hecho** ("corresponde a X (productId: …)"), nunca una
+  instrucción. Qué hacer con una duda sigue siendo conversación.
+
+Nueve pruebas en `src/catalog/visualIndex.test.ts`, todas sobre el núcleo puro, **incluida la del caso
+real**: la descripción del reloj redondo resuelve al Serie 11 Mini y no a los dos deportivos de 49 mm.
+
+**Al desplegar:** `npx tsx scripts/index-catalog-photos.ts` una vez. Sin eso, las fotos ya cargadas no
+tienen ficha y el emparejamiento no tiene contra qué comparar. Son ~39 fotos en MAGByLizN, una llamada de
+visión cada una (~USD 0,01), y se paga una sola vez por foto, no una por consulta.
+
+**Siguen pendientes el paso 1** (que la visión elija un `productId` real en vez de describir al aire) **y
+el paso 3** (forma/color/correa como atributos por negocio).
+
 ---
 
 ### E13 · Prometer consultar al dueño abre una consulta de verdad

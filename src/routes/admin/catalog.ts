@@ -15,6 +15,7 @@ import {
 import { listCategoryAliases, createCategoryAlias, deleteCategoryAlias } from "../../catalog/categoryAliases";
 import { detectProductColors } from "../../ai/colorDetection";
 import { uploadMedia } from "../../media/s3";
+import { indexProductMedia } from "../../ai/photoIndex";
 import { requireOwner } from "../../auth/requireOwner";
 import { upload, businessIdOf, isUnsupportedImageType } from "./shared";
 
@@ -137,6 +138,10 @@ catalogRouter.post("/api/products/:id/media", upload.single("file"), async (req,
   // product overall) comes through as a plain form field alongside the multipart file.
   const variantId = req.body.variantId ? String(req.body.variantId) : undefined;
   const media = await addProductMedia(businessIdOf(req), String(req.params.id), { type, url, s3Key: key, bytes }, variantId);
+  // LA FICHA VISUAL SE CALCULA AL SUBIR (E12b paso 2). Sin await: la dueña no tiene por que esperar una
+  // llamada a un modelo de vision para ver su foto cargada, y si falla o el proceso muere, la foto queda
+  // sin ficha y la rellena `npx tsx scripts/index-catalog-photos.ts`. Nunca puede romper una subida.
+  if (type === "IMAGE") void indexProductMedia(media.id);
   res.status(201).json(media);
 });
 
