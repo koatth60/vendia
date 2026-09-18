@@ -48,6 +48,23 @@ payload to DeepSeek on every customer message. Keep this lean going forward:
   (`--test src`) does NOT work on Node 22: it also runs `src/index.ts` and dies on EADDRINUSE :3000. `dist/` is build output that
   production does not use (prod runs the source through tsx); if it ever gets rebuilt, the compiled
   `*.test.js` files under it are dead weight, not a test suite.
+- Fourth occurrence, 2026-09-18, and el que cerró la clase entera. `src/routes/whatsapp.test.ts`
+  tenía una prueba con el comentario `// Real DeepSeek call (no mocking)` escrito arriba, y se llamaba
+  `.test.ts` igual: `npm test` la corría y la pagaba en cada push. Estuvo escondida un tiempo porque el
+  archivo moría al importar (el cliente de Groq se construía al tope del módulo, ver
+  `src/ai/transcription.ts`) - la falla de CI tapaba el gasto. Al arreglar Groq se destapó y la corrida
+  se colgó 17 minutos facturando antes de que la cancelaran.
+  **La lección: las tres veces anteriores se cerraron con una regla de nombres, que es algo que hay que
+  acordarse de cumplir. La cuarta se cerró sacando la plata del medio.** El workflow `Tests` ya no
+  recibe `secrets.DEEPSEEK_API_KEY`: recibe una key inválida a propósito. No puede facturar porque no
+  tiene con qué pagar. Tiene que ser un valor NO VACÍO (`src/ai/client.ts` construye el cliente al
+  importar y el SDK tira si la key viene vacía), y con uno inválido la llamada muere en 401 al instante
+  en vez de colgarse. Si mañana otro `*.test.ts` vuelve a llamar de verdad, CI se pone rojo en segundos
+  y gratis. **Nunca volver a poner el secreto de verdad en `test.yml`.**
+  La regla de nombres sigue en pie, pero ahora es la comodidad (saber qué corre con `npm run
+  test:paid`), no la garantía.
+  De paso quedó medido cómo se averigua cuál prueba llama de verdad sin adivinar: correr el archivo con
+  la key inválida. Las que pasan no llaman; la que falla, sí.
 
 # Rediseño del panel (dirección A) — reglas de estilo
 
@@ -68,7 +85,11 @@ faltan son las etapas `E47` a `E55` de `ONIX-PLAN.md`.
   Nunca dos ejes Y.
 - No redondear paddings, radios ni tamaños del diseño a múltiplos de 4.
 - Antes de cada commit de CSS:
-  `grep -nEi '#[0-9a-f]{3,8}\b|rgba?\(' public/admin/css/admin.css` debe salir vacío.
+  `grep -nEi '#[0-9a-f]{3,8}\b|rgba?\(' public/admin/css/admin.css public/admin/css/auth.css` debe
+  salir vacío. Desde `E48` (2026-09-18) esto ya no depende de que alguien se acuerde: el workflow
+  `Tests` lo corre como paso propio, junto con `npx tsc --noEmit`, y los dos van **antes** de
+  `npm test` para que el error aparezca en segundos y no después de la suite. `auth.css` entra al
+  grep: el día que se prendió tenía 3 literales, los mismos que `admin.css`.
 - Un cambio de CSS nunca justifica correr `npm run regression` ni `npm run test:paid`
   (llaman a DeepSeek de verdad y cuestan plata). `src/ai/*` no se toca en ninguna fase.
 

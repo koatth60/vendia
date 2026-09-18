@@ -1863,13 +1863,32 @@ de su pantalla, y sin eso ninguna se puede hacer bien.
 
 ---
 
-### E48 · El `grep` de color literal entra a CI
+### E48 · El `grep` de color literal entra a CI — **CERRADA el 2026-09-18** (commit `65dfa20`), sin desplegar
 
 **Quita:** al revisor, tener que acordarse de correr el `grep`.
-**Porque:** `.github/workflows/test.yml` corre `npm test` pero no el `grep` de color literal ni
+**Porque:** `.github/workflows/test.yml` corría `npm test` pero no el `grep` de color literal ni
 `tsc --noEmit`. Es la única regla del rediseño que necesita vigilancia automática.
-**Se hace:** los dos pasos en el workflow.
-**Tamaño:** S. **Depende de:** nada.
+**Se hizo:** los dos pasos en el workflow, **antes** de `npm test` (tardan segundos contra los cuatro
+minutos y medio de la suite, así que el error se ve al principio).
+
+**Lo que apareció al prenderlo:** la regla ya estaba rota. Había **7 colores literales** fuera de
+`tokens.css`, o sea que el paso nuevo habría puesto CI en rojo el primer día. Se convirtieron en
+tokens antes de prender la vigilancia:
+
+- La pastilla blanca del emblema (barra lateral y pantallas de acceso) tenía el blanco y los dos
+  verdes escritos a mano, en `admin.css` y otra vez en `auth.css`. Ahora son `--onix-brand-pill`,
+  `--onix-brand-pill-leaf-dark` y `--onix-brand-pill-leaf-light`. **No se redefinen en ningún bloque
+  de tema, a propósito:** el fondo de abajo es blanco siempre, y si siguieran al tema, en oscuro
+  tendrían que aclararse tanto que dejan de ser los verdes de la marca. Mismo criterio que los
+  `--onix-invert-*` que ya existían.
+- `.thumb-warning` tenía `color: #fff` sobre fondo `var(--danger)` → `var(--onix-danger-ink)`, que ya
+  existía y es el par de ese fondo. **Arregló un defecto real de tema oscuro:** ahí `--onix-danger` es
+  un rojo claro (`#F87171`), así que el texto blanco quedaba casi ilegible — y ese aviso es el que
+  dice que una foto no se le puede mandar al cliente, no es decorativo.
+
+`auth.css` quedó dentro del `grep`, no solo `admin.css`: tenía 3 de los 7.
+
+**Tamaño:** S. **Dependía de:** nada.
 
 ---
 
@@ -2320,7 +2339,7 @@ hasta que la etapa que lo arregla lo ponga en verde de verdad.
 | **Pedidos** | `E31`, `E32`, `E33`, `E34`, `E35` |
 | **Catálogo** | `E36`, `E37`, `E38`, `E39`, `E40`, `E61` |
 | **CRM** | `E02` hecha; quedan `E41`, `E42`, `E43`, `E44`, `E45`, `E46`, `E68` |
-| **Panel (rediseño)** | `E47`, `E48`, `E49`, `E50`, `E51`, `E52`, `E53`, `E54`, `E55` |
+| **Panel (rediseño)** | `E48` hecha; quedan `E47`, `E49`, `E50`, `E51`, `E52`, `E53`, `E54`, `E55` |
 | **FAQ que aprende** | `E09b` (que la lea), `E56`, `E57`, `E58`, `E59` |
 | **Observabilidad** | `E24`, `E25`, `E62`, `E63`, `E65` |
 | **Vender más** | `E68`, `E69`, `E70`, `E71`, `E72`, `E73` |
