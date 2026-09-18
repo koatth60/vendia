@@ -20,6 +20,7 @@ import { prisma } from "../src/db/client";
 //   CANTIDAD=100 npx tsx scripts/guiones-de-prueba.ts         # cien, repartidas entre los tipos
 //   CANTIDAD=100 PARALELO=6 npx tsx scripts/guiones-de-prueba.ts
 //   GUION=cancelar CANTIDAD=10 npx tsx scripts/guiones-de-prueba.ts
+//   GUION=saludo,compra,cancelar npx tsx scripts/guiones-de-prueba.ts   # varios tipos de una
 //   GRUPO=pedido,pregunta CANTIDAD=120 npx tsx scripts/guiones-de-prueba.ts   # sin PQR ni cancelaciones
 //   CLIENTA=573150496302 DUENO_AVISADO=1 npx tsx scripts/guiones-de-prueba.ts   # desde un telefono real
 //   LISTAR=1 npx tsx scripts/guiones-de-prueba.ts             # ver los tipos sin correr nada
@@ -1112,7 +1113,11 @@ async function main() {
 
   const gruposPedidos = (process.env.GRUPO ?? "").split(",").map((g) => g.trim()).filter(Boolean);
   const porGrupo = gruposPedidos.length > 0 ? GUIONES.filter((g) => gruposPedidos.includes(g.grupo)) : GUIONES;
-  const tipos = process.env.GUION ? porGrupo.filter((g) => g.nombre === process.env.GUION) : porGrupo;
+  // GUION acepta varios separados por coma. Correrlos de a uno con CANTIDAD=1 no sirve: cada corrida
+  // arranca en el indice 1, asi que todas usan el MISMO numero simulado y cada una borra la anterior --
+  // al final queda una sola conversacion de las cinco que se pidieron.
+  const nombresPedidos = (process.env.GUION ?? "").split(",").map((g) => g.trim()).filter(Boolean);
+  const tipos = nombresPedidos.length > 0 ? porGrupo.filter((g) => nombresPedidos.includes(g.nombre)) : porGrupo;
   if (tipos.length === 0) {
     console.error(`Ningun guion coincide (GUION="${process.env.GUION ?? ""}" GRUPO="${process.env.GRUPO ?? ""}"). Con LISTAR=1 se ven todos.`);
     process.exit(64);
