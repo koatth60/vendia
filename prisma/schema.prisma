@@ -962,6 +962,16 @@ model Customer {
   business      Business       @relation(fields: [businessId], references: [id], onDelete: Cascade)
   businessId    String
   phoneNumber   String
+  // UN CLIENTE DE PRUEBA (2026-09-18). No existe del otro lado: es un numero inventado para poder
+  // mirar como contesta el bot desde la Bandeja, con el catalogo y la personalidad REALES del negocio.
+  //
+  // Lo unico que cambia es la ULTIMA milla: hacia un cliente simulado no se llama a la API de Meta. El
+  // mensaje se guarda igual, asi que la conversacion se ve en el panel como cualquier otra -- y no hay
+  // forma de que le llegue a una persona, porque el numero no es de nadie.
+  //
+  // No se puede prender desde el panel a proposito: lo pone scripts/simular-cliente.ts. Un cliente real
+  // marcado asi dejaria de recibir mensajes sin que nadie se entere, y ese es el unico riesgo que tiene.
+  simulated     Boolean        @default(false)
   // Nombre AUTORITATIVO: el que la clienta dijo por chat (save_customer_name) o el que el dueno escribio
   // a mano en el panel. Solo lo cambia una persona a proposito.
   name          String?

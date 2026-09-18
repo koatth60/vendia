@@ -153,8 +153,17 @@ export async function seedReplayBusiness(
 // Borra el negocio de replay entero (cascada vía FKs). Llamar siempre en un `after` del test, para no
 // dejar negocios `[REPLAY]` acumulandose en la base de desarrollo cada corrida.
 export async function teardownReplayBusiness(businessId: string): Promise<void> {
+  // EL ORDEN ES EL DE LAS LLAVES FORANEAS, y la lista tiene que estar COMPLETA: cualquier tabla que
+  // apunte a Customer o a Conversation y no este aca hace que el borrado falle con un 23503 y deje el
+  // negocio de prueba a medio borrar. Paso el 2026-09-18 con BillableChat (la facturacion por chats,
+  // agregada el 2026-09-17): la fila quedaba viva y el teardown reventaba.
   await prisma.message.deleteMany({ where: { conversation: { customer: { businessId } } } });
   await prisma.pendingOwnerQuestion.deleteMany({ where: { conversation: { customer: { businessId } } } });
+  await prisma.agentTurn.deleteMany({ where: { businessId } });
+  await prisma.billableChat.deleteMany({ where: { businessId } });
+  await prisma.saleState.deleteMany({ where: { conversation: { customer: { businessId } } } });
+  await prisma.deliveryFailure.deleteMany({ where: { businessId } });
+  await prisma.ownerMessageLog.deleteMany({ where: { businessId } });
   await prisma.order.deleteMany({ where: { businessId } });
   await prisma.conversation.deleteMany({ where: { customer: { businessId } } });
   await prisma.customer.deleteMany({ where: { businessId } });

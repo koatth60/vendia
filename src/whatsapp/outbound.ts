@@ -13,6 +13,7 @@
 // Reexporta lo que NO es envio (descarga de medios, gestion de plantillas, foto de perfil, formato de
 // texto) para que el resto del codigo tenga un solo import de WhatsApp y la regla "cero llamadas
 // directas a client.ts" sea literal y verificable con un grep, en vez de una lista de excepciones.
+import { randomUUID } from "node:crypto";
 import { prisma } from "../db/client";
 import {
   GraphApiError,
@@ -426,11 +427,55 @@ export async function sendToCustomer(params: SendToCustomerParams): Promise<Outb
 // wamid real, y recien reporta el 131047 horas despues por el webhook de estados - para entonces
 // la duena ya creyo que el mensaje salio (incidente real del 2026-09-14, dos mensajes "enviados"
 // que nadie recibio).
+/**
+ * UN CLIENTE SIMULADO NO EXISTE DEL OTRO LADO (2026-09-18).
+ *
+ * Pedido del dueño: poder generar conversaciones de prueba y mirarlas desde la Bandeja, con el catálogo
+ * y la personalidad REALES del negocio, para ver cómo contesta el bot. Lo único que se cambia es la
+ * última milla: hacia un número inventado no se llama a la API de Meta.
+ *
+ * El mensaje se guarda igual, así que la conversación se ve en el panel como cualquier otra. Y no hay
+ * forma de que le llegue a una persona, porque el número no es de nadie.
+ */
+async function esClienteSimulado(conversationId: string): Promise<boolean> {
+  const conversacion = await prisma.conversation.findUnique({
+    where: { id: conversationId },
+    select: { customer: { select: { simulated: true } } },
+  });
+  return Boolean(conversacion?.customer.simulated);
+}
+
+async function entregaSimulada(params: SendToCustomerParams, windowOpen: boolean | null): Promise<OutboundResult> {
+  const wamid = `sim.${randomUUID()}`;
+  if (params.recordAs) {
+    await recordMessage(
+      params.businessId,
+      params.conversationId,
+      "ASSISTANT",
+      params.recordAs.text,
+      wamid,
+      undefined,
+      undefined,
+      undefined,
+      { humanAuthor: Boolean(params.recordAs.humanAuthor) },
+    );
+  }
+  // Ruidoso a proposito: que nadie confunda una corrida de prueba con trafico real al leer los logs.
+  console.log(`[SIMULACION] No se llamo a Meta (cliente de prueba). Conversacion ${params.conversationId}.`);
+  return { outcome: "SENT", delivered: true, wamid, attempts: 0, windowOpen, queued: false, queuedId: null, failure: null };
+}
+
 async function sendSingleContentToCustomer(params: SendToCustomerParams): Promise<OutboundResult> {
   const { businessId, conversationId, credentials, to, content } = params;
   const policy = params.onWindowClosed ?? "template";
 
   const windowState = await getWindowState(conversationId);
+  // Antes de cualquier otra cosa menos la ventana: si el destinatario es de prueba, no hay a quien
+  // llamar. La ventana se mira igual para que el comportamiento simulado no sea MAS permisivo que el real.
+  if (await esClienteSimulado(conversationId)) {
+    if (isFreeForm(content) && !windowState.windowOpen) return handleClosedWindow(params, policy);
+    return entregaSimulada(params, windowState.windowOpen);
+  }
   if (isFreeForm(content) && !windowState.windowOpen) {
     return handleClosedWindow(params, policy);
   }
