@@ -28,7 +28,7 @@ import { esLaImagenDelComprobante, faltaComprobanteDePago, FALTA_COMPROBANTE_NOT
 import { resolverModalidadDelPedido, filtrarMetodosPorZona } from "../orders/paymentTiming";
 import { listShippingRates, resolveShippingRateForCity } from "../catalog/shippingRates";
 import { recordAgentIncident } from "./incidents";
-import { sePuede } from "../orders/stateMachine";
+import { estadosQueElBotPuedeCancelar } from "../orders/stateMachine";
 import { Money, sumarParaMostrar, totalDeLinea } from "../config/dinero";
 import { getSaleGate } from "./configHealth";
 import { normalizeForMatch } from "../search/text";
@@ -2188,7 +2188,18 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
         return { canceled: false, reason: "no_order", note: "Ese pedido no existe o no es de este cliente." };
       }
 
-      if (!sePuede(order.fulfillmentStatus, "CANCELED")) {
+      // Hasta donde llega EL BOT lo fija el negocio, no la tabla de transiciones: la tabla dice lo que es
+      // posible (el dueno, desde el panel, puede mas) y `cancelacionPorElBot` dice hasta donde cancela el
+      // bot solo. Mismo calculo que listCancelableOrdersForCustomer, para que pedir por id y pedir sin id
+      // no puedan dar respuestas distintas.
+      const negocioCancelacion = await prisma.business.findUnique({
+        where: { id: businessId },
+        select: { cancelacionPorElBot: true },
+      });
+      const elBotPuedeCancelar = estadosQueElBotPuedeCancelar(
+        negocioCancelacion?.cancelacionPorElBot ?? "ANTES_DE_DESPACHAR",
+      ).includes(order.fulfillmentStatus);
+      if (!elBotPuedeCancelar) {
         return {
           canceled: false,
           reason: "not_cancelable",

@@ -334,6 +334,7 @@ async function loadBusiness() {
     document.getElementById('bot-interactive-lists').checked = Boolean(business.interactiveListsEnabled);
     document.getElementById('bot-attribute-check').checked = Boolean(business.attributeCheckEnabled);
     setCatalogPhotoScope(business.catalogPhotoScope || 'PRODUCT');
+    setCancelacionPorElBot(business.cancelacionPorElBot || 'ANTES_DE_DESPACHAR');
     document.getElementById('bot-gendered-address').checked = Boolean(business.genderedAddressEnabled);
     document.getElementById('bot-female-term').value = business.femaleAddressTerm || '';
     document.getElementById('bot-male-term').value = business.maleAddressTerm || '';
@@ -690,6 +691,7 @@ async function saveBusiness() {
   const interactiveListsEnabled = document.getElementById('bot-interactive-lists').checked;
   const attributeCheckEnabled = document.getElementById('bot-attribute-check').checked;
   const catalogPhotoScope = readCatalogPhotoScope();
+  const cancelacionPorElBot = readCancelacionPorElBot();
   const genderedAddressEnabled = document.getElementById('bot-gendered-address').checked;
   const femaleAddressTerm = document.getElementById('bot-female-term').value.trim();
   const maleAddressTerm = document.getElementById('bot-male-term').value.trim();
@@ -714,7 +716,7 @@ async function saveBusiness() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         name, description, customInstructions, assistantName, botTone, botDialect, botGreeting, botNeverSay,
-        autoSendPhotoOnQuote, offerPhotosBeforeSending, requirePaymentProof, interactiveListsEnabled, attributeCheckEnabled, catalogPhotoScope, businessCategory, contactName, contactPhone,
+        autoSendPhotoOnQuote, offerPhotosBeforeSending, requirePaymentProof, cancelacionPorElBot, interactiveListsEnabled, attributeCheckEnabled, catalogPhotoScope, businessCategory, contactName, contactPhone,
         ownerReminderMinutes, ownerQuestionTimeoutHours, intentEscalationTimeoutHours,
         followUpTemplateName, followUpTemplateLanguage, followUpDelayHours,
         abandonedAfterHours, cartRecoveryTemplateName, cartRecoveryTemplateLanguage,
@@ -829,6 +831,24 @@ function setCatalogPhotoScope(value) {
   document.querySelectorAll('input[name="catalog-photo-scope"]').forEach((input) => {
     input.checked = input.value === scope;
   });
+}
+
+// Hasta cuando puede cancelar el bot (Business.cancelacionPorElBot). El corte lo fija el negocio una vez
+// y dentro de ese limite el bot cancela solo, sin que el dueno tenga que hacer nada.
+const CANCELACIONES = ['NUNCA', 'ANTES_DE_DESPACHAR', 'ANTES_DE_ENTREGAR'];
+
+function setCancelacionPorElBot(value) {
+  const elegido = CANCELACIONES.includes(value) ? value : 'ANTES_DE_DESPACHAR';
+  document.querySelectorAll('input[name="cancelacion-por-el-bot"]').forEach((input) => {
+    input.checked = input.value === elegido;
+  });
+}
+
+function readCancelacionPorElBot() {
+  const marcado = document.querySelector('input[name="cancelacion-por-el-bot"]:checked');
+  // Sin ninguno marcado se guarda lo que el sistema hacia antes de que esto fuera configurable: un
+  // formulario a medias nunca le amplia a un negocio lo que el bot puede cancelar solo.
+  return marcado && CANCELACIONES.includes(marcado.value) ? marcado.value : 'ANTES_DE_DESPACHAR';
 }
 
 function readCatalogPhotoScope() {

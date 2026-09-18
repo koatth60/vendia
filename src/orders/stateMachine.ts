@@ -1,4 +1,4 @@
-import type { OrderEventActor, OrderFulfillmentStatus, Prisma } from "@prisma/client";
+import type { CancelacionPorElBot, OrderEventActor, OrderFulfillmentStatus, Prisma } from "@prisma/client";
 import { prisma } from "../db/client";
 
 // E31 (2026-09-18). El estado del pedido deja de poder sobrescribirse desde cualquier lado.
@@ -24,9 +24,10 @@ export function normalizarEstado(estado: OrderFulfillmentStatus): OrderFulfillme
  * De cada estado, a cuales se puede ir. Lo que no esta, no se puede.
  *
  * Las decisiones que no son obvias, dichas:
- * - De SHIPPED NO se puede cancelar. El pedido ya salio; lo que ocurre despues es una DEVOLUCION, que
- *   es otro hecho con otro nombre (y ConversationIntent ya tenia DEVOLUCION y NO_RECIBIDO sin nada del
- *   lado del pedido que los representara).
+ * - De SHIPPED SI se puede cancelar, pero eso no quiere decir que el bot pueda: la tabla dice lo que es
+ *   POSIBLE, y `estadosQueElBotPuedeCancelar` dice hasta donde llega el bot en ESTE negocio. Un pedido
+ *   despachado que el cliente rechaza puede terminar en RETURNED, que sigue siendo otro hecho con otro
+ *   nombre; lo que se agrego es que un negocio pueda dejar que se cancele antes de que llegue.
  * - CANCELED, RETURNED y REFUNDED son finales. Un pedido cancelado no se "descancela": si el cliente
  *   vuelve, es un pedido nuevo. Permitir volver atras es lo que hace que el historial mienta.
  * - DELIVERED puede ir a RETURNED: el cliente lo recibio y lo devolvio. Es el caso real, no una rareza.
@@ -36,7 +37,7 @@ const TRANSICIONES: Record<OrderFulfillmentStatus, OrderFulfillmentStatus[]> = {
   PENDING_PAYMENT: ["PAID", "PREPARING", "SHIPPED", "CANCELED"],
   PAID: ["PREPARING", "SHIPPED", "CANCELED", "REFUNDED"],
   PREPARING: ["SHIPPED", "CANCELED"],
-  SHIPPED: ["DELIVERED", "RETURNED"],
+  SHIPPED: ["DELIVERED", "RETURNED", "CANCELED"],
   DELIVERED: ["RETURNED"],
   CANCELED: [],
   RETURNED: ["REFUNDED"],
@@ -90,6 +91,23 @@ export function sePuede(desde: OrderFulfillmentStatus, hacia: OrderFulfillmentSt
 export const ESTADOS_CANCELABLES = (Object.keys(TRANSICIONES) as OrderFulfillmentStatus[]).filter((estado) =>
   sePuede(estado, "CANCELED"),
 );
+
+/**
+ * Hasta donde puede cancelar EL BOT en este negocio, que no es lo mismo que lo que es posible.
+ *
+ * Pedido del dueño (2026-09-18): "un toggle donde el cliente decida hasta qué punto se puede cancelar el
+ * pedido... para que el bot pueda cancelar sin tener que hacer nada el dueño de la empresa, pero bajo
+ * ciertas condiciones". El corte se fija una vez por negocio y dentro de ese límite el bot cancela solo.
+ *
+ * Sale de la MISMA tabla que `ESTADOS_CANCELABLES`, filtrada por el ajuste: así el día que la tabla
+ * cambie, esto lo sabe solo. Una segunda lista escrita a mano es la que se olvida de actualizar.
+ */
+export function estadosQueElBotPuedeCancelar(ajuste: CancelacionPorElBot): OrderFulfillmentStatus[] {
+  if (ajuste === "NUNCA") return [];
+  if (ajuste === "ANTES_DE_ENTREGAR") return ESTADOS_CANCELABLES;
+  // ANTES_DE_DESPACHAR: todo lo cancelable menos el pedido que ya salio.
+  return ESTADOS_CANCELABLES.filter((estado) => estado !== "SHIPPED");
+}
 
 /**
  * El cliente de transaccion tal como lo entrega ESTE prisma, que esta extendido (ver src/db/client.ts:

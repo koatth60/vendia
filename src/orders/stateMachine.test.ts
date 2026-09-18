@@ -2,7 +2,7 @@ import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { prisma } from "../db/client";
-import { sePuede, normalizarEstado, transicionarPedido, TransicionNoPermitida } from "./stateMachine";
+import { sePuede, normalizarEstado, transicionarPedido, TransicionNoPermitida, estadosQueElBotPuedeCancelar } from "./stateMachine";
 import { markOrderShipped, markOrderCanceled } from "./service";
 
 // E31 (2026-09-18). El estado del pedido deja de poder sobrescribirse desde cualquier lado.
@@ -52,30 +52,27 @@ test("E31: la tabla de transiciones, sin tener que tocar la base", () => {
   assert.ok(sePuede("PENDING", "CANCELED"), "y se puede cancelar");
   assert.ok(sePuede("SHIPPED", "DELIVERED"));
   assert.ok(sePuede("SHIPPED", "RETURNED"), "lo que pasa despues de enviar es una devolucion");
-  assert.equal(sePuede("SHIPPED", "CANCELED"), false, "un pedido que ya salio NO se cancela");
+  // 2026-09-18: un pedido despachado SI se puede cancelar. La tabla dice lo que es POSIBLE; hasta donde
+  // llega el bot lo fija cada negocio con Business.cancelacionPorElBot (ver estadosQueElBotPuedeCancelar).
+  assert.ok(sePuede("SHIPPED", "CANCELED"), "un despachado se puede cancelar si el negocio lo permite");
   assert.equal(sePuede("CANCELED", "SHIPPED"), false, "un pedido cancelado no se re-envia");
   assert.equal(sePuede("CANCELED", "PENDING_PAYMENT"), false, "cancelado es definitivo");
   assert.equal(sePuede("REFUNDED", "SHIPPED"), false);
 });
 
-test("E31: cancelar un pedido ya enviado falla con un motivo que se le puede mostrar al dueño", async () => {
+test("E31: cancelar un pedido ya enviado es posible, y hasta donde llega el bot lo fija el negocio", async () => {
   const { businessId, orderId } = await pedido();
   await markOrderShipped(businessId, orderId, { note: "Salio por Servientrega" });
 
-  await assert.rejects(
-    () => markOrderCanceled(businessId, orderId),
-    (error: unknown) => {
-      assert.ok(error instanceof TransicionNoPermitida);
-      assert.match(error.message, /ya fue enviado/i);
-      assert.match(error.message, /devuelto/i, "y le dice que hacer en su lugar");
-      return true;
-    },
-  );
+  // El dueño, desde el panel, puede: alcanza a llamar al mensajero antes de que entregue.
+  await markOrderCanceled(businessId, orderId);
+  const despues = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
+  assert.equal(despues.fulfillmentStatus, "CANCELED");
 
-  // Y el pedido NO se movio.
-  const fresco = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
-  assert.equal(fresco.fulfillmentStatus, "SHIPPED");
-  assert.equal(fresco.canceledAt, null, "ni se escribio la fecha de cancelacion");
+  // El bot no, salvo que el negocio lo haya permitido.
+  assert.equal(estadosQueElBotPuedeCancelar("ANTES_DE_DESPACHAR").includes("SHIPPED"), false);
+  assert.ok(estadosQueElBotPuedeCancelar("ANTES_DE_ENTREGAR").includes("SHIPPED"));
+  assert.deepEqual(estadosQueElBotPuedeCancelar("NUNCA"), []);
 });
 
 test("E31: re-enviar un pedido cancelado falla", async () => {

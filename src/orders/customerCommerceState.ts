@@ -1,6 +1,6 @@
 import { prisma } from "../db/client";
 import { formatPrice } from "../config/money";
-import { ESTADOS_CANCELABLES } from "./stateMachine";
+import { estadosQueElBotPuedeCancelar } from "./stateMachine";
 
 // Pieza 6 del plan de catalogo y medios (ONIX-PLAN-CATALOGO-Y-MEDIOS.md, seccion 3).
 //
@@ -133,7 +133,13 @@ export function isOpenOrder(row: { fulfillmentStatus: string }): boolean {
   // pagado y todavia sin despachar dejaba de contar como abierto, asi que el modelo lo veia como
   // historia vieja y `cancel_order` no lo encontraba. Ahora "abierto" es exactamente "todavia se puede
   // cancelar", que es lo que significa para quien lo lee.
-  return (ESTADOS_CANCELABLES as string[]).includes(row.fulfillmentStatus);
+  //
+  // 2026-09-18: la tabla de transiciones ahora admite SHIPPED -> CANCELED, porque un negocio puede
+  // permitir que el bot cancele un pedido ya despachado (Business.cancelacionPorElBot). Esta funcion no
+  // recibe el negocio y sirve para MOSTRAR, asi que mantiene el corte de siempre -- despachado ya no
+  // cuenta como abierto. Quien decide si se puede cancelar de verdad es listCancelableOrdersForCustomer,
+  // que si lee el ajuste.
+  return (estadosQueElBotPuedeCancelar("ANTES_DE_DESPACHAR") as string[]).includes(row.fulfillmentStatus);
 }
 
 function saleItems(raw: unknown): { producto: string; variante: string | null; cantidad: number }[] {

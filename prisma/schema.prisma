@@ -36,6 +36,19 @@ enum OrderFulfillmentStatus {
 // E35: si el pedido esta pagado, a medias, o si se devolvio la plata. Es distinto de
 // `fulfillmentStatus` (donde esta la mercaderia) y de `amountOnDelivery` (cuanto falta cobrar al
 // entregar): un pedido puede estar SHIPPED y sin pagar, o PAID y todavia en el deposito.
+/// Hasta que punto puede CANCELAR EL BOT un pedido, sin que el dueno tenga que hacer nada.
+///
+/// La tabla de transiciones sigue mandando sobre lo que es posible; esto solo dice hasta donde llega el
+/// bot solo. El dueno, desde el panel, no pierde ninguna capacidad.
+enum CancelacionPorElBot {
+  /// El bot no cancela nunca. Escala y decide el dueno.
+  NUNCA
+  /// Hasta antes de que el pedido salga. Es lo que hacia el sistema antes de que esto fuera configurable.
+  ANTES_DE_DESPACHAR
+  /// Tambien con el pedido ya despachado, mientras no se haya entregado.
+  ANTES_DE_ENTREGAR
+}
+
 enum OrderPaymentStatus {
   UNPAID
   PARTIAL
@@ -68,6 +81,8 @@ model Business {
   // field's existing AUTO/REACTIVE meaning untouched for every business that hasn't opted into this.
   offerPhotosBeforeSending  Boolean                   @default(false)
   requirePaymentProof       Boolean                   @default(true)
+  /// Hasta donde puede cancelar el bot sin intervencion del dueno. Por defecto, lo de siempre.
+  cancelacionPorElBot       CancelacionPorElBot       @default(ANTES_DE_DESPACHAR)
   businessCategory          String?
   email                     String                    @unique
   passwordHash              String

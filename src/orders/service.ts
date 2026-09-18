@@ -10,7 +10,7 @@ import { getPresignedMediaUrl } from "../media/s3";
 import { emitOrderNew, emitOrderUpdated } from "../realtime/events";
 import { getAgreedPrices, applyAgreedPrices, agreedUnitPriceOf } from "./agreedPrices";
 import { recalcularEtapaDelCliente } from "../crm/customers";
-import { transicionarPedido, TransicionNoPermitida, ESTADOS_CANCELABLES, type Actor, type TxCliente } from "./stateMachine";
+import { transicionarPedido, TransicionNoPermitida, ESTADOS_CANCELABLES, estadosQueElBotPuedeCancelar, type Actor, type TxCliente } from "./stateMachine";
 import { Money, sumar } from "../config/dinero";
 import { precioDeVenta, precioDeVentaConPromocion } from "../catalog/precioDeVenta";
 import { promocionesVigentes } from "../catalog/promotions";
@@ -566,8 +566,12 @@ export async function getOrderByConversationId(conversationId: string) {
  * salio no se cancela desde el chat, y uno cancelado ya no existe.
  */
 export async function listCancelableOrdersForCustomer(businessId: string, customerId: string) {
+  // Hasta donde llega el bot lo fija el negocio (Business.cancelacionPorElBot), no una constante global:
+  // el mismo calculo que usa cancel_order, para que la lista y la accion no puedan desincronizarse.
+  const negocio = await prisma.business.findUnique({ where: { id: businessId }, select: { cancelacionPorElBot: true } });
+  const cancelables = estadosQueElBotPuedeCancelar(negocio?.cancelacionPorElBot ?? "ANTES_DE_DESPACHAR");
   return prisma.order.findMany({
-    where: { businessId, customerId, fulfillmentStatus: { in: ESTADOS_CANCELABLES } },
+    where: { businessId, customerId, fulfillmentStatus: { in: cancelables } },
     orderBy: { createdAt: "desc" },
     select: {
       id: true,

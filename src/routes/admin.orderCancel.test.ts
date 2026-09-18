@@ -127,23 +127,23 @@ test("PUT /api/orders/:id/cancel returns 404 for a nonexistent order", async () 
 // E31: el criterio de aceptacion del plan, textual - "una transicion prohibida devuelve un error claro
 // en el panel, no un silencio". Antes de esta etapa, esto cancelaba un pedido ya enviado sin chistar y
 // encima le mandaba al cliente "tu pedido fue cancelado" cuando el mensajero ya habia salido.
-test("E31: cancelar un pedido YA ENVIADO devuelve 409 con el motivo, y no le manda nada al cliente", async () => {
-  const { business, customer, conversation, order } = await seedOrder();
+test("E34: cancelar un pedido YA ENVIADO desde el panel se permite, porque lo pide una persona", async () => {
+  const { business, conversation, order } = await seedOrder();
   businessId = business.id;
   try {
+    // 2026-09-18: antes esto devolvia 409 para todos. Con la cancelacion configurable
+    // (Business.cancelacionPorElBot) la tabla de transiciones admite SHIPPED -> CANCELED, porque un
+    // negocio puede querer que se cancele un pedido que todavia no llego. Lo que se volvio configurable
+    // es el corte DEL BOT; el dueño, desde el panel, decide con el caso delante y puede llamar al
+    // mensajero.
     await prisma.order.update({ where: { id: order.id }, data: { fulfillmentStatus: "SHIPPED" } });
-    const antes = sentTexts.length;
 
     const res = await fetch(`${baseUrl}/api/orders/${order.id}/cancel`, { method: "PUT" });
-    assert.equal(res.status, 409);
-    const body = (await res.json()) as { error: string };
-    assert.match(body.error, /ya fue enviado/i);
+    assert.equal(res.status, 200);
 
     const fresco = await prisma.order.findUniqueOrThrow({ where: { id: order.id } });
-    assert.equal(fresco.fulfillmentStatus, "SHIPPED", "el pedido no se movio");
-    assert.equal(sentTexts.length, antes, "y al cliente no le llego un aviso de algo que no paso");
+    assert.equal(fresco.fulfillmentStatus, "CANCELED");
   } finally {
     await cleanup(business.id, conversation.id);
-    void customer;
   }
 });

@@ -23,6 +23,12 @@ import { adminCostlyLimiter } from "../../auth/rateLimits";
 // puede confiar en que el formulario mande uno de ellos.
 const CATALOG_PHOTO_SCOPES = ["PRODUCT", "CATEGORY", "CATALOG"];
 
+const CANCELACIONES = ["NUNCA", "ANTES_DE_DESPACHAR", "ANTES_DE_ENTREGAR"] as const;
+
+function esCancelacionValida(valor: unknown): valor is (typeof CANCELACIONES)[number] {
+  return typeof valor === "string" && (CANCELACIONES as readonly string[]).includes(valor);
+}
+
 export const businessRouter = Router();
 
 businessRouter.get("/api/business", async (req, res) => {
@@ -48,6 +54,7 @@ businessRouter.put("/api/business", requireOwner, async (req, res) => {
     autoSendPhotoOnQuote,
     offerPhotosBeforeSending,
     requirePaymentProof,
+    cancelacionPorElBot,
     interactiveListsEnabled,
     attributeCheckEnabled,
     catalogPhotoScope,
@@ -102,6 +109,9 @@ businessRouter.put("/api/business", requireOwner, async (req, res) => {
       autoSendPhotoOnQuote: autoSendPhotoOnQuote !== undefined ? Boolean(autoSendPhotoOnQuote) : undefined,
       offerPhotosBeforeSending: offerPhotosBeforeSending !== undefined ? Boolean(offerPhotosBeforeSending) : undefined,
       requirePaymentProof: requirePaymentProof !== undefined ? Boolean(requirePaymentProof) : undefined,
+      // Hasta cuando cancela el bot. Un valor que no sea uno de los tres se ignora en vez de guardarse:
+      // un formulario roto no puede ampliarle a un negocio lo que el bot cancela sin preguntar.
+      cancelacionPorElBot: esCancelacionValida(cancelacionPorElBot) ? cancelacionPorElBot : undefined,
       // requiredEffectsEnabled NO se lee del body (2026-09-17). Que el bot verifique contra la base lo que
       // su propia respuesta dice haber hecho dejo de ser una opcion del panel, asi que tampoco puede
       // apagarse por esta ruta: un PUT con el campo en false no lo toca. Se cambia por SQL, a sabiendas.

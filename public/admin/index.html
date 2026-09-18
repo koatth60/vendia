@@ -263,6 +263,31 @@
         <div class="card">
           <div class="card-title">Comportamiento</div>
 
+          <label>Hasta cuándo puede el bot cancelar un pedido</label>
+          <div class="radio-group" role="radiogroup" aria-label="Hasta cuándo puede el bot cancelar un pedido">
+            <label class="toggle-row toggle-row-radio">
+              <input type="radio" name="cancelacion-por-el-bot" value="NUNCA" />
+              <div>
+                <div class="toggle-title">Nunca</div>
+                <div class="toggle-desc">El bot no cancela ningún pedido. Cuando el cliente lo pide, te avisa y lo decides tú. Úsalo si prefieres hablar con cada cliente que quiere echarse para atrás.</div>
+              </div>
+            </label>
+            <label class="toggle-row toggle-row-radio">
+              <input type="radio" name="cancelacion-por-el-bot" value="ANTES_DE_DESPACHAR" checked />
+              <div>
+                <div class="toggle-title">Mientras el pedido no haya salido</div>
+                <div class="toggle-desc">Recomendado. El bot cancela solo, sin que tengas que hacer nada, mientras el pedido siga en tus manos. Apenas lo marcas como enviado, deja de poder y te avisa.</div>
+              </div>
+            </label>
+            <label class="toggle-row toggle-row-radio">
+              <input type="radio" name="cancelacion-por-el-bot" value="ANTES_DE_ENTREGAR" />
+              <div>
+                <div class="toggle-title">Hasta que el cliente lo reciba</div>
+                <div class="toggle-desc">El bot cancela incluso un pedido que ya salió, mientras no esté entregado. Te llega el aviso para que puedas frenar al mensajero. Ten en cuenta que el paquete ya está en la calle y el domiciliario puede entregarlo igual.</div>
+              </div>
+            </label>
+          </div>
+
           <label class="toggle-row">
             <input type="checkbox" id="bot-require-proof" checked />
             <div>
