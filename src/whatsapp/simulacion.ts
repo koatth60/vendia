@@ -1,6 +1,6 @@
 import { prisma } from "../db/client";
 import { downloadMediaBytes } from "../media/s3";
-import { comprobanteDePago } from "./imagenDePrueba";
+import { comprobanteDePago, pngConTexto } from "./imagenDePrueba";
 
 // MEDIOS SIMULADOS: UNA IMAGEN QUE ENTRA SIN PASAR POR META (2026-09-18).
 //
@@ -22,6 +22,7 @@ import { comprobanteDePago } from "./imagenDePrueba";
 //
 //   sim.comprobante:<monto>:<metodo>   un comprobante de transferencia legible, generado al vuelo
 //   sim.producto:<productId>           la foto real del catálogo de ese producto, tal cual está en S3
+//   sim.otro:<renglones|separados>     una captura cualquiera, que no es ni comprobante ni producto
 //
 // Un id de Meta es siempre numérico, así que ninguno de estos puede chocar con uno real.
 
@@ -57,6 +58,14 @@ export async function descargarMedioSimulado(mediaId: string): Promise<{ buffer:
     }
     const { buffer, contentType } = await downloadMediaBytes(media.s3Key);
     return { buffer, mimeType: contentType };
+  }
+
+  if (clase === "otro") {
+    // Una imagen que no es ni comprobante ni producto: una captura cualquiera, de las que la gente manda
+    // por error o para preguntar otra cosa. Sirve para ver que hace el bot con algo que no encaja en
+    // ninguna de sus dos categorias.
+    const texto = resto.join(":").trim() || "CAPTURA DE PANTALLA";
+    return { buffer: pngConTexto(texto.split("|").map((r) => r.trim())), mimeType: "image/png" };
   }
 
   throw new Error(`Medio simulado desconocido: "${mediaId}". Las formas validas son sim.comprobante:<monto>:<metodo> y sim.producto:<productId>.`);

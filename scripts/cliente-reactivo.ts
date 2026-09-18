@@ -129,6 +129,28 @@ const CASOS: Record<string, Caso> = {
       return null;
     },
   },
+  // Que hace el bot con una imagen que no es ni comprobante ni producto. Antes de esto no se sabia: sus
+  // dos categorias son "foto de producto" y "comprobante", y el mundo manda cualquier cosa.
+  "foto-de-otra-cosa": {
+    persona: {
+      nombre: "Sandra Gil",
+      cedula: "52117733",
+      celular: "3109994488",
+      direccion: "Calle 45 #22-30",
+      barrio: "Nicolas de Federman",
+      ciudad: "Bogota",
+      intencion:
+        "esta preguntando por un reloj, y en algun momento manda por error una captura de su lista de mercado escribiendo exactamente [[img:sim.otro:LISTA DE MERCADO|LECHE|PAN|HUEVOS|ARROZ]] y despues se disculpa porque era para otro chat",
+    },
+    aprueba: ({ pedido, textoDelBot }) => {
+      if (/seg[uú]n nuestro equipo/i.test(textoDelBot)) return "trato la captura como una foto de producto para identificar";
+      if (/comprobante|ya (me )?lleg[oó]|pago/i.test(textoDelBot) && /recibimos tu comprobante/i.test(textoDelBot)) {
+        return "trato la captura como un comprobante de pago";
+      }
+      if (pedido) return "creo un pedido a partir de una captura que no era nada";
+      return null;
+    },
+  },
   // Defecto: la ficha quedaba con el CELULAR guardado como cedula. La clienta da su celular cuando se lo
   // piden y la cedula recien si se la piden aparte, que es como lo hace la gente.
   cedula: {
