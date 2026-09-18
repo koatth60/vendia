@@ -37,6 +37,18 @@ const LOOKBACK_MINUTES = 45;
  * pregunta siguiente, que llega cuando la clienta escribe de nuevo.
  */
 const TURNO_MARGEN_MS = 10_000;
+
+/**
+ * Cuanto se le da a una venta para que el pedido aparezca antes de llamarla "venta sin pedido".
+ *
+ * Medido contra produccion el 2026-09-18: de 8 incidentes VENTA_SIN_PEDIDO en 7 dias, SEIS eran
+ * conversaciones que hoy estan en SOLD y con su pedido creado. El chequeo corria a los pocos minutos
+ * del resumen, cuando el pedido todavia no existia, y dejaba la fila para siempre.
+ *
+ * Media hora es holgada: el cierre normal pasa en el mismo turno o en el siguiente. Lo que queda
+ * afuera es el caso que importa -- el resumen que se mando y media hora despues sigue sin pedido.
+ */
+const GRACIA_PARA_EL_PEDIDO_MS = 30 * 60 * 1000;
 export const HEALTH_CHECK_INTERVAL_MS = 30 * 60 * 1000;
 
 // Guard de agent.ts (detector F1 del diagnostico) que hasta ahora solo dejaba una fila en AgentIncident:
@@ -148,9 +160,23 @@ export function findHealthIssues(input: {
     }
   }
 
-  // Mando el resumen de cierre y no existe pedido: una venta que no quedo en el sistema.
+  // MANDO EL RESUMEN DE CIERRE Y NO EXISTE PEDIDO: una venta que no quedo en el sistema.
+  //
+  // Dos correcciones, las dos medidas contra produccion el 2026-09-18 sobre los 8 incidentes de la
+  // semana (ver GRACIA_PARA_EL_PEDIDO_MS arriba):
+  //
+  //   - Seis eran conversaciones ya vendidas: el pedido se creo minutos despues del chequeo. Ahora el
+  //     resumen tiene que tener al menos media hora para contar.
+  //   - Uno era de un cliente que SI tenia su pedido, abierto en otra conversacion suya. Desde que la
+  //     Bandeja agrupa por cliente (2026-09-13), "no hay pedido" se responde mirando al cliente y no a
+  //     una sola conversacion.
+  //
+  // Queda uno de los ocho, que es el defecto de verdad.
   const resumen = recent.find((m) => m.role === "ASSISTANT" && ORDER_SUMMARY.test(m.content));
-  if (resumen && !hasOrder) add("VENTA_SIN_PEDIDO", "mando el resumen de cierre y no hay pedido registrado");
+  const resumenYaMaduro = resumen ? Date.now() - resumen.createdAt.getTime() >= GRACIA_PARA_EL_PEDIDO_MS : false;
+  if (resumen && resumenYaMaduro && !hasOrder) {
+    add("VENTA_SIN_PEDIDO", "mando el resumen de cierre hace mas de media hora y el cliente no tiene ningun pedido");
+  }
 
   return out;
 }
@@ -179,7 +205,7 @@ export async function runConversationHealthJob(): Promise<void> {
       for (const { conversationId } of touched) {
         const conversation = await prisma.conversation.findUnique({
           where: { id: conversationId },
-          select: { customer: { select: { idNumber: true, deliveryPhone: true } } },
+          select: { customerId: true, customer: { select: { idNumber: true, deliveryPhone: true } } },
         });
         if (!conversation) continue;
 
@@ -189,7 +215,9 @@ export async function runConversationHealthJob(): Promise<void> {
             orderBy: { createdAt: "asc" },
             select: { role: true, content: true, mediaType: true, createdAt: true },
           }),
-          prisma.order.findFirst({ where: { conversationId }, select: { id: true } }),
+          // Del CLIENTE, no de esta conversacion: desde que la Bandeja agrupa por cliente, un pedido
+          // abierto en otro ciclo suyo es igual de real. Uno de los 8 incidentes de la semana era esto.
+          prisma.order.findFirst({ where: { customerId: conversation.customerId }, select: { id: true } }),
         ]);
 
         findings.push(

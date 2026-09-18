@@ -169,6 +169,26 @@ test("detecta una venta cerrada que no quedo registrada", () => {
   assert.ok(found.some((f) => f.kind === "VENTA_SIN_PEDIDO"));
 });
 
+test("un resumen recien mandado NO es una venta sin pedido: la venta esta ocurriendo", () => {
+  // Seis de los 8 incidentes de la semana del 2026-09-18 eran esto: el chequeo corria minutos despues
+  // del resumen y el pedido aparecia despues. Las seis conversaciones estan hoy en SOLD y con su pedido.
+  const found = findHealthIssues({
+    conversationId: "c5b",
+    since: new Date(Date.now() - 45 * 60 * 1000),
+    customer: sinDatos,
+    hasOrder: false,
+    messages: [
+      {
+        role: "ASSISTANT",
+        content: "¡Listo! Te dejo el resumen de tu pedido: Producto... Total a pagar: $154.000",
+        mediaType: null,
+        createdAt: new Date(Date.now() - 2 * 60 * 1000),
+      },
+    ],
+  });
+  assert.equal(found.some((f) => f.kind === "VENTA_SIN_PEDIDO"), false);
+});
+
 test("detecta fugas de estado interno y nombres de herramienta", () => {
   const conFuga = findHealthIssues({
     conversationId: "c6",
@@ -267,8 +287,16 @@ test("VENTA_SIN_PEDIDO queda registrada y tampoco le avisa al dueno", async () =
   // despues es la version vieja y peor del mismo trabajo.
   const { businessId, conversationId } = await seedHealthBusiness();
   try {
+    // Hace 40 minutos: dentro de la ventana del chequeo (45 min) y ya pasada la gracia de media hora que
+    // desde el 2026-09-18 le da a la venta para que el pedido aparezca. Un resumen recien mandado no es
+    // un defecto: es una venta que esta ocurriendo.
     await prisma.message.create({
-      data: { conversationId, role: "ASSISTANT", content: "Te dejo el resumen de tu pedido: 1x producto. Total a pagar $154.000" },
+      data: {
+        conversationId,
+        role: "ASSISTANT",
+        content: "Te dejo el resumen de tu pedido: 1x producto. Total a pagar $154.000",
+        createdAt: new Date(Date.now() - 40 * 60 * 1000),
+      },
     });
 
     const alerts = await runJobCapturingOwnerAlerts();
