@@ -5007,11 +5007,6 @@ async function loadRole() {
       const me = await res.json();
       isOwner = me.role !== 'EMPLOYEE';
       currentBusinessId = me.id || '';
-      // Cuenta creada sin clave de activacion: entra y trabaja, pero el bot no se conecta
-      // hasta que Zaqi la active. Quien decide es el servidor (active en /auth/me y el 403 de
-      // whatsapp-connect); esto solo se lo cuenta al cliente.
-      const pendingBanner = document.getElementById('pending-activation');
-      if (pendingBanner) pendingBanner.hidden = me.active !== false;
       const badge = document.getElementById('session-badge');
       if (badge) {
         const roleIcon = isOwner
