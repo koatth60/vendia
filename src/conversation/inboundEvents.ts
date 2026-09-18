@@ -153,7 +153,19 @@ export interface EventoReclamado {
  * en el orden en que los escribio, no al reves.
  */
 export async function reclamarEventos(cuantos = 10): Promise<EventoReclamado[]> {
-  const hasta = new Date(Date.now() + RESERVA_MS);
+  // POR QUE EL RELOJ VIENE DE ACA Y NO DE `now()` DE POSTGRES.
+  //
+  // Las columnas son `timestamp(3)` SIN zona, y los `@default(now())` del modelo los resuelve Prisma,
+  // no la base: lo que queda guardado es la hora UTC sin marca de zona. El `now()` de Postgres, en
+  // cambio, rinde la hora de la ZONA DE LA SESION. En una base cuya zona no es UTC las dos cosas no son
+  // comparables: con `America/Bogota`, `nextAttemptAt` quedaba cinco horas "en el futuro" y la cola no
+  // reclamaba NADA hasta pasadas esas cinco horas. En UTC el defecto es invisible -- pasaba en CI y en
+  // el servidor, y fallaba en la maquina del dueno.
+  //
+  // Comparar contra un parametro que sale del mismo reloj que escribe las filas saca la zona horaria de
+  // la base de la ecuacion: un entorno menos que puede cambiar el comportamiento de la cola.
+  const ahora = new Date();
+  const hasta = new Date(ahora.getTime() + RESERVA_MS);
   const reclamados = await prisma.$queryRaw<EventoReclamado[]>`
     UPDATE "InboundEvent"
     SET "lockedUntil" = ${hasta}, "attempts" = "attempts" + 1
@@ -161,8 +173,8 @@ export async function reclamarEventos(cuantos = 10): Promise<EventoReclamado[]> 
       SELECT id FROM "InboundEvent"
       WHERE "processedAt" IS NULL
         AND "failedAt" IS NULL
-        AND "nextAttemptAt" <= now()
-        AND ("lockedUntil" IS NULL OR "lockedUntil" < now())
+        AND "nextAttemptAt" <= ${ahora}
+        AND ("lockedUntil" IS NULL OR "lockedUntil" < ${ahora})
       ORDER BY "receivedAt" ASC
       LIMIT ${cuantos}
       FOR UPDATE SKIP LOCKED
