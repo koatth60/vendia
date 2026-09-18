@@ -1027,6 +1027,7 @@ test("cancel_order reports reason:no_order when the customer has no order", asyn
 // primera llamada solo deja la marca; la segunda cancela, y solo si la marca es de un turno anterior.
 test("cancel_order NO cancela en la primera llamada: deja la solicitud y devuelve el pedido", async () => {
   const context = await freshContext();
+  await prisma.order.deleteMany({ where: { customerId } });
   const order = await prisma.order.create({
     data: { businessId, customerId, conversationId: context.conversationId, summary: "1x Smartwatch", totalAmount: 145000, currency: "COP" },
   });
@@ -1052,6 +1053,7 @@ test("cancel_order NO cancela en la primera llamada: deja la solicitud y devuelv
 // El caso que el prompt no podia impedir: el modelo llamando dos veces seguidas dentro del mismo turno.
 test("dos llamadas en el MISMO turno no cancelan: hace falta un mensaje del cliente en el medio", async () => {
   const context = await freshContext();
+  await prisma.order.deleteMany({ where: { customerId } });
   const turnStartedAt = new Date();
   const order = await prisma.order.create({
     data: { businessId, customerId, conversationId: context.conversationId, summary: "1x Smartwatch", totalAmount: 145000, currency: "COP" },
@@ -1072,6 +1074,10 @@ test("la llamada del turno siguiente si cancela, y le avisa al dueno", async () 
   stubWhatsappFetch();
   try {
     const context = await freshContext();
+    // Este archivo comparte un customerId entre todas sus pruebas y varias dejan pedidos: con dos
+    // abiertos, cancel_order pide el orderId en vez de cancelar -- que es lo correcto, pero no es lo que
+    // mide esta prueba. Se parte de un cliente sin pedidos.
+    await prisma.order.deleteMany({ where: { customerId } });
     const order = await prisma.order.create({
       data: { businessId, customerId, conversationId: context.conversationId, summary: "1x Smartwatch", totalAmount: 145000, currency: "COP" },
     });
@@ -1100,6 +1106,7 @@ test("la llamada del turno siguiente si cancela, y le avisa al dueno", async () 
 // costo de adivinar mal es cancelarle el pedido equivocado.
 test("con dos pedidos abiertos pide el orderId en vez de adivinar", async () => {
   const context = await freshContext();
+  await prisma.order.deleteMany({ where: { customerId } });
   const otraConversacion = await prisma.conversation.create({ data: { customerId } });
   await prisma.order.create({
     data: { businessId, customerId, conversationId: context.conversationId, summary: "1x Smartwatch", totalAmount: 145000, currency: "COP" },
