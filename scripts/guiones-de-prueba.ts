@@ -411,7 +411,7 @@ async function correrGuion(
     }),
     prisma.order.findFirst({
       where: { conversationId: conversacion.id },
-      select: { summary: true, totalAmount: true, status: true },
+      select: { summary: true, totalAmount: true, fulfillmentStatus: true },
     }),
     prisma.message.findMany({
       where: { conversationId: conversacion.id, role: "ASSISTANT" },
