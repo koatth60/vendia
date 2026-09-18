@@ -169,7 +169,12 @@ async function main() {
   });
 
   console.log(`${negocio.name}: ${abiertas.length} pregunta(s) esperando respuesta del dueno.\n`);
-  if (abiertas.length === 0) process.exit(0);
+  // Sin preguntas citables todavia queda el otro camino, que es el que mas se usa: las conversaciones
+  // que flag_conversation_intent dejo esperando a una persona. Salir aca las dejaba sin atender.
+  if (abiertas.length === 0) {
+    await atenderLasQueEsperanUnaPersona(negocio.id);
+    process.exit(0);
+  }
 
   if (process.env.LISTAR) {
     for (const q of abiertas) {
