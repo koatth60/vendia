@@ -10,6 +10,7 @@ import { recordOwnerMessage } from "../delivery/ownerLog";
 import { recordAgentIncident } from "./incidents";
 import { textMentionsConfiguredCategory, getProductById } from "../catalog/products";
 import { promocionesParaElModelo } from "../catalog/promotions";
+import { limpiarCancelacionesPedidas } from "../orders/service";
 import { combosParaElModelo } from "../catalog/bundles";
 import {
   resolveProductScope,
@@ -942,6 +943,10 @@ export async function generateReply(
   // discrepar entre si por haber leido el reloj en tres momentos distintos.
   const ahora = new Date();
   const turnClock = buildTurnClock(ahora, negocio.timezone, negocio.locale);
+  // E34: el mismo instante viaja a las herramientas. `cancel_order` lo usa para distinguir una marca de
+  // cancelacion dejada en ESTE turno de una dejada en uno anterior -- que es lo unico que separa una
+  // cancelacion confirmada de una cancelacion de una sola frase.
+  context = { ...context, turnStartedAt: ahora };
 
   const history = await getRecentHistory(conversationId, 30);
   const contextSummary = await getOrRefreshContextSummary(conversationId, context.businessId);
@@ -2210,6 +2215,16 @@ ${CATALOG_BLOCK_MARKER}` : CATALOG_BLOCK_MARKER;
   // borra la lista anterior, que sigue siendo la ultima que vio.
   if (catalogBlocks.length > 0) {
     await setLastPresentedProductIds(conversationId, presentedProductIds(catalogBlocks));
+  }
+
+  // E34: la solicitud de cancelacion se limpia al final de cualquier turno que NO la haya usado. Si la
+  // clienta dijo "cancela" y despues se puso a hablar de otra cosa, la marca no puede quedar esperando
+  // a que una frase cualquiera de la semana que viene la active. El fallback es el estado seguro: si
+  // nada pasa, el pedido sigue vivo.
+  if (!toolsCalledThisTurn.includes("cancel_order")) {
+    await limpiarCancelacionesPedidas(context.businessId, context.customerId).catch((error) =>
+      console.error("No se pudo limpiar la solicitud de cancelacion:", error),
+    );
   }
 
   await recordAgentTurn({

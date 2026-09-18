@@ -1013,23 +1013,80 @@ test("get_order_status returns the most recent order's real fulfillment status",
 test("cancel_order reports reason:no_order when the customer has no order", async () => {
   const context = await freshContext();
   const result = await runCatalogTool(context, "cancel_order", {});
-  assert.deepEqual(result, { canceled: false, reason: "no_order", note: "Este cliente no tiene ningun pedido registrado." });
+  assert.deepEqual(result, {
+    canceled: false,
+    reason: "no_order",
+    note: "Este cliente no tiene ningun pedido que se pueda cancelar.",
+  });
 });
 
-test("cancel_order cancels a pending order and notifies the owner", async () => {
+// E34 (2026-09-18). ESTA PRUEBA CAMBIO DE CONTRATO, y ese cambio es la etapa entera.
+//
+// Antes, UNA llamada a cancel_order cancelaba. Lo unico que impedia que el modelo cancelara en el mismo
+// turno en que la clienta lo menciona era una directiva del prompt -- o sea, que se acordara. Ahora la
+// primera llamada solo deja la marca; la segunda cancela, y solo si la marca es de un turno anterior.
+test("cancel_order NO cancela en la primera llamada: deja la solicitud y devuelve el pedido", async () => {
+  const context = await freshContext();
+  const order = await prisma.order.create({
+    data: { businessId, customerId, conversationId: context.conversationId, summary: "1x Smartwatch", totalAmount: 145000, currency: "COP" },
+  });
+
+  const result = (await runCatalogTool({ ...context, turnStartedAt: new Date() }, "cancel_order", {})) as {
+    canceled: boolean;
+    reason: string;
+    pedido: { orderId: string; resumen: string };
+  };
+
+  assert.equal(result.canceled, false);
+  assert.equal(result.reason, "confirmation_required");
+  assert.equal(result.pedido.orderId, order.id, "el agente tiene que poder confirmar CUAL pedido");
+  assert.equal(result.pedido.resumen, "1x Smartwatch");
+
+  const enLaBase = await prisma.order.findUniqueOrThrow({ where: { id: order.id } });
+  assert.equal(enLaBase.fulfillmentStatus, "PENDING", "el pedido sigue vivo: el estado seguro es no cancelar");
+  assert.ok(enLaBase.cancelRequestedAt);
+
+  await prisma.order.deleteMany({ where: { conversationId: context.conversationId } });
+});
+
+// El caso que el prompt no podia impedir: el modelo llamando dos veces seguidas dentro del mismo turno.
+test("dos llamadas en el MISMO turno no cancelan: hace falta un mensaje del cliente en el medio", async () => {
+  const context = await freshContext();
+  const turnStartedAt = new Date();
+  const order = await prisma.order.create({
+    data: { businessId, customerId, conversationId: context.conversationId, summary: "1x Smartwatch", totalAmount: 145000, currency: "COP" },
+  });
+
+  await runCatalogTool({ ...context, turnStartedAt }, "cancel_order", {});
+  const segunda = (await runCatalogTool({ ...context, turnStartedAt }, "cancel_order", {})) as { canceled: boolean; reason: string };
+
+  assert.equal(segunda.canceled, false);
+  assert.equal(segunda.reason, "confirmation_required");
+  const enLaBase = await prisma.order.findUniqueOrThrow({ where: { id: order.id } });
+  assert.equal(enLaBase.fulfillmentStatus, "PENDING");
+
+  await prisma.order.deleteMany({ where: { conversationId: context.conversationId } });
+});
+
+test("la llamada del turno siguiente si cancela, y le avisa al dueno", async () => {
   stubWhatsappFetch();
   try {
     const context = await freshContext();
-    await prisma.order.create({
+    const order = await prisma.order.create({
       data: { businessId, customerId, conversationId: context.conversationId, summary: "1x Smartwatch", totalAmount: 145000, currency: "COP" },
     });
 
-    const result = await runCatalogTool(context, "cancel_order", {});
-    assert.deepEqual(result, { canceled: true });
+    // Turno 1: la clienta pide cancelar, el bot pregunta.
+    await runCatalogTool({ ...context, turnStartedAt: new Date(Date.now() - 60_000) }, "cancel_order", {});
 
-    const order = await prisma.order.findUniqueOrThrow({ where: { conversationId: context.conversationId } });
-    assert.equal(order.fulfillmentStatus, "CANCELED");
-    assert.ok(order.canceledAt);
+    // Turno 2: la clienta contesta que si. Arranca despues, que es lo que prueba que hubo un mensaje suyo
+    // en el medio -- el unico hecho que distingue una confirmacion de una frase suelta.
+    const result = (await runCatalogTool({ ...context, turnStartedAt: new Date() }, "cancel_order", {})) as { canceled: boolean };
+
+    assert.equal(result.canceled, true);
+    const enLaBase = await prisma.order.findUniqueOrThrow({ where: { id: order.id } });
+    assert.equal(enLaBase.fulfillmentStatus, "CANCELED");
+    assert.ok(enLaBase.canceledAt);
     assert.equal(sentMessages.length, 1, "owner must be notified about the cancellation");
     assert.match(sentMessages[0].body, /cancelad/i);
 
@@ -1039,9 +1096,66 @@ test("cancel_order cancels a pending order and notifies the owner", async () => 
   }
 });
 
+// Con dos pedidos abiertos, elegir "el mas reciente" seria adivinar cual quiso decir la clienta, y el
+// costo de adivinar mal es cancelarle el pedido equivocado.
+test("con dos pedidos abiertos pide el orderId en vez de adivinar", async () => {
+  const context = await freshContext();
+  const otraConversacion = await prisma.conversation.create({ data: { customerId } });
+  await prisma.order.create({
+    data: { businessId, customerId, conversationId: context.conversationId, summary: "1x Smartwatch", totalAmount: 145000, currency: "COP" },
+  });
+  const segundo = await prisma.order.create({
+    data: { businessId, customerId, conversationId: otraConversacion.id, summary: "2x Diadema", totalAmount: 60000, currency: "COP" },
+  });
+
+  const result = (await runCatalogTool({ ...context, turnStartedAt: new Date() }, "cancel_order", {})) as {
+    canceled: boolean;
+    reason: string;
+    pedidos: { orderId: string }[];
+  };
+  assert.equal(result.canceled, false);
+  assert.equal(result.reason, "which_order");
+  assert.equal(result.pedidos.length, 2);
+
+  // Y con el id, el mismo turno deja la solicitud sobre ESE pedido.
+  const conId = (await runCatalogTool({ ...context, turnStartedAt: new Date() }, "cancel_order", { orderId: segundo.id })) as {
+    reason: string;
+    pedido: { orderId: string };
+  };
+  assert.equal(conId.reason, "confirmation_required");
+  assert.equal(conId.pedido.orderId, segundo.id);
+
+  await prisma.order.deleteMany({ where: { customerId } });
+  await prisma.conversation.deleteMany({ where: { id: otraConversacion.id } });
+});
+
+test("no se cancela el pedido de otro cliente aunque manden su id", async () => {
+  const context = await freshContext();
+  const otroCustomer = await prisma.customer.create({ data: { businessId, phoneNumber: `5730055${Date.now()}` } });
+  const otraConversacion = await prisma.conversation.create({ data: { customerId: otroCustomer.id } });
+  const ajeno = await prisma.order.create({
+    data: { businessId, customerId: otroCustomer.id, conversationId: otraConversacion.id, summary: "1x Ajeno", totalAmount: 1000, currency: "COP" },
+  });
+
+  const result = (await runCatalogTool({ ...context, turnStartedAt: new Date() }, "cancel_order", { orderId: ajeno.id })) as {
+    canceled: boolean;
+    reason: string;
+  };
+  assert.equal(result.canceled, false);
+  assert.equal(result.reason, "no_order");
+
+  const enLaBase = await prisma.order.findUniqueOrThrow({ where: { id: ajeno.id } });
+  assert.equal(enLaBase.fulfillmentStatus, "PENDING");
+  assert.equal(enLaBase.cancelRequestedAt, null);
+
+  await prisma.order.deleteMany({ where: { id: ajeno.id } });
+  await prisma.conversation.deleteMany({ where: { id: otraConversacion.id } });
+  await prisma.customer.deleteMany({ where: { id: otroCustomer.id } });
+});
+
 test("cancel_order refuses an already-shipped order instead of canceling it", async () => {
   const context = await freshContext();
-  await prisma.order.create({
+  const enviado = await prisma.order.create({
     data: {
       businessId,
       customerId,
@@ -1054,9 +1168,13 @@ test("cancel_order refuses an already-shipped order instead of canceling it", as
     },
   });
 
-  const result = await runCatalogTool(context, "cancel_order", {});
+  // Se pasa el id a proposito: sin el, la herramienta primero tendria que resolver CUAL pedido, y lo que
+  // esta prueba mide es otra cosa -- que un pedido ya enviado no se cancela ni aunque lo pidan por id.
+  const result = await runCatalogTool(context, "cancel_order", { orderId: enviado.id });
   assert.equal((result as { canceled: boolean; reason: string }).canceled, false);
-  assert.equal((result as { canceled: boolean; reason: string }).reason, "already_shipped");
+  // E34: quien decide si se puede cancelar es la maquina de estados (E31), no una lista escrita a mano
+  // en la herramienta. Por eso el motivo es uno solo para todos los estados que no admiten cancelacion.
+  assert.equal((result as { canceled: boolean; reason: string }).reason, "not_cancelable");
 
   const order = await prisma.order.findUniqueOrThrow({ where: { conversationId: context.conversationId } });
   assert.equal(order.fulfillmentStatus, "SHIPPED", "must not touch a shipped order's status");
@@ -1066,7 +1184,7 @@ test("cancel_order refuses an already-shipped order instead of canceling it", as
 
 test("cancel_order refuses an already-canceled order", async () => {
   const context = await freshContext();
-  await prisma.order.create({
+  const cancelado = await prisma.order.create({
     data: {
       businessId,
       customerId,
@@ -1079,8 +1197,12 @@ test("cancel_order refuses an already-canceled order", async () => {
     },
   });
 
-  const result = await runCatalogTool(context, "cancel_order", {});
-  assert.deepEqual(result, { canceled: false, reason: "already_canceled", note: "Este pedido ya estaba cancelado." });
+  const result = await runCatalogTool(context, "cancel_order", { orderId: cancelado.id });
+  assert.deepEqual(result, {
+    canceled: false,
+    reason: "not_cancelable",
+    note: "Este pedido ya estaba cancelado.",
+  });
 
   await prisma.order.deleteMany({ where: { conversationId: context.conversationId } });
 });

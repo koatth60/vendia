@@ -431,6 +431,17 @@ model Order {
   shipmentMediaType  String?
   canceledAt         DateTime?
 
+  // E34 (2026-09-18). CANCELAR NUNCA OCURRE EN EL MISMO TURNO EN QUE SE PIDE.
+  //
+  // Hasta hoy la confirmacion la sostenia una directiva del prompt: "pregunta primero y espera el si en
+  // un mensaje aparte". O sea que lo unico que impedia cancelar un pedido de una, por una frase mal
+  // leida, era que el modelo se acordara. Ahora la primera llamada a `cancel_order` NO cancela: escribe
+  // esta marca y devuelve el pedido para que el agente pregunte. La segunda cancela solo si esta marca
+  // es anterior al arranque del turno -- o sea, solo si hubo un mensaje de la clienta en el medio.
+  //
+  // El fallback no tiene modelo adentro: si nada pasa, el pedido sigue vivo, que es el estado seguro.
+  cancelRequestedAt  DateTime?
+
   // E35 (2026-09-18). EL PEDIDO SABE DONDE ESTA.
   //
   // Medido en produccion el 2026-09-18: 55 mensajes de esta base mencionan guia, rastreo o una

@@ -27,6 +27,7 @@ import { faltaComprobanteDePago, FALTA_COMPROBANTE_NOTE } from "../orders/paymen
 import { resolverModalidadDelPedido, filtrarMetodosPorZona } from "../orders/paymentTiming";
 import { listShippingRates, resolveShippingRateForCity } from "../catalog/shippingRates";
 import { recordAgentIncident } from "./incidents";
+import { sePuede } from "../orders/stateMachine";
 import { Money, sumarParaMostrar, totalDeLinea } from "../config/dinero";
 import { getSaleGate } from "./configHealth";
 import { normalizeForMatch } from "../search/text";
@@ -60,6 +61,10 @@ import {
   getLatestOrderForCustomer,
   getOrderByConversationId,
   markOrderCanceled,
+  // E34: cancelar en dos turnos.
+  listCancelableOrdersForCustomer,
+  getOrderOfCustomer,
+  marcarCancelacionPedida,
   type ResolvedOrderItem,
 } from "../orders/service";
 import {
@@ -517,10 +522,12 @@ export const catalogTools: OpenAI.Chat.ChatCompletionTool[] = [
     function: {
       name: "cancel_order",
       description:
-        "Cancela el pedido mas reciente de este cliente, sea de esta conversacion o de otra. USA ESTA HERRAMIENTA SOLO despues de que el cliente ya confirmo explicitamente que si quiere cancelar (ver CANCELAR UN PEDIDO en tus instrucciones) - nunca en el mismo turno en que recien lo pide. Si el pedido ya fue enviado, esta herramienta lo va a rechazar.",
+        "Cancela un pedido de este cliente. Llamala apenas el cliente pida cancelar: la PRIMERA llamada no cancela nada, te devuelve el pedido para que se lo confirmes con tus palabras, y recien la llamada del turno siguiente cancela de verdad. Si el cliente tiene mas de un pedido abierto, pasa orderId.",
       parameters: {
         type: "object",
-        properties: {},
+        properties: {
+          orderId: { type: "string", description: "Id del pedido a cancelar. Solo hace falta si el cliente tiene mas de uno abierto." },
+        },
         required: [],
       },
     },
@@ -797,6 +804,14 @@ export interface ToolContext {
    * presentador ya no la adjunta (dedup por conversacion) y send_product_media la manda como siempre.
    */
   mediaQueuedProductIds?: string[];
+  /**
+   * E34: cuando arranco este turno. Lo pone generateReply con el mismo instante que el reloj del turno.
+   *
+   * Sirve para distinguir "la marca la dejo ESTE turno" de "la dejo un turno anterior", que es lo unico
+   * que separa una cancelacion confirmada de una cancelacion de una sola frase. Sin esto habria que
+   * confiar en que el modelo no llame dos veces seguidas, que es justo lo que no se puede garantizar.
+   */
+  turnStartedAt?: Date;
 }
 
 // Track C item 3 (ONIX-RELIABILITY-PLAN.md): a validation gate ahead of the switch below, catching a
@@ -2084,16 +2099,70 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
       };
     }
     case "cancel_order": {
-      const order = await getLatestOrderForCustomer(businessId, context.customerId);
-      if (!order) return { canceled: false, reason: "no_order", note: "Este cliente no tiene ningun pedido registrado." };
-      if (order.fulfillmentStatus === "CANCELED") {
-        return { canceled: false, reason: "already_canceled", note: "Este pedido ya estaba cancelado." };
+      // E34 (2026-09-18). CANCELAR NUNCA OCURRE EN EL MISMO TURNO EN QUE SE PIDE.
+      //
+      // Antes la confirmacion la sostenia una directiva del prompt ("pregunta primero y espera el si en
+      // un mensaje aparte"), asi que lo unico que impedia cancelar de una, por una frase mal leida, era
+      // que el modelo se acordara. Ahora la primera llamada deja la marca y devuelve el pedido; la
+      // segunda cancela SOLO si la marca es anterior al arranque de este turno, o sea solo si hubo un
+      // mensaje de la clienta en el medio.
+      //
+      // El disparador no es "el cliente pidio cancelar" -- eso seria leer prosa, que la Parte I no
+      // admite. Es la llamada a la herramienta sobre un pedido cancelable, que es un evento
+      // estructurado, y el estado vive en una columna que se consulta con un SELECT.
+      const inicioDelTurno = context.turnStartedAt ?? new Date();
+      const pedidoPedido = String(input.orderId ?? "").trim();
+
+      const order = pedidoPedido
+        ? await getOrderOfCustomer(businessId, context.customerId, pedidoPedido)
+        : await (async () => {
+            const cancelables = await listCancelableOrdersForCustomer(businessId, context.customerId);
+            // Con varios pedidos abiertos, elegir "el mas reciente" seria adivinar cual quiso decir, y el
+            // costo de adivinar mal es cancelarle a la clienta el pedido equivocado.
+            return cancelables.length === 1 ? cancelables[0] : null;
+          })();
+
+      if (!order) {
+        const cancelables = await listCancelableOrdersForCustomer(businessId, context.customerId);
+        if (cancelables.length === 0) {
+          return { canceled: false, reason: "no_order", note: "Este cliente no tiene ningun pedido que se pueda cancelar." };
+        }
+        if (!pedidoPedido && cancelables.length > 1) {
+          return {
+            canceled: false,
+            reason: "which_order",
+            pedidos: cancelables.map((o) => ({ orderId: o.id, resumen: o.summary, creado: o.createdAt.toISOString().slice(0, 10) })),
+            note: "Este cliente tiene mas de un pedido abierto. Preguntale cual quiere cancelar y volve a llamarme con su orderId.",
+          };
+        }
+        return { canceled: false, reason: "no_order", note: "Ese pedido no existe o no es de este cliente." };
       }
-      if (order.fulfillmentStatus === "SHIPPED") {
+
+      if (!sePuede(order.fulfillmentStatus, "CANCELED")) {
         return {
           canceled: false,
-          reason: "already_shipped",
-          note: "Este pedido ya fue enviado. No lo canceles tú - dile al cliente que necesitas confirmar con el equipo, y usa ask_owner.",
+          reason: "not_cancelable",
+          note:
+            order.fulfillmentStatus === "CANCELED"
+              ? "Este pedido ya estaba cancelado."
+              : "Este pedido ya no se puede cancelar desde el chat. No lo canceles tú - dile al cliente que necesitas confirmar con el equipo, y usa ask_owner.",
+        };
+      }
+
+      // La marca de ESTE mismo turno no habilita nada: si habilitara, dos llamadas seguidas dentro del
+      // turno cancelarian igual, que es exactamente lo que esta etapa vino a impedir.
+      if (!order.cancelRequestedAt || order.cancelRequestedAt >= inicioDelTurno) {
+        await marcarCancelacionPedida(order.id, new Date());
+        return {
+          canceled: false,
+          reason: "confirmation_required",
+          pedido: {
+            orderId: order.id,
+            resumen: order.summary,
+            total: String(order.totalAmount),
+            moneda: order.currency,
+          },
+          note: "Todavia no se cancelo nada. Confirmale al cliente que es ESTE pedido y espera su respuesta; cuando conteste que si, volve a llamarme.",
         };
       }
 

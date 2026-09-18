@@ -1,5 +1,6 @@
 import { prisma } from "../db/client";
 import { formatPrice } from "../config/money";
+import { ESTADOS_CANCELABLES } from "./stateMachine";
 
 // Pieza 6 del plan de catalogo y medios (ONIX-PLAN-CATALOGO-Y-MEDIOS.md, seccion 3).
 //
@@ -34,6 +35,13 @@ const MAX_CLOSED_ORDERS_SHOWN = 2;
 export type OrderStateLabel = "pendiente" | "enviado" | "cancelado";
 
 export interface OrderFact {
+  /**
+   * E34: el id, solo en los pedidos ABIERTOS. Es lo que el agente le pasa a `cancel_order` cuando el
+   * cliente tiene mas de uno: sin el, la herramienta tendria que adivinar cual quiso decir, y adivinar
+   * mal significa cancelarle el pedido equivocado. Un pedido cerrado no lo lleva -- no hay nada que
+   * hacer con el y seria un identificador largo por turno sin ninguna accion detras.
+   */
+  orderId?: string;
   resumen: string;
   total: string;
   estado: OrderStateLabel;
@@ -76,6 +84,8 @@ export interface CustomerCommerceState {
 
 /** Las filas tal como salen de la base. El builder no sabe de Prisma, solo de esta forma. */
 export interface CommerceOrderRow {
+  /** E34: hace falta para poder cancelar un pedido puntual. Opcional para no romper llamadores viejos. */
+  id?: string;
   conversationId: string;
   summary: string;
   totalAmount: number | { toString(): string };
@@ -117,7 +127,13 @@ function orderStateLabel(fulfillmentStatus: string): OrderStateLabel {
 
 /** Abierto = PENDING. Un pedido enviado ya no se puede cancelar y uno cancelado ya no existe. */
 export function isOpenOrder(row: { fulfillmentStatus: string }): boolean {
-  return row.fulfillmentStatus === "PENDING";
+  // E34 (2026-09-18): sale de la maquina de estados, no de una comparacion con "PENDING".
+  //
+  // E31 agrego PENDING_PAYMENT, PAID y PREPARING, y esta linea se quedo mirando solo PENDING: un pedido
+  // pagado y todavia sin despachar dejaba de contar como abierto, asi que el modelo lo veia como
+  // historia vieja y `cancel_order` no lo encontraba. Ahora "abierto" es exactamente "todavia se puede
+  // cancelar", que es lo que significa para quien lo lee.
+  return (ESTADOS_CANCELABLES as string[]).includes(row.fulfillmentStatus);
 }
 
 function saleItems(raw: unknown): { producto: string; variante: string | null; cantidad: number }[] {
@@ -148,6 +164,7 @@ export function buildCustomerCommerceState(
   const abiertos = rows.orders.filter(isOpenOrder);
   const cerrados = rows.orders.filter((o) => !isOpenOrder(o)).slice(0, MAX_CLOSED_ORDERS_SHOWN);
   const pedidos = [...abiertos, ...cerrados].slice(0, MAX_ORDERS_SHOWN).map((o) => ({
+    ...(isOpenOrder(o) && o.id ? { orderId: o.id } : {}),
     resumen: o.summary,
     total: `$${formatPrice(o.totalAmount, o.currency || opts.currency, opts.locale)}`,
     estado: orderStateLabel(o.fulfillmentStatus),
@@ -223,6 +240,7 @@ export async function getCustomerCommerceState(
           orderBy: { createdAt: "desc" },
           take: ORDER_READ_LIMIT,
           select: {
+            id: true,
             conversationId: true,
             summary: true,
             totalAmount: true,

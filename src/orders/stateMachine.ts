@@ -83,6 +83,15 @@ export function sePuede(desde: OrderFulfillmentStatus, hacia: OrderFulfillmentSt
 }
 
 /**
+ * E34: los estados desde los que un pedido todavia se puede cancelar. Sale de la MISMA tabla de
+ * transiciones, no de una lista escrita a mano: el dia que un estado nuevo admita cancelacion, esto lo
+ * sabe solo. Una lista aparte es exactamente la que se olvida de actualizar.
+ */
+export const ESTADOS_CANCELABLES = (Object.keys(TRANSICIONES) as OrderFulfillmentStatus[]).filter((estado) =>
+  sePuede(estado, "CANCELED"),
+);
+
+/**
  * El cliente de transaccion tal como lo entrega ESTE prisma, que esta extendido (ver src/db/client.ts:
  * la extension que cifra y descifra el token de WhatsApp). Prisma.TransactionClient describe el cliente
  * sin extender y no encaja; derivarlo del propio `prisma` lo mantiene correcto si la extension cambia.

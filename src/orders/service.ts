@@ -10,7 +10,7 @@ import { getPresignedMediaUrl } from "../media/s3";
 import { emitOrderNew, emitOrderUpdated } from "../realtime/events";
 import { getAgreedPrices, applyAgreedPrices, agreedUnitPriceOf } from "./agreedPrices";
 import { recalcularEtapaDelCliente } from "../crm/customers";
-import { transicionarPedido, TransicionNoPermitida, type Actor, type TxCliente } from "./stateMachine";
+import { transicionarPedido, TransicionNoPermitida, ESTADOS_CANCELABLES, type Actor, type TxCliente } from "./stateMachine";
 import { Money, sumar } from "../config/dinero";
 import { precioDeVenta, precioDeVentaConPromocion } from "../catalog/precioDeVenta";
 import { promocionesVigentes } from "../catalog/promotions";
@@ -559,6 +559,61 @@ export async function getOrderByConversationId(conversationId: string) {
 // Looks up by customerId, not the current conversationId - Order.conversationId is 1:1 with the
 // conversation it was closed in, so it can't be used to find a customer's order history across
 // conversations (e.g. a new open conversation started after the sale closed the previous one).
+/**
+ * E34 (2026-09-18). Los pedidos de este cliente que todavia se pueden cancelar.
+ *
+ * "Cancelable" lo decide la maquina de estados (E31), no una lista escrita a mano aca: un pedido que ya
+ * salio no se cancela desde el chat, y uno cancelado ya no existe.
+ */
+export async function listCancelableOrdersForCustomer(businessId: string, customerId: string) {
+  return prisma.order.findMany({
+    where: { businessId, customerId, fulfillmentStatus: { in: ESTADOS_CANCELABLES } },
+    orderBy: { createdAt: "desc" },
+    select: {
+      id: true,
+      summary: true,
+      totalAmount: true,
+      currency: true,
+      fulfillmentStatus: true,
+      createdAt: true,
+      cancelRequestedAt: true,
+    },
+  });
+}
+
+/** Un pedido puntual de este cliente, por id. Devuelve null si no es suyo: nunca se cancela lo ajeno. */
+export async function getOrderOfCustomer(businessId: string, customerId: string, orderId: string) {
+  return prisma.order.findFirst({
+    where: { id: orderId, businessId, customerId },
+    select: {
+      id: true,
+      summary: true,
+      totalAmount: true,
+      currency: true,
+      fulfillmentStatus: true,
+      createdAt: true,
+      cancelRequestedAt: true,
+    },
+  });
+}
+
+/** Deja la marca de "la clienta pidio cancelar", que recien el turno siguiente puede usar. */
+export async function marcarCancelacionPedida(orderId: string, cuando: Date): Promise<void> {
+  await prisma.order.update({ where: { id: orderId }, data: { cancelRequestedAt: cuando } });
+}
+
+/**
+ * Borra las solicitudes de cancelacion de este cliente. Corre al final de cualquier turno que NO haya
+ * llamado a `cancel_order`: si la clienta dijo "cancela" y despues se puso a hablar de otra cosa, la
+ * marca no puede quedar esperando a que una frase cualquiera de la semana que viene la active.
+ */
+export async function limpiarCancelacionesPedidas(businessId: string, customerId: string): Promise<void> {
+  await prisma.order.updateMany({
+    where: { businessId, customerId, cancelRequestedAt: { not: null } },
+    data: { cancelRequestedAt: null },
+  });
+}
+
 export async function getLatestOrderForCustomer(businessId: string, customerId: string) {
   const order = await prisma.order.findFirst({
     where: { businessId, customerId },

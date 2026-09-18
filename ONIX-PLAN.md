@@ -1923,7 +1923,7 @@ Queda **a propósito** un `Number(tarifa.cost)` en `saleState.ts:81`: es una con
 
 ---
 
-### E34 · Cancelar nunca ocurre en el mismo turno en que se pide
+### E34 · Cancelar nunca ocurre en el mismo turno en que se pide — **CERRADA el 2026-09-18**, sin desplegar
 
 **Quita:** al modelo, que la confirmación de cancelación dependa de que recuerde preguntar.
 **Porque:** hoy la confirmación la sostiene una directiva del prompt. El disparador correcto **no**
@@ -1940,6 +1940,33 @@ recibir un id, no "el último pedido del cliente".
 **Prompt:** la sección `CANCELAR UN PEDIDO` entera. **−3 líneas.**
 **Tamaño:** M. **Depende de:** `E31`, **`D2`**. **Bandera:** no.
 **Vuelta atrás:** revertir; la columna queda muerta.
+
+**Estado (2026-09-18): CERRADA, sin desplegar.** `D2` la decidió el dueño el mismo día: *"sigue con
+E34"*, o sea que la prueba vieja se reescribe.
+
+- **`Order.cancelRequestedAt`**: la primera llamada a `cancel_order` **no cancela**. Deja la marca y
+  devuelve el pedido —con su id y su resumen— para que el agente confirme con sus palabras. La segunda
+  cancela **sólo** si la marca es anterior al arranque del turno, o sea sólo si hubo un mensaje de la
+  clienta en el medio. El turno lleva su instante hasta las herramientas (`ToolContext.turnStartedAt`).
+- **Dos llamadas seguidas dentro del mismo turno no cancelan**, que es el caso que una directiva del
+  prompt no puede impedir y que ahora tiene su prueba.
+- **La solicitud se limpia** al final de cualquier turno que no haya llamado a `cancel_order`: si la
+  clienta dijo "cancela" y después se puso a hablar de otra cosa, la marca no queda esperando a que una
+  frase cualquiera de la semana que viene la active. **El fallback no tiene modelo adentro**: si nada
+  pasa, el pedido sigue vivo.
+- **`cancel_order` recibe un id**, no "el último pedido". Con dos pedidos abiertos devuelve la lista y
+  pide cuál, en vez de adivinar: adivinar mal es cancelarle a la clienta el pedido equivocado. Los ids
+  viajan en los pedidos que el modelo ya ve, y **sólo en los abiertos**.
+- **Qué se puede cancelar lo decide la máquina de estados de `E31`**, no una lista escrita a mano en la
+  herramienta. De paso se arregló un defecto que `E31` había dejado: `isOpenOrder` seguía comparando
+  contra `"PENDING"` a secas, así que un pedido **pagado y sin despachar** no contaba como abierto — el
+  modelo lo veía como historia vieja y `cancel_order` no lo encontraba.
+- **Prompt:** la sección `CANCELAR UN PEDIDO` se borró. `systemPrompt.ts` pasa de **541 a 538 líneas**,
+  exactamente las −3 que predecía la ficha.
+
+**Medido en producción el 2026-09-18:** `cancel_order` no se llamó ni una vez en 259 turnos, y las 5
+cancelaciones de los 27 pedidos se hicieron desde el panel. O sea que esto no arregla un incendio: cierra
+la puerta antes de que el volumen la encuentre.
 
 ---
 
