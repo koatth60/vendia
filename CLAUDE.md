@@ -156,3 +156,20 @@ directiva que ese hecho vuelve innecesaria.
 mantienen en cero.** 568 el 2026-09-16. Si sube y no hay errores, nos estamos convirtiendo en
 chatbot sin que nadie lo decida. Antes de agregar texto al prompt, hay que poder decir qué
 línea se borra a cambio.
+
+# Desplegar: `ssh vendia` solo funciona desde la maquina del dueno
+
+`ssh vendia` resuelve a una IP de Tailscale. Desde una sesion en la nube, otra computadora o CI no
+existe. Si `ssh` falla con timeout o "Could not resolve", no es el servidor: es que no estas en esa red.
+
+Camino que funciona desde cualquier lado, con `gh`:
+
+```bash
+git push origin <rama>
+gh workflow run deploy.yml -f accion=<rama>   # o: estado | logs | rollback
+gh run watch && gh run view --log
+```
+
+Corre el mismo `scripts/deploy.sh` de siempre. No prueba nada por su cuenta: mirar que el workflow
+`Tests` este en verde antes de disparar el despliegue. Detalle completo en
+`docs/DESPLIEGUE-DESDE-LA-NUBE.md`.

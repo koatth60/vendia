@@ -1,28 +1,33 @@
-name: Desplegar
+name: Servidor
 
-# Solo a mano. Un despliegue automatico en cada push manda a produccion commits a medio terminar,
-# y el trabajo aca se empuja directo a la rama sin pull request. Se dispara con:
+# Solo a mano. Un despliegue automatico en cada push manda a produccion commits a medio terminar, y
+# aca se empuja directo a la rama sin pull request.
 #
-#   gh workflow run deploy.yml -f rama=redesign/completo
-#   gh run watch
+# Existe para poder operar el servidor desde una sesion en la nube, que no tiene la llave SSH ni
+# Tailscale. Desde cualquier maquina con `gh`:
 #
-# Existe para poder desplegar desde una sesion en la nube, que no tiene la llave SSH ni Tailscale.
+#   gh workflow run deploy.yml -f accion=redesign/completo   # desplegar esa rama
+#   gh workflow run deploy.yml -f accion=estado              # pm2 + commit desplegado
+#   gh workflow run deploy.yml -f accion=logs                # ultimas 120 lineas
+#   gh workflow run deploy.yml -f accion=rollback            # volver al commit anterior
+#   gh run watch                                             # seguir la corrida
+#   gh run view --log                                        # leer la salida del servidor
 on:
   workflow_dispatch:
     inputs:
-      rama:
-        description: Rama a desplegar en el servidor
+      accion:
+        description: Nombre de rama a desplegar, o estado / logs / rollback
         required: true
         default: redesign/completo
         type: string
 
 # Dos despliegues a la vez dejan el servidor a mitad de camino entre dos commits.
 concurrency:
-  group: deploy-produccion
+  group: servidor-produccion
   cancel-in-progress: false
 
 jobs:
-  desplegar:
+  operar:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -37,12 +42,12 @@ jobs:
           printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
           chmod 600 ~/.ssh/known_hosts
 
-      # La llave esta anclada en el servidor a scripts/ci-deploy.sh, asi que lo unico que viaja es el
-      # nombre de la rama. El servidor valida ese nombre antes de usarlo.
-      - name: Desplegar
+      # La llave esta anclada en el servidor a scripts/ci-deploy.sh, asi que esto no abre una consola:
+      # viaja una sola palabra y el servidor la valida contra su propia lista antes de usarla.
+      - name: Ejecutar en el servidor
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-          RAMA: ${{ inputs.rama }}
+          ACCION: ${{ inputs.accion }}
         run: |
           ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes -o BatchMode=yes \
-            "root@${DEPLOY_HOST}" "$RAMA"
+            "root@${DEPLOY_HOST}" "$ACCION"
