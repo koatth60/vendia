@@ -917,7 +917,7 @@ el panel. Eso funcionó como debe.
 
 ---
 
-### E11 · Un color que no existe no sale
+### E11 · Un color que no existe no sale — **CERRADA el 2026-09-18**, sin desplegar (y apagada en los tres negocios)
 
 **Quita:** al modelo, decidir qué atributos del producto son ciertos.
 **Porque:** `verifyAgainstCatalog` tiene exactamente dos tipos de hallazgo: `precio_inexistente` y
@@ -1307,7 +1307,7 @@ vacíos o mal formados que no revientan ni inventan elementos.
 
 ---
 
-### E17 · Una foto de más de 5 MB no se intenta enviar
+### E17 · Una foto de más de 5 MB no se intenta enviar — **CERRADA y DESPLEGADA el 2026-09-18** (commit `198981d`)
 
 **Quita:** al operador, descubrir por el reclamo del cliente que una foto nunca salió.
 **Porque:** dos fallos 131053 en siete días con el mensaje exacto *"Image file has size 6303812 bytes
@@ -1367,7 +1367,7 @@ por tamaño, que tienen que ser cero) antes de darla por cerrada.
 
 ---
 
-### E17b · Lo que manda el panel también viaja hacia Meta
+### E17b · Lo que manda el panel también viaja hacia Meta — **CERRADA el 2026-09-18**, sin desplegar
 
 **Quita:** al sistema, depender de que Meta pueda descargar una URL nuestra.
 **Porque:** `E17` y el cambio del 2026-09-17 sacaron el link de S3 del camino del bot, pero no del
@@ -1394,7 +1394,7 @@ cuando Meta rechaza la subida). `npm test` completo antes de desplegar.
 
 ---
 
-### E18 · Fuera de la ventana de 24 h se manda plantilla
+### E18 · Fuera de la ventana de 24 h se manda plantilla — **CERRADA** (commit `3b7ba3e`, «Fase 7: capa unica de salida»), sin desplegar
 
 **Quita:** al sistema, intentar un envío que Meta va a rechazar.
 **Porque:** cuatro fallos 131047 en siete días — *"Message failed to send because more than 24 hours
@@ -1409,9 +1409,17 @@ ninguna llamada directa a `whatsapp/client.ts` fuera de ahí.
 **Vuelta atrás:** la capa nueva delega en las funciones viejas; se desactiva la política y queda el
 paso directo.
 
+**Estado (verificado el 2026-09-18): HECHA, sin desplegar.** `src/whatsapp/outbound.ts` es el punto
+único de salida, con `META_ERROR_CODES` (131047 ventana, 131050 opt-out, 190 token, 132018 formato de
+plantilla) y los códigos de límite de tasa (4, 80007, 130429, 131048, más el HTTP 429). Los timeouts
+explícitos están en `src/whatsapp/client.ts` (`AbortSignal.timeout`). La prueba de arquitectura que
+pide la ficha existe: `src/whatsapp/outbound.arch.test.ts` hace `grep` para que no quede ninguna
+llamada directa a `whatsapp/client.ts` fuera de esa capa. Los casos por código están en
+`src/whatsapp/outbound.test.ts`.
+
 ---
 
-### E19 · El token de WhatsApp avisa antes de vencerse
+### E19 · El token de WhatsApp avisa antes de vencerse — **CERRADA** (commit `5b68513`, «Fase 7: ciclo de vida del token»), sin desplegar
 
 **Quita:** al operador, tener que acordarse de una fecha.
 **Porque:** el token expira a los 60 días y el bot queda mudo sin aviso. No hay columna de
@@ -1422,6 +1430,12 @@ error 190 para marcar la conexión como caída en el panel.
 **Se prueba:** con la fecha a 6 días, el job manda exactamente una alerta.
 **Tamaño:** M. **Depende de:** `E18`. **Bandera:** no.
 **Vuelta atrás:** revertir; la columna queda muerta.
+
+**Estado (verificado el 2026-09-18): HECHA, sin desplegar.** Columna
+`Business.whatsappTokenExpiresAt`, job `src/jobs/tokenExpiry.ts` con aviso a 7 días y reserva atómica
+en `whatsappTokenExpiryNotifiedAt` (para que el aviso salga UNA vez aunque el job corra de nuevo), y
+el error 190 marcando `whatsappConnectionBrokenAt` desde `outbound.ts`. Cinco pruebas en
+`src/jobs/tokenExpiry.test.ts`, incluida la que pide la ficha.
 
 ---
 
