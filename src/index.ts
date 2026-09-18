@@ -23,6 +23,7 @@ import { runAbandonmentJob, ABANDONMENT_CHECK_INTERVAL_MS } from "./jobs/abandon
 import { runSaleConfirmationChaserJob, SALE_CONFIRMATION_CHASER_INTERVAL_MS } from "./jobs/saleConfirmationChaser";
 import { runPendingBurstJob, PENDING_BURST_INTERVAL_MS } from "./jobs/pendingBursts";
 import { runStartupJobs } from "./jobs/startup";
+import { sinSolape } from "./jobs/sinSolape";
 import { runBackupJob, BACKUP_CHECK_INTERVAL_MS } from "./jobs/backup";
 
 const app = express();
@@ -140,58 +141,78 @@ server.listen(env.port, () => {
 // igual - el razonamiento, job por job, esta en src/jobs/startup.ts.
 runStartupJobs().catch((error) => console.error("Error corriendo los jobs al arranque:", error));
 
+
+// E23, primera parte (2026-09-18). Cada job lleva su guardia contra solaparse CONSIGO MISMO.
+//
+// setInterval no espera a que la pasada anterior termine: si una tarda mas que su intervalo, arranca
+// otra encima. El perseguidor de confirmaciones corre cada 60 SEGUNDOS mandando WhatsApps en un bucle
+// secuencial - una pasada lenta se solapaba con la siguiente, las dos encontraban la misma conversacion
+// vencida, y al cliente le llegaban dos mensajes identicos.
+//
+// Esto NO reemplaza el reparto por base con FOR UPDATE SKIP LOCKED (resto de E23, depende de E21): la
+// guardia es por proceso. Lo unico que impide dos procesos sigue siendo `instances: 1`.
+const guardiaSeguimientoPostventa = sinSolape("seguimiento post-venta", runFollowUpJob);
+const guardiaRecordatorioDeEscalaciones = sinSolape("recordatorio de escalaciones", runEscalationReminderJob);
+const guardiaChequeoDeConversaciones = sinSolape("chequeo de conversaciones", runConversationHealthJob);
+const guardiaColaDeSalida = sinSolape("cola de salida", runOutboundQueueJob);
+const guardiaVencimientoDeToken = sinSolape("vencimiento de token", runTokenExpiryJob);
+const guardiaRafagasPendientes = sinSolape("rafagas pendientes", runPendingBurstJob);
+const guardiaAbandonoDeConversaciones = sinSolape("abandono de conversaciones", runAbandonmentJob);
+const guardiaRespaldoDeLaBase = sinSolape("respaldo de la base", runBackupJob);
+const guardiaPerseguidorDeVentas = sinSolape("perseguidor de confirmaciones de venta", runSaleConfirmationChaserJob);
+
 const FOLLOW_UP_INTERVAL_MS = 60 * 60 * 1000;
 setInterval(() => {
-  runFollowUpJob().catch((error) => console.error("Error corriendo el job de seguimiento post-venta:", error));
+  guardiaSeguimientoPostventa.correr().catch((error) => console.error("Error corriendo el job de seguimiento post-venta:", error));
 }, FOLLOW_UP_INTERVAL_MS);
 
 const ESCALATION_REMINDER_INTERVAL_MS = 30 * 60 * 1000;
 setInterval(() => {
-  runEscalationReminderJob().catch((error) => console.error("Error corriendo el job de recordatorio de escalaciones:", error));
+  guardiaRecordatorioDeEscalaciones.correr().catch((error) => console.error("Error corriendo el job de recordatorio de escalaciones:", error));
 }, ESCALATION_REMINDER_INTERVAL_MS);
 
 // El perseguidor de confirmaciones de venta tiene reloj propio y mucho mas fino (ver
 // SALE_CONFIRMATION_CHASER_INTERVAL_MS). Con los 30 minutos del job de escalaciones,
 // Business.ownerReminderMinutes no se podia cumplir: el panel deja poner 5 y el piso real era 30.
 setInterval(() => {
-  runSaleConfirmationChaserJob().catch((error) =>
-    console.error("Error corriendo el perseguidor de confirmaciones de venta:", error)
-  );
+  guardiaPerseguidorDeVentas
+    .correr()
+    .catch((error) => console.error("Error corriendo el perseguidor de confirmaciones de venta:", error));
 }, SALE_CONFIRMATION_CHASER_INTERVAL_MS);
 
 // Fase 0: el chequeo de conversaciones corre solo. Ver src/jobs/conversationHealth.ts.
 setInterval(() => {
-  runConversationHealthJob().catch((error) => console.error("Error corriendo el chequeo de conversaciones:", error));
+  guardiaChequeoDeConversaciones.correr().catch((error) => console.error("Error corriendo el job de chequeo de conversaciones:", error));
 }, HEALTH_CHECK_INTERVAL_MS);
 
 // Fase 7: la cola de salida deja de depender de que el cliente escriba. Ver src/jobs/outboundQueue.ts.
 setInterval(() => {
-  runOutboundQueueJob().catch((error) => console.error("Error drenando la cola de salida:", error));
+  guardiaColaDeSalida.correr().catch((error) => console.error("Error corriendo el job de cola de salida:", error));
 }, OUTBOUND_QUEUE_INTERVAL_MS);
 
 // Fase 7: aviso de vencimiento de token de WhatsApp. Ver src/jobs/tokenExpiry.ts.
 setInterval(() => {
-  runTokenExpiryJob().catch((error) => console.error("Error corriendo el chequeo de vencimiento de token:", error));
+  guardiaVencimientoDeToken.correr().catch((error) => console.error("Error corriendo el job de vencimiento de token:", error));
 }, TOKEN_EXPIRY_CHECK_INTERVAL_MS);
 
 // E08: el reloj de las rafagas de mensajes. Antes era un setTimeout por rafaga dentro del proceso, asi
 // que un reinicio se llevaba la rafaga; ahora las rafagas son filas y este job las drena cuando vencen.
 // Corre cada segundo: la ventana de silencio es de 8 s, asi que esta resolucion no agrega latencia.
 setInterval(() => {
-  runPendingBurstJob().catch((error) => console.error("Error drenando las rafagas pendientes:", error));
+  guardiaRafagasPendientes.correr().catch((error) => console.error("Error corriendo el job de rafagas pendientes:", error));
 }, PENDING_BURST_INTERVAL_MS);
 
 // Fase 9: conversaciones inactivas pasan a ABANDONED y su carrito (si tenia) recibe la plantilla de
 // recuperacion. Ver src/jobs/abandonment.ts.
 setInterval(() => {
-  runAbandonmentJob().catch((error) => console.error("Error corriendo el job de abandono de conversaciones:", error));
+  guardiaAbandonoDeConversaciones.correr().catch((error) => console.error("Error corriendo el job de abandono de conversaciones:", error));
 }, ABANDONMENT_CHECK_INTERVAL_MS);
 
 // Respaldo de la base. Se revisa cada hora y se vuelca si el ultimo tiene mas de 20h - o sea, uno por
 // dia sin depender de que el proceso viva 24h seguidas. Ver src/jobs/backup.ts: hasta el 2026-09-18
 // existia el script del volcado y NO LO LLAMABA NADIE.
 setInterval(() => {
-  runBackupJob().catch((error) => console.error("[ZAQI ALERT] Error respaldando la base:", error));
+  guardiaRespaldoDeLaBase.correr().catch((error) => console.error("Error corriendo el job de respaldo de la base:", error));
 }, BACKUP_CHECK_INTERVAL_MS);
 
 // Fase 7 del plan maestro (2026-09-15): sin esto, cada `pm2 restart` mataba el proceso a mitad de un
@@ -224,3 +245,28 @@ const shutdown = createOrderedShutdown({
 
 process.on("SIGTERM", () => void shutdown("SIGTERM"));
 process.on("SIGINT", () => void shutdown("SIGINT"));
+
+// E23, primera parte (2026-09-18). Hasta hoy NO existia ningun manejador de caida, en ninguna parte.
+//
+// Que agrega, si Node ya muere solo ante una excepcion no atrapada: muere SIN pasar por el apagado
+// ordenado. O sea que los turnos en vuelo - un cliente esperando su respuesta, un mensaje esperando su
+// ventana de rafaga - se cortan a la mitad, y como el webhook ya le respondio 200 a Meta, Meta no
+// reintenta: ese cliente se queda sin respuesta y no queda registro de por que.
+//
+// Y con mas negocios importa mas: hoy el proceso es uno solo para TODOS los inquilinos. Una excepcion
+// no atrapada por el turno de un negocio se lleva puestos los turnos en vuelo de todos los demas.
+//
+// Se SALE igual, a proposito. Despues de una excepcion no atrapada el estado del proceso es
+// indefinido y seguir andando es peor que reiniciar: pm2 lo levanta. Lo que cambia es que ahora
+// primero se drena lo que se pueda y queda un log buscable con la causa, en vez de un corte mudo.
+function caidaNoAtrapada(clase: string, error: unknown): void {
+  console.error(`[ZAQI ALERT] ${clase}: el proceso se cae. Causa:`, error);
+  // El apagado ordenado tiene su propio tope de espera; si se cuelga, el timer de abajo igual sale.
+  void shutdown(clase).finally(() => process.exit(1));
+  // Red de seguridad: si el drenado quedara colgado, no se puede quedar un proceso zombi aceptando
+  // nada. unref() para que este timer no mantenga vivo el proceso si el drenado termina antes.
+  setTimeout(() => process.exit(1), 10_000).unref();
+}
+
+process.on("uncaughtException", (error) => caidaNoAtrapada("uncaughtException", error));
+process.on("unhandledRejection", (motivo) => caidaNoAtrapada("unhandledRejection", motivo));
