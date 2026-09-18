@@ -12,7 +12,10 @@ export const ANTHROPIC_VISION_MODEL = "claude-sonnet-5";
 // null cuando no hay key configurada - el resto del modulo trata eso como "escalacion apagada", no
 // como un error. Asi el bot sigue andando normal en negocios/entornos sin ANTHROPIC_API_KEY.
 // Exportado (no una const privada) para poder monkeypatchear anthropic.messages.create en tests,
-// mismo patron que "export const groq" en src/ai/transcription.ts.
+// El `? :` no es cosmetico: es lo que hace que importar este archivo sea inocuo cuando falta la key.
+// El constructor del SDK tira si la apiKey viene vacia, asi que sin ese guard el error saldria al
+// IMPORTAR y no al usar la vision. src/ai/transcription.ts tenia ese agujero y en CI dejaba 3 archivos
+// de prueba rojos (arreglado el 2026-09-18 con getGroqClient(), construccion diferida).
 // timeout/maxRetries por el mismo motivo que DeepSeek (ver src/ai/client.ts) - esta llamada corre en
 // medio del turno de un cliente esperando respuesta, no en background.
 export const anthropic = env.anthropicApiKey
