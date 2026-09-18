@@ -243,7 +243,13 @@ test("handleOwnerReply (PHOTO_PRODUCT) resolves the owner's answer to a real cat
   }
 });
 
-test("handleOwnerReply (PHOTO_PRODUCT) falls back to the owner's raw (prefixed) text when it doesn't match any catalog product", async () => {
+// E13b (2026-09-18). Esta prueba afirmaba lo contrario hasta hoy: que la respuesta cruda de la duena se
+// le reenviaba al cliente con el prefijo "Segun nuestro equipo:". Eso es exactamente el defecto que se
+// vio en produccion (Dennis, cmu6b0uja0028od2ka6c04qol): la duena contesto "Gen9", un token que no llega
+// al piso de confianza, y al cliente le llego "Segun nuestro equipo: Gen9" - sin producto, sin precio y
+// sin sentido. Ahora no sale nada al cliente y la pregunta queda ABIERTA, que es lo unico que le da a la
+// duena una segunda oportunidad de decirlo con el nombre completo.
+test("handleOwnerReply (PHOTO_PRODUCT) no le manda nada al cliente cuando la respuesta no resuelve a un producto", async () => {
   const { customer, conversation } = await makeCustomerAndConversation();
   const wamid = `wamid.photo-${randomUUID()}`;
   await prisma.pendingOwnerQuestion.create({
@@ -263,16 +269,95 @@ test("handleOwnerReply (PHOTO_PRODUCT) falls back to the owner's raw (prefixed) 
     });
 
     const sentToCustomer = sentMessages.find((m) => m.to === customer.phoneNumber);
-    assert.ok(sentToCustomer);
-    assert.match(sentToCustomer!.body, /Según nuestro equipo: no se ve claro/);
+    assert.equal(sentToCustomer, undefined, "al cliente no le puede llegar la respuesta cruda de la duena");
 
     const photoSent = sentMedia.find((m) => m.to === customer.phoneNumber);
-    assert.equal(photoSent, undefined, "must not send any photo when the owner's answer didn't resolve to a real product");
+    assert.equal(photoSent, undefined, "tampoco una foto: no hay producto identificado");
+
+    // A la duena SI se le contesta, y se le dice que hacer.
+    const sentToOwner = sentMessages.find((m) => m.to === "573000000001");
+    assert.ok(sentToOwner, "la duena tiene que enterarse de que su respuesta no salio");
+    assert.match(sentToOwner!.body, /no encontre/i);
+    assert.match(sentToOwner!.body, /nombre del producto/i);
+
+    // Y la pregunta queda abierta: cerrarla la dejaria sin forma de reintentar y al cliente sin respuesta.
+    const sigueAbierta = await prisma.pendingOwnerQuestion.findFirst({
+      where: { conversationId: conversation.id, resolvedAt: null },
+    });
+    assert.ok(sigueAbierta, "la pregunta tiene que seguir abierta para que la duena pueda contestar de nuevo");
+
+    // Nada se guardo como mensaje del asistente en el hilo del cliente.
+    const mensajesDelBot = await prisma.message.count({
+      where: { conversationId: conversation.id, role: "ASSISTANT" },
+    });
+    assert.equal(mensajesDelBot, 0, "no se escribe en el hilo lo que no se mando");
   } finally {
     await prisma.pendingOwnerQuestion.deleteMany({ where: { conversationId: conversation.id } });
     await prisma.message.deleteMany({ where: { conversationId: conversation.id } });
     await prisma.conversation.deleteMany({ where: { id: conversation.id } });
     await prisma.customer.deleteMany({ where: { id: customer.id } });
+  }
+});
+
+// E13b, punto 2. La otra mitad del caso Dennis: entre que se pregunta y que la duena contesta, el
+// servidor puede haber resuelto la foto solo. Si eso paso, la respuesta NO sale al cliente - ya tiene el
+// producto en pantalla, y mandarselo otra vez (o distinto) lo confunde.
+test("handleOwnerReply (PHOTO_PRODUCT) no despacha la respuesta si el producto ya se identifico mientras tanto", async () => {
+  const { customer, conversation } = await makeCustomerAndConversation();
+  const wamid = `wamid.photo-${randomUUID()}`;
+  await prisma.pendingOwnerQuestion.create({
+    data: {
+      conversationId: conversation.id,
+      wamid,
+      question: "Identificar el producto de la foto/video que mando el cliente",
+      kind: "PHOTO_PRODUCT",
+    },
+  });
+  const producto = await prisma.product.create({
+    data: {
+      businessId,
+      name: `Reloj ${randomUUID().slice(0, 6)}`,
+      description: "Reloj de prueba",
+      price: 120000,
+      currency: "COP",
+    },
+  });
+  // Despues de preguntar, el servidor identifico el producto y le mando la foto al cliente.
+  await prisma.message.create({
+    data: {
+      conversationId: conversation.id,
+      role: "ASSISTANT",
+      content: `¡Ese es el *${producto.name}*!`,
+      mediaType: "IMAGE",
+      mediaS3Key: `k-${randomUUID()}`,
+      relatedProductId: producto.id,
+    },
+  });
+
+  try {
+    await handleOwnerReply(businessId, credentials, "573000000001", {
+      type: "text",
+      context: { id: wamid },
+      text: { body: producto.name },
+    });
+
+    const sentToCustomer = sentMessages.find((m) => m.to === customer.phoneNumber);
+    assert.equal(sentToCustomer, undefined, "el cliente ya lo tenia: no se le repite");
+
+    const sentToOwner = sentMessages.find((m) => m.to === "573000000001");
+    assert.ok(sentToOwner, "a la duena se le explica por que no salio");
+    assert.match(sentToOwner!.body, /ya se resolvio solo/i);
+
+    const resuelta = await prisma.pendingOwnerQuestion.findFirst({
+      where: { conversationId: conversation.id, resolvedAt: null },
+    });
+    assert.equal(resuelta, null, "la pregunta se cierra: ya no hay nada que preguntar");
+  } finally {
+    await prisma.message.deleteMany({ where: { conversationId: conversation.id } });
+    await prisma.pendingOwnerQuestion.deleteMany({ where: { conversationId: conversation.id } });
+    await prisma.conversation.deleteMany({ where: { id: conversation.id } });
+    await prisma.customer.deleteMany({ where: { id: customer.id } });
+    await prisma.product.deleteMany({ where: { id: producto.id } });
   }
 });
 

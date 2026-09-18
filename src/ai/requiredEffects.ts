@@ -84,16 +84,48 @@ export interface IncomingMessageFacts {
 /**
  * Cuando llego la ultima imagen del cliente que TODAVIA no fue atendida, o null si no hay ninguna.
  *
- * "Atendida" = despues de esa imagen salio un aviso real a la duena por esta conversacion (ver
- * ownerWasNotifiedSince: PendingOwnerQuestion con wamid, o un OwnerMessageLog exitoso). Es la misma
- * definicion que usa la verificacion, asi que el efecto no puede exigir algo distinto de lo que despues
- * comprueba.
+ * "Atendida" es cualquiera de dos cosas, las dos consultables con un SELECT:
+ *   1. el servidor resolvio la foto solo y le mando al cliente la media del producto identificado
+ *      (productMediaSentSince) - la mas fuerte, porque el cliente YA tiene la respuesta en pantalla;
+ *   2. salio un aviso real a la duena por esta conversacion (ownerWasNotifiedSince:
+ *      PendingOwnerQuestion, o un OwnerMessageLog exitoso).
+ *
+ * La segunda es la misma definicion que usa la verificacion, asi que el efecto no puede exigir algo
+ * distinto de lo que despues comprueba. La primera solo puede APAGAR el efecto, nunca exigirlo, asi que
+ * no abre esa brecha.
  *
  * Solo se miran las imagenes recientes: un comprobante de hace una semana no es una tarea pendiente, y
  * sin este corte una conversacion vieja con una foto sin avisar volveria a disparar el efecto para
  * siempre.
  */
 const UNATTENDED_IMAGE_WINDOW_HOURS = 24;
+
+/**
+ * E13b (2026-09-18). La tercera forma de "atendida", y la mas fuerte de las tres: el servidor ya
+ * identifico el producto de esa foto y le mando al cliente la media de ESE producto.
+ *
+ * Caso real, conversacion cmu6b0uja0028od2ka6c04qol (Dennis): a las 01:58:52 el servidor le mando al
+ * cliente las dos fotos del Smartwatch gen 9, y a las 02:00:25 el turno igual desperto a la duena para
+ * preguntarle que producto era. Ya estaba resuelto y en la pantalla del cliente. Pasaba porque
+ * "atendida" solo contemplaba avisos a la duena: que el servidor lo resolviera SOLO no contaba, que es
+ * exactamente al reves de lo que uno esperaria.
+ *
+ * Se mira Message y no SaleState.mediaSent a proposito: mediaSent es un arreglo de ids sin fecha, y la
+ * pregunta de aca es "DESPUES de esa imagen". Sin marca de tiempo no se puede responder con un SELECT,
+ * y habria que deducirla - que es justo lo que la regla de efectos requeridos prohibe.
+ */
+export async function productMediaSentSince(conversationId: string, since: Date): Promise<boolean> {
+  const enviada = await prisma.message.count({
+    where: {
+      conversationId,
+      role: "ASSISTANT",
+      mediaType: { not: null },
+      relatedProductId: { not: null },
+      createdAt: { gte: since },
+    },
+  });
+  return enviada > 0;
+}
 
 export async function findUnattendedCustomerImage(conversationId: string): Promise<Date | null> {
   const desde = new Date(Date.now() - UNATTENDED_IMAGE_WINDOW_HOURS * 60 * 60 * 1000);
@@ -103,6 +135,7 @@ export async function findUnattendedCustomerImage(conversationId: string): Promi
     select: { createdAt: true },
   });
   if (!imagen) return null;
+  if (await productMediaSentSince(conversationId, imagen.createdAt)) return null;
   return (await ownerWasNotifiedSince(conversationId, imagen.createdAt)) ? null : imagen.createdAt;
 }
 

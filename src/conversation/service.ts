@@ -608,6 +608,9 @@ export async function findConversationByPendingOwnerQuestion(wamid: string) {
     payload: pending.payload,
     conversationId: pending.conversationId,
     customer: pending.conversation.customer,
+    // E13b: cuando se pregunto. El despacho lo necesita para saber si la pregunta todavia tiene
+    // sentido, o si el servidor la resolvio solo mientras la duena no contestaba.
+    askedAt: pending.createdAt,
   };
 }
 
@@ -703,6 +706,7 @@ export async function findOpenPendingOwnerQuestionsForBusiness(businessId: strin
     payload: p.payload,
     conversationId: p.conversationId,
     customer: p.conversation.customer,
+    askedAt: p.createdAt,
   }));
 }
 

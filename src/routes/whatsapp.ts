@@ -45,7 +45,7 @@ import {
   saveCustomerContactInfo,
   recordMessageDeliveryStatus,
 } from "../conversation/service";
-import { consumeEscalatedTurn } from "../ai/requiredEffects";
+import { consumeEscalatedTurn, productMediaSentSince } from "../ai/requiredEffects";
 import { generateReply, generateClosingMessage, extractDeliveryDataFromAnswer, extractAddressFromAnswer } from "../ai/agent";
 import { sendCatalogBlocks } from "../whatsapp/catalogBlocks";
 import { analyzeCustomerImage } from "../ai/vision";
@@ -410,6 +410,22 @@ export async function handleOwnerReply(
     // catalog product so the customer gets the actual name/price/photo back, instead of just the owner's
     // raw words. Falls back to forwarding the raw text (still prefixed) when it doesn't match anything.
     if (pendingQuestion.kind === "PHOTO_PRODUCT") {
+      // E13b, punto 2: la pregunta puede haber dejado de tener sentido mientras la duena no contestaba.
+      // Si entre que se pregunto y que contesto el servidor ya identifico el producto y le mando la
+      // media al cliente, la respuesta NO sale: el cliente ya tiene el producto en pantalla y recibirlo
+      // otra vez (o peor, distinto) lo confunde. Se le avisa a la duena y la pregunta se cierra.
+      if (await productMediaSentSince(pendingQuestion.conversationId, pendingQuestion.askedAt)) {
+        await markPendingOwnerQuestionResolved(pendingQuestion.questionId);
+        await setHumanControl(businessId, pendingQuestion.conversationId, false);
+        await replyToOwner(
+          businessId,
+          credentials,
+          ownerPhone,
+          "Gracias, pero eso ya se resolvio solo: el cliente recibio el producto identificado antes de tu respuesta. No le mande nada para no repetirle.",
+        );
+        return;
+      }
+
       const match = await findConfidentProductMatch(businessId, answerText);
       let outcome: { delivered: boolean; nudged: boolean; queued: boolean };
       if (match.product) {
@@ -433,9 +449,21 @@ export async function handleOwnerReply(
           }
         }
       } else {
-        const fallbackText = formatForWhatsapp(`Según nuestro equipo: ${answerText}`);
-        outcome = await deliverOwnerAnswerToCustomer(businessId, pendingQuestion.conversationId, credentials, pendingQuestion.customer.phoneNumber, fallbackText);
-        await recordMessage(businessId, pendingQuestion.conversationId, "ASSISTANT", fallbackText);
+        // E13b, punto 3: NO sale crudo. Esto mandaba "Segun nuestro equipo: {lo que sea que escribio la
+        // duena}". Caso real (Dennis, 2026-09-18): la duena contesto "Gen9", un solo token que no llega
+        // al piso de confianza, y al cliente le llego "Segun nuestro equipo: Gen9" - sin producto, sin
+        // precio y sin sentido, 90 segundos despues de que el mismo cliente ya hubiera dicho "Si" a ese
+        // reloj.
+        // La pregunta QUEDA ABIERTA a proposito: es lo unico que hace que la duena pueda contestar de
+        // nuevo con el nombre completo. Cerrarla la dejaria sin segunda oportunidad y el cliente sin
+        // respuesta.
+        await replyToOwner(
+          businessId,
+          credentials,
+          ownerPhone,
+          `No encontre "${answerText}" en el catalogo, asi que no le mande nada al cliente todavia. Respondeme este mismo mensaje con el nombre del producto como esta cargado y se lo paso con precio y foto. Si no es nada del catalogo, la conversacion la tenes vos: escribile directo desde el panel.`,
+        );
+        return;
       }
       await markPendingOwnerQuestionResolved(pendingQuestion.questionId);
       await setHumanControl(businessId, pendingQuestion.conversationId, false);

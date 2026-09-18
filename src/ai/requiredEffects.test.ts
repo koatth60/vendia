@@ -586,3 +586,99 @@ test("con un pedido ya registrado no se crea un segundo", async () => {
     "el candado de idempotencia es la fila Order, no la memoria del turno"
   );
 });
+
+// ---------------------------------------------------------------------------------------------------
+// E13b (2026-09-18). La pregunta que ya no hacia falta.
+//
+// Conversacion cmu6b0uja0028od2ka6c04qol (Dennis). El cliente manda la foto de un reloj a las 01:54:18;
+// a las 01:58:52 el servidor le manda las dos fotos del Smartwatch gen 9 - o sea, lo identifico SOLO; y
+// a las 02:00:25 el turno igual desperto a la duena para preguntarle que producto era.
+//
+// La causa: "atendida" solo contemplaba avisos a la duena. Que el servidor resolviera la foto y le
+// mandara el producto al cliente no contaba como atenderla.
+// ---------------------------------------------------------------------------------------------------
+
+test("E13b: si el servidor ya le mando al cliente la media del producto, la imagen queda atendida y no se despierta a la duena", async () => {
+  await seedFor({ saleStateEnabled: false, requiredEffectsEnabled: true });
+  // Precondicion del disparador (ver "una imagen sin nada que el servidor haya escrito no exige nada"):
+  // tiene que existir actividad de venta escrita por el servidor. En Dennis existia - venia mostrandole
+  // productos desde antes de la foto.
+  await recordMediaSent(conversationId, "Reloj Inteligente Serie 11 Mini (Plateado)");
+
+  await customerSendsReceiptPhoto();
+
+  // Antes de mandar nada, el efecto SI se exige: es el estado en que quedo Dennis a las 01:54.
+  const antes = await computeRequiredEffects(conversationId, { mediaType: "IMAGE" });
+  assert.equal(antes.length, 1, "una imagen sin atender tiene que exigir el aviso");
+  assert.equal(antes[0].kind, "OWNER_NOTIFIED_ABOUT_IMAGE");
+
+  // Ahora el servidor identifica el producto y le manda la foto al cliente. El hecho se escribe como lo
+  // escribe produccion: un Message del ASISTENTE con media Y con relatedProductId apuntando a un
+  // producto real del catalogo - no un texto que diga que la mando.
+  const producto = await prisma.product.findFirstOrThrow({ where: { businessId } });
+  await prisma.message.create({
+    data: {
+      conversationId,
+      role: "ASSISTANT",
+      content: `¡Ese es el *${producto.name}*!`,
+      mediaType: "IMAGE",
+      mediaS3Key: `k-${randomUUID()}`,
+      relatedProductId: producto.id,
+    },
+  });
+
+  const despues = await computeRequiredEffects(conversationId, { mediaType: "IMAGE" });
+  assert.deepEqual(
+    despues,
+    [],
+    "con el producto ya identificado y enviado, despertar a la duena es molestarla por algo resuelto"
+  );
+});
+
+test("E13b: una media SIN relatedProductId no alcanza para dar la imagen por atendida", async () => {
+  await seedFor({ saleStateEnabled: false, requiredEffectsEnabled: true });
+  await recordMediaSent(conversationId, "Reloj Inteligente Serie 11 Mini (Plateado)");
+  await customerSendsReceiptPhoto();
+
+  // Media del asistente pero sin producto asociado: puede ser cualquier cosa (un comprobante reenviado,
+  // una foto suelta). No prueba que la foto del cliente se haya identificado, asi que NO puede apagar el
+  // efecto - si lo apagara, bastaria con mandar cualquier imagen para que la duena no se entere nunca.
+  await prisma.message.create({
+    data: {
+      conversationId,
+      role: "ASSISTANT",
+      content: "Te paso una imagen",
+      mediaType: "IMAGE",
+      mediaS3Key: `k-${randomUUID()}`,
+    },
+  });
+
+  const exigidos = await computeRequiredEffects(conversationId, { mediaType: "IMAGE" });
+  assert.equal(exigidos.length, 1, "sin producto asociado, la imagen sigue sin atender");
+  assert.equal(exigidos[0].kind, "OWNER_NOTIFIED_ABOUT_IMAGE");
+});
+
+test("E13b: la media del producto tiene que ser POSTERIOR a la imagen del cliente", async () => {
+  await seedFor({ saleStateEnabled: false, requiredEffectsEnabled: true });
+  await recordMediaSent(conversationId, "Reloj Inteligente Serie 11 Mini (Plateado)");
+
+  // Orden invertido a proposito: primero el servidor manda un producto (por otra cosa), y DESPUES el
+  // cliente manda una foto nueva. Esa foto nueva no esta atendida por algo que paso antes de existir.
+  const producto = await prisma.product.findFirstOrThrow({ where: { businessId } });
+  await prisma.message.create({
+    data: {
+      conversationId,
+      role: "ASSISTANT",
+      content: `Mira el *${producto.name}*`,
+      mediaType: "IMAGE",
+      mediaS3Key: `k-${randomUUID()}`,
+      relatedProductId: producto.id,
+    },
+  });
+  await new Promise((r) => setTimeout(r, 5));
+  await customerSendsReceiptPhoto();
+
+  const exigidos = await computeRequiredEffects(conversationId, { mediaType: "IMAGE" });
+  assert.equal(exigidos.length, 1, "una media anterior no atiende una imagen posterior");
+  assert.equal(exigidos[0].kind, "OWNER_NOTIFIED_ABOUT_IMAGE");
+});
