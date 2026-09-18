@@ -57,35 +57,90 @@ export async function resolverModalidadDelPedido(
   }
 ): Promise<ShippingPaymentModality | null> {
   const disponibles = await modalidadesDisponibles(businessId, opts.city);
+  const mods = disponibles.mods;
 
   const declarada = opts.declarada?.trim();
   if (declarada && MODALIDADES.includes(declarada as ShippingPaymentModality)) {
     // Se acepta si aplica en la zona. Y tambien cuando el negocio no configuro NINGUNA modalidad: sin esa
     // lista no hay dato que la contradiga, y descartarla seria inventarse una restriccion que nadie puso.
-    if (disponibles.length === 0 || disponibles.includes(declarada as ShippingPaymentModality)) {
-      return declarada as ShippingPaymentModality;
-    }
+    const esCodTotal = declarada === "COD_ALL";
+    const aplica = esCodTotal
+      ? admitePagoTotalAlRecibir(disponibles)
+      : mods.length === 0 || mods.includes(declarada as ShippingPaymentModality);
+    if (aplica) return declarada as ShippingPaymentModality;
   }
 
-  if (opts.cobraAlRecibir) return "COD_ALL";
+  // El metodo elegido se cobra al recibir. Eso solo puede volverse contraentrega TOTAL donde la zona la
+  // admite: si no, el pedido queda sin modalidad resuelta (null) en vez de escribir en la base que el
+  // mensajero cobra el producto entero en una ciudad donde el negocio nunca dijo que puede cobrarlo.
+  if (opts.cobraAlRecibir) {
+    if (admitePagoTotalAlRecibir(disponibles)) return "COD_ALL";
+    return null;
+  }
 
-  if (disponibles.length === 1) return disponibles[0];
+  if (mods.length === 1 && (mods[0] !== "COD_ALL" || admitePagoTotalAlRecibir(disponibles))) return mods[0];
 
   return null;
 }
 
-/** Las modalidades que aplican para este pedido: las de su zona si la hay, si no las del negocio. */
-async function modalidadesDisponibles(businessId: string, city?: string | null): Promise<ShippingPaymentModality[]> {
+/**
+ * Las modalidades que aplican para este pedido: las de su zona si la hay, si no las del negocio.
+ *
+ * COBRAR TODO AL RECIBIR EXIGE UNA ZONA QUE LO DIGA (2026-09-18). La lista del negocio es un respaldo
+ * para cuando la ciudad no cae en ninguna zona configurada, y de ahi COD_ALL se saca siempre.
+ *
+ * El motivo es de plata y es asimetrico. Las otras dos modalidades se pagan por transferencia y se
+ * pueden hacer desde cualquier parte: ofrecerlas de mas no arriesga nada. Cobrar todo al recibir depende
+ * de si el negocio LLEGA ahi con un mensajero que cobre, y eso lo sabe zona por zona, nunca "en
+ * general". Heredar COD_ALL de la lista del negocio equivale a decir "cobramos al recibir en cualquier
+ * ciudad del pais", que no es lo que ese campo quiso decir nunca.
+ *
+ * Medido en produccion el 2026-09-18: MAGByLizN acepta pagar todo al recibir solo en Bogota y Soacha
+ * (asi estan sus tarifas), pero su lista de negocio incluia COD_ALL, y 9 de sus ultimos 25 pedidos
+ * fueron a ciudades sin regla cargada - Ocaña, Santa Rosa de Cabal, El Zulia. En todas ellas el bot
+ * podia ofrecer y cerrar contraentrega total. El negocio despacharia la mercancia sin haber cobrado.
+ */
+async function modalidadesDisponibles(
+  businessId: string,
+  city?: string | null
+): Promise<{ mods: ShippingPaymentModality[]; zonaResuelta: boolean }> {
   const ciudad = city?.trim();
   if (ciudad) {
     const zona = await resolveShippingRateForCity(businessId, ciudad);
-    if (zona) return zona.paymentModalities;
+    if (zona) return { mods: zona.paymentModalities, zonaResuelta: true };
   }
   const negocio = await prisma.business.findUnique({
     where: { id: businessId },
     select: { shippingPaymentModalities: true },
   });
-  return negocio?.shippingPaymentModalities ?? [];
+  // La zona no se resolvio. Si este negocio DISTINGUE por zona - o sea, alguna de sus tarifas o reglas
+  // de ciudad declara sus propias modalidades - entonces su lista general no puede hablar por una ciudad
+  // que el no clasifico, y COD_ALL no se hereda. Si no distingue por zona en ningun lado, su lista
+  // general es la unica verdad que existe y sigue valiendo como antes: un negocio que nunca uso el
+  // concepto no pierde nada.
+  return { mods: negocio?.shippingPaymentModalities ?? [], zonaResuelta: !(await distinguePorZona(businessId)) };
+}
+
+/** ¿Este negocio declara modalidades zona por zona? Si lo hace, su lista general deja de ser autoridad sobre COD_ALL. */
+async function distinguePorZona(businessId: string): Promise<boolean> {
+  const [tarifas, reglas] = await Promise.all([
+    prisma.shippingRate.findMany({ where: { businessId }, select: { paymentModalities: true } }),
+    prisma.shippingCityRule.findMany({ where: { businessId }, select: { paymentModalities: true } }),
+  ]);
+  return [...tarifas, ...reglas].some((fila) => fila.paymentModalities.length > 0);
+}
+
+/**
+ * La regla de plata, en una linea y en un solo lugar: cobrar TODO al recibir exige una zona resuelta que
+ * lo admita. Sin zona no hay COD total, aunque el negocio lo tenga en su lista general.
+ */
+function admitePagoTotalAlRecibir(d: { mods: ShippingPaymentModality[]; zonaResuelta: boolean }): boolean {
+  // Ciudad declarada que no cae en ninguna zona, en un negocio que SI clasifica por zona: no hay dato
+  // que lo autorice, y este es el unico caso en que se niega por defecto.
+  if (!d.zonaResuelta) return false;
+  // Sin ninguna modalidad configurada no hay dato que lo contradiga: se mantiene el comportamiento
+  // anterior a que estas listas existieran, igual que en el resto de este archivo.
+  return d.mods.length === 0 || d.mods.includes("COD_ALL");
 }
 
 /**
@@ -112,8 +167,9 @@ export async function filtrarMetodosPorZona<T extends { settlement: PaymentSettl
   if (!ciudad) return metodos;
 
   const disponibles = await modalidadesDisponibles(businessId, ciudad);
-  if (disponibles.length === 0) return metodos;
-  if (disponibles.includes("COD_ALL")) return metodos;
-
+  if (admitePagoTotalAlRecibir(disponibles)) return metodos;
+  // Una ciudad declarada que no cae en ninguna zona configurada tambien se filtra, aunque el negocio
+  // tenga COD_ALL en su lista general: es el caso de Ocaña o Piedecuesta, donde nadie dijo que el
+  // negocio llegue con un mensajero que cobre (2026-09-18).
   return metodos.filter((m) => m.settlement !== "ON_DELIVERY");
 }
