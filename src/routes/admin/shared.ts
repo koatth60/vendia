@@ -87,6 +87,16 @@ export function businessIdOf(req: { session: { businessId?: string } }): string 
   return req.session.businessId as string;
 }
 
+// E31: quien hizo el cambio, para poder escribirlo en OrderEvent. Hasta el 2026-09-18 no habia ningun
+// campo que registrara quien envio o quien cancelo un pedido.
+export function rolDe(req: { session: { role?: string } }): string | undefined {
+  return req.session.role;
+}
+
+export function emailDe(req: { session: { email?: string } }): string | null {
+  return req.session.email ?? null;
+}
+
 // WhatsApp's Cloud API rejects image/gif outright ("Unsupported Image mime type image/gif") - and it
 // does so asynchronously, after already accepting the send request, so the caller has no synchronous
 // error to react to. Block it at upload time instead of letting it silently fail delivery later.

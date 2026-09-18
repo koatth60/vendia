@@ -1,5 +1,6 @@
 import { prisma } from "../db/client";
 import type { OrderFulfillmentStatus, ShippingPaymentModality } from "@prisma/client";
+import { OrderFulfillmentStatus as OrderFulfillmentStatusEnum } from "@prisma/client";
 import { montoACobrarAlEntregar } from "./paymentTiming";
 import { findConfidentProductMatch, getProductById } from "../catalog/products";
 import { canonicalColors } from "../catalog/attributeTaxonomy";
@@ -9,6 +10,7 @@ import { getPresignedMediaUrl } from "../media/s3";
 import { emitOrderNew, emitOrderUpdated } from "../realtime/events";
 import { getAgreedPrices, applyAgreedPrices, agreedUnitPriceOf } from "./agreedPrices";
 import { recalcularEtapaDelCliente } from "../crm/customers";
+import { transicionarPedido, TransicionNoPermitida, type Actor } from "./stateMachine";
 
 export interface ResolvedOrderItem {
   productId: string;
@@ -401,7 +403,12 @@ export async function listOrdersForBusiness(
 // used for the Pendientes/Enviados/Cancelados badge numbers regardless of which one is currently open.
 export async function countOrdersByStatus(businessId: string): Promise<Record<OrderFulfillmentStatus, number>> {
   const rows = await prisma.order.groupBy({ by: ["fulfillmentStatus"], where: { businessId }, _count: true });
-  const counts: Record<OrderFulfillmentStatus, number> = { PENDING: 0, SHIPPED: 0, CANCELED: 0 };
+  // E31: se arma desde los valores del enum y no con tres literales. Con la lista escrita a mano, cada
+  // estado nuevo que se agregue al esquema deja este objeto incompleto en silencio y su contador sale
+  // como undefined en el panel.
+  const counts = Object.fromEntries(
+    Object.values(OrderFulfillmentStatusEnum).map((estado) => [estado, 0]),
+  ) as Record<OrderFulfillmentStatus, number>;
   for (const row of rows) counts[row.fulfillmentStatus] = row._count;
   return counts;
 }
@@ -434,34 +441,48 @@ export async function getLatestOrderForCustomer(businessId: string, customerId: 
   return order ? formatOrder(order) : null;
 }
 
+// E31: las dos funciones que mueven el pedido pasan por la maquina de estados. Antes eran `update`
+// sueltos que ni miraban el estado actual, asi que el panel podia cancelar un pedido YA ENVIADO y
+// volver a enviar uno cancelado, sin dejar rastro de quien. Si la transicion no esta permitida, estas
+// funciones TIRAN TransicionNoPermitida - las rutas la traducen a un 409 con el motivo en castellano.
 export async function markOrderShipped(
   businessId: string,
   orderId: string,
-  data: { note?: string | null; mediaS3Key?: string | null; mediaType?: string | null }
+  data: { note?: string | null; mediaS3Key?: string | null; mediaType?: string | null },
+  actor: Actor = { tipo: "OWNER" }
 ) {
-  const order = await prisma.order.findFirst({ where: { id: orderId, businessId } });
-  if (!order) return null;
-  const updated = await prisma.order.update({
-    where: { id: orderId },
-    data: {
-      fulfillmentStatus: "SHIPPED",
+  const movido = await transicionarPedido({
+    businessId,
+    orderId,
+    hacia: "SHIPPED",
+    actor,
+    datos: {
       shippedAt: new Date(),
       shipmentNote: data.note || null,
       shipmentMediaS3Key: data.mediaS3Key || null,
       shipmentMediaType: data.mediaType || null,
     },
   });
+  if (!movido) return null;
   emitOrderUpdated(businessId, orderId);
-  return updated;
+  return prisma.order.findFirst({ where: { id: orderId, businessId } });
 }
 
-export async function markOrderCanceled(businessId: string, orderId: string) {
-  const order = await prisma.order.findFirst({ where: { id: orderId, businessId } });
-  if (!order) return null;
-  const updated = await prisma.order.update({
-    where: { id: orderId },
-    data: { fulfillmentStatus: "CANCELED", canceledAt: new Date() },
+export async function markOrderCanceled(
+  businessId: string,
+  orderId: string,
+  actor: Actor = { tipo: "OWNER" },
+  motivo?: string | null
+) {
+  const movido = await transicionarPedido({
+    businessId,
+    orderId,
+    hacia: "CANCELED",
+    actor,
+    motivo,
+    datos: { canceledAt: new Date() },
   });
+  if (!movido) return null;
   emitOrderUpdated(businessId, orderId);
-  return updated;
+  return prisma.order.findFirst({ where: { id: orderId, businessId } });
 }

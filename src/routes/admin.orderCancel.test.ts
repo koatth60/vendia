@@ -74,7 +74,12 @@ async function cleanup(businessIdToClean: string, conversationId: string) {
   await prisma.business.deleteMany({ where: { id: businessIdToClean } });
 }
 
-test("PUT /api/orders/:id/cancel notifies the customer by WhatsApp before canceling", async () => {
+// E31 (2026-09-18): el nombre de esta prueba decia "before canceling" y el orden se INVIRTIO a
+// proposito. Ahora se cancela primero y se avisa despues, porque con la maquina de estados la
+// cancelacion puede rechazarse (por ejemplo, si el pedido ya salio) - y un "tu pedido fue cancelado"
+// no se puede desdecir. Lo que la prueba verifica es lo que importaba desde el principio: que las dos
+// cosas pasen.
+test("PUT /api/orders/:id/cancel cancela el pedido y le avisa al cliente por WhatsApp", async () => {
   const { business, customer, conversation, order } = await seedOrder();
   businessId = business.id;
 
@@ -116,5 +121,29 @@ test("PUT /api/orders/:id/cancel returns 404 for a nonexistent order", async () 
     assert.equal(res.status, 404);
   } finally {
     await prisma.business.deleteMany({ where: { id: business.id } });
+  }
+});
+
+// E31: el criterio de aceptacion del plan, textual - "una transicion prohibida devuelve un error claro
+// en el panel, no un silencio". Antes de esta etapa, esto cancelaba un pedido ya enviado sin chistar y
+// encima le mandaba al cliente "tu pedido fue cancelado" cuando el mensajero ya habia salido.
+test("E31: cancelar un pedido YA ENVIADO devuelve 409 con el motivo, y no le manda nada al cliente", async () => {
+  const { business, customer, conversation, order } = await seedOrder();
+  businessId = business.id;
+  try {
+    await prisma.order.update({ where: { id: order.id }, data: { fulfillmentStatus: "SHIPPED" } });
+    const antes = sentTexts.length;
+
+    const res = await fetch(`${baseUrl}/api/orders/${order.id}/cancel`, { method: "PUT" });
+    assert.equal(res.status, 409);
+    const body = (await res.json()) as { error: string };
+    assert.match(body.error, /ya fue enviado/i);
+
+    const fresco = await prisma.order.findUniqueOrThrow({ where: { id: order.id } });
+    assert.equal(fresco.fulfillmentStatus, "SHIPPED", "el pedido no se movio");
+    assert.equal(sentTexts.length, antes, "y al cliente no le llego un aviso de algo que no paso");
+  } finally {
+    await cleanup(business.id, conversation.id);
+    void customer;
   }
 });

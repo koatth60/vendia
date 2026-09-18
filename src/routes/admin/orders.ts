@@ -12,7 +12,8 @@ import { sendToCustomer, formatForWhatsapp, type WhatsappCredentials } from "../
 import { uploadMedia } from "../../media/s3";
 import { uploadOnceToWhatsapp } from "../../whatsapp/mediaUpload";
 import { requireOwner } from "../../auth/requireOwner";
-import { upload, businessIdOf, isUnsupportedImageType } from "./shared";
+import { upload, businessIdOf, isUnsupportedImageType, rolDe, emailDe } from "./shared";
+import { TransicionNoPermitida } from "../../orders/stateMachine";
 
 export const ordersRouter = Router();
 
@@ -117,11 +118,20 @@ ordersRouter.put("/api/orders/:id/ship", upload.single("file"), async (req, res)
     }
   }
 
-  await markOrderShipped(businessId, String(req.params.id), {
-    note: formattedNote || null,
-    mediaS3Key,
-    mediaType,
-  });
+  try {
+    await markOrderShipped(
+      businessId,
+      String(req.params.id),
+      { note: formattedNote || null, mediaS3Key, mediaType },
+      { tipo: rolDe(req) === "EMPLOYEE" ? "EMPLOYEE" : "OWNER", etiqueta: emailDe(req) },
+    );
+  } catch (error) {
+    if (error instanceof TransicionNoPermitida) {
+      res.status(409).json({ error: error.message });
+      return;
+    }
+    throw error;
+  }
   res.json({ ok: true, mediaError });
 });
 
@@ -134,6 +144,25 @@ ordersRouter.put("/api/orders/:id/cancel", requireOwner, async (req, res) => {
   if (!order) {
     res.status(404).json({ error: "Pedido no encontrado" });
     return;
+  }
+
+  // E31: se CANCELA primero y se avisa despues. Antes era al reves, y con la maquina de estados eso
+  // seria peor que un orden arbitrario: si la transicion se rechaza (por ejemplo, el pedido ya salio),
+  // al cliente ya le habriamos dicho "tu pedido fue cancelado" y recien despues fallaria. Un aviso que
+  // no se puede desdecir no puede salir antes del hecho que anuncia.
+  try {
+    await markOrderCanceled(
+      businessId,
+      String(req.params.id),
+      { tipo: "OWNER", etiqueta: emailDe(req) },
+      typeof req.body?.motivo === "string" ? req.body.motivo.slice(0, 300) : null,
+    );
+  } catch (error) {
+    if (error instanceof TransicionNoPermitida) {
+      res.status(409).json({ error: error.message });
+      return;
+    }
+    throw error;
   }
 
   const business = await prisma.business.findUnique({ where: { id: businessId } });
@@ -156,7 +185,6 @@ ordersRouter.put("/api/orders/:id/cancel", requireOwner, async (req, res) => {
     }
   }
 
-  await markOrderCanceled(businessId, String(req.params.id));
   res.json({ ok: true });
 });
 

@@ -12,10 +12,33 @@ enum PlanTier {
   NEGOCIO
 }
 
+// E31 (2026-09-18). Estados reales del pedido.
+//
+// PENDING es el valor HISTORICO y se conserva: es el que tienen todos los pedidos ya creados, y
+// borrarlo de un enum de Postgres obligaria a reescribir filas. La maquina de estados
+// (src/orders/stateMachine.ts) lo trata como sinonimo de PENDING_PAYMENT, que es como se llama el
+// mismo estado de ahora en adelante. Migracion aditiva: ninguna fila existente se toca.
 enum OrderFulfillmentStatus {
   PENDING
+  PENDING_PAYMENT
+  PAID
+  PREPARING
   SHIPPED
+  DELIVERED
   CANCELED
+  RETURNED
+  REFUNDED
+}
+
+// Quien movio el pedido y de donde a donde. Hasta el 2026-09-18 no habia NINGUN campo que registrara
+// quien envio o quien cancelo: el pedido cambiaba de estado y no quedaba rastro de por que ni de mano
+// de quien. Un pedido cancelado y un cliente reclamando eran dos hechos sin forma de cruzarlos.
+enum OrderEventActor {
+  OWNER
+  EMPLOYEE
+  AGENT
+  JOB
+  SYSTEM
 }
 
 model Business {
@@ -398,8 +421,29 @@ model Order {
   items              OrderItem[]
   createdAt          DateTime               @default(now())
 
+  events             OrderEvent[]
+
   @@index([businessId, createdAt])
   @@index([businessId, fulfillmentStatus])
+}
+
+// E31: la historia del pedido. Una fila por transicion aceptada.
+model OrderEvent {
+  id         String                 @id @default(cuid())
+  order      Order                  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderId    String
+  businessId String
+  from       OrderFulfillmentStatus
+  to         OrderFulfillmentStatus
+  actor      OrderEventActor
+  // Quien fue, cuando se puede saber: el email de la sesion del panel, o el id del job. Null para el
+  // agente y para transiciones del sistema.
+  actorLabel String?
+  reason     String?
+  createdAt  DateTime               @default(now())
+
+  @@index([orderId, createdAt])
+  @@index([businessId, createdAt])
 }
 
 // Fase 2 del plan maestro (2026-09-15), causa raiz C1: hasta ahora ningun lugar del sistema sabia que
