@@ -1553,7 +1553,7 @@ exactamente una confirmación.
 
 ---
 
-### E24 · `/health` deja de mentir y `/metrics` existe
+### E24 · `/health` deja de mentir y `/metrics` existe — **CERRADA EN PARTE el 2026-09-18**, sin desplegar
 
 **Quita:** al operador, tener que hacer `grep` en `pm2 logs` para saber si algo se rompió.
 **Porque:** `/health` responde sano mientras todos los jobs revientan, mientras las credenciales de
@@ -1566,6 +1566,40 @@ estructurado con `pino`, con `requestId`, `businessId`, `conversationId` y `turn
 **Se prueba:** con un job caído, `/health` devuelve el estado degradado y nombra cuál.
 **Tamaño:** M. **Depende de:** `E23`. **Bandera:** no.
 **Vuelta atrás:** revertir.
+
+**Cómo quedó (2026-09-18). Se cerró la parte de `/health` y `/metrics`; el log estructurado NO.**
+
+- **Seis componentes**, cada uno con estado, nombre y detalle: base, cola de entrada, jobs, proveedor de
+  IA, credenciales de Meta, turnos sin responder. Aparecen **siempre**, estén bien o mal — un componente
+  que solo aparece cuando falla es uno que nadie sabe que se está vigilando.
+- **`503` solo cuando algo está CAÍDO** (hoy: la base). "Degradado" responde `200` a propósito: el
+  balanceador no tiene que sacar de rotación un proceso que atiende perfectamente porque un negocio
+  tenga el token vencido. La diferencia está en el cuerpo.
+- **Los guards de jobs se registran solos** al crearse (`sinSolape`). Si hubiera que anotarlos en una
+  lista aparte, el job que se agregue mañana no se anotaría y `/health` diría "todo bien" sin saber que
+  existe.
+- **`/health` no tiene control de acceso, así que cuenta pero no nombra a los negocios.** Decir "el
+  negocio X está caído" en una ruta pública es filtrar quién es cliente; el detalle con nombre va en el
+  panel, que sí tiene control de acceso. Hay una prueba que lo verifica.
+- **La antigüedad de la cola pesa más que la profundidad**: mil eventos de hace dos segundos es un pico
+  normal; *uno* esperando diez minutos es el consumidor parado.
+- **La carta muerta se reporta pero no pone el sistema en rojo.** Un rojo que solo se apaga cuando una
+  persona limpia a mano es un rojo permanente, y un rojo permanente se deja de mirar.
+- Un negocio **inactivo** con el token vencido no cuenta: dejaría el healthcheck en amarillo permanente
+  por cuentas dadas de baja.
+
+**Lo primero que hizo `/health` fue encontrar basura real:** reportó "la cola lleva 949 s sin procesarse,
+7 pendientes" y tenía razón — eran eventos que dejaban las pruebas de `E20`/`E21`, que limpiaban al
+empezar pero no al terminar. Se arregló la raíz, no el umbral.
+
+**Lo que NO se hizo, y por qué:** el **log estructurado con `pino`** (`requestId`, `businessId`,
+`conversationId`, `turnId` en cada línea). Es una dependencia nueva y un cambio transversal a todo el
+código; meterlo apurado junto a esto sería peor que no hacerlo. **`E24` no está completa hasta que eso
+exista.** Tampoco están la latencia por etapa ni el costo por negocio en `/metrics`: eso necesita
+instrumentar el turno, que es trabajo propio. Y el breaker de `modelFailover` que reporta `/health` es
+**el del proceso que atendió la petición**, no el del sistema: sacarlo a una tabla es parte de `E23`.
+
+9 pruebas nuevas. Suite completa: 1007, 993 pasan, 0 fallan.
 
 ---
 

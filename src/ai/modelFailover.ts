@@ -34,6 +34,23 @@ export function resetModelFailoverState(): void {
   preferredFailedAt = null;
 }
 
+/**
+ * E24 (2026-09-18): el estado del breaker, para que `/health` pueda decirlo. Sin esto, el bot puede
+ * estar corriendo entero sobre el modelo de respaldo durante horas y el healthcheck responder "ok" --
+ * que es justo la clase de mentira que esta etapa vino a sacar.
+ *
+ * VIVE EN MEMORIA, y eso importa: con dos procesos (`E23`) cada uno tiene su propio breaker y este
+ * numero es el del proceso que atendio la peticion, no el del sistema. Sacarlo a una tabla es parte de
+ * `E23`, no de aca.
+ */
+export function modelFailoverState(): { enRespaldo: boolean; desde: Date | null; modelo: string } {
+  return {
+    enRespaldo: preferredIsInCooldown(),
+    desde: preferredFailedAt === null ? null : new Date(preferredFailedAt),
+    modelo: currentChatModel(),
+  };
+}
+
 export function currentChatModel(): string {
   return preferredIsInCooldown() ? DEEPSEEK_FALLBACK_MODEL : DEEPSEEK_MODEL;
 }

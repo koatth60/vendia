@@ -13,6 +13,7 @@ import { whatsappRouter, getActiveTurnCount, flushPendingReplyBursts, getPending
 import { createOrderedShutdown } from "./shutdown";
 import { adminRouter } from "./routes/admin";
 import { adminApiLimiter } from "./auth/rateLimits";
+import { saludDelSistema, comoPrometheus } from "./health/estado";
 import { avisarSiLaClaveEstaEnTextoPlano } from "./auth/platformPassword";
 import { authRouter } from "./routes/auth";
 import { platformAdminRouter } from "./routes/platformAdmin";
@@ -45,17 +46,30 @@ app.use("/webhook", ...captureRawBody());
 app.use(express.json());
 app.use(sessionMiddleware);
 
-// Fase 7 del plan maestro (2026-09-15): antes devolvia {status:"ok"} incondicionalmente - no detectaba
-// una conexion rota a Postgres, que es justo el tipo de falla que un healthcheck existe para atrapar.
-// `SELECT 1` es la consulta mas barata que toca la base de verdad, sin depender de ninguna tabla.
+// E24 (2026-09-18): `/health` deja de mentir.
+//
+// La Fase 7 le habia agregado un `SELECT 1`, que ya era mejor que el {status:"ok"} incondicional de
+// antes. Pero seguia respondiendo sano con todos los jobs pisandose, con las credenciales de Meta de un
+// negocio vencidas y su bot mudo, con el proveedor de IA en enfriamiento y con la cola de entrada
+// acumulando. Un healthcheck que no puede ponerse en rojo no es un healthcheck: es un adorno que ademas
+// da falsa tranquilidad. Ver src/health/estado.ts, que es donde viven las preguntas.
+//
+// 503 SOLO cuando algo esta CAIDO (hoy: la base). "degradado" responde 200 a proposito: el balanceador
+// no tiene que sacar de rotacion un proceso que atiende perfectamente aunque un negocio tenga el token
+// vencido. La diferencia esta en el cuerpo, que dice QUE esta mal y con nombre.
 app.get("/health", async (_req, res) => {
-  try {
-    await prisma.$queryRaw`SELECT 1`;
-    res.json({ status: "ok" });
-  } catch (error) {
-    console.error("Healthcheck fallo: no se pudo consultar la base de datos:", error);
-    res.status(503).json({ status: "error", detail: "database unreachable" });
+  const salud = await saludDelSistema();
+  if (salud.estado === "caido") {
+    console.error(`[ZAQI ALERT] Healthcheck CAIDO: ${salud.problemas.join(", ")}`);
+    res.status(503).json(salud);
+    return;
   }
+  res.json(salud);
+});
+
+// Formato Prometheus, para que esto se pueda graficar y alertar sin que nadie mire una pantalla.
+app.get("/metrics", async (_req, res) => {
+  res.type("text/plain; version=0.0.4").send(comoPrometheus(await saludDelSistema()));
 });
 
 // Los estáticos no llevan hash en el nombre (admin.css es siempre admin.css), así que

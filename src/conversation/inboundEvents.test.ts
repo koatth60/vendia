@@ -1,4 +1,4 @@
-import { test, beforeEach } from "node:test";
+import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { prisma } from "../db/client";
@@ -40,9 +40,16 @@ function cuerpoConMensaje(wamid: string, phoneNumberId = "pni-1") {
   };
 }
 
-beforeEach(async () => {
+// Se limpia ANTES Y DESPUES. Solo antes no alcanza: los eventos del ultimo caso quedan en la base para
+// siempre, y como son viejos y sin procesar, `/health` los ve -- con razon -- como la cola parada. Paso
+// exactamente eso: la prueba de E24 "en condiciones normales el estado es ok" fallo por basura que habia
+// dejado ESTE archivo.
+async function limpiar() {
   await prisma.inboundEvent.deleteMany({ where: { wamid: { startsWith: "test-" } } });
-});
+}
+
+beforeEach(limpiar);
+afterEach(limpiar);
 
 test("E20: el mismo wamid dos veces entra UNA sola vez, y la deduplicacion ocurre antes de gastar", async () => {
   const wamid = `test-${randomUUID()}`;

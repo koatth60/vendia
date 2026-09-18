@@ -24,11 +24,28 @@ export interface Guardia {
   enCurso: () => boolean;
 }
 
+/**
+ * E24 (2026-09-18). TODOS los guards, sin que nadie tenga que acordarse de registrarlos.
+ *
+ * `/health` necesita poder decir QUE job esta mal, no solo que algo lo esta. Si cada job tuviera que
+ * anotarse en una lista aparte, el job que se agregue manana no se anotaria, y `/health` diria "todo
+ * bien" sin saber que existe. Registrarse es parte de crearse.
+ */
+const guardias = new Map<string, Guardia>();
+
+export function todasLasGuardias(): { nombre: string; salteadas: number; enCurso: boolean }[] {
+  return [...guardias.entries()].map(([nombre, g]) => ({
+    nombre,
+    salteadas: g.salteadas(),
+    enCurso: g.enCurso(),
+  }));
+}
+
 export function sinSolape(nombre: string, tarea: () => Promise<void>): Guardia {
   let corriendo = false;
   let salteadas = 0;
 
-  return {
+  const guardia: Guardia = {
     correr: async () => {
       if (corriendo) {
         salteadas += 1;
@@ -52,4 +69,7 @@ export function sinSolape(nombre: string, tarea: () => Promise<void>): Guardia {
     salteadas: () => salteadas,
     enCurso: () => corriendo,
   };
+
+  guardias.set(nombre, guardia);
+  return guardia;
 }

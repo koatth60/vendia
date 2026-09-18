@@ -66,6 +66,10 @@ afterEach(async () => {
   // El borrado del negocio ademas estaba silenciado con .catch(): si fallaba, no limpiaba nada y nadie
   // se enteraba. Ahora la limpieza no depende de que la cascada haga lo que uno cree que hace.
   await prisma.pendingBurst.deleteMany({ where: { conversationId } });
+  // Igual que las rafagas: un InboundEvent viejo y sin procesar que quede colgado hace que `/health`
+  // reporte -- con razon -- que la cola de entrada esta parada.
+  await prisma.inboundEvent.deleteMany({ where: { wamid: { startsWith: "wamid-" } } });
+  await prisma.inboundEvent.deleteMany({ where: { wamid: { startsWith: "otro-" } } });
   await prisma.business.delete({ where: { id: businessId } }).catch(() => undefined);
 });
 
