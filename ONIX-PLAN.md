@@ -2330,6 +2330,82 @@ el cual validarla. **Decisión:** `D6`.
 
 ---
 
+### E76 · El denominador del agente: cuántas veces escribe el servidor en vez del modelo — **CERRADA el 2026-09-18**, sin desplegar
+
+**Quita:** al plan, poder cumplir su propia meta sin que nadie note que el agente se volvió un chatbot.
+
+**Porque:** la medida declarada del norte es *"las líneas de `systemPrompt.ts` tienen que ir BAJANDO
+mientras los errores se mantienen en cero"*. Esa medida es necesaria y **no alcanza**, porque el prompt
+no es el único lugar donde el agente pierde libertad.
+
+Cuando el mecanismo de efectos requeridos cae al fallback, **el servidor escribe el mensaje**:
+`FALLBACK_SALE_REGISTERED_TEXT`, `FALLBACK_IMAGE_RECEIVED_TEXT`. Ese turno es, literalmente, un chatbot:
+texto fijo escrito por código, sin modelo adentro. Que exista está bien — es la garantía, y la garantía
+es justamente lo que no tiene al modelo adentro. El problema es que **no se cuenta**.
+
+Hoy se puede llegar a la meta del plan —prompt bajando, errores en cero— con Onix funcionando como
+chatbot en el 30% de los turnos, y nada en el tablero lo diría.
+
+El contador ya existe: `requiredEffectStats`, con `retryResolved` contra `fallbackUsed`, y su propio
+comentario dice que es *"el número que decide si en el futuro se puede confiar en el reintento"*. **Vive
+en memoria y no se expone en ninguna ruta.** Se pierde en cada reinicio, y hubo trece en un día.
+
+**Se hace:** una columna en `AgentTurn`, exactamente con la forma que ya tiene `catalogAuthor` —que
+existe por esta misma razón, para el camino del bloque de catálogo—: quién resolvió el efecto de este
+turno.
+
+    modelo     lo hizo solo, a la primera
+    reintento  hizo falta forzarle la herramienta
+    servidor   cayó al fallback: el texto lo escribió el código
+    escalado   no se pudo ni con el fallback
+    null       este turno no exigía ningún efecto
+
+Con eso, `servidor + escalado` sobre los turnos con efecto exigido es la tasa que falta, persistida, por
+negocio y por fecha, consultable con un `GROUP BY`. Se expone junto al resto en `E24`.
+
+**Por qué una columna y no volcar el contador entero:** una columna, un significado. El contador en
+memoria tiene siete campos y ninguno sobrevive a un reinicio.
+
+**Se prueba:** un turno donde el modelo cumple queda en `modelo`; uno donde cae al fallback queda en
+`servidor`; uno sin efectos exigidos queda en `null`.
+
+**Tamaño:** S. **Depende de:** nada para persistirlo; `E24` para mostrarlo. **Bandera:** no.
+**Vuelta atrás:** revertir; la columna queda de más, que es aditivo.
+
+> **Va ANTES que `E64`, y eso es el punto.** `E64` es la etapa que el propio plan llama *"la única parte
+> del plan que puede bloquear un mensaje que hoy sale"*. Encender un validador que bloquea prosa sin
+> tener antes el denominador es apostar: si después de `E64` los errores bajan, no habría forma de saber
+> si el agente mejoró o si el servidor simplemente aprendió a taparlo mejor. `E67` merece la misma
+> lectura: saca `neverSay` del prompt (−20 líneas, se ve como victoria) pero lo convierte en una
+> verificación sobre lo que el modelo ya escribió — mover una regla del prompt a un guard no la borra,
+> la vuelve inapelable.
+
+**Cómo quedó (2026-09-18).**
+
+- `AgentTurn.effectAuthor` (migración `20260918170000_autor_del_efecto`), con los cinco valores de
+  arriba. Se escribe en `runTurnWithRequiredEffects` en **un solo lugar** para los tres finales de la
+  escalera (`escalated ? "escalado" : fallbackUsed ? "servidor" : "reintento"`), justo donde ya estaban
+  las tres banderas juntas, y en el camino de salida temprana para `"modelo"`. Un solo punto de
+  derivación: no hay forma de agregar un final nuevo y olvidarse de contarlo.
+- `getAgentAuthorshipSummary(businessId, days)` en `src/ai/agentTurns.ts`: un `GROUP BY` sobre el índice
+  que ya existía (`[businessId, createdAt]`). Devuelve el **denominador primero** —los turnos que
+  exigieron algo— porque "12 turnos con fallback" no dice nada sin saber sobre cuántos.
+- `GET /api/agent-authorship` devuelve esa tasa **y `promptLines` en la misma respuesta**. Las dos
+  mitades de la medida del norte viajan juntas a propósito: leídas por separado, el prompt bajando
+  parece una victoria aunque la tasa de servidor esté subiendo.
+- Sin turnos con efectos la tasa es `null`, no `0`. Cero afirmaría "el servidor nunca escribió" sobre
+  datos que no existen. Las filas anteriores a la migración también quedan fuera del denominador: la
+  serie arranca vacía en vez de mezclar turnos sin dato con turnos que el modelo resolvió.
+- 7 pruebas nuevas en `src/ai/requiredEffects.test.ts` (27 en el archivo, todas pasan). Los cuatro
+  finales se prueban **con los mismos escenarios** que ya probaban la escalera: si alguno cambia de
+  final, la prueba de la columna se rompe también, así que la columna no puede quedar mintiendo en
+  silencio.
+
+**Lo que falta:** mostrarlo en el panel es `E24`. La ruta ya existe; lo que no existe todavía es la
+pantalla que ponga los dos números uno al lado del otro donde se los vea sin pedirlos.
+
+---
+
 # PARTE V — Decisiones que esperan al dueño
 
 Ninguna la resuelve el código. Cada una bloquea algo concreto.

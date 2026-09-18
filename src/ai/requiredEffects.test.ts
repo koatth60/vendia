@@ -16,6 +16,7 @@ import {
   FALLBACK_IMAGE_RECEIVED_TEXT,
   ESCALATION_TEXT,
 } from "./requiredEffects";
+import { getAgentAuthorshipSummary } from "./agentTurns";
 import type { BotPersonality } from "./prompts/systemPrompt";
 
 // EFECTOS REQUERIDOS. Reproduce el turno de Milena (conversacion cmu3htnp0009y4k2kzxhy9dlz, 2026-09-16):
@@ -681,4 +682,118 @@ test("E13b: la media del producto tiene que ser POSTERIOR a la imagen del client
   const exigidos = await computeRequiredEffects(conversationId, { mediaType: "IMAGE" });
   assert.equal(exigidos.length, 1, "una media anterior no atiende una imagen posterior");
   assert.equal(exigidos[0].kind, "OWNER_NOTIFIED_ABOUT_IMAGE");
+});
+
+// ---------------------------------------------------------------------------------------------------
+// E76 (2026-09-18). EL DENOMINADOR DEL AGENTE.
+//
+// requiredEffectStats ya contaba todo esto, pero en memoria: se pierde en cada reinicio, y el
+// 2026-09-17 hubo trece despliegues en un dia. Lo que sigue prueba que cada uno de los cuatro finales
+// de la escalera queda escrito en la fila del turno, que es lo unico que sobrevive a un reinicio.
+//
+// Los cuatro casos son los MISMOS escenarios de arriba, a proposito: si alguno de esos tests cambia de
+// final, este de aca tiene que romperse tambien. Duplicar el escenario y no el aserto es lo que hace
+// que la columna no pueda quedar mintiendo en silencio.
+// ---------------------------------------------------------------------------------------------------
+
+async function autorDelUltimoTurno(): Promise<string | null> {
+  const turno = await prisma.agentTurn.findFirstOrThrow({
+    where: { conversationId },
+    orderBy: { createdAt: "desc" },
+  });
+  return turno.effectAuthor;
+}
+
+test("E76: el turno que el modelo resuelve solo queda escrito como 'modelo'", async () => {
+  await seedFor({ saleStateEnabled: false, requiredEffectsEnabled: true });
+  await recordMediaSent(conversationId, "Reloj Inteligente Serie 11 Mini (Plateado)");
+  await customerSendsReceiptPhoto();
+  programModel([withToolCall("ask_owner_about_photo", {}), textOnly("Le pase tu imagen al equipo.")]);
+
+  await generateReply(conversationId, context, personality, "");
+
+  assert.equal(await autorDelUltimoTurno(), "modelo");
+});
+
+test("E76: el turno que hizo falta forzar queda escrito como 'reintento'", async () => {
+  await seedFor({ saleStateEnabled: true, requiredEffectsEnabled: true });
+  await armSale();
+  await customerSendsReceiptPhoto();
+  programModel([
+    textOnly("Estoy validando tu comprobante."),
+    withToolCall("close_conversation", { outcome: "SOLD", summary: "1x producto" }),
+    textOnly("Listo, ya le pase tu comprobante al equipo."),
+  ]);
+
+  await generateReply(conversationId, context, personality, "");
+
+  // "reintento" y no "modelo": el efecto ocurrio, pero no porque el agente lo decidiera. Contarlo como
+  // modelo seria exactamente el autoengano que esta columna vino a cerrar.
+  assert.equal(await autorDelUltimoTurno(), "reintento");
+  assert.equal(requiredEffectStats.retryResolved, 1, "el escenario tiene que seguir siendo el del reintento");
+});
+
+test("E76: el turno que escribio el codigo queda escrito como 'servidor'", async () => {
+  await seedFor({ saleStateEnabled: true, requiredEffectsEnabled: true });
+  await armSale();
+  await customerSendsReceiptPhoto();
+  programModel([textOnly("Estoy validando."), textOnly("Sigo validando."), textOnly("Ya casi.")]);
+
+  const { text: reply } = await generateReply(conversationId, context, personality, "");
+
+  assert.equal(reply, FALLBACK_SALE_REGISTERED_TEXT, "el escenario tiene que seguir siendo el del fallback");
+  assert.equal(await autorDelUltimoTurno(), "servidor", "el cliente leyo texto fijo nuestro: eso es un chatbot, y tiene que contarse");
+});
+
+test("E76: el turno que termino en una persona queda escrito como 'escalado'", async () => {
+  await seedFor({ saleStateEnabled: false, requiredEffectsEnabled: true });
+  await recordMediaSent(conversationId, "Reloj Inteligente Serie 11 Mini (Plateado)");
+  await customerSendsReceiptPhoto();
+  globalThis.fetch = (async () => ({ ok: false, status: 500, json: async () => ({}), text: async () => "boom" }) as unknown as Response) as typeof fetch;
+  programModel([textOnly("Estoy validando."), textOnly("Sigo validando."), textOnly("Ya casi.")]);
+
+  await generateReply(conversationId, context, personality, "");
+
+  assert.equal(await autorDelUltimoTurno(), "escalado");
+});
+
+test("E76: un turno que no exigia ningun efecto no inventa un autor", async () => {
+  await seedFor({ saleStateEnabled: false, requiredEffectsEnabled: true });
+  programModel([textOnly("Contame que necesitas y te ayudo.")]);
+
+  await generateReply(conversationId, context, personality, "hola");
+
+  // null y no "modelo": el agente no resolvio nada porque no habia nada que resolver. Meterlo en el
+  // numerador inflaria la tasa de exito con turnos que nunca estuvieron en riesgo.
+  assert.equal(await autorDelUltimoTurno(), null);
+});
+
+test("E76: la tasa sale sobre los turnos que exigian algo, y los turnos sin dato no entran", async () => {
+  await seedFor({ saleStateEnabled: false, requiredEffectsEnabled: true });
+
+  const autores = ["modelo", "modelo", "reintento", "servidor", "escalado", null];
+  for (const effectAuthor of autores) {
+    await prisma.agentTurn.create({ data: { businessId, conversationId, effectAuthor } });
+  }
+
+  const resumen = await getAgentAuthorshipSummary(businessId, 7);
+
+  assert.equal(resumen.turnsWithRequiredEffects, 5, "el turno con null no exigia nada: no es denominador");
+  assert.deepEqual(resumen.byAuthor, { modelo: 2, reintento: 1, servidor: 1, escalado: 1 });
+  // 2 de 5 los escribio el codigo (servidor + escalado). Esa es la tasa que hay que mirar al lado de las
+  // lineas del prompt: el prompt bajando con este numero subiendo no es progreso.
+  assert.equal(resumen.serverWroteRate, 0.4);
+  assert.equal(resumen.modelSolvedRate, 0.4);
+  assert.ok(resumen.promptLines && resumen.promptLines > 0, "la otra mitad de la medida viaja en la misma respuesta");
+});
+
+test("E76: sin ningun turno con efectos la tasa es null, que no es lo mismo que cero", async () => {
+  await seedFor({ saleStateEnabled: false, requiredEffectsEnabled: true });
+
+  const resumen = await getAgentAuthorshipSummary(businessId, 7);
+
+  assert.equal(resumen.turnsWithRequiredEffects, 0);
+  // Cero diria "el servidor nunca escribio", que es una afirmacion sobre datos que no existen.
+  assert.equal(resumen.serverWroteRate, null);
+  assert.equal(resumen.modelSolvedRate, null);
 });

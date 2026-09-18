@@ -3,7 +3,7 @@ import { getAiUsageSummary } from "../../ai/usage";
 import { getChatUsage } from "../../billing/chats";
 import { getAgentIncidentSummary, getHealthFindings } from "../../ai/incidents";
 import { getConfigHealth } from "../../ai/configHealth";
-import { getShadowValidationSummary } from "../../ai/agentTurns";
+import { getShadowValidationSummary, getAgentAuthorshipSummary } from "../../ai/agentTurns";
 import { getAnalyticsSummary, getBaselineMetrics } from "../../analytics/service";
 import { businessIdOf } from "./shared";
 
@@ -35,6 +35,16 @@ insightsRouter.get("/api/health-findings", async (req, res) => {
 // es el numero con el que se decide, dentro de 48 horas, si la validacion se activa o no.
 insightsRouter.get("/api/catalog-shadow", async (req, res) => {
   const summary = await getShadowValidationSummary(businessIdOf(req));
+  res.json(summary);
+});
+
+// E76 (2026-09-18): cuantos de los turnos que exigian un efecto los resolvio el AGENTE y cuantos los
+// termino escribiendo el SERVIDOR, mas las lineas del prompt en la misma respuesta. Las dos mitades de
+// la medida del norte juntas: el prompt bajando con la tasa de servidor subiendo no es progreso.
+insightsRouter.get("/api/agent-authorship", async (req, res) => {
+  const requested = Number(req.query.days);
+  const days = ANALYTICS_RANGES.includes(requested) ? requested : 7;
+  const summary = await getAgentAuthorshipSummary(businessIdOf(req), days);
   res.json(summary);
 });
 

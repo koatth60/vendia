@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { prisma } from "../db/client";
 import { parseFinding, type CatalogFinding } from "../catalog/outputValidation";
 
@@ -32,6 +34,15 @@ export interface AgentTurnRecord {
    * paso por ese camino. Es el denominador de la tasa de caida al fallback.
    */
   catalogAuthor: "modelo" | "servidor" | null;
+  /**
+   * E76 (2026-09-18): quien resolvio el efecto requerido de este turno. Mismo criterio que
+   * catalogAuthor, para el otro camino donde el servidor puede terminar escribiendo el mensaje.
+   *
+   * "servidor" y "escalado" son turnos donde el texto lo escribio el codigo, no el modelo. Esa tasa,
+   * sobre los turnos que exigian algun efecto, es la que dice si el agente esta mejorando o si el
+   * servidor solo aprendio a taparlo mejor - y es la que la medida del norte (lineas del prompt) no ve.
+   */
+  effectAuthor: "modelo" | "reintento" | "servidor" | "escalado" | null;
   /** Ids de producto cuyos medios salieron con esos bloques. */
   mediaProductIds: string[];
   /**
@@ -48,6 +59,95 @@ export async function recordAgentTurn(turn: AgentTurnRecord): Promise<void> {
   } catch (error) {
     console.error("No se pudo registrar un AgentTurn (no bloqueante):", error);
   }
+}
+
+// E76 (2026-09-18): EL DENOMINADOR DEL AGENTE.
+//
+// La medida del norte que fijo el dueno es "las lineas de systemPrompt.ts tienen que ir BAJANDO
+// mientras los errores se mantienen en cero". Esa medida sola se puede cumplir con Onix funcionando
+// como chatbot: cada vez que el fallback por codigo resuelve el efecto, el cliente recibe TEXTO FIJO
+// escrito por nosotros. El prompt baja, los errores quedan en cero, y el agente escribio menos.
+//
+// Por eso este numero va AL LADO de las lineas del prompt, no en otra pantalla: el prompt bajando con
+// la tasa de servidor subiendo no es progreso, es el servidor tapandolo mejor.
+//
+// Hasta ahora esto solo existia en `requiredEffectStats`, un contador en memoria que se pierde en cada
+// reinicio - y el 2026-09-17 hubo trece despliegues en un dia. Una metrica que se borra trece veces por
+// dia no permite comparar dos semanas.
+
+const PROMPT_PATH = join(__dirname, "prompts", "systemPrompt.ts");
+let promptLinesCache: number | null | undefined;
+
+/**
+ * Lineas de systemPrompt.ts, la mitad que ya se venia midiendo a mano. Se lee del disco una sola vez:
+ * el archivo no cambia sin reiniciar el proceso. null si no se pudo leer - es un numero informativo y
+ * no vale hacer fallar la pantalla de metricas por el.
+ */
+export function promptLineCount(): number | null {
+  if (promptLinesCache !== undefined) return promptLinesCache;
+  try {
+    promptLinesCache = readFileSync(PROMPT_PATH, "utf8").split("\n").length;
+  } catch {
+    promptLinesCache = null;
+  }
+  return promptLinesCache;
+}
+
+export interface AgentAuthorshipSummary {
+  days: number;
+  /**
+   * Turnos que EXIGIERON algun efecto. Es el denominador, y por eso esta primero: "12 turnos con
+   * fallback" no dice nada sin saber sobre cuantos.
+   *
+   * Los turnos sin efectos requeridos no entran (guardan null). Los turnos anteriores a la migracion
+   * del 2026-09-18 tambien guardan null, asi que tampoco entran: la serie arranca vacia a proposito en
+   * vez de mezclar turnos sin dato con turnos que el modelo resolvio.
+   */
+  turnsWithRequiredEffects: number;
+  byAuthor: { modelo: number; reintento: number; servidor: number; escalado: number };
+  /**
+   * (servidor + escalado) / turnos. LA TASA QUE IMPORTA: la proporcion de turnos donde el mensaje lo
+   * escribio el codigo y no el agente. null cuando no hubo ningun turno con efectos en la ventana -
+   * null es "no se sabe", que no es lo mismo que 0.
+   */
+  serverWroteRate: number | null;
+  /** modelo / turnos: lo hizo solo, a la primera, sin que nadie lo empujara. */
+  modelSolvedRate: number | null;
+  /** Lineas de systemPrompt.ts. Va en la misma respuesta para que los dos numeros se lean juntos. */
+  promptLines: number | null;
+}
+
+const AUTORES = ["modelo", "reintento", "servidor", "escalado"] as const;
+
+export async function getAgentAuthorshipSummary(businessId: string, days = 7): Promise<AgentAuthorshipSummary> {
+  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+  const filas = await prisma.agentTurn.groupBy({
+    by: ["effectAuthor"],
+    where: { businessId, createdAt: { gte: since }, effectAuthor: { not: null } },
+    _count: { _all: true },
+  });
+
+  const byAuthor = { modelo: 0, reintento: 0, servidor: 0, escalado: 0 };
+  for (const fila of filas) {
+    const autor = fila.effectAuthor;
+    // Un valor que no este en la lista seria un dato viejo o corrupto: se ignora en vez de romper la
+    // pantalla, pero no se suma al denominador, porque no se sabe que es.
+    if (autor && (AUTORES as readonly string[]).includes(autor)) {
+      byAuthor[autor as (typeof AUTORES)[number]] = fila._count._all;
+    }
+  }
+
+  const turnsWithRequiredEffects = byAuthor.modelo + byAuthor.reintento + byAuthor.servidor + byAuthor.escalado;
+  const tasa = (n: number) => (turnsWithRequiredEffects === 0 ? null : n / turnsWithRequiredEffects);
+
+  return {
+    days,
+    turnsWithRequiredEffects,
+    byAuthor,
+    serverWroteRate: tasa(byAuthor.servidor + byAuthor.escalado),
+    modelSolvedRate: tasa(byAuthor.modelo),
+    promptLines: promptLineCount(),
+  };
 }
 
 // Pieza 5 del plan de catalogo y medios, MODO SOMBRA: lo que la validacion contra el catalogo HABRIA

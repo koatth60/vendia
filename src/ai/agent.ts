@@ -1051,6 +1051,12 @@ export async function generateReply(
   // solo de la base (ver src/ai/requiredEffects.ts). Se calcula antes de la primera llamada al modelo
   // para que el estado que se mira sea el de ANTES del turno. Bandera apagada = lista vacia = cero
   // cambio de comportamiento.
+  // E76 (2026-09-18): quien termina resolviendo el efecto de este turno. Se guarda en AgentTurn porque
+  // el contador en memoria (requiredEffectStats) se pierde en cada reinicio, y hubo trece en un dia.
+  // Cada turno que termina en "servidor" es un turno donde el mensaje lo escribio el codigo, no el
+  // modelo - o sea, un chatbot. Sin este numero, el plan puede cumplir su meta (prompt bajando, errores
+  // en cero) con Onix funcionando como chatbot en un tercio de los turnos y nadie lo veria.
+  let effectAuthor: "modelo" | "reintento" | "servidor" | "escalado" | null = null;
   const requiredEffects: RequiredEffect[] = personality?.requiredEffectsEnabled
     ? await computeRequiredEffects(conversationId, { mediaType: lastHistoryEntry?.mediaType ?? null })
     : [];
@@ -1936,6 +1942,7 @@ ${CATALOG_BLOCK_MARKER}` : CATALOG_BLOCK_MARKER;
 
     const missingAfterFirstAttempt = await verifyRequiredEffects(conversationId, requiredEffects);
     if (missingAfterFirstAttempt.length === 0) {
+      effectAuthor = "modelo";
       recordRequiredEffectsTurn({
         conversationId,
         required: requiredEffects.map((e) => e.kind),
@@ -2011,6 +2018,8 @@ ${CATALOG_BLOCK_MARKER}` : CATALOG_BLOCK_MARKER;
       );
     }
 
+    // Llegar hasta aca significa que hubo al menos un reintento: el camino sin reintentos sale arriba.
+    effectAuthor = escalated ? "escalado" : fallbackUsed ? "servidor" : "reintento";
     recordRequiredEffectsTurn({
       conversationId,
       required: requiredEffects.map((e) => e.kind),
@@ -2168,6 +2177,9 @@ ${CATALOG_BLOCK_MARKER}` : CATALOG_BLOCK_MARKER;
     // Y quien lo escribio, cuando el turno paso por el camino de un solo autor. Sin esta columna la tasa
     // de caida al fallback no tiene denominador: el incidente solo cuenta las caidas.
     catalogAuthor,
+    // Y quien resolvio el efecto requerido, que es el otro camino donde el servidor puede terminar
+    // escribiendo el mensaje. Ver E76: es el denominador que le falta a la medida del norte.
+    effectAuthor,
     mediaProductIds: catalogMediaProductIds(),
     shadowFindings: shadowFindings.map(serializeFinding),
   });

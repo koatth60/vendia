@@ -1267,6 +1267,21 @@ model AgentTurn {
   // distinto de "one", o sin alcance). Es el denominador de la tasa de caida al fallback: el incidente
   // solo da el numerador.
   catalogAuthor  String?
+  // E76 (2026-09-18): quien resolvio el efecto requerido de este turno. Misma forma y mismo motivo que
+  // catalogAuthor, pero para el otro camino - el de los efectos requeridos.
+  //
+  //   "modelo"     lo hizo solo, a la primera
+  //   "reintento"  hizo falta forzarle la herramienta con tool_choice
+  //   "servidor"   cayo al fallback: el texto lo escribio el codigo, sin modelo adentro
+  //   "escalado"   no se pudo ni con el fallback
+  //   null         este turno no exigia ningun efecto
+  //
+  // POR QUE ESTA COLUMNA EXISTE: la medida del norte es "las lineas del prompt bajando con errores en
+  // cero", y esa medida no ve los fallbacks. Cada turno en "servidor" ES un chatbot - texto fijo escrito
+  // por codigo. Sin esta columna se puede cumplir la meta del plan con Onix funcionando como chatbot en
+  // un tercio de los turnos y nada lo diria. El contador existia (requiredEffectStats) pero vivia en
+  // memoria y se perdia en cada reinicio; hubo trece en un dia.
+  effectAuthor   String?
   // Ids de producto cuyos medios salieron con los bloques de este turno.
   mediaProductIds String[] @default([])
   // Pieza 5 del plan de catalogo y medios, EN MODO SOMBRA: lo que la validacion contra el catalogo real
