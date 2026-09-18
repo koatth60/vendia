@@ -887,8 +887,14 @@ sus fotos pesadas, con enlace a arreglarlas.
 **Tamaño:** M. **Depende de:** nada. **Bandera:** no.
 **Vuelta atrás:** revertir.
 
-**Estado (2026-09-18): implementada, sin desplegar.** Falta el despliegue y las 48 h contra la línea
-base; hasta entonces no se da por cerrada.
+**Estado (2026-09-18): DESPLEGADA**, commit `198981d`, en producción a las 20:1x UTC con tráfico en
+cero (decisión del dueño: se esperó a que no hubiera flujo). Faltan las 48 h contra la línea base;
+hasta entonces no se da por cerrada.
+
+Al desplegar se midió el catálogo entero de producción: **39 medios, ninguno por encima del tope**, y
+los 39 quedaron con su peso guardado. Las dos fotos de 6.303.812 bytes que aparecen en el log del
+2026-09-16 ya no están en el catálogo — alguien las reemplazó. O sea que hoy la garantía es preventiva:
+lo que cierra no es un incendio activo sino la clase de error, que es de lo que se trataba.
 
 Lo que se construyó:
 
@@ -923,8 +929,8 @@ con el motivo, que un archivo sin medir no se bloquea, y que la herramienta devu
 de tumbar el turno). `npm test`: 883 pruebas, 881 en verde, 0 en rojo, 2 `todo` — las dos fixtures de
 replay que ya estaban en `knownFailing`. Los 11 fixtures de replay dan idéntico.
 
-Al desplegar: `npx prisma migrate deploy`, y después `npx tsx scripts/list-oversized-media.ts` una vez
-para que la dueña vea sus fotos pesadas marcadas sin esperar a que alguien intente mandarlas.
+Lo que queda de `E17`: mirar 48 h de números contra la línea base (fallos de entrega con código 131053
+por tamaño, que tienen que ser cero) antes de darla por cerrada.
 
 ---
 
