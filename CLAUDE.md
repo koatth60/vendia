@@ -6,11 +6,13 @@ response prose. Follow these to keep sessions cheap:
 1. Don't re-read a file right after Edit/Write — the tool result already confirms the change.
 2. Use `Read` with `offset`/`limit`, or `Grep`, instead of dumping a whole file — several files here
    (`public/admin/index.html`, `src/routes/whatsapp.ts`, `src/routes/admin.ts`) are large.
-3. Run only the affected test file(s) (`node --import tsx --test src/path/to.test.ts`). **Nunca correr
-   `npm test` entero** — ni siquiera "una vez antes de commitear", que es lo que decía esta línea hasta
-   el 2026-09-18. Son 1116 pruebas, ~2 min local y 12+ min en CI, y cada cambio quedaba esperándola para
-   poder desplegar. Decisión del dueño, con la corrida que la motivó saliendo 1114/1114 en verde sin
-   encontrar nada. La cobertura amplia la da CI, que corre sola en el push.
+3. **No correr NINGUNA prueba sin que el dueño la pida** — ni `npm test` entero ni un archivo suelto.
+   Decisión del dueño, 2026-09-18, en dos pasos el mismo día: primero prohibió la suite completa (1116
+   pruebas, ~2 min local, 12+ min en CI, y cada cambio quedaba esperándola para poder desplegar; la
+   corrida que lo motivó salió 1114/1114 en verde sin encontrar nada), y después la amplió a cualquier
+   prueba. Hasta ese día esta línea decía lo contrario ("corré la suite una vez antes de commitear").
+   Lo que sí se corre siempre: `npx tsc --noEmit` y `npm run typecheck:all`, que son segundos. La
+   cobertura amplia la da CI, que corre sola en el push.
 4. Don't dump raw API responses (curl to Meta's Graph API, etc). Pipe through `node -e` or `jq` and
    print only the fields that matter.
 5. Read logs (`pm2 logs`, deploy output) with `tail -N` or `grep`, never the whole file.

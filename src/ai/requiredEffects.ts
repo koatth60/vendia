@@ -55,6 +55,22 @@ export type RequiredEffectKind =
   // la foto de un producto sin leer prosa. Crear un pedido automatico sobre una imagen ambigua es un
   // riesgo real y caro; un aviso de mas no cuesta nada.
   | "OWNER_NOTIFIED_ABOUT_IMAGE"
+  // Llego una imagen que el SERVIDOR ya clasifico como comprobante de pago (Message.imageAnalysis
+  // empieza con "COMPROBANTE:", escrito por ai/vision.ts antes de que el turno arranque), sobre una
+  // conversacion con venta en curso. El efecto exigido es que el DUENO QUEDE AVISADO DEL PAGO.
+  //
+  // POR QUE EXISTE COMO EFECTO PROPIO (2026-09-18). El commit que dejo de escalar los comprobantes como
+  // "foto de producto sin identificar" los saco del disparador y no puso nada en su lugar, con el
+  // argumento de que "el pago tiene su propio camino: el cierre le pregunta al dueno si le llego la
+  // plata". Ese camino solo existe si el modelo llama close_conversation, y medido enseguida en
+  // produccion (Sandra Gil, conversacion cmu7l6eb50012w82khu91rx8n) no la llamo: escribio "¡Perfecto,
+  // todo queda listo! en total fueron $149.000, tu pedido sale para Bogota" con CERO herramientas en
+  // los nueve turnos. Order = 0, PendingOwnerQuestion = 0, conversacion todavia en NEW. La clienta creyo
+  // que compro, el dueno nunca se entero, y no habia ningun pedido.
+  //
+  // O sea: se cambio un aviso mal redactado por NINGUN aviso. Esto lo cierra - y por el camino correcto,
+  // que es preguntarle al dueno si le llego la plata, no que producto es la foto.
+  | "OWNER_NOTIFIED_ABOUT_PAYMENT"
   // El pedido esta realmente resuelto contra el catalogo (motor de venta activo, items con precio y
   // forma de pago). Recien ahi el efecto puede ser el cierre completo.
   | "SALE_REGISTERED_AND_OWNER_NOTIFIED";
@@ -350,24 +366,30 @@ export async function computeRequiredEffects(
   const imagenSinAtender = await findUnattendedCustomerImage(conversationId);
   if (!imagenSinAtender) return [];
 
-  // UN COMPROBANTE NO ES UNA FOTO SIN IDENTIFICAR (2026-09-18).
+  // UN COMPROBANTE NO ES UNA FOTO SIN IDENTIFICAR, PERO TAMPOCO ES NADA (2026-09-18, segunda pasada).
   //
   // Este disparador existe para la foto de un producto que el bot no supo reconocer. Un comprobante de
-  // pago no es eso, y ademas ask_owner_about_photo ahora se NIEGA a escalarlo como producto (E81) -- con
-  // lo cual el efecto quedaba imposible de cumplir: reintento, reintento, el respaldo por codigo tambien
-  // fallaba, y la conversacion terminaba en "un asesor del equipo va a continuar contigo", con el bot
-  // apagado. Medido dos veces seguidas con el comprobante a la vista en el chat.
+  // pago no es eso, y ademas ask_owner_about_photo se NIEGA a escalarlo como producto (E81) -- con lo
+  // cual ese efecto quedaba imposible de cumplir y la conversacion terminaba en "un asesor del equipo va
+  // a continuar contigo", con el bot apagado.
   //
-  // El pago tiene su propio camino: el cierre le pregunta al dueno si le llego la plata. Ese es el que
-  // corresponde, y no pasa por identificar ningun producto.
+  // La primera version de este guard resolvio eso devolviendo lista vacia, o sea NO EXIGIENDO NADA, con
+  // el argumento de que el pago tiene su propio camino (close_conversation le pregunta al dueno si le
+  // llego la plata). Medido en produccion horas despues: ese camino no corre si el modelo no llama la
+  // herramienta, y no la llamo. Ver el comentario de OWNER_NOTIFIED_ABOUT_PAYMENT arriba.
+  //
+  // Ahora el comprobante NO sale por la puerta de atras: cambia de efecto. Se le exige al turno que el
+  // dueno quede avisado DEL PAGO, con close_conversation como herramienta forzada -- que es la que
+  // corresponde y la unica que crea el pedido -- y con el mismo respaldo por codigo que la imagen
+  // generica, que avisa sin el modelo adentro.
   const mensajeDeLaImagen = await prisma.message.findFirst({
     where: { conversationId, role: "CUSTOMER", mediaType: "IMAGE", createdAt: { gte: imagenSinAtender } },
     orderBy: { createdAt: "asc" },
     select: { id: true, createdAt: true },
   });
-  if (mensajeDeLaImagen && (await esLaImagenDelComprobante(conversationId, mensajeDeLaImagen.id, mensajeDeLaImagen.createdAt))) {
-    return [];
-  }
+  const esComprobante =
+    Boolean(mensajeDeLaImagen) &&
+    (await esLaImagenDelComprobante(conversationId, mensajeDeLaImagen!.id, mensajeDeLaImagen!.createdAt));
 
   // Hay evidencia de venta en curso ESCRITA POR EL SERVIDOR.
   const evidence = await getServerSaleEvidence(conversationId);
@@ -378,6 +400,11 @@ export async function computeRequiredEffects(
   // haya salido en un turno anterior.
   const since = imagenSinAtender;
 
+  // El comprobante va DESPUES de la rama del cierre completo a proposito: cuando el negocio lleva el
+  // pedido en el motor de venta y ese pedido esta completo, SALE_REGISTERED_AND_OWNER_NOTIFIED es el
+  // efecto mas fuerte de los dos -- su respaldo por codigo CREA el pedido (registerSaleFromServer), y el
+  // de aca solo avisa. Con un comprobante en la mano, crear el pedido es mejor que avisar de el.
+
   // La distincion va explicita, no implicita: el cierre real solo cuando el negocio lleva el pedido en
   // el motor de venta Y ese pedido esta completo. En cualquier otro caso el efecto es el aviso.
   if (conversation.saleStateEnabled && isSaleFullyResolved(saleState)) {
@@ -387,6 +414,22 @@ export async function computeRequiredEffects(
         tool: "close_conversation",
         reason:
           "el cliente mando una imagen con un pedido ya resuelto contra el catalogo, asi que el pedido tiene que quedar registrado y el dueno avisado antes de responderle",
+        since,
+      },
+    ];
+  }
+
+  // Comprobante reconocido, sin motor de venta o con el pedido incompleto: se fuerza el cierre igual --
+  // es la herramienta que le pregunta al dueno si le llego la plata, y la unica que crea el pedido -- y
+  // si el modelo no la llama, el respaldo por codigo le avisa igual. Lo que ya NO puede pasar es que el
+  // turno no exija nada, que es como Sandra Gil termino con "todo queda listo" y cero pedido.
+  if (esComprobante) {
+    return [
+      {
+        kind: "OWNER_NOTIFIED_ABOUT_PAYMENT",
+        tool: "close_conversation",
+        reason:
+          "el cliente mando el comprobante de pago de esta conversacion: el pedido tiene que quedar registrado y el dueno avisado para que confirme si le llego la plata, antes de responderle",
         since,
       },
     ];
@@ -433,7 +476,10 @@ export async function verifyRequiredEffects(conversationId: string, effects: Req
       missing.push(effect);
       continue;
     }
-    if (effect.kind === "OWNER_NOTIFIED_ABOUT_IMAGE") {
+    if (effect.kind === "OWNER_NOTIFIED_ABOUT_IMAGE" || effect.kind === "OWNER_NOTIFIED_ABOUT_PAYMENT") {
+      // Mismo criterio para los dos, y es el correcto para el pago: `saleClosed` incluye
+      // pendingConfirmationMessageId, o sea el "¿Te llego el pago?" que close_conversation le manda al
+      // dueno con wamid en mano. Si eso salio, el dueno esta avisado del pago por el camino bueno.
       if (saleClosed || (await ownerWasNotifiedSince(conversationId, effect.since))) continue;
       missing.push(effect);
     }
@@ -494,6 +540,14 @@ export const FALLBACK_SALE_REGISTERED_TEXT =
 export const FALLBACK_IMAGE_RECEIVED_TEXT =
   "Recibí tu imagen y ya se la pasé al equipo para que la revise y la confirme. Apenas me confirmen te aviso por acá.";
 
+/**
+ * Igual que el anterior pero para un comprobante YA RECONOCIDO por el servidor. Dice comprobante porque
+ * el servidor sabe que lo es, y sigue sin afirmar que el pago este confirmado ni que exista un pedido:
+ * eso lo decide el dueno mirando su cuenta.
+ */
+export const FALLBACK_PAYMENT_RECEIVED_TEXT =
+  "Recibí tu comprobante y ya se lo pasé al equipo para que confirme el pago. Apenas me confirmen te aviso por acá.";
+
 /** Texto FIJO para cuando no se pudo producir el efecto: no afirma que haya pasado nada. */
 export const ESCALATION_TEXT =
   "Recibí tu mensaje. Un asesor del equipo va a continuar por acá contigo en un momento.";
@@ -523,7 +577,11 @@ function describeCustomerRow(customer: { name: string | null; whatsappProfileNam
  * NO crea el Order a proposito: nada en la base distingue un comprobante de cualquier otra foto, y un
  * pedido inventado sobre una imagen ambigua cuesta mucho mas que un aviso de mas.
  */
-async function notifyOwnerAboutImage(context: ToolContext, evidence: ServerSaleEvidence): Promise<FallbackResult> {
+async function notifyOwnerAboutImage(
+  context: ToolContext,
+  evidence: ServerSaleEvidence,
+  esComprobanteReconocido = false
+): Promise<FallbackResult> {
   const business = await prisma.business.findUnique({
     where: { id: context.businessId },
     select: { contactPhone: true, contactName: true, currency: true },
@@ -566,7 +624,9 @@ async function notifyOwnerAboutImage(context: ToolContext, evidence: ServerSaleE
   const greeting = business.contactName ? `Hola ${business.contactName}` : "Hola";
   const customerLabel = customer ? describeCustomerRow(customer) : context.recipientPhone;
   const text = [
-    `${greeting}, el cliente ${customerLabel} mando una IMAGEN y el bot no la resolvio. Puede ser un comprobante de pago: hay que revisarla.`,
+    esComprobanteReconocido
+      ? `${greeting}, el cliente ${customerLabel} mando un COMPROBANTE DE PAGO y el bot no logro cerrar el pedido. Revisa si te llego la plata.`
+      : `${greeting}, el cliente ${customerLabel} mando una IMAGEN y el bot no la resolvio. Puede ser un comprobante de pago: hay que revisarla.`,
     datos.length > 0 ? datos.join("\n") : "Todavia no hay datos de pedido registrados en esta conversacion.",
     "El bot NO registro ningun pedido ni confirmo ningun pago. Abre esa conversacion en el panel y revísala tú.",
   ].join("\n\n");
@@ -585,7 +645,13 @@ async function notifyOwnerAboutImage(context: ToolContext, evidence: ServerSaleE
     console.error("No se pudo avisar al dueno de la imagen recibida:", alerta.failure?.message);
     return { ok: false, detail: `No se pudo avisar al dueno: ${alerta.failure?.message ?? "sin wamid"}`, customerText: null };
   }
-  return { ok: true, detail: "aviso al dueno enviado; no se registro ningun pedido", customerText: FALLBACK_IMAGE_RECEIVED_TEXT };
+  return {
+    ok: true,
+    detail: esComprobanteReconocido
+      ? "aviso al dueno enviado por el comprobante; no se registro ningun pedido"
+      : "aviso al dueno enviado; no se registro ningun pedido",
+    customerText: esComprobanteReconocido ? FALLBACK_PAYMENT_RECEIVED_TEXT : FALLBACK_IMAGE_RECEIVED_TEXT,
+  };
 }
 
 /**
@@ -647,9 +713,13 @@ async function registerSaleFromServer(context: ToolContext, effect: RequiredEffe
 /** FALLBACK POR CODIGO. Despacha segun el efecto: el aviso siempre, el cierre solo cuando se exigio. */
 export async function runRequiredEffectFallback(context: ToolContext, effect: RequiredEffect): Promise<FallbackResult> {
   if (effect.kind === "SALE_REGISTERED_AND_OWNER_NOTIFIED") return registerSaleFromServer(context, effect);
-  if (effect.kind === "OWNER_NOTIFIED_ABOUT_IMAGE") {
+  if (effect.kind === "OWNER_NOTIFIED_ABOUT_IMAGE" || effect.kind === "OWNER_NOTIFIED_ABOUT_PAYMENT") {
     const evidence = await getServerSaleEvidence(context.conversationId);
-    const outcome = await notifyOwnerAboutImage(context, evidence);
+    // El aviso es el mismo camino (sendAlertToOwner + recordOwnerMessage) y sigue sin crear ningun
+    // Order: el fallback avisa, no cobra. La diferencia es el texto, que con un comprobante reconocido
+    // puede decirle al dueno exactamente que revise -- si le llego la plata -- en vez de "puede ser un
+    // comprobante".
+    const outcome = await notifyOwnerAboutImage(context, evidence, effect.kind === "OWNER_NOTIFIED_ABOUT_PAYMENT");
     if (!outcome.ok) return outcome;
     // Misma regla que arriba: el resultado de la funcion no prueba nada, la base si.
     const stillMissing = await verifyRequiredEffects(context.conversationId, [effect]);
@@ -665,6 +735,9 @@ export async function runRequiredEffectFallback(context: ToolContext, effect: Re
 export function escalationOwnerAlertText(kind: RequiredEffectKind): string {
   if (kind === "SALE_REGISTERED_AND_OWNER_NOTIFIED") {
     return "Atencion: un cliente tiene un pedido ya armado y el bot no logro registrarlo (ni el modelo ni el cierre automatico). Esa conversacion quedo esperandote en el panel - revisala a mano.";
+  }
+  if (kind === "OWNER_NOTIFIED_ABOUT_PAYMENT") {
+    return "Atencion: un cliente mando un COMPROBANTE DE PAGO y el bot no logro registrar el pedido ni avisarte por el camino normal. Revisa si te llego la plata - esa conversacion quedo esperandote en el panel.";
   }
   return "Atencion: un cliente mando una imagen que puede ser un comprobante de pago y el bot no logro avisarte por el camino normal. Esa conversacion quedo esperandote en el panel - revísala a mano.";
 }
