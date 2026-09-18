@@ -1,5 +1,5 @@
 import { prisma } from "../db/client";
-import { faltaComprobanteDePago } from "./paymentProof";
+import { faltaComprobanteDePago, momentoEnQueSePasaronLosDatosDePago } from "./paymentProof";
 
 // EL BOT NO DECLARA UN PAGO RECIBIDO (2026-09-18).
 //
@@ -26,21 +26,6 @@ import { faltaComprobanteDePago } from "./paymentProof";
 //
 // Cuando esas cuatro se cumplen, el hecho es "hay un comprobante sin verificar", y ese hecho lo dice el
 // servidor. Al modelo no le queda la decisión de declarar el pago recibido.
-
-/**
- * El momento en que a esta conversación se le pasaron los datos de pago, o null.
- *
- * Misma definición que usa `faltaComprobanteDePago`: sale de `AgentTurn.toolsCalled`, el registro de lo
- * que el servidor hizo de verdad, no de lo que el bot escribió.
- */
-async function momentoDeLosDatosDePago(conversationId: string): Promise<Date | null> {
-  const turno = await prisma.agentTurn.findFirst({
-    where: { conversationId, toolsCalled: { has: "get_payment_methods" } },
-    orderBy: { createdAt: "asc" },
-    select: { createdAt: true },
-  });
-  return turno?.createdAt ?? null;
-}
 
 /** True cuando hay un comprobante que nadie verificó todavía. Cuatro SELECT, ninguna lectura de prosa. */
 export async function comprobanteEsperandoVerificacion(businessId: string, conversationId: string): Promise<boolean> {
@@ -78,7 +63,7 @@ export async function comprobanteEsperandoVerificacion(businessId: string, conve
     return false;
   }
 
-  const desde = await momentoDeLosDatosDePago(conversationId);
+  const desde = await momentoEnQueSePasaronLosDatosDePago(conversationId);
   if (!desde) return false;
 
   const imagen = await prisma.message.findFirst({

@@ -13,3 +13,4 @@ Thumbs.db
 
 # Salida de design/audit-responsive.mjs: se regenera en cada corrida.
 design/panel.html
+conversaciones-archivadas/

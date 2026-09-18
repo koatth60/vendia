@@ -22,9 +22,26 @@ import { prisma } from "../db/client";
  * llamar get_payment_methods es lo que produce el bloque fijo con el numero, la llave y el titular. No es
  * una lectura de lo que el bot escribio, es el registro de lo que el servidor hizo.
  */
-async function momentoEnQueSePasaronLosDatosDePago(conversationId: string): Promise<Date | null> {
+export async function momentoEnQueSePasaronLosDatosDePago(conversationId: string): Promise<Date | null> {
+  // DOS CAMINOS, NO UNO (2026-09-18).
+  //
+  // Hasta hoy esto era solo `get_payment_methods`. Y el 2026-09-18, por la manana, se arreglo que el
+  // numero de Nequi saliera SIEMPRE -- el bloque de pago se arma leyendo la base al empezar el turno,
+  // llame el modelo a la herramienta o no (commit 73dd8aa). Nadie actualizo esta definicion.
+  //
+  // Desde entonces, en las ventas donde el modelo no llama la herramienta, el cliente recibe los datos
+  // de pago, manda el pantallazo, y el sistema cree que nunca se le paso nada: la imagen entra como foto
+  // de producto, se escala al dueno y el bot se apaga. Medido en la conversacion de Rocio Bermudez, con
+  // el numero de Nequi y el de Bancolombia a la vista en su chat.
+  //
+  // `set_payment_method` sirve igual de bien y no depende de por donde salio el bloque: si el cliente ya
+  // ELIGIO como paga, los datos de pago ya los tuvo delante. Se toma el primero de los dos que haya
+  // ocurrido.
   const turno = await prisma.agentTurn.findFirst({
-    where: { conversationId, toolsCalled: { has: "get_payment_methods" } },
+    where: {
+      conversationId,
+      OR: [{ toolsCalled: { has: "get_payment_methods" } }, { toolsCalled: { has: "set_payment_method" } }],
+    },
     orderBy: { createdAt: "asc" },
     select: { createdAt: true },
   });
