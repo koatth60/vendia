@@ -79,6 +79,27 @@ viejo sin molestarlo.
 
 ---
 
+## Camino 1b — volver al paso anterior del despliegue
+
+El plan completo se despliega en cuatro pasos, cada uno con su etiqueta
+(`paso-1-infra-y-panel`, `paso-2-pedidos`, `paso-3-cola-de-entrada`, `paso-4-agente-y-catalogo`; ver
+[`DESPLIEGUE-DEL-PLAN-COMPLETO.md`](DESPLIEGUE-DEL-PLAN-COMPLETO.md)). Si algo aparece **después** de un
+paso, el sospechoso son las tres o cuatro etapas de ese paso, y se puede volver sólo hasta el anterior
+en vez de tirar todo:
+
+```bash
+cd /opt/vendia
+git fetch origin --tags
+git checkout paso-2-pedidos        # el paso anterior al que se acaba de desplegar
+pm2 delete vendia-worker           # sólo si se está bajando del paso 4
+pm2 startOrRestart ecosystem.config.js --update-env
+systemctl reload nginx
+```
+
+Compensaciones, según hasta dónde se baje: volver a antes del **paso 3** pide el `SET DEFAULT` de
+`Product.currency`; volver a antes del **paso 2** pide además el mapeo de estados. Las dos están
+escritas arriba.
+
 ## Camino 2 — restaurar la base (último recurso)
 
 Sirve para: datos corrompidos por un defecto de la versión nueva, no para "el bot contestó mal".

@@ -33,29 +33,61 @@ Dos opcionales, las dos **con el valor correcto por omisión**:
 `PLATFORM_ADMIN_PASSWORD` sigue en texto plano en el `.env`. El proceso arranca igual y **avisa en el
 log**; pasarla a `PLATFORM_ADMIN_PASSWORD_HASH` es parte de `E29` y se puede hacer después.
 
-## El despliegue
+## El despliegue va en cuatro pasos, no de una
+
+**Por qué.** De una sola vez son 46 commits y 16 etapas: si algo se rompe, hay 16 sospechosos y
+averiguar cuál cuesta más que el arreglo. La rama es lineal, así que no hace falta cherry-pick ni ramas
+nuevas — se despliegan **commits intermedios de la misma rama**, en orden, con una ventana de
+observación entre uno y otro. Cada paso tiene su etiqueta, ya empujadas:
+
+| Paso | Etiqueta | Qué entra | Migraciones | Qué puede romper |
+|---|---|---|---|---|
+| 1 | `paso-1-infra-y-panel` | CI, `E48`, `E49` (rediseño de Bandeja/Clientes/Pedidos), `E13b`, `E14`, `E15`, `E30`, `E46`, `E28` | 2 | El panel y los jobs. **No** toca cómo entra un mensaje ni qué dice el bot |
+| 2 | `paso-2-pedidos` | `E41`, `E31` (máquina de estados + `OrderEvent`), `E32` (el stock vuelve al cancelar) | +1 | Marcar enviado y cancelar desde el panel |
+| 3 | `paso-3-cola-de-entrada` | `E20`/`E21` (todo mensaje entra por `InboundEvent`), `E22`, `E23` (1/2), `E24`, `E29`, `E76`, `E33` (1/2), `E36`, respaldos | +6 | **El paso grande**: cambia el camino de TODOS los mensajes entrantes |
+| 4 | `paso-4-agente-y-catalogo` | `E23` (2/2) web+worker, `E33` (2/2), `E37`, `E38`, `E35`, `E34`, `E45` | +6 | Lo único que cambia **cómo habla** el agente (`E34`) y **qué cifra cobra** (`E37`, `E38`) |
+
+Entre paso y paso: **30 minutos de tráfico real como mínimo**, mirando lo de "La primera hora". Si algo
+aparece, el sospechoso son las 3 o 4 etapas de ESE paso, no las dieciséis.
+
+### Cómo se despliega cada paso
 
 Desde la máquina del dueño (la única con la red de Tailscale):
 
 ```bash
-git push origin redesign/completo-gto08b
 ssh vendia
 ```
 
 ```bash
 cd /opt/vendia
-git fetch origin
-git checkout redesign/completo-gto08b
-git pull origin redesign/completo-gto08b
+git fetch origin --tags
+git checkout paso-1-infra-y-panel     # y en cada ronda, la etiqueta del paso siguiente
 npm ci
 npx prisma generate
-npx prisma migrate deploy        # 15 migraciones, todas aditivas
+npx prisma migrate deploy             # aplica sólo las migraciones hasta ese punto
 pm2 startOrRestart ecosystem.config.js --update-env
 systemctl reload nginx
 ```
 
-O, sin la red del dueño, con el workflow: `gh workflow run deploy.yml -f accion=redesign/completo-gto08b`
-(corre el mismo `scripts/deploy.sh`, que ya hace `startOrRestart` sobre el ecosystem).
+**Ojo con el paso 4**: es el que agrega `vendia-worker`. En los pasos 1 a 3 el `ecosystem.config.js`
+todavía tiene una sola entrada, así que `startOrRestart` se comporta como el `restart` de siempre.
+
+Sin la red del dueño, el workflow acepta la etiqueta igual que una rama:
+`gh workflow run deploy.yml -f accion=paso-1-infra-y-panel` (corre el mismo `scripts/deploy.sh`).
+
+### Volver atrás desde cada paso
+
+Siempre hay **dos destinos posibles**: el paso anterior, o producción tal como está hoy.
+
+| Desde | A producción (`produccion-antes-del-plan-completo`) | Al paso anterior |
+|---|---|---|
+| Paso 1 | `git checkout` y listo. Ninguna compensación | — |
+| Paso 2 | `git checkout` + **mapear los estados de pedido** (`ROLLBACK.md`) | Mismo mapeo |
+| Paso 3 | Lo de arriba + **`SET DEFAULT 'USD'` en `Product.currency`** | Sólo el `SET DEFAULT` |
+| Paso 4 | Lo de arriba + `pm2 delete vendia-worker` | `pm2 delete vendia-worker` |
+
+Las tablas y columnas nuevas se quedan donde están en todos los casos: el código viejo las ignora. El
+detalle de cada compensación, con su SQL, está en [`ROLLBACK.md`](ROLLBACK.md).
 
 **`pm2 startOrRestart` y no `pm2 restart vendia`**: desde `E23` son dos procesos, y `vendia-worker` no
 existe todavía en el servidor. Un `restart` a secas deja al worker sin levantar — y el worker es quien
