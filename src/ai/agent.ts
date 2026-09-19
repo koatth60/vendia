@@ -2109,7 +2109,18 @@ ${BLOQUE_PEDIR_COMPROBANTE}`;
           typeof result.total === "number" &&
           Array.isArray(result.items)
         ) {
-          orderSummaryThisTurn = { items: result.items, shippingCost: result.shippingCost ?? 0, total: result.total };
+          const descuentoDelResumen = result as { cartDiscount?: unknown; cartDiscountLabel?: unknown };
+          orderSummaryThisTurn = {
+            items: result.items,
+            shippingCost: result.shippingCost ?? 0,
+            total: result.total,
+            // El tipo de retorno de runCatalogTool es la union inferida de TODAS las herramientas, asi
+            // que estos dos campos no estan en el. Se leen por una vista local en vez de ensanchar esa
+            // union, que la comparten veinte herramientas que no tienen nada que ver con el resumen.
+            cartDiscount: typeof descuentoDelResumen.cartDiscount === "number" ? descuentoDelResumen.cartDiscount : 0,
+            cartDiscountLabel:
+              typeof descuentoDelResumen.cartDiscountLabel === "string" ? descuentoDelResumen.cartDiscountLabel : null,
+          };
         }
         messages.push({
           role: "tool",

@@ -1814,6 +1814,11 @@ export async function runCatalogTool(context: ToolContext, name: string, input: 
           subtotal: state.subtotal,
           shippingCost: state.shippingCost ?? 0,
           total: state.total,
+          // El descuento del pedido entero viaja con el resumen: sin esto el bloque mostraba items +
+          // envio y un total que no cuadraba a la vista, porque el descuento ya estaba restado adentro
+          // (medido con Diana Quintero: $65.000 + $55.000 + $9.000 y "Total: $119.000").
+          cartDiscount: state.cartDiscount,
+          cartDiscountLabel: state.cartDiscountLabel,
           currency: state.items[0].currency,
           note: `No escribas tú los items, el envio ni el TOTAL: pon la marca ${ORDER_SUMMARY_BLOCK_MARKER} donde quieras mostrar el resumen completo (o ${TOTAL_BLOCK_MARKER} si solo necesitas el total suelto) y el sistema la reemplaza por estos numeros reales antes de enviar. Pídele que confirme antes de seguir.`,
         };
