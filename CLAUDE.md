@@ -230,6 +230,29 @@ chatbot. Medido el mismo día: 11 redacciones distintas de "muéstrame audífono
 mismo grupo con sus fotos. Un sistema de reglas necesita esas once y las que vengan, por negocio y por
 país. Esa lista no termina.
 
+### El servidor ejecuta, el modelo narra
+
+La forma concreta de lo anterior. **Un procedimiento que el modelo tiene que SEGUIR es otra regla que
+puede saltarse** — la misma familia que las Fases 3 y 5, donde los bloques fijos funcionaban en los
+turnos donde el modelo colaboraba y no existían en los turnos donde no. Un procedimiento que el
+**servidor EJECUTA**, en cambio, ocurre siempre.
+
+**La diferencia es quién avanza el estado.** Hoy lo avanza el modelo llamando herramientas: si no las
+llama, el estado no se mueve y el cliente recibe un texto que afirma algo que no pasó. Tiene que
+avanzarlo el servidor leyendo la base.
+
+`computeCheckoutState` YA calcula en cada turno qué falta. El 2026-09-19 calculó bien
+`faltan: ["cómo prefieres pagar"]`, `close_conversation` se negó por eso, y nadie hizo nada con esa
+negativa: ni se le dijo al cliente ni quedó incidente. La máquina andaba y le hablaba a una pared.
+
+**Paso concreto pendiente:** `buildTools` entrega hoy todas las herramientas en todos los turnos —
+`close_conversation` disponible cuando el cliente apenas saludó. Acotarlas por estado del checkout baja
+la superficie de error sin quitarle una palabra al modelo.
+
+**El límite:** el servidor decide el estado y los hechos disponibles; el modelo decide las palabras. Si
+el servidor decide *qué decir* además de *qué tiene que ser verdad*, esto es un chatbot.
+
+
 ## La medida
 
 **Las líneas de `src/ai/prompts/systemPrompt.ts` tienen que ir BAJANDO mientras los errores se

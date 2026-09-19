@@ -110,6 +110,52 @@ sin que haya errores nuevos, nos estamos volviendo chatbot sin que nadie lo haya
 Cada etapa de este plan tiene que poder nombrar **qué responsabilidad le quitó al modelo**. Una etapa
 que solo le agrega una instrucción no le quitó ninguna, y es un parche disfrazado.
 
+### El servidor ejecuta, el modelo narra
+
+Segunda parte de la misma decisión, 2026-09-19. Es la forma concreta que toma todo lo de arriba.
+
+La tentación al ver los errores es **obligar al modelo a seguir un procedimiento**. Eso no funciona, y
+ya se vivió: un procedimiento que el modelo tiene que seguir es otra regla que puede saltarse — la misma
+familia que las Fases 3 y 5 del plan maestro, donde los bloques fijos funcionaban perfecto en los turnos
+donde el modelo colaboraba y no existían en los turnos donde no.
+
+| | |
+|---|---|
+| Procedimiento que **el modelo sigue** | otra regla que puede desobedecer |
+| Procedimiento que **el servidor ejecuta**, y el modelo narra | lo correcto |
+
+**La diferencia es quién avanza el estado.** Hoy lo avanza el modelo llamando herramientas: si no las
+llama, el estado no se mueve y el cliente recibe un texto que afirma algo que no pasó. Tiene que
+avanzarlo el servidor leyendo la base, y pedirle al modelo solo el texto del estado actual.
+
+El camino del pago, que es el ejemplo más claro porque sí es una secuencia determinista, ya está casi
+entero construido:
+
+  1. llega una imagen → el servidor la clasifica (`Message.imageAnalysis`, ya ocurre)
+  2. es comprobante → el servidor avisa al dueño (ya ocurre, hoy como respaldo del efecto requerido)
+  3. el dueño confirma → el servidor crea el pedido (ya ocurre, `handleOwnerReply`)
+  4. **lo único del modelo**: escribir "recibí tu comprobante, ya lo estoy verificando", con su voz
+
+Lo que falta no es inventar la máquina de estados: **`computeCheckoutState` ya calcula en cada turno qué
+falta.** Lo que falta es que el servidor sea quien la avanza SIEMPRE, no solo cuando el modelo ya falló
+dos veces. Medido el 2026-09-19 (Diana Quintero): el checkout calculó correctamente
+`faltan: ["cómo prefieres pagar"]`, `close_conversation` se negó por eso — y nadie hizo nada con esa
+negativa. Ni se le dijo al cliente, ni quedó un incidente. La máquina andaba y le hablaba a una pared.
+
+**Un paso concreto que se puede dar ya:** `buildTools` entrega HOY todas las herramientas en todos los
+turnos. El modelo tiene `close_conversation` disponible cuando el cliente apenas saludó, y
+`set_payment_method` antes de que haya un producto. Acotar qué herramientas y qué datos se le permiten
+usar según el estado del checkout reduce la superficie de error sin quitarle una sola palabra.
+
+**El límite, y no se cruza:** el servidor decide **el estado y los hechos disponibles**; el modelo decide
+**las palabras**. Si el servidor empieza a decidir *qué decir* además de *qué tiene que ser verdad*, esto
+se vuelve un chatbot — que es exactamente lo contrario de *El norte*.
+
+**Y hay un costo de producto que esto protege.** El 2026-09-19 una clienta cambió el carrito cuatro
+veces en mitad del flujo: pidió tres productos, quitó dos, agregó dos, y reemplazó el inicial. Un
+procedimiento de pasos fijos se rompe en el primer "espera, mejor cámbiame los MAX". La libertad de
+conversación no es un adorno: es lo que hace que esto valga más que un menú de botones.
+
 ## Estructura, nunca parche
 
 Decisión del dueño, 2026-09-15, después de una semana de "arreglamos un parche y rompimos otro".
