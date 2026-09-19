@@ -76,6 +76,7 @@ import { canonicalColors } from "../catalog/attributeTaxonomy";
 import { tokenize, normalizeForMatch } from "../search/text";
 import { buildSystemPrompt, type BotPersonality } from "./prompts/systemPrompt";
 import { formatPrice } from "../config/money";
+import { totalDeLinea } from "../config/dinero";
 import { getBusinessLocale } from "../config/businessConfig";
 import { formatBusinessHours, closedDays } from "../config/businessHours";
 import { formatPaymentExamples } from "../catalog/paymentMethods";
@@ -1519,6 +1520,23 @@ ${CATALOG_BLOCK_MARKER}` : CATALOG_BLOCK_MARKER;
     // bloque de pago salio de verdad hacia el cliente este turno - ver el comentario de
     // recordPaymentDataShown mas abajo.
     const pagoMarcaPresenteAntesDeRenderizar = text.includes(PAYMENT_BLOCK_MARKER);
+
+    // El carrito REAL de esta conversacion, para respaldar {{BLOQUE_RESUMEN}} y {{BLOQUE_TOTAL}} cuando
+    // show_order_summary no corrio. Ver el comentario en el campo `orderSummary` de abajo. Sin items no
+    // hay resumen que mostrar, y ahi la marca se borra como cualquier bloque sin respaldo.
+    const resumenDesdeLaBase: FixedBlockData["orderSummary"] =
+      saleState && saleState.items.length > 0
+        ? {
+            items: saleState.items.map((item) => ({
+              productName: item.productName,
+              variantLabel: item.variantLabel,
+              quantity: item.quantity,
+              lineTotal: totalDeLinea(item.unitPrice, item.quantity, item.currency).comoNumeroParaMostrar(),
+            })),
+            shippingCost: saleState.shippingCost ?? 0,
+            total: saleState.total,
+          }
+        : null;
     const { text: renderedText, missingBlocks } = renderFixedBlocks(text, {
       currency: negocio.currency,
       locale: negocio.locale,
@@ -1530,7 +1548,22 @@ ${CATALOG_BLOCK_MARKER}` : CATALOG_BLOCK_MARKER;
           ? metodosDePagoDelNegocio.map((m) => ({ label: m.label, details: m.details }))
           : null),
       shippingRate: resolvedShippingRate,
-      orderSummary: orderSummaryThisTurn,
+      // EL RESUMEN DEL PEDIDO, LEIDO DE LA BASE Y NO DE UNA HERRAMIENTA (2026-09-19).
+      //
+      // Mismo arreglo que el bloque de pago en 73dd8aa, por el mismo motivo y con la misma forma: si el
+      // dato solo existe cuando el modelo llama la herramienta, el turno donde no la llama manda un
+      // mensaje que no coincide con la base.
+      //
+      // Caso real, conversacion cmu7n92tt000ei82kdr2s7mn2 (Diana Quintero): pidio cambiar los AIRPODS MAX
+      // por el parlante Bluetooth. El bot contesto "Ya cambie los MAX por los Audifonos Bluetooth" y
+      // despues "el parlante en gris quedo anotado" -- el segundo turno con toolsCalled VACIO. En
+      // SaleState los MAX seguian adentro a $95.000 y el parlante no estaba. Listo tres veces un carrito
+      // que no existia; de haber cerrado, le llegaba un producto de $95.000 que dijo que no queria.
+      //
+      // `saleState` ya se leyo al empezar este turno (ver arriba), asi que esto no agrega ni una consulta.
+      // El resultado de show_order_summary sigue ganando cuando corre: es el mismo dato leido en el mismo
+      // turno, ya validado por la herramienta.
+      orderSummary: orderSummaryThisTurn ?? resumenDesdeLaBase,
       // Solo como camino de respaldo para los turnos SIN alcance resuelto (kind "none"): ahi nada
       // cambio respecto de antes de la Fase B y el bloque fijo sigue siendo lo unico que impide que la
       // lista la escriba el modelo. Con alcance resuelto la lista ya salio en sus propios mensajes.
