@@ -1246,17 +1246,32 @@ export async function generateReply(
     // PIEZA 6: dato estructurado, misma forma que productFacts - no prosa, y ninguna instruccion sobre
     // que hacer con el. El modelo puede desobedecer una directiva; no puede ignorar un dato que tiene
     // delante. Sin pedidos no sale ningun mensaje, asi que un cliente nuevo no paga un solo token.
-    ...(commerceState.pedidos.length > 0
-      ? [
-          {
-            role: "system" as const,
-            content:
-              `PEDIDOS DE ESTE CLIENTE, leidos de la base. Estan TODOS los que tiene con este negocio, ` +
-              `incluidos los que abrio en otras conversaciones: son los unicos que existen para el.\n\n` +
-              JSON.stringify(commerceState.pedidos),
-          },
-        ]
-      : []),
+    // LA AUSENCIA DE PEDIDOS TAMBIEN ES UN DATO (2026-09-19).
+    //
+    // Hasta hoy esto era `pedidos.length > 0 ? [inyectar] : []`, o sea que un cliente SIN pedidos no
+    // recibia ningun mensaje de estado: el modelo no leia "no tiene pedidos", leia nada. Y un hueco no
+    // se comporta como un cero -- se llena.
+    //
+    // Caso real, MAGByLizN, 2026-09-19 01:06 (Carlos Mendoza, 573150496302): pidio cancelar un pedido.
+    // Su unico pedido ya lo habia cancelado la duena desde el panel diez horas antes, y el parlante que
+    // habia armado en el chat nunca llego a ser Order porque close_conversation no corrio. O sea: cero
+    // pedidos cancelables. El bot contesto "¡Listo, Carlos! Ya cancele el pedido del Parlante Charge 6
+    // Negro" con toolsCalled VACIO -- no llamo cancel_order, no cancelo nada, y lo afirmo igual.
+    //
+    // cancel_order ya sabia responder que no hay nada que cancelar (reason: "no_order"), pero eso solo
+    // sirve si la herramienta se llama. El dato tiene que estar ANTES, en el estado del turno, junto al
+    // resto de los hechos que pone el servidor.
+    {
+      role: "system" as const,
+      content:
+        commerceState.pedidos.length > 0
+          ? `PEDIDOS DE ESTE CLIENTE, leidos de la base. Estan TODOS los que tiene con este negocio, ` +
+            `incluidos los que abrio en otras conversaciones: son los unicos que existen para el.\n\n` +
+            JSON.stringify(commerceState.pedidos)
+          : `PEDIDOS DE ESTE CLIENTE, leidos de la base: NINGUNO. Este cliente no tiene ni un solo pedido ` +
+            `con este negocio, ni en esta conversacion ni en ninguna otra. No hay nada que cancelar, nada ` +
+            `que rastrear y nada que consultar; lo que este a medio armar en este chat todavia no es un pedido.`,
+    },
     // EL PRECIO ACORDADO: dato estructurado, sin ninguna directiva alrededor - misma forma que los
     // pedidos de arriba y que productFacts. El precio ya sale de la base en el resumen y en el cierre
     // (ver resolveOrderItems y getSaleState); esto es para que el agente pueda CONTARSELO al cliente sin
