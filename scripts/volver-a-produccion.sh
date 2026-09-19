@@ -14,7 +14,8 @@ set -euo pipefail
 #
 # QUE HACE, Y POR QUE CADA COSA:
 #
-#   1. Deja el codigo en la etiqueta `produccion-antes-del-plan-completo` (commit b7ec408).
+#   1. Deja el codigo en la etiqueta `produccion-2026-09-19-ventas-ok` (commit 62da9dc), o en la que
+#      se pase por la variable ETIQUETA.
 #   2. Aplica las DOS compensaciones de base que el codigo viejo necesita. Las migraciones del plan son
 #      aditivas y no se revierten -- el codigo viejo ignora las tablas y columnas nuevas sin enterarse --
 #      pero hay dos cosas que si lo rompen, y las dos se arreglan con una sentencia:
@@ -28,7 +29,11 @@ set -euo pipefail
 # LO QUE NO HACE: restaurar el volcado de la base. Eso borraria todo lo que entro despues del respaldo
 # (mensajes, pedidos, clientes) y casi nunca hace falta. Esta escrito aparte en docs/ROLLBACK.md.
 
-ETIQUETA="produccion-antes-del-plan-completo"
+# El punto de referencia se MUEVE cuando hay uno mejor verificado, no se acumulan copias: volver atras
+# tiene que llevar al mejor estado conocido, no al mas viejo. La etiqueta anterior
+# (produccion-antes-del-plan-completo, b7ec408) sigue existiendo en el repo por si hace falta ir mas
+# atras todavia; se cambia esta linea y ya.
+ETIQUETA="${ETIQUETA:-produccion-2026-09-19-ventas-ok}"
 
 # El repositorio de produccion, o el de esta copia si no estamos en el servidor. Se resuelve asi para
 # que una copia de este script guardada FUERA del repositorio (por ejemplo /root/volver-a-produccion.sh)
