@@ -237,6 +237,30 @@ export function isSaleFullyResolved(saleState: SaleStateSnapshot | null): boolea
 }
 
 /**
+ * Lo mismo, PERO SIN EXIGIR EL CANAL DE PAGO, y solo para el camino del comprobante reconocido.
+ *
+ * POR QUE EXISTE (2026-09-18). Medido en produccion, conversacion de Marcela Ospina: la clienta eligio
+ * Nequi, el bot contesto "¡Perfecto, Nequi!" con el resumen completo, y NUNCA llamo set_payment_method.
+ * El SaleState quedo con producto, cantidad, precio, modalidad, cedula, celular y direccion -- y
+ * `paymentMethodId` en null. Con eso isSaleFullyResolved daba false, el efecto exigido fue el debil (que
+ * solo avisa) en vez del fuerte (cuyo respaldo CREA el pedido), y cuando el aviso por WhatsApp fallo no
+ * quedaba ninguna salida: pedido 0 y conversacion a control humano.
+ *
+ * El canal de pago no hace falta para registrar el pedido: `registerSaleFromServer` llama a
+ * close_conversation SIN pasarle forma de pago, y la pregunta que se le manda al dueno es "¿te llego
+ * $X?", no "¿por cual canal?". Ademas, con un comprobante reconocido el canal ya esta en la imagen que
+ * el dueno va a mirar.
+ *
+ * Lo que esto quita es una DECISION DEL MODELO: que el pedido se registre ya no depende de que se haya
+ * acordado de llamar set_payment_method. No se lee prosa en ningun lado -- items y total salen del motor
+ * de venta, que valida contra el catalogo linea por linea.
+ */
+function isSaleResolvedForPaymentProof(saleState: SaleStateSnapshot | null): boolean {
+  if (!saleState) return false;
+  return saleState.items.length > 0 && saleState.total > 0;
+}
+
+/**
  * Cuando quedo lista para registrarse una venta que NADIE registro, o null si no hay ninguna.
  *
  * EL AGUJERO QUE CIERRA, medido el 2026-09-17 sobre 14 dias de produccion: 22 pedidos creados, y el
@@ -419,9 +443,24 @@ export async function computeRequiredEffects(
     ];
   }
 
-  // Comprobante reconocido, sin motor de venta o con el pedido incompleto: se fuerza el cierre igual --
-  // es la herramienta que le pregunta al dueno si le llego la plata, y la unica que crea el pedido -- y
-  // si el modelo no la llama, el respaldo por codigo le avisa igual. Lo que ya NO puede pasar es que el
+  // Comprobante reconocido con el pedido armado en el motor de venta: va el efecto FUERTE, aunque falte
+  // el canal de pago. Ver isSaleResolvedForPaymentProof -- el canal no hace falta para registrar, y
+  // exigirlo dejaba la venta de Marcela sin pedido cuando el aviso por WhatsApp fallo.
+  if (esComprobante && conversation.saleStateEnabled && isSaleResolvedForPaymentProof(saleState)) {
+    return [
+      {
+        kind: "SALE_REGISTERED_AND_OWNER_NOTIFIED",
+        tool: "close_conversation",
+        reason:
+          "el cliente mando el comprobante de pago y el pedido ya esta armado contra el catalogo: tiene que quedar registrado y el dueno avisado antes de responderle",
+        since,
+      },
+    ];
+  }
+
+  // Comprobante reconocido, sin motor de venta o sin items todavia: se fuerza el cierre igual -- es la
+  // herramienta que le pregunta al dueno si le llego la plata, y la unica que crea el pedido -- y si el
+  // modelo no la llama, el respaldo por codigo le avisa igual. Lo que ya NO puede pasar es que el
   // turno no exija nada, que es como Sandra Gil termino con "todo queda listo" y cero pedido.
   if (esComprobante) {
     return [
