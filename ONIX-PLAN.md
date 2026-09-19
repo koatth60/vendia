@@ -68,6 +68,48 @@ PostgreSQL. Pedidos y su estado, PostgreSQL. Pago, el proveedor más el backend 
 Media, el almacenamiento real más metadatos persistidos. Configuración del negocio y estado de la
 conversación, PostgreSQL.
 
+## No se le quita albedrío: se le quitan responsabilidades
+
+Decisión del dueño, 2026-09-19, después de un día entero probando conversaciones reales contra
+producción.
+
+**La pregunta que la motivó fue "¿y si hacemos todo en puro código y el LLM solo habla?"** — y la
+respuesta importa, porque la mitad es correcta y la otra mitad rompe el producto.
+
+**La regla, para cuando vuelva la duda:**
+
+> **Si el error se puede describir como "se le olvidó", va a código.**
+> **Si se describe como "lo dijo feo", va al prompt.**
+
+**La evidencia que la fijó.** Ese día se encontraron seis defectos en producción. Los seis eran
+contabilidad: acordarse de llamar `set_order_item`, registrar el pedido, guardar la forma de pago,
+anotar la cancelación. **Ninguno fue de conversación.** Cuando la clienta escribió *"cambiame los MAX
+por los audifonos bluetooth con parlante integrado"*, el bot entendió perfectamente qué sacar, qué
+poner y que faltaba preguntar el color. **Entendió la mutación del carrito. Lo que no hizo fue
+escribirla.** Esa distinción es toda la arquitectura.
+
+Pedirle a un LLM que recuerde el carrito es pedirle que sea una base de datos. No lo es, y no va a
+serlo: es un error de diseño nuestro, no un fallo del modelo.
+
+**Por qué "todo en código" no es la salida.** Ese mismo día se midieron 11 formas de pedir lo mismo
+contra el catálogo real — `"audifonos"`, `"los audifonos"`, `"que audifonos tienen"`, `"quiero unos
+audifonos"`, `"tienen audifonos?"`… — y las 11 resolvieron al mismo grupo con sus fotos. Un sistema de
+reglas necesita esas once **y las que vengan**: "algo para oír música", "los cositos esos de oído",
+"lo mismo que le compré a mi hermana". Esa lista no termina, y cambia por negocio y por país.
+
+**Y sí, el resultado de ir hasta el final sería un chatbot** — lo cual es una decisión de producto
+legítima, pero es la contraria a la que este proyecto tomó (ver *El norte*). Un chatbot de botones
+convierte bien en un catálogo de cinco productos. Lo que no puede es recomendar, manejar una objeción,
+ni vender algo que el cliente no supo nombrar.
+
+**El camino, y ya está medido.** Cada hecho que el servidor se lleva es una directiva del prompt que se
+puede borrar, así que el progreso se lee en una sola cifra: las líneas de `src/ai/prompts/systemPrompt.ts`
+bajando mientras los errores se mantienen en cero. **568 el 2026-09-16 → 536 el 2026-09-19.** Si sube
+sin que haya errores nuevos, nos estamos volviendo chatbot sin que nadie lo haya decidido.
+
+Cada etapa de este plan tiene que poder nombrar **qué responsabilidad le quitó al modelo**. Una etapa
+que solo le agrega una instrucción no le quitó ninguna, y es un parche disfrazado.
+
 ## Estructura, nunca parche
 
 Decisión del dueño, 2026-09-15, después de una semana de "arreglamos un parche y rompimos otro".

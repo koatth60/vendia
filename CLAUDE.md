@@ -208,6 +208,28 @@ directivas viejas que existían para suplirlas. Por eso el prompt llegó a 568 l
 el cliente diga X, hacé Y". Toda fase que garantice un hecho tiene que terminar borrando la
 directiva que ese hecho vuelve innecesaria.
 
+## No se le quita albedrío: se le quitan responsabilidades
+
+Decisión del dueño, 2026-09-19. Es la regla operativa que decide, ante un defecto concreto, si la cura
+va a código o al prompt:
+
+> **Si el error se puede describir como "se le olvidó", va a código.**
+> **Si se describe como "lo dijo feo", va al prompt.**
+
+Ese día se encontraron seis defectos en producción y **los seis eran "se le olvidó"**: no llamó
+`set_order_item`, no registró el pedido, no guardó la forma de pago, no anotó la cancelación. Ninguno
+fue de conversación. Cuando la clienta escribió *"cambiame los MAX por los audifonos bluetooth con
+parlante integrado"*, el bot entendió qué sacar, qué poner y que faltaba el color. **Entendió la
+mutación del carrito; lo que no hizo fue escribirla.**
+
+Pedirle al modelo que recuerde el carrito es pedirle que sea una base de datos. Es un error de diseño
+nuestro, no un fallo del modelo.
+
+**Y la tentación contraria tampoco:** "hacemos todo en código y el LLM solo habla" termina en un
+chatbot. Medido el mismo día: 11 redacciones distintas de "muéstrame audífonos" resolvieron todas al
+mismo grupo con sus fotos. Un sistema de reglas necesita esas once y las que vengan, por negocio y por
+país. Esa lista no termina.
+
 ## La medida
 
 **Las líneas de `src/ai/prompts/systemPrompt.ts` tienen que ir BAJANDO mientras los errores se
