@@ -8,7 +8,7 @@ import { getBusinessLocale } from "../config/businessConfig";
 import { getAgreedPrices, applyAgreedPrices } from "./agreedPrices";
 import { Money, sumarParaMostrar, totalDeLinea } from "../config/dinero";
 import { precioDeVenta, precioDeVentaConPromocion } from "../catalog/precioDeVenta";
-import { promocionesVigentes } from "../catalog/promotions";
+import { promocionesVigentes, descuentoDeCarrito } from "../catalog/promotions";
 
 // Fase 2 del plan maestro (2026-09-15), causa raiz C1. Unico dueno de lectura/escritura de SaleState -
 // ver ONIX-PLAN-MAESTRO.md seccion 1.3 y 4 (Fase 2) para el diseno completo. Nada fuera de este archivo
@@ -39,6 +39,10 @@ export interface SaleStateSnapshot {
   city: string | null;
   shippingLabel: string | null;
   shippingCost: number | null;
+  /** Descuento del pedido entero (Promotion con alcance CART). 0 si el negocio no tiene ninguna. */
+  cartDiscount: number;
+  /** Nombre de esa promocion, para poder nombrarla en el resumen. null si no aplico ninguna. */
+  cartDiscountLabel: string | null;
   shippingModality: ShippingPaymentModality | null;
   paymentMethodId: string | null;
   paymentMethodLabel: string | null;
@@ -164,11 +168,28 @@ export async function getSaleState(conversationId: string): Promise<SaleStateSna
     `el pedido en curso de la conversacion ${conversationId}`,
   );
   const subtotal = subtotalExacto.comoNumeroParaMostrar();
-  const total = subtotalExacto.mas(Money.de(shippingCost ?? 0, moneda)).comoNumeroParaMostrar();
+
+  // DESCUENTO DEL PEDIDO ENTERO (2026-09-19). Sale de una Promotion con alcance CART, que el camino por
+  // linea ignora a proposito -- ver descuentoDeCarrito y el comentario de PromotionScope.CART. Sin
+  // ninguna cargada da cero y el total es exactamente el de antes.
+  //
+  // Se cuenta `items.length` (productos distintos) y no la suma de unidades: es lo que significa
+  // "llevando dos productos" en la FAQ de un negocio.
+  const { descuento: descuentoCarrito, promocion: promocionDeCarrito } = descuentoDeCarrito(
+    await promocionesVigentes(businessId),
+    subtotalExacto,
+    items.length,
+  );
+  const total = subtotalExacto
+    .menos(descuentoCarrito)
+    .mas(Money.de(shippingCost ?? 0, moneda))
+    .comoNumeroParaMostrar();
 
   return {
     conversationId,
     items,
+    cartDiscount: descuentoCarrito.comoNumeroParaMostrar(),
+    cartDiscountLabel: promocionDeCarrito?.name ?? null,
     customerName,
     idNumber,
     deliveryPhone,

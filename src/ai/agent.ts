@@ -717,6 +717,10 @@ export interface FixedBlockData {
     items: { productName: string; variantLabel?: string | null; quantity: number; lineTotal: number }[];
     shippingCost: number;
     total: number;
+    /** Descuento del pedido entero (Promotion con alcance CART). 0 o ausente = no aplico ninguna. */
+    cartDiscount?: number;
+    /** Nombre de esa promocion, para nombrarla en la linea del resumen. */
+    cartDiscountLabel?: string | null;
   } | null;
   // Bloqueador de produccion (2026-09-15): productos reales que devolvio list_all_products o
   // search_products ESTE turno - fuente de {{BLOQUE_CATALOGO}}. `price` ya viene formateado por
@@ -810,6 +814,11 @@ export function renderFixedBlocks(text: string, data: FixedBlockData): { text: s
           (item) =>
             `${item.quantity}x ${item.productName}${item.variantLabel ? ` (${item.variantLabel})` : ""} — $${formatPrice(item.lineTotal, data.currency, data.locale)}`
         ),
+        ...(data.orderSummary.cartDiscount && data.orderSummary.cartDiscount > 0
+          ? [
+              `Descuento${data.orderSummary.cartDiscountLabel ? ` (${data.orderSummary.cartDiscountLabel})` : ""}: −$${formatPrice(data.orderSummary.cartDiscount, data.currency, data.locale)}`,
+            ]
+          : []),
         data.orderSummary.shippingCost > 0 ? `Envío: $${formatPrice(data.orderSummary.shippingCost, data.currency, data.locale)}` : "Envío: gratis",
         `Total: $${formatPrice(data.orderSummary.total, data.currency, data.locale)}`,
       ];
@@ -1535,6 +1544,8 @@ ${CATALOG_BLOCK_MARKER}` : CATALOG_BLOCK_MARKER;
             })),
             shippingCost: saleState.shippingCost ?? 0,
             total: saleState.total,
+            cartDiscount: saleState.cartDiscount,
+            cartDiscountLabel: saleState.cartDiscountLabel,
           }
         : null;
     const { text: renderedText, missingBlocks } = renderFixedBlocks(text, {

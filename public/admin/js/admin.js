@@ -6725,6 +6725,14 @@ function onPromotionScopeChange() {
   const scope = document.getElementById('promo-scope').value;
   document.getElementById('promo-category-field').hidden = scope !== 'CATEGORY';
   document.getElementById('promo-product-field').hidden = scope !== 'PRODUCT';
+  // Con CART el mismo campo significa otra cosa: productos DISTINTOS en el pedido, no unidades de una
+  // linea (ver descuentoDeCarrito en src/catalog/promotions.ts). Dejar el rotulo viejo hacia que la
+  // dueña cargara "2" pensando en dos unidades del mismo producto.
+  const esCarrito = scope === 'CART';
+  const rotulo = document.getElementById('promo-min-quantity-label');
+  if (rotulo) rotulo.textContent = esCarrito ? 'Mínimo de productos distintos' : 'Mínimo de unidades';
+  const hint = document.getElementById('promo-cart-hint');
+  if (hint) hint.hidden = !esCarrito;
 }
 
 function promotionDiscountLabel(promo) {
@@ -6734,6 +6742,7 @@ function promotionDiscountLabel(promo) {
 function promotionScopeLabel(promo) {
   if (promo.scope === 'CATEGORY') return 'Categoría: ' + (promo.categoryLabel || '');
   if (promo.scope === 'PRODUCT') return 'Producto: ' + (promo.product ? promo.product.name : '(borrado)');
+  if (promo.scope === 'CART') return 'Todo el pedido (una vez)';
   return 'Todo el catálogo';
 }
 

@@ -14,7 +14,7 @@ import { businessIdOf } from "./shared";
 export const promotionsRouter = Router();
 
 const KINDS: PromotionKind[] = ["PERCENT", "AMOUNT"];
-const SCOPES: PromotionScope[] = ["GLOBAL", "CATEGORY", "PRODUCT"];
+const SCOPES: PromotionScope[] = ["GLOBAL", "CATEGORY", "PRODUCT", "CART"];
 
 /**
  * Valida el cuerpo entero antes de tocar la base. Una promocion a medias no se guarda: un porcentaje
@@ -33,7 +33,7 @@ function leerPromocion(body: Record<string, unknown>): { error: string } | { dat
   if (kind === "PERCENT" && valor > 100) return { error: "Un porcentaje no puede pasar de 100" };
 
   const scope = String(body?.scope ?? "") as PromotionScope;
-  if (!SCOPES.includes(scope)) return { error: "El alcance tiene que ser GLOBAL, CATEGORY o PRODUCT" };
+  if (!SCOPES.includes(scope)) return { error: "El alcance tiene que ser GLOBAL, CATEGORY, PRODUCT o CART" };
 
   const categoryLabel = String(body?.categoryLabel ?? "").trim() || null;
   const productId = String(body?.productId ?? "").trim() || null;

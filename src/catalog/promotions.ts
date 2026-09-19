@@ -47,6 +47,10 @@ function especificidad(scope: PromotionScope): number {
 }
 
 function alcanza(promo: PromocionAplicable, linea: { productId: string; category: string | null; quantity: number }): boolean {
+  // CART no es un ajuste por linea: se resta una sola vez del total del pedido (ver descuentoDeCarrito
+  // mas abajo y el comentario de PromotionScope.CART en schema.prisma). Si entrara aca, una promocion de
+  // "$10.000 llevando dos productos" le restaria $10.000 a CADA linea.
+  if (promo.scope === "CART") return false;
   if (linea.quantity < promo.minQuantity) return false;
   if (promo.scope === "GLOBAL") return true;
   if (promo.scope === "PRODUCT") return promo.productId === linea.productId;
@@ -92,6 +96,48 @@ export function precioConDescuento(precioDeLista: Money, promo: PromocionAplicab
     promo.kind === "PERCENT" ? precioDeLista.porPorcentaje(promo.value) : Money.de(promo.value, precioDeLista.moneda);
   const conDescuento = precioDeLista.menos(descuento);
   return conDescuento.esNegativo() ? Money.cero(precioDeLista.moneda) : conDescuento;
+}
+
+/**
+ * EL DESCUENTO DEL PEDIDO ENTERO, una sola vez (2026-09-19).
+ *
+ * Contraparte de `promocionQueAplica` para el alcance CART, que ese ignora a proposito. Ver el
+ * comentario de PromotionScope.CART en schema.prisma: esto existe porque "llevando dos productos se
+ * descuentan $10.000 del total" no es un precio de producto y no se puede representar con los otros
+ * tres alcances sin cobrar mal.
+ *
+ * `minQuantity` cuenta PRODUCTOS DISTINTOS (lineas), no unidades: "dos productos" en la FAQ de un
+ * negocio quiere decir dos cosas distintas en la bolsa, no dos unidades de la misma. Es la lectura
+ * conservadora -- si alguna vez hace falta la otra, es un alcance nuevo y no un cambio de este.
+ *
+ * UNA sola, igual que en el camino por linea: la de mayor descuento. Apilar promociones es una decision
+ * de negocio que nadie tomo.
+ *
+ * Con PERCENT el porcentaje se calcula sobre el SUBTOTAL que se recibe -- los productos, sin el envio.
+ * Descontarle un porcentaje al envio seria regalar plata del transportador, que el negocio paga igual.
+ */
+export function descuentoDeCarrito(
+  promociones: PromocionAplicable[],
+  subtotal: Money,
+  lineasDistintas: number,
+): { descuento: Money; promocion: PromocionAplicable | null } {
+  const candidatas = promociones.filter((p) => p.scope === "CART" && lineasDistintas >= p.minQuantity);
+  if (candidatas.length === 0) return { descuento: Money.cero(subtotal.moneda), promocion: null };
+
+  const montoDe = (p: PromocionAplicable): Money =>
+    p.kind === "PERCENT" ? subtotal.porPorcentaje(p.value) : Money.de(p.value, subtotal.moneda);
+
+  const mejor = candidatas.reduce((a, b) => {
+    const compara = montoDe(b).comparar(montoDe(a));
+    if (compara !== 0) return compara > 0 ? b : a;
+    return a.id < b.id ? a : b;
+  });
+
+  // Nunca mas que el subtotal: un descuento mas grande que la compra deja el pedido en cero, no en
+  // deuda. Misma regla que precioConDescuento.
+  const bruto = montoDe(mejor);
+  const descuento = bruto.comparar(subtotal) > 0 ? subtotal : bruto;
+  return { descuento, promocion: mejor };
 }
 
 /** Normaliza lo que escribio la duena, para poder comparar con `Product.category` sin acentos ni mayusculas. */

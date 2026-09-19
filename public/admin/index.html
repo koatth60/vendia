@@ -687,6 +687,7 @@
               <option value="GLOBAL">Todo el catálogo</option>
               <option value="CATEGORY">Una categoría</option>
               <option value="PRODUCT">Un producto</option>
+              <option value="CART">Todo el pedido (una sola vez)</option>
             </select>
           </div>
           <div id="promo-category-field" hidden>
@@ -700,8 +701,9 @@
         </div>
         <div class="grid-2">
           <div>
-            <label>Mínimo de unidades</label>
+            <label id="promo-min-quantity-label">Mínimo de unidades</label>
             <input id="promo-min-quantity" type="number" min="1" step="1" placeholder="1" />
+            <p class="hint" id="promo-cart-hint" hidden>Se resta una sola vez del total del pedido, no de cada producto. El mínimo cuenta productos distintos.</p>
           </div>
           <div>
             <label>Vigencia</label>

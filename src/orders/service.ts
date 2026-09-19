@@ -13,7 +13,7 @@ import { recalcularEtapaDelCliente } from "../crm/customers";
 import { transicionarPedido, TransicionNoPermitida, ESTADOS_CANCELABLES, estadosQueElBotPuedeCancelar, type Actor, type TxCliente } from "./stateMachine";
 import { Money, sumar } from "../config/dinero";
 import { precioDeVenta, precioDeVentaConPromocion } from "../catalog/precioDeVenta";
-import { promocionesVigentes } from "../catalog/promotions";
+import { promocionesVigentes, descuentoDeCarrito } from "../catalog/promotions";
 import { obtenerCombo, buscarComboPorNombre, listarCombos } from "../catalog/bundles";
 
 export interface ResolvedOrderItem {
@@ -295,7 +295,27 @@ export async function createOrder(params: {
   // E35: total = items + envio + impuesto - descuento. Los dos ultimos son null en casi todos los
   // negocios y entonces esto da exactamente lo mismo que antes.
   const impuesto = Money.de(params.taxAmount || 0, currency);
-  const descuento = Money.de(params.discountAmount || 0, currency);
+
+  // DESCUENTO DE CARRITO (2026-09-19). Se calcula ACA y no en el llamador a proposito: close_conversation
+  // no es el unico camino que crea pedidos -- handleOwnerReply tambien los crea, desde el borrador que
+  // quedo parqueado cuando no se pudo avisar al dueno. Si el descuento lo pusiera el llamador, uno de los
+  // dos caminos lo olvidaria y el mismo pedido costaria distinto segun por donde entro.
+  //
+  // El defecto que cierra: la FAQ de Boutique Alondra promete "$10.000 llevando dos productos", el bot lo
+  // promete bien porque lo lee de ahi, y el pedido salia por el total completo. Ver descuentoDeCarrito y
+  // el comentario de PromotionScope.CART en schema.prisma.
+  //
+  // Un `discountAmount` explicito del llamador GANA: es el descuento que alguien decidio a mano para ese
+  // pedido puntual, y no lo pisa una regla general.
+  const descuentoDeLaRegla =
+    params.discountAmount == null
+      ? descuentoDeCarrito(
+          (await promocionesVigentes(businessId)) as unknown as Parameters<typeof descuentoDeCarrito>[0],
+          totalDeItems,
+          items.length,
+        ).descuento
+      : Money.de(params.discountAmount, currency);
+  const descuento = descuentoDeLaRegla;
   const totalAmount = totalDeItems.mas(envio).mas(impuesto).menos(descuento).comoNumeroParaMostrar();
   // Lo que el mensajero tiene que cobrar. Se guarda calculado y no derivado al leer: el precio de un
   // producto puede cambiar manana, y lo que se acordo en este pedido no.
