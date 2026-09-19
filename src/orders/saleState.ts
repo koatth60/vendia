@@ -118,9 +118,37 @@ export async function getSaleState(conversationId: string): Promise<SaleStateSna
   const { city, label: shippingLabel, cost: shippingCost } = await resolveCityAndShipping(businessId, address);
 
   let paymentMethodLabel: string | null = null;
-  if (state?.paymentMethodId) {
-    const method = await prisma.paymentMethod.findFirst({ where: { id: state.paymentMethodId, businessId } });
+  let paymentMethodId: string | null = state?.paymentMethodId ?? null;
+  if (paymentMethodId) {
+    const method = await prisma.paymentMethod.findFirst({ where: { id: paymentMethodId, businessId } });
     paymentMethodLabel = method?.label ?? null;
+  }
+
+  // CONTRAENTREGA TOTAL YA ES LA FORMA DE PAGO (2026-09-19).
+  //
+  // Con shippingModality = COD_ALL el cliente paga todo al mensajero: eso ES el metodo de pago, y el
+  // servidor lo sabe sin preguntarle nada a nadie. Exigir ademas que el modelo llame set_payment_method
+  // es la misma decision dos veces, y cuando no la llamaba salian DOS defectos de una sola causa,
+  // medidos el 2026-09-19 en la conversacion cmu7oisp9000mzc2kk4h41053 (Diana Quintero):
+  //
+  //   1. checkout.completo quedaba en false por "falta formaPago", asi que close_conversation se negaba
+  //      EN SILENCIO -- el bot escribio "Tu pedido quedo confirmado" con Order = 0 y status NEW.
+  //   2. la compuerta seguia pidiendo formaPago, asi que el modelo volvia a preguntar "¿como prefieres
+  //      pagar?" DESPUES de que la clienta ya habia elegido contraentrega total, y le volcaba los
+  //      numeros de Nequi y Bancolombia -- invitandola a transferir plata que no hay que transferir.
+  //
+  // Se DERIVA, no se escribe: mismo principio que el resto de este archivo. Si manana la duena cambia
+  // cual es su metodo contraentrega, esto lo toma solo.
+  if (!paymentMethodId && state?.shippingModality === "COD_ALL") {
+    const contraentrega = await prisma.paymentMethod.findFirst({
+      where: { businessId, active: true, settlement: "ON_DELIVERY" },
+      orderBy: { createdAt: "asc" },
+      select: { id: true, label: true },
+    });
+    if (contraentrega) {
+      paymentMethodId = contraentrega.id;
+      paymentMethodLabel = contraentrega.label;
+    }
   }
 
   let varianteFaltante = false;
@@ -198,7 +226,7 @@ export async function getSaleState(conversationId: string): Promise<SaleStateSna
     shippingLabel,
     shippingCost,
     shippingModality: state?.shippingModality ?? null,
-    paymentMethodId: state?.paymentMethodId ?? null,
+    paymentMethodId,
     paymentMethodLabel,
     blockedBy: state?.blockedBy ?? null,
     checkout,
