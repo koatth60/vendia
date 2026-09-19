@@ -1618,6 +1618,59 @@ ${CATALOG_BLOCK_MARKER}` : CATALOG_BLOCK_MARKER;
         conversationId,
         "sintaxis_de_herramienta_en_el_texto",
       );
+
+      // BORRAR TODO EL MENSAJE NO PUEDE TERMINAR EN SILENCIO (2026-09-19).
+      //
+      // Caso real, conversacion cmu7o4cbj0002va2kue7fztkk (Diana Quintero): el modelo escribio la llamada
+      // como texto, el guard la borro entera, quedaron 0 caracteres, y a la clienta NO le llego nada --
+      // justo despues de haber dado cedula, celular y direccion. Para ella el bot la ignoro.
+      //
+      // Es el patron que CLAUDE.md ya marco con el bloque de pago mutilado: la garantia existia (el
+      // guard) pero su fallback era peor que el problema. Ahi la cura fue llenar el hueco con el dato de
+      // la base; aca el hueco es el mensaje entero, asi que se le pide al modelo que escriba la respuesta
+      // en texto plano SIN herramientas -- mismo recurso que ya usa el loop agotado, y con todo el
+      // trabajo del turno (los tool results) ya adentro de `messages`, asi que puede contestar de verdad.
+      //
+      // El disparador es determinista y no lee prosa: text.length === 0 despues del guard.
+      if (!text.trim()) {
+        try {
+          const rescate = await createChatCompletion(
+            {
+              max_tokens: 1024,
+              messages,
+              // Sin `tools` a proposito: fuerza texto plano en vez de otra llamada a herramienta, que es
+              // exactamente lo que acaba de fallar.
+              // @ts-expect-error DeepSeek-specific param, not in the OpenAI SDK types.
+              thinking: { type: "disabled" },
+            },
+            { businessId: context.businessId, conversationId },
+          );
+          await logAiUsage({
+            businessId: context.businessId,
+            conversationId,
+            kind: "CHAT",
+            model: rescate.model || DEEPSEEK_MODEL,
+            usage: rescate.usage,
+          });
+          text = quitarSintaxisDeHerramienta(rescate.choices[0]?.message?.content?.trim() ?? "").limpio;
+        } catch (error) {
+          console.error("Fallo el rescate tras borrar la sintaxis de herramienta del mensaje entero:", error);
+        }
+        if (!text.trim()) {
+          text = FALLBACK_TEXT;
+          await alertOwnerOfDegradedReply(
+            context,
+            "El modelo escribio solo la sintaxis de una herramienta y no se pudo recuperar ninguna respuesta",
+          );
+        }
+        await recordAgentIncident(
+          context.businessId,
+          "BACKSTOP_INTERVENTION",
+          `El guard de sintaxis dejo el mensaje en cero; se recupero con ${text === FALLBACK_TEXT ? "el texto de respaldo" : "una respuesta en texto plano"}.`,
+          conversationId,
+          "mensaje_vacio_tras_guard",
+        );
+      }
     }
 
     // EL PAGO RECIBIDO LO DICE EL SERVIDOR, NO EL MODELO (2026-09-18).
