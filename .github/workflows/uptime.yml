@@ -12,7 +12,7 @@ jobs:
       - name: Check /health (retry once before failing)
         run: |
           for i in 1 2; do
-            if curl -fsS --max-time 10 https://zaqisolutions.com/health > /dev/null; then
+            if curl -fsS --max-time 10 https://zaqisolutions.com/salud > /dev/null; then
               exit 0
             fi
             echo "Intento $i fallo, reintentando en 20s..."
